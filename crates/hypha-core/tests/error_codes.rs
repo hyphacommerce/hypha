@@ -14,8 +14,8 @@
 use hypha_core::{
     AddressError, AppKey, AppKeyError, AuthError, CallbackUrlError, CountryError, Currency,
     CurrencyError, DescriptionError, EmailError, ErrorCode, HandleError, IdError, IdempotencyError,
-    LanguageError, MoneyError, NotifyError, OperationIdError, PageError, QuantityError, RepoError,
-    Scope, TextError, TimezoneError,
+    LanguageError, MessageError, MoneyError, NotifyError, OperationIdError, PageError,
+    QuantityError, RepoError, Scope, TextError, TimezoneError,
 };
 
 #[test]
@@ -51,6 +51,19 @@ fn cores_error_codes_keep_their_names() {
             code(AddressError::Country(CountryError::Unknown(
                 "XX".to_string(),
             ))),
+        ),
+        (
+            "invalid_message_code",
+            code(MessageError::Code(String::new())),
+        ),
+        (
+            "invalid_message_path",
+            code(MessageError::Path(String::new())),
+        ),
+        ("invalid_message", code(MessageError::TextMissing)),
+        (
+            "invalid_message",
+            code(MessageError::TextTooLong { max: 1 }),
         ),
         ("invalid_quantity", code(QuantityError::Zero)),
         ("quantity_overflow", code(QuantityError::Overflow)),

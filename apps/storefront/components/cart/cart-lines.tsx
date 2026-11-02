@@ -17,9 +17,11 @@ import { useEffect, useRef } from "react";
 
 import type { Cart } from "@/app/[country]/actions";
 import { LineImage, lineImage } from "@/components/line-image";
+import { CartMessages } from "@/components/cart-messages";
 import { DiscountNotes } from "@/components/discounts";
 import { Price } from "@/components/price";
 import { type Application, type LineDiscount, linePrice, readCartDiscounts } from "@/lib/discounts";
+import { placeMessages } from "@/lib/messages";
 
 import { useCart } from "./cart-provider";
 
@@ -29,6 +31,7 @@ export function CartLines({ size = "md" }: { size?: "sm" | "md" }) {
   const { cart, digits, base, change, isPending } = useCart();
   if (!cart) return null;
   const discounts = readCartDiscounts(cart);
+  const messages = placeMessages(cart.messages);
   return (
     <VStack gap={0}>
       {cart.lines.map((line, i) => (
@@ -44,6 +47,7 @@ export function CartLines({ size = "md" }: { size?: "sm" | "md" }) {
             isPending={isPending}
             onChange={(quantity) => change(line.variant, quantity)}
           />
+          <CartMessages messages={messages.lines[i]} />
         </VStack>
       ))}
     </VStack>

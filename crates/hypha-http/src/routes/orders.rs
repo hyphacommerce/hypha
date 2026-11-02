@@ -17,8 +17,8 @@ use hypha_order_actions::{
 };
 use hypha_orders::{
     CancelReason, DiscountClass, FinancialStatus, FulfillmentStatus, HasOrders, ListOrders, Order,
-    OrderDiscount, OrderFilterInput, OrderLine, OrderSort, OrderSummary, get_placed_order,
-    list_orders,
+    OrderAddressCheck, OrderDiscount, OrderFilterInput, OrderLine, OrderSort, OrderSummary,
+    change_order_shipping_address, get_placed_order, list_orders, mark_order_address_valid,
 };
 use hypha_products::{HasProducts, ProductRepo};
 use serde::{Deserialize, Serialize};
@@ -28,8 +28,8 @@ use hypha_core::Ctx;
 use hypha_custom_fields::{HasCustomFieldDefinitions, HasCustomFieldValues, OwnerType};
 
 use super::{
-    address::PostalAddressResponse,
-    carts::DiscountShareResponse,
+    address::{AddressVerificationResponse, PostalAddressRequest, PostalAddressResponse},
+    carts::{CartMessageResponse, DiscountShareResponse},
     custom_fields::{self, CustomFieldValues, FieldParams},
     discounts::{DiscountClassDto, DiscountTargetDto, DiscountValueDto},
     page::{ListQuery, PageParams, PageResponse, SortedFilters},
@@ -150,6 +150,54 @@ impl From<CancelReasonDto> for CancelReason {
     }
 }
 
+/// An order's address check.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct OrderAddressCheckResponse {
+    /// What the store's verification app said (when the cart's address was set, or when
+    /// staff last changed it); `null` without a verification app.
+    verification: Option<AddressVerificationResponse>,
+    /// The warnings about the address the order was placed with (or the format's, after
+    /// staff changed it).
+    warnings: Vec<CartMessageResponse>,
+    /// Who looked at the address and said it's fine; `null` until someone does.
+    marked_valid: Option<MarkedValidResponse>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct MarkedValidResponse {
+    /// The actor's ID (`usr_…`).
+    by: String,
+    /// RFC 3339, UTC.
+    at: String,
+}
+
+impl OrderAddressCheckResponse {
+    fn new(check: &OrderAddressCheck) -> Result<Self, ApiError> {
+        Ok(Self {
+            verification: check
+                .verification
+                .as_ref()
+                .map(AddressVerificationResponse::new)
+                .transpose()?,
+            warnings: check
+                .warnings
+                .iter()
+                .map(CartMessageResponse::from)
+                .collect(),
+            marked_valid: check
+                .marked_valid
+                .as_ref()
+                .map(|m| {
+                    Ok::<_, ApiError>(MarkedValidResponse {
+                        by: m.by.clone(),
+                        at: rfc3339(m.at)?,
+                    })
+                })
+                .transpose()?,
+        })
+    }
+}
+
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct OrderResponse {
     id: OrderId,
@@ -185,6 +233,14 @@ pub struct OrderResponse {
     lines: Vec<OrderLineResponse>,
     /// `null` when nothing in the order ships.
     shipping_address: Option<PostalAddressResponse>,
+    /// What was known about the shipping address: its verification, the warnings it was
+    /// placed with, and who marked it valid. `null` for an order placed before addresses
+    /// were checked, or without an address.
+    address_check: Option<OrderAddressCheckResponse>,
+    /// Whether staff should look at the address before shipping: its verification found
+    /// it ambiguous or undeliverable, or it was placed with a warning about it, and nobody
+    /// marked it valid since (`POST …/address-check/mark-valid`).
+    address_review: bool,
     /// How each group of lines ships, as charged.
     shipping_lines: Vec<OrderShippingLineResponse>,
     /// When it was created, RFC 3339 in UTC.
@@ -352,6 +408,12 @@ impl OrderResponse {
             total: order.total(),
             lines: order.lines().iter().map(OrderLineResponse::from).collect(),
             shipping_address: order.shipping_address().map(PostalAddressResponse::from),
+            address_check: order
+                .address_check()
+                .filter(|_| order.shipping_address().is_some())
+                .map(OrderAddressCheckResponse::new)
+                .transpose()?,
+            address_review: order.needs_address_review(),
             shipping_lines: order
                 .shipping_lines()
                 .iter()
@@ -710,13 +772,14 @@ const REPLAY_WINDOW_MICROS: i64 = 60 * 60 * 1_000_000;
 /// `payment_failed` (start paying again). If the order can't be placed once the money is
 /// committed (a line sold out meanwhile), the money is given back. A cart checked out
 /// already answers with its order for an hour after it was placed (the provider's report
-/// may have completed it), then `409 cart_completed`.
+/// may have completed it), then `409 cart_completed`. A cart with an error among its
+/// `messages` is `409 checkout_blocked`, after the checks above.
 #[utoipa::path(
     post,
     path = "/storefront/carts/{id}/checkout",
     params(("id" = CartId, Path), ("Idempotency-Key" = Option<String>, Header, description = "Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`.")),
     request_body = CheckoutRequest,
-    responses((status = 201, description = "Created", body = CheckoutResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`."))), (status = 429, description = "Over the rate limit for this cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
+    responses((status = 201, description = "Created", body = CheckoutResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`."))), (status = 409, description = "The cart can't be checked out as it is: `cart_empty`, `cart_email_missing`, `cart_unavailable`, `shipping_address_required`, `shipping_option_required`, `shipping_option_unavailable`, `total_changed`, `discounts_changed`, `payment_method_required`, `payment_method_unavailable`, `payment_required`, `payment_pending`, `payment_failed`, `cart_payment_committed`, `cart_completed`; or, after those, `checkout_blocked`: the cart has error messages, every one in `details.messages` (each as a cart's `messages` item; warnings left out). Also a concurrent change (`concurrent_modification`, safe to retry).", body = ApiErrorBody), (status = 429, description = "Over the rate limit for this cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     extensions(("x-hypha-scopes" = json!(["checkout"]))),
 )]
 pub async fn checkout_handler<S: Storage>(
@@ -744,6 +807,7 @@ pub async fn checkout_handler<S: Storage>(
         &state.clock,
         &rates,
         &providers,
+        &state.cart_checks(&ports),
         input,
     )
     .await?;
@@ -854,13 +918,15 @@ pub struct CartPaymentResponse {
 /// total is started again (the provider resumes it); otherwise a new one is made and the
 /// old ones released. Refused for a manual method (409 `payment_method_offline`: check out
 /// instead), a total of zero (409 `cart_nothing_to_pay`) and a cart whose money is
-/// committed already (409 `cart_payment_committed`: check out).
+/// committed already (409 `cart_payment_committed`: check out), then a cart with an error
+/// among its `messages` (409 `checkout_blocked`): no money is taken for a cart checkout
+/// would refuse.
 #[utoipa::path(
     post,
     path = "/storefront/carts/{id}/payment",
     params(("id" = CartId, Path)),
     request_body = StartCartPaymentRequest,
-    responses((status = 200, description = "OK", body = CartPaymentResponse), (status = 429, description = "Over the rate limit for this cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
+    responses((status = 200, description = "OK", body = CartPaymentResponse), (status = 409, description = "No payment can start for the cart now: checkout's checks (`cart_empty`, `total_changed`, `payment_method_required`, …), `payment_method_offline`, `cart_nothing_to_pay`, `cart_payment_committed`; or, after those, `checkout_blocked`: the cart has error messages, every one in `details.messages` (each as a cart's `messages` item; warnings left out), and no money is taken for it. Also a concurrent change (`concurrent_modification`, safe to retry).", body = ApiErrorBody), (status = 429, description = "Over the rate limit for this cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     extensions(("x-hypha-scopes" = json!(["checkout"]))),
 )]
 pub async fn start_cart_payment<S: Storage>(
@@ -887,6 +953,7 @@ pub async fn start_cart_payment<S: Storage>(
         &state.clock,
         &rates,
         &providers,
+        &state.cart_checks(&ports),
         input,
     )
     .await?;
@@ -934,6 +1001,8 @@ pub struct OrderSummaryResponse {
     total: Money,
     /// How many items, adding up line quantities.
     item_count: u64,
+    /// Whether its shipping address needs review (`?address=needs_review`).
+    address_review: bool,
     /// The custom field values `?custom_fields=` asked for; absent without it.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<std::collections::HashMap<String, serde_json::Value>>, required = false)]
@@ -959,6 +1028,7 @@ impl OrderSummaryResponse {
             cancelled_at: o.cancelled_at.map(rfc3339).transpose()?,
             total: o.total,
             item_count: o.item_count,
+            address_review: o.address_review,
             custom_fields,
         })
     }
@@ -1021,8 +1091,20 @@ pub struct OrderFilters {
     placed_from: Option<String>,
     /// Only orders placed before this instant (RFC 3339).
     placed_before: Option<String>,
+    /// `needs_review`: only orders whose shipping address needs review (its verification
+    /// found it ambiguous or undeliverable, or it was placed with a warning about it),
+    /// until someone marks it valid.
+    #[param(inline)]
+    address: Option<AddressFilterDto>,
     #[param(inline)]
     sort: Option<OrderSortDto>,
+}
+
+/// What an order list's addresses are narrowed to.
+#[derive(Debug, Clone, Copy, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AddressFilterDto {
+    NeedsReview,
 }
 
 /// The order of an order list. Default `newest`. Sorting by total needs the `currency`
@@ -1073,6 +1155,7 @@ impl OrderFilters {
             currency: self.currency.as_deref().map(Currency::new).transpose()?,
             placed_from: instant("placed_from", self.placed_from)?,
             placed_before: instant("placed_before", self.placed_before)?,
+            address_review: self.address.map(|AddressFilterDto::NeedsReview| true),
         })
     }
 }
@@ -1254,6 +1337,76 @@ pub async fn fetch<S: Storage>(
     PathId(id): PathId<OrderId>,
 ) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
+    let view = order_view(&ctx, &ports, id).await?;
+    let order = OrderResponse::with_images(&view.order, &ports, state.media.as_deref()).await?;
+    Ok(Json(
+        AdminOrderResponse::respond(&ctx, &ports, &view, order).await?,
+    ))
+}
+
+/// Staff looked at the order's shipping address and it's fine: it no longer needs review
+/// (`order.address_marked_valid`). Marking it again changes nothing. An order without a
+/// shipping address is `409 order_has_no_shipping_address`.
+#[utoipa::path(
+    post,
+    path = "/admin/orders/{id}/address-check/mark-valid",
+    params(("id" = OrderId, Path)),
+    responses((status = 200, description = "OK", body = AdminOrderResponse)),
+    extensions(("x-hypha-scopes" = json!(["orders:write"]))),
+)]
+pub async fn mark_address_valid<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<OrderId>,
+) -> Result<Json<Redacted>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    mark_order_address_valid(&ctx, ports.orders(), &state.clock, id).await?;
+    let view = order_view(&ctx, &ports, id).await?;
+    let order = OrderResponse::with_images(&view.order, &ports, state.media.as_deref()).await?;
+    Ok(Json(
+        AdminOrderResponse::respond(&ctx, &ports, &view, order).await?,
+    ))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ChangeShippingAddressRequest {
+    /// In the order's country.
+    address: PostalAddressRequest,
+}
+
+/// Changes where the order ships, before anything has (`409 order_fulfilled` once a line
+/// is fulfilled, `409 order_cancelled`, `409 order_has_no_shipping_address` for an order
+/// that ships nothing). The address passes its country's format (`422
+/// invalid_address` with `details.problems`) and stays in the order's country (`422
+/// address_country_mismatch`); the store's verification app is asked again, and the new
+/// check replaces the old (no longer marked valid). Shipping isn't priced again: the
+/// order keeps what was charged. Records `order.shipping_address_changed`.
+#[utoipa::path(
+    put,
+    path = "/admin/orders/{id}/shipping-address",
+    params(("id" = OrderId, Path)),
+    request_body = ChangeShippingAddressRequest,
+    responses((status = 200, description = "OK", body = AdminOrderResponse)),
+    extensions(("x-hypha-scopes" = json!(["orders:write"]))),
+)]
+pub async fn change_shipping_address<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId(id): PathId<OrderId>,
+    body: JsonBody<ChangeShippingAddressRequest>,
+) -> Result<Json<Redacted>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    change_order_shipping_address(
+        &ctx,
+        ports.orders(),
+        &hypha_addresses::Formats,
+        &state.verifier(&ports, Some(id.to_string())),
+        id,
+        req.address.into(),
+    )
+    .await?;
     let view = order_view(&ctx, &ports, id).await?;
     let order = OrderResponse::with_images(&view.order, &ports, state.media.as_deref()).await?;
     Ok(Json(

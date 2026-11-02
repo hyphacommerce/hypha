@@ -449,6 +449,20 @@ fn transfer_repo() {
 }
 
 #[test]
+fn checkout_rule_repo() {
+    block_on(contract::checkout_rule_repo(async || {
+        InMemoryPorts::default()
+    }));
+}
+
+#[test]
+fn checkout_settings_repo() {
+    block_on(contract::checkout_settings_repo(async || {
+        InMemoryPorts::default()
+    }));
+}
+
+#[test]
 fn supplier_repo() {
     block_on(contract::supplier_repo(async || InMemoryPorts::default()));
 }

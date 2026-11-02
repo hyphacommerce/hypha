@@ -11,6 +11,7 @@
 )]
 use std::sync::Mutex;
 
+use hypha_addresses::Formats;
 use hypha_cart::{
     AddLine, CartError, CartRepo, CommandError, CreateCart, PricedCart, SetLineQuantity,
     ShippingProblem, add_line, create_cart, get_cart, select_shipping, set_line_quantity,
@@ -227,6 +228,8 @@ impl World {
         block_on(set_shipping_address(
             &Ctx::system(),
             &self.ports,
+            &Formats,
+            &hypha_core::NoVerification,
             cart,
             Some(address(country)),
         ))
@@ -267,7 +270,8 @@ fn address(country: &str) -> AddressParts {
         line2: None,
         city: "Zagreb".to_string(),
         province: None,
-        postal_code: Some("10000".to_string()),
+        // Valid in each country the tests ship to.
+        postal_code: Some(if country == "SI" { "1000" } else { "10000" }.to_string()),
         country: country.to_string(),
         phone: None,
     }
@@ -519,6 +523,8 @@ fn a_new_address_drops_the_choice() {
     let priced = block_on(set_shipping_address(
         &Ctx::system(),
         &w.ports,
+        &Formats,
+        &hypha_core::NoVerification,
         cart,
         Some(moved),
     ))

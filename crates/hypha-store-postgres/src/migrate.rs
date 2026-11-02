@@ -509,6 +509,26 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "purchase_order_sent_revision",
             sql: include_str!("../migrations/0097_purchase_order_sent_revision.sql"),
         },
+        Migration {
+            version: 98,
+            name: "checkout_rules",
+            sql: include_str!("../migrations/0098_checkout_rules.sql"),
+        },
+        Migration {
+            version: 99,
+            name: "address_verification",
+            sql: include_str!("../migrations/0099_address_verification.sql"),
+        },
+        Migration {
+            version: 100,
+            name: "address_autocomplete",
+            sql: include_str!("../migrations/0100_address_autocomplete.sql"),
+        },
+        Migration {
+            version: 101,
+            name: "validation_apps",
+            sql: include_str!("../migrations/0101_validation_apps.sql"),
+        },
     ],
 };
 

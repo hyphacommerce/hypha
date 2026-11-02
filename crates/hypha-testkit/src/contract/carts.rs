@@ -27,6 +27,49 @@ pub async fn cart_repo<R: CartRepo>(make: impl AsyncFn() -> R) {
     shipping_round_trips(&make().await).await;
     scenario("cart: the payment method round trips on insert and update, and clears");
     payment_method_round_trips(&make().await).await;
+    scenario("cart: validation apps' answers round trip on insert and update, and clear");
+    app_checks_round_trip(&make().await).await;
+}
+
+async fn app_checks_round_trip<R: CartRepo>(repo: &R) {
+    use hypha_core::{
+        AddressField, AppCheck, AppKey, Message, MessageCode, MessagePath, MessageSource, Severity,
+        Timestamp,
+    };
+    let app = AppKey::new("app_rules").unwrap();
+    let answered = AppCheck {
+        app: app.clone(),
+        digest: "d1".to_string(),
+        messages: vec![
+            Message::new(
+                Severity::Error,
+                MessageCode::new("alcohol_restricted").unwrap(),
+                MessagePath::ShippingAddressField(AddressField::PostalCode),
+                "We can't ship alcohol to this postal code.",
+                MessageSource::App { app: app.clone() },
+            )
+            .unwrap(),
+        ],
+        failure: None,
+        checked_at: Timestamp::from_unix_micros(1_767_225_600_123_456),
+    };
+    let failed = AppCheck {
+        app: AppKey::new("app_other").unwrap(),
+        digest: "d2".to_string(),
+        messages: Vec::new(),
+        failure: Some("no answer within 2 s".to_string()),
+        checked_at: Timestamp::from_unix_micros(1),
+    };
+    let mut c = cart(1);
+    c.set_app_checks(vec![answered.clone()]).unwrap();
+    repo.insert(&mut c).await.unwrap();
+    assert_eq!(repo.get(c.id()).await, Ok(Some(c.clone())));
+    c.set_app_checks(vec![answered, failed]).unwrap();
+    repo.update(&mut c).await.unwrap();
+    assert_eq!(repo.get(c.id()).await, Ok(Some(c.clone())));
+    c.set_app_checks(Vec::new()).unwrap();
+    repo.update(&mut c).await.unwrap();
+    assert_eq!(repo.get(c.id()).await, Ok(Some(c)));
 }
 
 async fn payment_method_round_trips<R: CartRepo>(repo: &R) {
@@ -239,7 +282,8 @@ async fn shipping_round_trips<R: CartRepo>(repo: &R) {
 
     // An address and a built-in choice (no quote).
     let mut c = cart(1);
-    c.set_shipping_address(Some(full.clone())).unwrap();
+    c.set_shipping_address(Some(full.clone()), Some(verified()))
+        .unwrap();
     c.select_shipping(Some(SelectedShipping {
         option,
         quote: None,
@@ -265,9 +309,46 @@ async fn shipping_round_trips<R: CartRepo>(repo: &R) {
     assert_eq!(repo.get(c.id()).await, Ok(Some(c.clone())));
 
     // Cleared.
-    c.set_shipping_address(None).unwrap();
+    c.set_shipping_address(None, None).unwrap();
     repo.update(&mut c).await.unwrap();
     let stored = repo.get(c.id()).await.unwrap().unwrap();
     assert_eq!((stored.shipping_address(), stored.shipping()), (None, None));
+    assert_eq!(stored.address_check(), None);
     assert_eq!(stored, c);
+}
+
+/// A verification with every field set, as kept with a cart or an order.
+pub(crate) fn verified() -> hypha_core::AddressVerification {
+    use hypha_core::{
+        AddressPrecision, AddressVerdict, AddressVerification, AppKey, FieldStatus,
+        SuggestedAddress, VerificationFlags,
+    };
+    AddressVerification {
+        digest: "d1".to_string(),
+        verdict: AddressVerdict::DeliverableWithFixes,
+        precision: Some(AddressPrecision::Premise),
+        fields: [("postal_code".to_string(), FieldStatus::Corrected)]
+            .into_iter()
+            .collect(),
+        suggested: Some(SuggestedAddress {
+            company: None,
+            line1: "Ilica 1".to_string(),
+            line2: Some("Stan 4".to_string()),
+            city: "Zagreb".to_string(),
+            province: None,
+            postal_code: Some("10000".to_string()),
+            country: "HR".to_string(),
+        }),
+        suggested_digest: Some("d2".to_string()),
+        flags: VerificationFlags {
+            po_box: Some(false),
+            residential: Some(true),
+            business: None,
+            vacant: Some(false),
+        },
+        app: Some(AppKey::new("app_verify").unwrap()),
+        reference: Some("ref".to_string()),
+        failure: None,
+        checked_at: hypha_core::Timestamp::from_unix_micros(1_767_225_600_123_456),
+    }
 }

@@ -3,6 +3,66 @@
 
 export type paths = Record<string, never>;
 export interface webhooks {
+    "address.resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Turn the suggestion someone picked into the address's parts.
+         * @description `POST` to the URL the app registered for `address.resolve` v1. Answer within 1000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: Hypha falls back to its own default. Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).
+         */
+        post: operations["address.resolve.v1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "address.suggest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Offer up to five addresses for what someone has typed so far in an address form.
+         * @description `POST` to the URL the app registered for `address.suggest` v1. Answer within 1000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: Hypha falls back to its own default. Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).
+         */
+        post: operations["address.suggest.v1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "address.verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify a shipping address: whether mail reaches it, a corrected one when confident, and what it is.
+         * @description `POST` to the URL the app registered for `address.verify` v1. Answer within 3000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: Hypha falls back to its own default. Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).
+         */
+        post: operations["address.verify.v1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "admin.action": {
         parameters: {
             query?: never;
@@ -17,6 +77,26 @@ export interface webhooks {
          * @description `POST` to the URL the app registered for `admin.action` v1. Answer within 10000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: the flow stops with `app_unavailable` (502, `details: {app, point}`). Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).
          */
         post: operations["admin.action.v1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "checkout.validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Say what's wrong with a cart (errors stop checkout) or worth a second look (warnings), each on the part it's about.
+         * @description `POST` to the URL the app registered for `checkout.validate` v1. Answer within 2000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: the merchant's setting for the app decides: checkout goes on without it, or stops with a `validation_unavailable` error on the cart. Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).
+         */
+        post: operations["checkout.validate.v1"];
         delete?: never;
         options?: never;
         head?: never;
@@ -167,6 +247,92 @@ export interface webhooks {
 export interface components {
     schemas: {
         /**
+         * @description How far down the provider found the address.
+         *
+         *     Known values: `country`, `locality`, `street`, `premise`, `subpremise`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        AddressPrecision: "country" | "locality" | "street" | "premise" | "subpremise";
+        /** @description What Hypha sends when a suggestion is picked. */
+        AddressResolveRequest: {
+            /**
+             * @description The country the form is for: the address must be in it.
+             * @example HR
+             */
+            country: string;
+            /** @description The suggestion's `id`, as `address.suggest` answered it. */
+            id: string;
+            /** @description The same session the suggestions were asked in. */
+            session: string;
+        };
+        /**
+         * @description The app's answer: the address's parts, which then go through the country's format
+         *     check like any typed address.
+         */
+        AddressResolveResponse: {
+            address: components["schemas"]["SuggestedAddress"];
+        };
+        /** @description What Hypha sends while someone types. */
+        AddressSuggestRequest: {
+            /**
+             * @description The country the form is for: suggestions stay in it.
+             * @example HR
+             */
+            country: string;
+            /**
+             * Format: int32
+             * @description How many suggestions to answer at most (1 to 5).
+             */
+            limit: number;
+            /** @description What's typed so far (3 to 200 characters). */
+            query: string;
+            /**
+             * @description The client's token for one address being typed, the same until one is picked, for
+             *     providers that bill per session.
+             */
+            session: string;
+        };
+        /** @description The app's answer: what to show in the dropdown. */
+        AddressSuggestResponse: {
+            suggestions?: components["schemas"]["AddressSuggestion"][];
+        };
+        /** @description One address offered. */
+        AddressSuggestion: {
+            /** @description The rest, shown smaller ("10000 Zagreb, Croatia"). */
+            description?: string | null;
+            /** @description The app's own ID for it, sent back to `address.resolve` when it's picked. */
+            id: string;
+            /** @description The main line shown ("Ilica 1"). */
+            label: string;
+        };
+        /**
+         * @description What an address verification provider concluded about an address, overall.
+         *
+         *     Known values: `deliverable`, `deliverable_with_fixes`, `missing_subpremise`, `ambiguous`, `undeliverable`, `unknown`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        AddressVerdict: "deliverable" | "deliverable_with_fixes" | "missing_subpremise" | "ambiguous" | "undeliverable" | "unknown";
+        /** @description What Hypha sends. */
+        AddressVerifyRequest: {
+            address: components["schemas"]["VerifiedAddress"];
+            /** @description `cart` when a shopper sets it, `order` when staff edit an order's. */
+            context: components["schemas"]["VerifyContext"];
+        };
+        /** @description The app's answer. */
+        AddressVerifyResponse: {
+            /** @description Per address field (`postal_code`), how sure the provider is. */
+            fields?: {
+                [key: string]: components["schemas"]["FieldVerification"];
+            };
+            /** @description What the address is; a flag left out is unknown. */
+            flags?: components["schemas"]["VerificationFlags"];
+            precision?: components["schemas"]["AddressPrecision"] | null;
+            /** @description The provider's own ID for the lookup. */
+            reference?: string | null;
+            suggested?: components["schemas"]["SuggestedAddress"] | null;
+            verdict: components["schemas"]["AddressVerdict"];
+        };
+        /**
          * @description The objects the action was pressed on, as the admin passed them (checked against
          *     the action's target).
          */
@@ -224,6 +390,20 @@ export interface components {
          * @example chan_0190f1a2b3c47d8e9f00112233445566
          */
         ChannelId: string;
+        /** @description What Hypha sends. */
+        CheckoutValidateRequest: {
+            cart: components["schemas"]["ValidatedCart"];
+            /**
+             * @description `address` when the shipping address was set, `shipping` when an option was chosen,
+             *     `checkout` when the shopper places the order or starts its payment.
+             */
+            step: components["schemas"]["ValidationStep"];
+        };
+        /** @description The app's answer. */
+        CheckoutValidateResponse: {
+            /** @description At most 20; none when the cart is fine. */
+            messages: components["schemas"]["ValidationMessage"][];
+        };
         /**
          * @description An ISO 3166-1 alpha-2 country code.
          * @example HR
@@ -245,6 +425,17 @@ export interface components {
          * @example ana@example.com
          */
         Email: string;
+        /**
+         * @description How sure the provider is of one field.
+         *
+         *     Known values: `confirmed`, `corrected`, `inferred`, `unconfirmed`, `missing`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        FieldStatus: "confirmed" | "corrected" | "inferred" | "unconfirmed" | "missing";
+        /** @description How sure the provider is of one field: an object, so a later version can say more. */
+        FieldVerification: {
+            status: components["schemas"]["FieldStatus"];
+        };
         /**
          * @description A FulfillmentId: `ful_` and 32 hex digits.
          * @example ful_0190f1a2b3c47d8e9f00112233445566
@@ -585,15 +776,144 @@ export interface components {
          */
         SearchSort: "relevance" | "newest" | "price_asc" | "price_desc" | "title";
         /**
+         * @description Whether a message stops checkout.
+         *
+         *     Known values: `error`, `warning`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        Severity: "error" | "warning";
+        /**
+         * @description A ShippingOptionId: `shipopt_` and 32 hex digits.
+         * @example shipopt_0190f1a2b3c47d8e9f00112233445566
+         */
+        ShippingOptionId: string;
+        /**
+         * @description An address as a provider suggests it: where it is, without who lives there (names and
+         *     phone are never sent, so never suggested).
+         */
+        SuggestedAddress: {
+            city: string;
+            company?: string | null;
+            country: string;
+            line1: string;
+            line2?: string | null;
+            postal_code?: string | null;
+            province?: string | null;
+        };
+        /**
          * @description A UserId: `user_` and 32 hex digits.
          * @example user_0190f1a2b3c47d8e9f00112233445566
          */
         UserId: string;
+        /** @description A kept verification, as an app needs it. */
+        ValidatedAddressCheck: {
+            flags: components["schemas"]["VerificationFlags"];
+            verdict: components["schemas"]["AddressVerdict"];
+        };
+        /**
+         * @description The cart as the app sees it. Paths in its answer point into the cart's own response,
+         *     whose arrays are in this order.
+         */
+        ValidatedCart: {
+            channel: components["schemas"]["ChannelId"];
+            country: components["schemas"]["CountryCode"];
+            currency: components["schemas"]["Currency"];
+            customer?: components["schemas"]["CustomerId"] | null;
+            /**
+             * @description `null` without one, or without the app's `customer_data:email` (then listed in
+             *     `redacted`).
+             */
+            email?: string | null;
+            id: components["schemas"]["CartId"];
+            lines: components["schemas"]["ValidatedLine"][];
+            market: components["schemas"]["MarketId"];
+            /** @description The cart's personal fields left out for this app (`email`). */
+            redacted?: string[] | null;
+            shipping_address?: components["schemas"]["PostalAddressResponse"] | null;
+            shipping_address_check?: components["schemas"]["ValidatedAddressCheck"] | null;
+            /** @description One per group of shipped lines, with its chosen option. */
+            shipping_groups: components["schemas"]["ValidatedShippingGroup"][];
+            /** @description The available lines after discounts. */
+            subtotal: components["schemas"]["Money"];
+            total: components["schemas"]["Money"];
+        };
+        /** @description One cart line. */
+        ValidatedLine: {
+            product: components["schemas"]["ProductId"];
+            /** Format: int32 */
+            quantity: number;
+            sku?: string | null;
+            unit_price?: components["schemas"]["Money"] | null;
+            variant: components["schemas"]["VariantId"];
+            /**
+             * Format: int32
+             * @description One unit's weight when the variant is shipped and has one.
+             */
+            weight_grams?: number | null;
+        };
+        /** @description A group of shipped lines and the option chosen for it. */
+        ValidatedShippingGroup: {
+            /** @description The option's code (`dhl_express`). */
+            code?: string | null;
+            option?: components["schemas"]["ShippingOptionId"] | null;
+            /** @description A provider's key for an option a rate app or spore prices (`app_dhl`). */
+            provider?: string | null;
+        };
+        /** @description One message the app has for the shopper. */
+        ValidationMessage: {
+            /**
+             * @description The app's own: snake_case, a letter first, at most 64 characters.
+             * @example alcohol_restricted
+             */
+            code: string;
+            /** @description Plain text for the shopper, 1 to 500 characters. */
+            message: string;
+            /**
+             * @description Where it shows: `$`, `$.email`, `$.shipping_address`, `$.shipping_address.<field>`,
+             *     `$.shipping_groups[<i>]` or `$.lines[<i>]`, an index the request has.
+             * @example $.shipping_address.postal_code
+             */
+            path: string;
+            /** @description `error` stops checkout; `warning` never does. */
+            severity: components["schemas"]["Severity"];
+        };
+        /**
+         * @description When a validation app is asked: as the shopper goes through checkout.
+         *
+         *     Known values: `address`, `shipping`, `checkout`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        ValidationStep: "address" | "shipping" | "checkout";
         /**
          * @description A VariantId: `var_` and 32 hex digits.
          * @example var_0190f1a2b3c47d8e9f00112233445566
          */
         VariantId: string;
+        /** @description What the provider says the address is; `None` where it doesn't know. */
+        VerificationFlags: {
+            business?: boolean | null;
+            po_box?: boolean | null;
+            residential?: boolean | null;
+            vacant?: boolean | null;
+        };
+        /** @description The address to verify: where it is, never who lives there (no names or phone). */
+        VerifiedAddress: {
+            city: string;
+            company?: string | null;
+            country: string;
+            line1: string;
+            line2?: string | null;
+            postal_code?: string | null;
+            /** @description The region's code where the country lists regions (`CA`). */
+            province?: string | null;
+        };
+        /**
+         * @description Where an address is verified: setting a cart's, or staff editing an order's.
+         *
+         *     Known values: `cart`, `order`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        VerifyContext: "cart" | "order";
     };
     responses: never;
     parameters: never;
@@ -603,6 +923,132 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    "address.resolve.v1": {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description `t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>" under the app's secret>`. Check it, and refuse a `t` more than a few minutes old. */
+                "Hypha-Signature": string;
+                /** @description The point's name, as this operation's. */
+                "Hypha-Extension": string;
+                /** @description The point's version. */
+                "Hypha-Extension-Version": string;
+                /** @description The same for every retry of one piece of work: answer a repeat as the first. */
+                "Idempotency-Key": string;
+                /** @description The store the call is for (`store_…`). */
+                "Hypha-Store": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddressResolveRequest"];
+            };
+        };
+        responses: {
+            /** @description The answer (any 2xx). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddressResolveResponse"];
+                };
+            };
+            /** @description A failure. Apps built on `@hyphacommerce/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "address.suggest.v1": {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description `t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>" under the app's secret>`. Check it, and refuse a `t` more than a few minutes old. */
+                "Hypha-Signature": string;
+                /** @description The point's name, as this operation's. */
+                "Hypha-Extension": string;
+                /** @description The point's version. */
+                "Hypha-Extension-Version": string;
+                /** @description The same for every retry of one piece of work: answer a repeat as the first. */
+                "Idempotency-Key": string;
+                /** @description The store the call is for (`store_…`). */
+                "Hypha-Store": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddressSuggestRequest"];
+            };
+        };
+        responses: {
+            /** @description The answer (any 2xx). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddressSuggestResponse"];
+                };
+            };
+            /** @description A failure. Apps built on `@hyphacommerce/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "address.verify.v1": {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description `t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>" under the app's secret>`. Check it, and refuse a `t` more than a few minutes old. */
+                "Hypha-Signature": string;
+                /** @description The point's name, as this operation's. */
+                "Hypha-Extension": string;
+                /** @description The point's version. */
+                "Hypha-Extension-Version": string;
+                /** @description The same for every retry of one piece of work: answer a repeat as the first. */
+                "Idempotency-Key": string;
+                /** @description The store the call is for (`store_…`). */
+                "Hypha-Store": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddressVerifyRequest"];
+            };
+        };
+        responses: {
+            /** @description The answer (any 2xx). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddressVerifyResponse"];
+                };
+            };
+            /** @description A failure. Apps built on `@hyphacommerce/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     "admin.action.v1": {
         parameters: {
             query?: never;
@@ -634,6 +1080,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminActionResponse"];
+                };
+            };
+            /** @description A failure. Apps built on `@hyphacommerce/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "checkout.validate.v1": {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description `t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>" under the app's secret>`. Check it, and refuse a `t` more than a few minutes old. */
+                "Hypha-Signature": string;
+                /** @description The point's name, as this operation's. */
+                "Hypha-Extension": string;
+                /** @description The point's version. */
+                "Hypha-Extension-Version": string;
+                /** @description The same for every retry of one piece of work: answer a repeat as the first. */
+                "Idempotency-Key": string;
+                /** @description The store the call is for (`store_…`). */
+                "Hypha-Store": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CheckoutValidateRequest"];
+            };
+        };
+        responses: {
+            /** @description The answer (any 2xx). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckoutValidateResponse"];
                 };
             };
             /** @description A failure. Apps built on `@hyphacommerce/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log. */
@@ -943,10 +1431,30 @@ export interface operations {
 
 /** Each point's newest version and bodies. */
 export interface ExtensionPoints {
+  "address.resolve": {
+    version: 1;
+    request: NonNullable<webhooks["address.resolve"]["post"]["requestBody"]>["content"]["application/json"];
+    response: webhooks["address.resolve"]["post"]["responses"][200]["content"]["application/json"];
+  };
+  "address.suggest": {
+    version: 1;
+    request: NonNullable<webhooks["address.suggest"]["post"]["requestBody"]>["content"]["application/json"];
+    response: webhooks["address.suggest"]["post"]["responses"][200]["content"]["application/json"];
+  };
+  "address.verify": {
+    version: 1;
+    request: NonNullable<webhooks["address.verify"]["post"]["requestBody"]>["content"]["application/json"];
+    response: webhooks["address.verify"]["post"]["responses"][200]["content"]["application/json"];
+  };
   "admin.action": {
     version: 1;
     request: NonNullable<webhooks["admin.action"]["post"]["requestBody"]>["content"]["application/json"];
     response: webhooks["admin.action"]["post"]["responses"][200]["content"]["application/json"];
+  };
+  "checkout.validate": {
+    version: 1;
+    request: NonNullable<webhooks["checkout.validate"]["post"]["requestBody"]>["content"]["application/json"];
+    response: webhooks["checkout.validate"]["post"]["responses"][200]["content"]["application/json"];
   };
   "payments.capture": {
     version: 1;
@@ -987,7 +1495,11 @@ export interface ExtensionPoints {
 
 /** The version of each point this build of Hypha calls: what a handler answers by default. */
 export const EXTENSION_POINT_VERSIONS: { [P in keyof ExtensionPoints]: ExtensionPoints[P]["version"] } = {
+  "address.resolve": 1,
+  "address.suggest": 1,
+  "address.verify": 1,
   "admin.action": 1,
+  "checkout.validate": 1,
   "payments.capture": 1,
   "payments.refund": 1,
   "payments.start": 2,

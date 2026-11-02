@@ -1,7 +1,7 @@
 //! What happens to orders, as events. Contract types: a reshaped field is a new `VERSION`,
 //! never an edit.
 
-use hypha_core::{ChannelId, CustomerId, Event, Money, OrderId};
+use hypha_core::{Address, ChannelId, CustomerId, Event, Money, OrderId};
 use serde::Serialize;
 
 pub const ORDER: &str = "order";
@@ -66,5 +66,65 @@ pub struct OrderCancelled {
 
 impl Event for OrderCancelled {
     const TYPE: &'static str = "order.cancelled";
+    const VERSION: u16 = 1;
+}
+
+/// `order.address_marked_valid`: staff looked at the shipping address and said it's fine.
+/// `by` is the actor's prefixed ID.
+#[derive(Debug, Serialize)]
+pub struct OrderAddressMarkedValid {
+    pub order: OrderId,
+    pub by: String,
+}
+
+impl Event for OrderAddressMarkedValid {
+    const TYPE: &'static str = "order.address_marked_valid";
+    const VERSION: u16 = 1;
+}
+
+/// An address in an event: every field, which webhooks redact per the receiving app's
+/// grant like any other.
+#[derive(Debug, Serialize)]
+pub struct ShippingAddressPayload {
+    pub first_name: Option<String>,
+    pub last_name: String,
+    pub company: Option<String>,
+    pub line1: String,
+    pub line2: Option<String>,
+    pub city: String,
+    pub province: Option<String>,
+    pub postal_code: Option<String>,
+    pub country: String,
+    pub phone: Option<String>,
+}
+
+impl From<&Address> for ShippingAddressPayload {
+    fn from(a: &Address) -> Self {
+        let p = a.parts();
+        Self {
+            first_name: p.first_name.clone(),
+            last_name: p.last_name.clone(),
+            company: p.company.clone(),
+            line1: p.line1.clone(),
+            line2: p.line2.clone(),
+            city: p.city.clone(),
+            province: p.province.clone(),
+            postal_code: p.postal_code.clone(),
+            country: p.country.clone(),
+            phone: p.phone.clone(),
+        }
+    }
+}
+
+/// `order.shipping_address_changed`: staff changed where the order ships, before any of
+/// it did. Shipping wasn't priced again.
+#[derive(Debug, Serialize)]
+pub struct OrderShippingAddressChanged {
+    pub order: OrderId,
+    pub address: ShippingAddressPayload,
+}
+
+impl Event for OrderShippingAddressChanged {
+    const TYPE: &'static str = "order.shipping_address_changed";
     const VERSION: u16 = 1;
 }

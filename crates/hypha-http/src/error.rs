@@ -92,6 +92,8 @@ pub struct ApiErrorBody {
 /// - `discount_code_taken`: `{"code"}`, the code another discount has
 /// - `compare_at_not_above_price` / `compare_at_currency_mismatch` (variants):
 ///   `{"variant": "var_…"}`
+/// - `invalid_suggestion_query`: `{"parameter"}`, the address suggestion's parameter
+///   that breaks its rule (`q`, `session`, `limit`)
 ///
 /// Status rules: 401 no or bad credentials (with `WWW-Authenticate: Bearer`); 429 over
 /// a rate limit or locked second factor; 403
@@ -279,6 +281,27 @@ impl ApiError {
     /// fields).
     pub fn invalid_body(message: impl std::fmt::Display) -> Self {
         Self::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid_body", message)
+    }
+
+    /// An address suggestion asked of a store with no autocomplete app: forms know
+    /// beforehand from the address format's `autocomplete`.
+    pub fn autocomplete_unavailable() -> Self {
+        Self::new(
+            StatusCode::NOT_FOUND,
+            "autocomplete_unavailable",
+            "the store has no address autocomplete app",
+        )
+    }
+
+    /// An address suggestion's parameter that parses but breaks its rule (`q` too short),
+    /// with the parameter in `details.parameter`.
+    pub fn invalid_suggestion_query(parameter: &str, message: impl std::fmt::Display) -> Self {
+        Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_suggestion_query",
+            message,
+        )
+        .with_details(Some(json!({ "parameter": parameter })))
     }
 
     /// A list's `?cursor=` that isn't one the list handed out.
@@ -574,6 +597,18 @@ fn completed(order: OrderId) -> Value {
     json!({ "order": order })
 }
 
+/// `invalid_address`'s details: every problem by field, so a form marks each one.
+fn address_problems(e: &hypha_core::AddressError) -> Value {
+    let problems: Vec<Value> = e
+        .problems()
+        .iter()
+        .map(
+            |p| json!({ "field": p.field.as_str(), "code": p.code.as_str(), "message": p.message }),
+        )
+        .collect();
+    json!({ "problems": problems })
+}
+
 // ---------- axum's own rejections (bad JSON, bad path IDs) ----------
 
 impl From<JsonRejection> for ApiError {
@@ -808,7 +843,11 @@ impl From<hypha_stores::CommandError> for ApiError {
             // Only possible at startup, and a deployment problem rather than a request one.
             E::Repo(RepoError::Backend(_)) | E::MultipleStores(_) => return Self::internal(e),
         };
-        Self::domain(status, e)
+        let details = match &e {
+            E::Address(a) => Some(address_problems(a)),
+            _ => None,
+        };
+        Self::domain(status, e).with_details(details)
     }
 }
 
@@ -991,6 +1030,7 @@ impl From<hypha_cart::CommandError> for ApiError {
             }) => Some(shortages([(*variant, *requested, *available)])),
             E::Cart(CartError::Completed { order }) => Some(completed(*order)),
             E::ShippingOptionNotOffered { reason, .. } => Some(json!({ "reason": reason.code() })),
+            E::Address(a) => Some(address_problems(a)),
             _ => None,
         };
         Self::domain(status, e).with_details(details)
@@ -1085,6 +1125,7 @@ impl From<hypha_inventory::CommandError> for ApiError {
                     .map(|l| serde_json::json!({ "variant": l.variant, "in_transit": l.in_transit }))
                     .collect::<Vec<_>>()
             })),
+            E::Inventory(I::Address(a)) => Some(address_problems(a)),
             _ => None,
         };
         Self::domain(status, e).with_details(details)
@@ -1154,6 +1195,7 @@ impl From<hypha_customers::CommandError> for ApiError {
             E::Customer(C::TooManyFilterIds { field, max }) => {
                 Some(json!({ "field": field, "max": max }))
             }
+            E::Address(a) => Some(address_problems(a)),
             _ => None,
         };
         Self::domain(status, e).with_details(details)
@@ -1170,6 +1212,9 @@ fn order_error_status(e: &hypha_orders::OrderError) -> Option<StatusCode> {
             Some(StatusCode::CONFLICT)
         }
         O::NotFulfilled { .. } => Some(StatusCode::CONFLICT),
+        // Changing where it ships: the order's state, or the new address's country.
+        O::Fulfilled(_) | O::NoShippingAddress(_) => Some(StatusCode::CONFLICT),
+        O::AddressCountryMismatch { .. } => Some(StatusCode::UNPROCESSABLE_ENTITY),
         // A line ID in the body; a list's filter or sort.
         O::UnknownLine(_) | O::Filter(_) | O::SortNeedsCurrency => {
             Some(StatusCode::UNPROCESSABLE_ENTITY)
@@ -1205,8 +1250,13 @@ impl From<hypha_orders::CommandError> for ApiError {
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
             ) => StatusCode::CONFLICT,
+            E::Address(_) => StatusCode::UNPROCESSABLE_ENTITY,
         };
-        Self::domain(status, e)
+        let details = match &e {
+            E::Address(a) => Some(address_problems(a)),
+            _ => None,
+        };
+        Self::domain(status, e).with_details(details)
     }
 }
 
@@ -1525,7 +1575,8 @@ impl From<hypha_checkout::CommandError> for ApiError {
             | E::CartPaymentCommitted { .. }
             | E::PaymentRequired(_)
             | E::PaymentPending { .. }
-            | E::PaymentFailed { .. } => StatusCode::CONFLICT,
+            | E::PaymentFailed { .. }
+            | E::CheckoutBlocked { .. } => StatusCode::CONFLICT,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
@@ -1552,6 +1603,13 @@ impl From<hypha_checkout::CommandError> for ApiError {
             E::PaymentFailed {
                 payment, status, ..
             } => Some(json!({ "payment": payment, "status": status.as_str() })),
+            E::CheckoutBlocked { messages, .. } => Some(json!({
+                "messages": messages
+                    .iter()
+                    .map(crate::routes::carts::CartMessageResponse::from)
+                    .map(|m| serde_json::to_value(m).unwrap_or(Value::Null))
+                    .collect::<Vec<_>>(),
+            })),
             _ => None,
         };
         Self::domain(status, e).with_details(details)
@@ -1782,6 +1840,7 @@ impl From<hypha_purchasing::CommandError> for ApiError {
             E::Purchasing(P::ExchangeRateRequired { currency, store }) => {
                 Some(json!({ "currency": currency, "store_currency": store }))
             }
+            E::Purchasing(P::Address(a)) => Some(address_problems(a)),
             E::Purchasing(P::BelowReceived { variant, minimum }) => {
                 Some(json!({ "variant": variant, "minimum": minimum }))
             }
@@ -1891,6 +1950,53 @@ fn discount_details(e: &hypha_discounts::CommandError) -> Option<Value> {
             D::CurrencyMismatch { path, market, .. } | D::MarketNotFound { path, market },
         ) => Some(json!({"path": path, "market": market})),
         E::CodeTaken(code) => Some(json!({ "code": code })),
+        _ => None,
+    }
+}
+
+impl From<hypha_checkout_rules::CommandError> for ApiError {
+    fn from(e: hypha_checkout_rules::CommandError) -> Self {
+        use hypha_checkout_rules::{CheckoutRuleError as R, CommandError as E};
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // Rules only arrive in URLs.
+            E::NotFound(_) => StatusCode::NOT_FOUND,
+            E::Rule(R::Invalid(_)) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::TooMany { .. } => StatusCode::CONFLICT,
+            // An app named in the body.
+            E::AppKey(_)
+            | E::VerificationAppUnavailable(_)
+            | E::AutocompleteAppUnavailable(_)
+            | E::ValidationAppUnavailable(_)
+            | E::DuplicateValidationApp(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            // A grant approved or endpoints set while the store has as many as it may.
+            E::TooManyValidationApps { .. } => StatusCode::CONFLICT,
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        let details = checkout_rule_details(&e);
+        Self::domain(status, e).with_details(details)
+    }
+}
+
+/// `invalid_checkout_rule`: `{"problems": [{"path", "code", "message"}]}`, every broken
+/// rule; `too_many_checkout_rules` and `too_many_validation_apps`: `{"max"}`;
+/// `validation_app_unavailable` and `duplicate_validation_app`: `{"app"}`.
+fn checkout_rule_details(e: &hypha_checkout_rules::CommandError) -> Option<Value> {
+    use hypha_checkout_rules::{CheckoutRuleError as R, CommandError as E};
+    match e {
+        E::Rule(R::Invalid(problems)) => Some(json!({
+            "problems": problems
+                .iter()
+                .map(|p| json!({"path": p.path, "code": p.code, "message": p.message}))
+                .collect::<Vec<_>>()
+        })),
+        E::TooMany { max } | E::TooManyValidationApps { max } => Some(json!({ "max": max })),
+        E::ValidationAppUnavailable(app) | E::DuplicateValidationApp(app) => {
+            Some(json!({ "app": app.as_str() }))
+        }
         _ => None,
     }
 }
@@ -2286,6 +2392,37 @@ mod tests {
         ] {
             assert_eq!(ApiError::from(e).status, StatusCode::CONFLICT);
         }
+    }
+
+    #[test]
+    fn a_blocked_checkout_is_a_conflict_listing_its_errors() {
+        let cart = hypha_core::CartId::from_uuid(Uuid::from_u128(1));
+        let message = hypha_core::Message::new(
+            hypha_core::Severity::Error,
+            hypha_core::MessageCode::new("po_box_not_allowed").unwrap(),
+            hypha_core::MessagePath::ShippingGroup(0),
+            "No PO boxes with this option.",
+            hypha_core::MessageSource::Format,
+        )
+        .unwrap();
+        let e = ApiError::from(hypha_checkout::CommandError::CheckoutBlocked {
+            cart,
+            messages: vec![message],
+        });
+        assert_eq!(
+            (e.status, e.code, e.details),
+            (
+                StatusCode::CONFLICT,
+                "checkout_blocked",
+                Some(json!({ "messages": [{
+                    "severity": "error",
+                    "code": "po_box_not_allowed",
+                    "path": "$.shipping_groups[0]",
+                    "message": "No PO boxes with this option.",
+                    "source": { "type": "format" },
+                }] }))
+            )
+        );
     }
 
     #[test]

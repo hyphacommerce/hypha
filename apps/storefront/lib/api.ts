@@ -9,6 +9,7 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 
+import { type AddressFormat, type FieldProblems, problemsOf } from "./address";
 import { FRESH_SECONDS, TAGS } from "./cache-tags";
 import { type FieldContext, type FieldPart, referenceIds } from "./custom-fields";
 import { link } from "./site";
@@ -95,6 +96,21 @@ export async function countryOf(folder: string): Promise<Country> {
   if (!country) notFound();
   return country;
 }
+
+/** A country's address form: its fields change only with a release, its `autocomplete`
+ * with the store's settings, so it's read again as often as other cached reads. */
+export const loadAddressFormat = cache((country: string) =>
+  unstable_cache(
+    async (): Promise<AddressFormat> =>
+      loaded(
+        await api().GET("/storefront/address-formats/{country}", {
+          params: { path: { country } },
+        }),
+      ),
+    ["address-format", country],
+    { revalidate: FRESH_SECONDS },
+  )(),
+);
 
 /** The shown category tree, once per request (and cached, tagged `categories`). */
 export const loadCategories = cache(
@@ -233,6 +249,21 @@ export async function fieldContext(
   };
 }
 
+/**
+ * An action's refusal: the message to show and, for an address, each field's problem
+ * (the banner then only points at them).
+ */
+export function refusedWith(error: { code: string; error: string; details?: unknown }): {
+  error: string;
+  problems?: FieldProblems;
+} {
+  const problems = problemsOf(error);
+  if (problems && Object.keys(problems).length > 0) {
+    return { error: "Check the highlighted fields.", problems };
+  }
+  return { error: describe(error) };
+}
+
 /** A message for the shopper, by the API's stable error code. */
 export function describe(error: { code: string; error: string }): string {
   switch (error.code) {
@@ -268,6 +299,8 @@ export function describe(error: { code: string; error: string }): string {
       return "We don't ship to this country yet.";
     case "discount_code_invalid":
       return "That code isn't valid. Check it and try again.";
+    case "checkout_blocked":
+      return "Some things need fixing before you can place your order: see what's marked.";
     case "discounts_changed":
       return "A discount changed since you looked. Check the total and place the order again.";
     case "total_changed":

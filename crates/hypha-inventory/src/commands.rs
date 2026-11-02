@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
-    Address, AddressParts, AuthError, Ctx, Currency, ErrorCode, IdGenerator, IdempotencyError,
-    InventoryItemId, Keyset, LocationId, MarketId, Page, PageRequest, Quantity, RepoError, Scope,
-    TransferId, UnitCost, VariantId, report_duplicate, retry_on_conflict,
+    AddressFormats, AddressParts, AuthError, Ctx, Currency, ErrorCode, IdGenerator,
+    IdempotencyError, InventoryItemId, Keyset, LocationId, MarketId, Page, PageRequest, Quantity,
+    RepoError, Scope, TransferId, UnitCost, VariantId, report_duplicate, retry_on_conflict,
 };
 
 use crate::{
@@ -157,9 +157,11 @@ pub struct UpdateLocation {
     pub address: Option<Option<AddressParts>>,
 }
 
+/// A new address is checked and normalised by its country's format (`formats`).
 pub async fn update_location<L: LocationRepo>(
     ctx: &Ctx,
     locations: &L,
+    formats: &impl AddressFormats,
     id: LocationId,
     input: UpdateLocation,
 ) -> Result<Location, CommandError> {
@@ -176,7 +178,9 @@ pub async fn update_location<L: LocationRepo>(
         location.set_priority(priority);
     }
     if let Some(address) = input.address {
-        let address = address.map(Address::new).transpose();
+        let address = address
+            .map(|parts| formats.validate(parts).map(|checked| checked.address))
+            .transpose();
         location.set_address(address.map_err(InventoryError::from)?);
     }
     locations.update(&mut location).await?;

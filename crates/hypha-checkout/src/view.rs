@@ -63,6 +63,7 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
                 sku: line.sku.clone(),
                 handle: None,
                 image: None,
+                shipping_weight: None,
             }),
             // Checked out: nothing more to buy on this line.
             sellable: Some(0),
@@ -82,6 +83,7 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
         market: order.market(),
         currency: order.currency(),
         country: order.country(),
+        channel: cart.channel(),
         email: cart.email().cloned(),
         customer: cart.customer(),
         order: Some(order.id()),
@@ -90,6 +92,8 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
         taxes_included: order.taxes_included(),
         subtotal: order.subtotal(),
         shipping_address: order.shipping_address().cloned(),
+        address_check: cart.address_check().cloned(),
+        app_checks: Vec::new(),
         shipping_groups: order
             .shipping_lines()
             .iter()

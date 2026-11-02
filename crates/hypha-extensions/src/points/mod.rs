@@ -2,13 +2,26 @@
 //! `ExtensionPoint` here, with its request and response, and a line in the extensions
 //! document's list (`hypha-http`'s `openapi.rs`).
 
+pub mod address;
 pub mod admin;
+pub mod checkout;
 pub mod payments;
 pub mod search;
 pub mod shipping;
 
+pub use address::{
+    AddressResolve, AddressResolveRequest, AddressResolveResponse, AddressSuggest,
+    AddressSuggestRequest, AddressSuggestResponse, AddressSuggestion, AddressVerify,
+    AddressVerifyRequest, AddressVerifyResponse, FieldVerification, MAX_SUGGESTION_ID,
+    MAX_SUGGESTION_TEXT, MAX_SUGGESTIONS, VerifiedAddress,
+};
 pub use admin::{
     ActionContext, AdminActionRequest, AdminActionResponse, MAX_ACTION_MESSAGE, RunAdminAction,
+};
+pub use checkout::{
+    CheckoutValidate, CheckoutValidateRequest, CheckoutValidateResponse, MAX_VALIDATION_MESSAGES,
+    MAX_VALIDATION_TEXT, ValidatedAddressCheck, ValidatedCart, ValidatedLine,
+    ValidatedShippingGroup, ValidationMessage,
 };
 
 pub use payments::{
@@ -54,6 +67,10 @@ pub const KNOWN: &[Known] = &[
     known::<PaymentsVoid>(),
     known::<PaymentsRefund>(),
     known::<SearchQuery>(),
+    known::<AddressVerify>(),
+    known::<AddressSuggest>(),
+    known::<AddressResolve>(),
+    known::<CheckoutValidate>(),
 ];
 
 /// The point named `name`, when this build knows it.

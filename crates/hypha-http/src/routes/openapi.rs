@@ -623,6 +623,18 @@ fn points() -> Vec<PointDoc> {
             "Answer a storefront search with product and variant IDs in order.",
         ),
         PointDoc::of::<x::RunAdminAction>("Run one of the app's admin actions, pressed by staff."),
+        PointDoc::of::<x::AddressVerify>(
+            "Verify a shipping address: whether mail reaches it, a corrected one when confident, and what it is.",
+        ),
+        PointDoc::of::<x::AddressSuggest>(
+            "Offer up to five addresses for what someone has typed so far in an address form.",
+        ),
+        PointDoc::of::<x::AddressResolve>(
+            "Turn the suggestion someone picked into the address's parts.",
+        ),
+        PointDoc::of::<x::CheckoutValidate>(
+            "Say what's wrong with a cart (errors stop checkout) or worth a second look (warnings), each on the part it's about.",
+        ),
     ]
 }
 
@@ -650,6 +662,10 @@ fn point_operation(point: &PointDoc) -> Operation {
             "the flow stops with `app_unavailable` (502, `details: {app, point}`)"
         }
         hypha_extensions::OnFailure::Fallback => "Hypha falls back to its own default",
+        hypha_extensions::OnFailure::Configured => {
+            "the merchant's setting for the app decides: checkout goes on without it, or stops \
+             with a `validation_unavailable` error on the cart"
+        }
     };
     let description = format!(
         "`POST` to the URL the app registered for `{}` v{}. Answer within {timeout_ms} ms \
@@ -1018,7 +1034,11 @@ mod tests {
         assert_eq!(
             webhooks.keys().map(String::as_str).collect::<Vec<_>>(),
             [
+                "address.resolve",
+                "address.suggest",
+                "address.verify",
                 "admin.action",
+                "checkout.validate",
                 "payments.capture",
                 "payments.refund",
                 "payments.start",

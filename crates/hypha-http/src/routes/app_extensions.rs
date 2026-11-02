@@ -1454,6 +1454,11 @@ pub async fn refresh<S: Storage>(
     let removes = |m: &hypha_apps::AppManifest| crate::app_fields::removes_fields(&stored, m);
     let prepared =
         prepare_refresh(&ctx, &ports, &state.manifests(), &state.env, &key, removes).await?;
+    // A manifest applied at once may register `checkout.validate` under scopes the grant
+    // already has: a sixth validation app is refused.
+    if let Refreshed::Updated(app) = &prepared.answer {
+        crate::checkout_validate::ensure_room_for_app(&ports, app).await?;
+    }
     let refreshed = crate::app_fields::commit_applying(&ports, &state.env, prepared).await?;
     Ok(Json(match refreshed {
         Refreshed::Updated(app) => RefreshResponse {

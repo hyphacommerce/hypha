@@ -33,3 +33,20 @@ export type SearchQueryResponse = PointResponse<"search.query">;
 
 export type AdminActionRequest = PointRequest<"admin.action">;
 export type AdminActionResponse = PointResponse<"admin.action">;
+
+/** Verify a shipping address: no names or phone are sent, only where it is. */
+export type AddressVerifyRequest = PointRequest<"address.verify">;
+/** The verdict, field statuses, a suggestion (only when confident) and flags. */
+export type AddressVerifyResponse = PointResponse<"address.verify">;
+
+/** Suggest up to five addresses for what someone has typed so far. */
+export type AddressSuggestRequest = PointRequest<"address.suggest">;
+export type AddressSuggestResponse = PointResponse<"address.suggest">;
+/** Turn the picked suggestion into the address's parts, in the form's country. */
+export type AddressResolveRequest = PointRequest<"address.resolve">;
+export type AddressResolveResponse = PointResponse<"address.resolve">;
+
+/** Validate a cart for checkout: its address and email as the app's grant allows. */
+export type CheckoutValidateRequest = PointRequest<"checkout.validate">;
+/** At most 20 messages, each on a part of the cart (`message` builds one). */
+export type CheckoutValidateResponse = PointResponse<"checkout.validate">;

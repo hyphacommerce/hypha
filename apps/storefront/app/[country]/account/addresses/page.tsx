@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { AccountShell } from "@/components/account/account-shell";
 import { AddressBook } from "@/components/account/forms";
 import { loadAccount } from "@/lib/account";
-import { countryOf } from "@/lib/api";
+import { countryOf, loadAddressFormat } from "@/lib/api";
 import { link } from "@/lib/site";
 
 export const dynamic = "force-dynamic";
@@ -15,13 +15,14 @@ export default async function AddressesPage({ params }: { params: Promise<{ coun
   const country = await countryOf((await params).country);
   const code = country.country;
   const to = (path: string) => link(code, path);
-  const account = await loadAccount();
+  const [account, format] = await Promise.all([loadAccount(), loadAddressFormat(code)]);
   if (!account) redirect(to("/account"));
   return (
     <AccountShell title="Addresses" current="/account/addresses" link={to}>
       <AddressBook
         country={code}
         countryName={country.name}
+        format={format}
         addresses={account.addresses.map((a) => ({
           id: a.id,
           lines: [
@@ -30,7 +31,7 @@ export default async function AddressesPage({ params }: { params: Promise<{ coun
             a.line1,
             a.line2,
             [a.postal_code, a.city].filter(Boolean).join(" "),
-            a.province,
+            a.province_name ?? a.province,
             a.country,
             a.phone,
           ].filter((l): l is string => Boolean(l)),

@@ -160,6 +160,7 @@ pub fn event_scope(subject_kind: &str) -> Option<Scope> {
         "asset" => Scope::MediaRead,
         "supplier" | "purchase_order" | "receipt" => Scope::PurchasingRead,
         "transfer" => Scope::InventoryRead,
+        "checkout_rule" | "checkout_settings" => Scope::CheckoutRulesRead,
         // Definitions; `<owner>.custom_fields_updated` events are about their owner
         // (`product`, `category`, `customer`, `order`) and go by its read scope.
         "custom_field_definition" => Scope::CustomFieldsRead,
@@ -826,6 +827,15 @@ mod tests {
             Some(Scope::InventoryRead)
         );
         assert_eq!(event_scope("purchase_order"), Some(Scope::PurchasingRead));
+    }
+
+    #[test]
+    fn checkout_rule_events_need_checkout_rules_read() {
+        assert_eq!(event_scope("checkout_rule"), Some(Scope::CheckoutRulesRead));
+        assert_eq!(
+            event_scope("checkout_settings"),
+            Some(Scope::CheckoutRulesRead)
+        );
     }
 
     #[test]

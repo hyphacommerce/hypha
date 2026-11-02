@@ -18,6 +18,7 @@ import {
   PhotoIcon,
   PuzzlePieceIcon,
   ReceiptPercentIcon,
+  ShieldCheckIcon,
   ShoppingBagIcon,
   Squares2X2Icon,
   TableCellsIcon,
@@ -196,6 +197,13 @@ export const SETTINGS_GROUPS: { title: string; description: string; pages: Setti
         icon: TruckIcon,
         scope: "shipping:read",
         description: "Zones, rates and live-rate apps.",
+      },
+      {
+        label: "Checkout",
+        href: "/settings/checkout",
+        icon: ShieldCheckIcon,
+        scope: "checkout_rules:read",
+        description: "Rules on addresses and carts: no PO boxes, a phone for couriers.",
       },
       {
         label: "Search",

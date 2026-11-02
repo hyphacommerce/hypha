@@ -581,7 +581,7 @@ const PII: [&str; 10] = [
     "Piistreet 1",
     "Piiflat 2",
     "Piicity",
-    "PII-10000",
+    "HR-19 987",
     "Piiprovince",
     // A personal custom field's value.
     "Piinote",
@@ -595,11 +595,21 @@ fn leaks(body: &Value) -> Vec<&'static str> {
 /// A customer with every personal field set, an order placed with their email, a cart
 /// with their shipping address linked to them; their IDs.
 async fn personal_data(app: &TestApp) -> (String, String, String) {
-    let (order, _, _) = placed_order_for_three_mugs(app).await;
     let address = json!({"first_name": "Piiana", "last_name": "Piihorvat", "company": "Acme",
         "line1": "Piistreet 1", "line2": "Piiflat 2", "city": "Piicity",
-        "province": "Piiprovince", "postal_code": "PII-10000", "country": "HR",
+        "province": "Piiprovince", "postal_code": "HR-19 987", "country": "HR",
         "phone": "+385 PII 1"});
+    // An order shipped to the address, so staff may change it.
+    let (pk, placing, _) = cart_for_three_mugs(app).await;
+    let ship = json!({"address": address}).to_string();
+    let path = format!("{placing}/shipping-address");
+    let (status, body) = send_as(app, &pk, "PUT", &path, Some(&ship)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    pay_on_delivery(app, &pk, &placing).await;
+    let path = format!("{placing}/checkout");
+    let (status, placed) = send_as(app, &pk, "POST", &path, Some("{}")).await;
+    assert_eq!(status, StatusCode::CREATED, "{placed}");
+    let order = placed["id"].as_str().unwrap().to_string();
     let body = json!({"email": "pii-ana@example.hr", "first_name": "Piiana",
         "last_name": "Piihorvat", "phone": "+385 PII 1"})
     .to_string();
@@ -614,6 +624,26 @@ async fn personal_data(app: &TestApp) -> (String, String, String) {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    // A verification app suggesting a corrected address: personal data in carts' and
+    // orders' checks.
+    let (base, _, _) = fake_app(&[(
+        "/verify",
+        200,
+        json!({"verdict": "deliverable_with_fixes",
+            "suggested": {"line1": "Piistreet 2", "city": "Piicity",
+                          "postal_code": "HR-19 987", "country": "HR"}}),
+    )])
+    .await;
+    app_answering(app, "app_verify", &base, &[("address.verify", "/verify")]).await;
+    let (status, body) = send(
+        app,
+        "PATCH",
+        "/admin/checkout-settings",
+        Some(r#"{"verification_app":"app_verify"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
 
     let pk = publishable(app).await;
     let (_, cart) = send_as(
@@ -748,7 +778,7 @@ async fn no_admin_route_shows_personal_data_without_its_scopes() {
     let notification = sent["items"][0]["id"].as_str().unwrap().to_string();
     let to_cancel = [another_order(&app).await, another_order(&app).await];
     let address = json!({"first_name": "Piiana", "last_name": "Piihorvat", "company": "Acme",
-        "line1": "Piistreet 1", "city": "Piicity", "postal_code": "PII-10000",
+        "line1": "Piistreet 1", "city": "Piicity", "postal_code": "HR-19 987",
         "country": "HR", "phone": "+385 PII 1"})
     .to_string();
     let consent = json!({"state": "subscribed"}).to_string();
@@ -785,6 +815,16 @@ async fn no_admin_route_shows_personal_data_without_its_scopes() {
         ("GET", "/admin/orders".to_string(), None),
         ("GET", format!("/admin/orders/{order}"), None),
         ("POST", format!("/admin/orders/{order}/paid"), None),
+        (
+            "PUT",
+            format!("/admin/orders/{order}/shipping-address"),
+            Some(json!({"address": serde_json::from_str::<Value>(&address).unwrap()}).to_string()),
+        ),
+        (
+            "POST",
+            format!("/admin/orders/{order}/address-check/mark-valid"),
+            None,
+        ),
         ("PUT", format!("/admin/carts/{cart}/customer"), Some(link)),
         ("GET", format!("/admin/notifications?order={order}"), None),
         (

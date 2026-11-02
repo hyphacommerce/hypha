@@ -361,6 +361,7 @@ pub async fn add_address_handler<S: Storage>(
         &owned.ctx,
         ports.customers(),
         &state.ids,
+        &hypha_addresses::Formats,
         owned.customer,
         req.into(),
     )
@@ -392,6 +393,7 @@ pub async fn update_address_handler<S: Storage>(
     let customer = update_address(
         &owned.ctx,
         ports.customers(),
+        &hypha_addresses::Formats,
         owned.customer,
         address,
         req.into(),

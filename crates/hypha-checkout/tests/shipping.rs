@@ -11,6 +11,7 @@
 )]
 use std::sync::Mutex;
 
+use hypha_addresses::Formats;
 use hypha_cart::{
     AddLine, CartRepo, CreateCart, SelectedShipping, StoredQuote, add_line, create_cart, get_cart,
     select_shipping, set_cart_email, set_shipping_address,
@@ -219,13 +220,15 @@ impl World {
             line2: None,
             city: "Zagreb".to_string(),
             province: None,
-            postal_code: None,
+            postal_code: Some("10000".to_string()),
             country: "HR".to_string(),
             phone: None,
         };
         block_on(set_shipping_address(
             &Ctx::system(),
             &self.ports,
+            &Formats,
+            &hypha_core::NoVerification,
             cart,
             Some(address),
         ))
@@ -264,6 +267,7 @@ impl World {
             &self.clock,
             &self.dhl,
             &(hypha_payments::ManualProvider,),
+            &Formats,
             input,
         ))
         .map(|o| o.value.order)
@@ -527,6 +531,7 @@ impl World {
             &self.clock,
             &rates,
             &(hypha_payments::ManualProvider,),
+            &Formats,
             input,
         ))
         .map(|o| o.value.order);

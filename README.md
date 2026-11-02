@@ -17,7 +17,7 @@ previewed exactly and approved by a person first.
 | Selling | Markets (countries and currency), catalogs, sales channels, tax regions and classes |
 | Prices | Price lists that compete on the lowest price: sales and clearances on a schedule, compare-at prices, quantity breaks, prices for customer groups, a spreadsheet editor with CSV import |
 | Discounts | Codes and automatic discounts: amounts or percentages off products, the order or shipping, buy X get Y, volume tiers, combinations, usage limits |
-| Checkout | Carts priced per market, shipping zones and rates (or a rate app), payment methods: manual (bank transfer, cash on delivery) and online payments started before the order exists |
+| Checkout | Carts priced per market, shipping zones and rates (or a rate app), payment methods: manual (bank transfer, cash on delivery) and online payments started before the order exists; address forms and checks for 244 countries, checkout rules without code, and apps that verify, autocomplete and validate addresses and carts |
 | Orders | Fulfilment by location with tracking, cancellations, refunds, inventory per location |
 | Customers | Accounts with email sign-in codes, addresses, marketing consent, data export and erasure |
 | Staff | Roles and scopes, two-factor sign-in, invites, API keys |

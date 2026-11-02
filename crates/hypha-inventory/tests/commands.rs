@@ -8,6 +8,7 @@
     reason = "a failing test panics, and fixtures cast small counters"
 )]
 
+use hypha_addresses::Formats;
 use hypha_core::{
     Actor, AuthError, Ctx, Currency, InventoryItemId, LocationId, MarketId, PageRequest, Scope,
     UnitCost, UserId, VariantId,
@@ -220,7 +221,14 @@ fn update_location_changes_only_what_is_given() {
         markets: Some(vec![market(2)]),
         ..UpdateLocation::default()
     };
-    let updated = block_on(update_location(&Ctx::system(), &world.locations, id, input)).unwrap();
+    let updated = block_on(update_location(
+        &Ctx::system(),
+        &world.locations,
+        &Formats,
+        id,
+        input,
+    ))
+    .unwrap();
 
     assert_eq!(updated.name(), "Zagreb");
     assert_eq!(updated.priority(), 7);
@@ -238,6 +246,7 @@ fn update_location_rejects_unknown_location() {
         block_on(update_location(
             &Ctx::system(),
             &world.locations,
+            &Formats,
             unknown,
             UpdateLocation::default()
         )),

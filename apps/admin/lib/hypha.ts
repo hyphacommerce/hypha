@@ -410,6 +410,12 @@ export function describe(error: ApiError): string {
       return `${error.error.charAt(0).toUpperCase()}${error.error.slice(1)}.`;
     case "too_many_shipping_options":
       return "A zone has at most 50 options.";
+    case "too_many_checkout_rules":
+      return "A store has at most 100 checkout rules. Delete one you no longer need.";
+    case "checkout_rule_not_found":
+      return "That checkout rule no longer exists. Reload the page.";
+    case "invalid_checkout_rule":
+      return "Check the highlighted parts of the rule.";
     case "invalid_shipping_provider_key":
       return "Keys are app_ followed by lowercase letters, digits and '_', like app_courier.";
     case "shipping_provider_exists":

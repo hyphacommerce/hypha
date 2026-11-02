@@ -317,12 +317,17 @@ fn create_cart_picks_the_market_of_its_country() {
 }
 
 /// What an empty cart in the Croatian market prices to, whatever else is set up.
-fn empty_in_croatia(id: CartId, taxes_included: bool) -> PricedCart {
+fn empty_in_croatia(
+    id: CartId,
+    channel: hypha_core::ChannelId,
+    taxes_included: bool,
+) -> PricedCart {
     PricedCart {
         id,
         market: market_id(),
         currency: Currency::EUR,
         country: hr(),
+        channel,
         email: None,
         customer: None,
         order: None,
@@ -330,6 +335,8 @@ fn empty_in_croatia(id: CartId, taxes_included: bool) -> PricedCart {
         taxes_included,
         subtotal: eur(0),
         shipping_address: None,
+        address_check: None,
+        app_checks: Vec::new(),
         shipping_groups: vec![],
         shipping_total: eur(0),
         discounts: vec![],
@@ -349,7 +356,10 @@ fn a_new_cart_is_priced_from_its_market() {
     world.stock("mug", 2);
     world.set_prices_include_tax();
     let cart = world.create_cart_in("HR").unwrap();
-    assert_eq!(cart, empty_in_croatia(cart.id, true));
+    assert_eq!(
+        cart,
+        empty_in_croatia(cart.id, world.storefront().channel().unwrap(), true)
+    );
     assert_eq!(world.get(cart.id), Ok(cart));
 }
 
@@ -365,8 +375,22 @@ fn an_emptied_cart_prices_like_a_new_one() {
         cart,
         vid("mug"),
     ));
-    assert_eq!(emptied, Ok(empty_in_croatia(cart, false)));
-    assert_eq!(world.get(cart), Ok(empty_in_croatia(cart, false)));
+    assert_eq!(
+        emptied,
+        Ok(empty_in_croatia(
+            cart,
+            world.storefront().channel().unwrap(),
+            false
+        ))
+    );
+    assert_eq!(
+        world.get(cart),
+        Ok(empty_in_croatia(
+            cart,
+            world.storefront().channel().unwrap(),
+            false
+        ))
+    );
 }
 
 #[test]

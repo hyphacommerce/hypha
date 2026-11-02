@@ -4,9 +4,9 @@ use hypha_core::{
     TaxClassId, TaxRate, TaxRegionId, Timestamp, VariantId, Version, Versioned,
 };
 use hypha_orders::{
-    CancelReason, FinancialStatus, FulfillmentStatus, NewOrder, Order, OrderFilter,
-    OrderFilterInput, OrderLine, OrderNumber, OrderRepo, OrderSort, OrderStats, OrderTax,
-    OrderTaxSource, repo::keys,
+    CancelReason, FinancialStatus, FulfillmentStatus, MarkedValid, NewOrder, Order,
+    OrderAddressCheck, OrderFilter, OrderFilterInput, OrderLine, OrderNumber, OrderRepo, OrderSort,
+    OrderStats, OrderTax, OrderTaxSource, repo::keys,
 };
 use uuid::Uuid;
 
@@ -105,6 +105,20 @@ async fn discount_round_trips<R: OrderRepo>(repo: &R) {
             })
             .unwrap(),
         ),
+        address_check: Some(OrderAddressCheck {
+            verification: Some(super::carts::verified()),
+            warnings: vec![hypha_core::Message::format_warning(
+                &hypha_core::AddressWarning {
+                    field: hypha_core::AddressField::Line1,
+                    code: hypha_core::AddressWarningCode::HouseNumberMissing,
+                    message: "Add a house number".to_string(),
+                },
+            )],
+            marked_valid: Some(MarkedValid {
+                by: "usr_00000000000000000000000000000001".to_string(),
+                at: Timestamp::from_unix_micros(1_767_225_600_000_009),
+            }),
+        }),
         shipping_lines: vec![shipping],
         discounts: vec![
             discount(7, DiscountClass::Product, 50, None),
@@ -223,6 +237,7 @@ fn order_with(n: u128, lines: Vec<OrderLine>, taxes_included: bool) -> Order {
         email: Email::new("ana@example.hr").unwrap(),
         lines,
         shipping_address: None,
+        address_check: None,
         shipping_lines: vec![],
         subtotal,
         shipping_total: Money::zero(Currency::EUR),
@@ -434,6 +449,7 @@ fn varied(n: u128, amount: i64, currency: Currency, email: &str, country: &str, 
         email: Email::new(email).unwrap(),
         lines: vec![line],
         shipping_address: None,
+        address_check: None,
         shipping_lines: vec![],
         subtotal: money,
         shipping_total: Money::zero(currency),
@@ -612,7 +628,32 @@ async fn list_filtered<R: OrderRepo>(repo: &R) {
     let mut usd = varied(3, 500, Currency::USD, "ana@example.hr", "HR", 3);
     usd.fulfil(&[(usd.lines()[0].id, Quantity::new(1).unwrap())])
         .unwrap();
-    let mut later = varied(4, 500, Currency::EUR, "ivo@example.hr", "HR", 4);
+    let later = varied(4, 500, Currency::EUR, "ivo@example.hr", "HR", 4);
+    let mut snapshot = later.snapshot();
+    snapshot.shipping_address = Some(
+        hypha_core::Address::new(hypha_core::AddressParts {
+            first_name: None,
+            last_name: "Ivo".to_string(),
+            company: None,
+            line1: "Nowhere".to_string(),
+            line2: None,
+            city: "Zagreb".to_string(),
+            province: None,
+            postal_code: Some("10000".to_string()),
+            country: "HR".to_string(),
+            phone: None,
+        })
+        .unwrap(),
+    );
+    snapshot.address_check = Some(OrderAddressCheck {
+        verification: Some(hypha_core::AddressVerification {
+            verdict: hypha_core::AddressVerdict::Undeliverable,
+            ..super::carts::verified()
+        }),
+        warnings: Vec::new(),
+        marked_valid: None,
+    });
+    let mut later = Order::restore(snapshot).unwrap();
     for o in [&mut ana, &mut ivo, &mut usd, &mut later] {
         repo.insert(o).await.unwrap();
     }
@@ -723,6 +764,36 @@ async fn list_filtered<R: OrderRepo>(repo: &R) {
         .await,
         [oid(2), oid(3)],
         "from inclusive, before exclusive"
+    );
+    assert_eq!(
+        found(OrderFilterInput {
+            address_review: Some(true),
+            ..none()
+        })
+        .await,
+        [oid(4)],
+        "an address needing review"
+    );
+    assert_eq!(
+        found(OrderFilterInput {
+            address_review: Some(false),
+            ..none()
+        })
+        .await,
+        [oid(1), oid(2), oid(3)]
+    );
+    later
+        .mark_address_valid("system".to_string(), Timestamp::from_unix_micros(9))
+        .unwrap();
+    repo.update(&mut later).await.unwrap();
+    assert_eq!(
+        found(OrderFilterInput {
+            address_review: Some(true),
+            ..none()
+        })
+        .await,
+        Vec::<OrderId>::new(),
+        "marked valid"
     );
 }
 

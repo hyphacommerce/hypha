@@ -23,6 +23,21 @@ pub enum Actor {
     System,
 }
 
+impl Actor {
+    /// The actor as its prefixed ID (`usr_…`), or `system`: how a record names who did
+    /// something.
+    pub fn reference(&self) -> String {
+        match self {
+            Actor::User(id) => id.to_string(),
+            Actor::Agent(id) => id.to_string(),
+            Actor::ApiKey(id) => id.to_string(),
+            Actor::App(id) => id.to_string(),
+            Actor::Customer(id) => id.to_string(),
+            Actor::System => "system".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ctx {
     actor: Actor,

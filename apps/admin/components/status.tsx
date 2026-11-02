@@ -68,6 +68,11 @@ export function CancelledBadge() {
   return <Badge label="Cancelled" variant="error" />;
 }
 
+/** An order whose shipping address staff should look at before shipping it. */
+export function NeedsReviewBadge() {
+  return <Badge label="Needs review" variant="warning" />;
+}
+
 /** A shipment: shipped, or taken back. */
 export function ShipmentBadge({ status }: { status: AdminSchemas["FulfillmentStateDto"] }) {
   return status === "cancelled" ? (

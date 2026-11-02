@@ -95,6 +95,7 @@ fn order_for(ana: CustomerId, n: u128, cart: CartId) -> Order {
             unit_cost: None,
         }],
         shipping_address: Some(address()),
+        address_check: None,
         shipping_lines: vec![],
         subtotal: eur(500),
         shipping_total: eur(0),
@@ -113,7 +114,7 @@ fn cart_of(ana: CustomerId, n: u128) -> Cart {
     );
     cart.set_customer(Some((ana, Email::new("ana@example.hr").unwrap())))
         .unwrap();
-    cart.set_shipping_address(Some(address())).unwrap();
+    cart.set_shipping_address(Some(address()), None).unwrap();
     cart
 }
 

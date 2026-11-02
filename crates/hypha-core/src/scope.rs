@@ -124,6 +124,11 @@ pub enum Scope {
     /// agent may draft orders but only propose sending them.
     #[serde(rename = "purchasing:send")]
     PurchasingSend,
+    /// Checkout rules and the checkout settings: what a cart must meet to be checked out.
+    #[serde(rename = "checkout_rules:read")]
+    CheckoutRulesRead,
+    #[serde(rename = "checkout_rules:write")]
+    CheckoutRulesWrite,
     /// Personal data: without these, a caller that isn't a staff session (an API key, an
     /// app) gets customers, orders and carts with the field absent and listed in
     /// `redacted`. First and last names.
@@ -194,6 +199,8 @@ impl Scope {
             Scope::PurchasingRead => "purchasing:read",
             Scope::PurchasingWrite => "purchasing:write",
             Scope::PurchasingSend => "purchasing:send",
+            Scope::CheckoutRulesRead => "checkout_rules:read",
+            Scope::CheckoutRulesWrite => "checkout_rules:write",
             Scope::CustomerDataName => "customer_data:name",
             Scope::CustomerDataEmail => "customer_data:email",
             Scope::CustomerDataPhone => "customer_data:phone",
@@ -240,6 +247,7 @@ impl Scope {
             Scope::AgentsRead => Some(Scope::AgentsWrite),
             Scope::DiscountsRead => Some(Scope::DiscountsWrite),
             Scope::PurchasingRead => Some(Scope::PurchasingWrite),
+            Scope::CheckoutRulesRead => Some(Scope::CheckoutRulesWrite),
             Scope::ProductsWrite
             | Scope::MarketsWrite
             | Scope::PricingWrite
@@ -265,6 +273,7 @@ impl Scope {
             | Scope::DiscountsWrite
             | Scope::PurchasingWrite
             | Scope::PurchasingSend
+            | Scope::CheckoutRulesWrite
             | Scope::CustomerDataName
             | Scope::CustomerDataEmail
             | Scope::CustomerDataPhone
@@ -293,7 +302,7 @@ impl Scope {
         Scope::CustomerDataProfile,
     ];
 
-    pub const ALL: [Scope; 52] = [
+    pub const ALL: [Scope; 54] = [
         Scope::ProductsRead,
         Scope::ProductsWrite,
         Scope::MarketsRead,
@@ -341,6 +350,8 @@ impl Scope {
         Scope::PurchasingRead,
         Scope::PurchasingWrite,
         Scope::PurchasingSend,
+        Scope::CheckoutRulesRead,
+        Scope::CheckoutRulesWrite,
         Scope::CustomerDataName,
         Scope::CustomerDataEmail,
         Scope::CustomerDataPhone,

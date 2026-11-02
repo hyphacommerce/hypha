@@ -26,23 +26,36 @@ import {
   selectShipping,
   startCartPayment,
 } from "@/app/[country]/actions";
+import { AddressFields } from "@/components/address-fields";
+import { CartMessages } from "@/components/cart-messages";
 import { Skeleton } from "@/components/skeletons";
+import {
+  ADDRESS_FIELDS,
+  type AddressFormat,
+  type AddressValues,
+  type FieldProblems,
+  missingIn,
+} from "@/lib/address";
+import { type CartMessage, type PlacedMessages, statusOf } from "@/lib/messages";
 import { saleLabel } from "@/lib/prices";
+import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 
-/** The fields the form won't save without (marked required below). */
-const REQUIRED: (keyof Details)[] = ["email", "last_name", "line1", "city"];
-
-/** Contact and shipping address, saved together. */
+/** Contact and shipping address, saved together; the address laid out as its country
+ * does (`format`). */
 export function DetailsForm({
   country,
   countryName,
+  format,
   initial,
   initialOptIn,
   emailFixed = false,
   saved,
+  messages,
+  suggestion,
 }: {
   country: string;
   countryName: string;
+  format: AddressFormat;
   initial: Details;
   /** Whether the shopper ticked "Email me with news and offers". */
   initialOptIn: boolean;
@@ -50,28 +63,73 @@ export function DetailsForm({
   emailFixed?: boolean;
   /** Whether the cart already has them (the button says "Update"). */
   saved: boolean;
+  /** The cart's messages about the email and the address. */
+  messages?: Pick<PlacedMessages, "email" | "address" | "fields">;
+  /** A corrected address the store's verification app is confident of. */
+  suggestion?: Suggestion;
 }) {
   const [details, setDetails] = useState(initial);
   const [optIn, setOptIn] = useState(initialOptIn);
   const [error, setError] = useState<string>();
+  const [problems, setProblems] = useState<FieldProblems>();
   const [pending, start] = useTransition();
   const [tried, setTried] = useState(false);
+  // Fields changed since the last save: the cart's messages about them are for what was
+  // saved, so they wait for the next one.
+  const [edited, setEdited] = useState<ReadonlySet<string>>(new Set());
+  // "Use as entered": a warning never blocks, so nothing needs recording.
+  const [kept, setKept] = useState(false);
+  const suggesting = suggestion !== undefined && !kept && edited.size === 0;
 
-  const set = (key: keyof Details) => (value: string) =>
+  const set = (key: keyof Details) => (value: string) => {
     setDetails((d) => ({ ...d, [key]: value }));
+    setEdited((e) => (e.has(key) ? e : new Set(e).add(key)));
+    // A field changed since the save no longer has the problem it reported.
+    if (key !== "email") setProblems((p) => (p?.[key] ? { ...p, [key]: undefined } : p));
+  };
+  // A picked autocomplete suggestion: its fields replace what's typed, and what saving
+  // them would refuse shows under each.
+  const fill = (values: Partial<AddressValues>, found: FieldProblems) => {
+    setDetails((d) => ({ ...d, ...values }));
+    setEdited((e) => new Set([...e, ...Object.keys(values)]));
+    setProblems(found);
+  };
   const required = (key: keyof Details) =>
     tried && details[key].trim() === ""
       ? { type: "error" as const, message: "Required" }
       : undefined;
+  const fieldMessages: PlacedMessages["fields"] = {};
+  for (const field of ADDRESS_FIELDS) {
+    if (!edited.has(field)) fieldMessages[field] = messages?.fields[field];
+  }
 
-  const submit = () => {
-    setTried(true);
-    if (REQUIRED.some((k) => details[k].trim() === "")) return;
+  const save = (next: Details) =>
     start(async () => {
       // A save answers with the page re-rendered (`refresh` in the action).
-      const result = await saveDetails(country, details, optIn);
+      const result = await saveDetails(country, next, optIn);
       setError(result?.error);
+      setProblems(result?.problems);
+      if (!result) setEdited(new Set());
     });
+  const submit = () => {
+    setTried(true);
+    if (details.email.trim() === "" || missingIn(format, details).length > 0) return;
+    save(details);
+  };
+  // The suggestion in place of where the address is, keeping who it's for.
+  const acceptSuggestion = () => {
+    if (!suggestion) return;
+    const next: Details = {
+      ...details,
+      company: suggestion.company ?? details.company,
+      line1: suggestion.line1,
+      line2: suggestion.line2 ?? "",
+      city: suggestion.city,
+      province: suggestion.province ?? "",
+      postal_code: suggestion.postal_code ?? "",
+    };
+    setDetails(next);
+    save(next);
   };
 
   const field = (
@@ -88,7 +146,10 @@ export function DetailsForm({
       isDisabled={options.disabled}
       value={details[key]}
       onChange={set(key)}
-      status={options.required ? required(key) : undefined}
+      status={
+        (options.required ? required(key) : undefined) ??
+        (key === "email" && !edited.has("email") ? statusOf(messages?.email) : undefined)
+      }
     />
   );
 
@@ -115,21 +176,32 @@ export function DetailsForm({
             Ships to {countryName}. To ship elsewhere, switch the currency at the top.
           </Text>
         </VStack>
-        <Grid columns={{ minWidth: 220 }} gap={3}>
-          {field("first_name", "First name")}
-          {field("last_name", "Last name", { required: true })}
-        </Grid>
-        {field("company", "Company")}
-        {field("line1", "Address", { required: true })}
-        {field("line2", "Apartment, suite")}
-        <Grid columns={{ minWidth: 220 }} gap={3}>
-          {field("postal_code", "Postal code")}
-          {field("city", "City", { required: true })}
-        </Grid>
-        <Grid columns={{ minWidth: 220 }} gap={3}>
-          {field("province", "Region")}
-          {field("phone", "Phone")}
-        </Grid>
+        {suggesting ? (
+          <AddressSuggestion
+            suggestion={suggestion}
+            pending={pending}
+            onAccept={acceptSuggestion}
+            onKeep={() => setKept(true)}
+          />
+        ) : (
+          <CartMessages
+            messages={
+              edited.size === 0
+                ? messages?.address.filter((m) => m.code !== "address_corrections_suggested")
+                : undefined
+            }
+          />
+        )}
+        <AddressFields
+          format={format}
+          values={details}
+          onChange={(key, value) => set(key)(value)}
+          problems={problems}
+          messages={fieldMessages}
+          tried={tried}
+          size="lg"
+          onFill={fill}
+        />
       </VStack>
       {error && <Banner status="error" title={error} />}
       <div>
@@ -145,6 +217,51 @@ export function DetailsForm({
   );
 }
 
+/** An address the store's verification app suggests. */
+type Suggestion = StorefrontSchemas["SuggestedAddressResponse"];
+
+/** "Did you mean …?": the suggested address, to use or to keep the address as entered. */
+function AddressSuggestion({
+  suggestion,
+  pending,
+  onAccept,
+  onKeep,
+}: {
+  suggestion: Suggestion;
+  pending: boolean;
+  onAccept: () => void;
+  onKeep: () => void;
+}) {
+  const lines = [
+    suggestion.company,
+    suggestion.line1,
+    suggestion.line2,
+    [suggestion.postal_code, suggestion.city].filter(Boolean).join(" "),
+    suggestion.province_name ?? suggestion.province,
+  ].filter(Boolean);
+  return (
+    <div className="shop-address-suggestion">
+      <VStack gap={3}>
+        <VStack gap={1}>
+          <Text weight="bold">Did you mean this address?</Text>
+          {lines.map((line) => (
+            <Text key={line}>{line}</Text>
+          ))}
+        </VStack>
+        <HStack gap={2} wrap="wrap">
+          <Button
+            label="Use this address"
+            variant="primary"
+            isLoading={pending}
+            clickAction={onAccept}
+          />
+          <Button label="Use as entered" variant="ghost" clickAction={onKeep} />
+        </HStack>
+      </VStack>
+    </div>
+  );
+}
+
 /** A shipping offer as shown: `price` ("€5.00", or "Free" when a discount takes all of
  * it), with the price before a discount struck through beside it (`was`). */
 export type Offer = { option: string; label: string; price: string; was?: string | null };
@@ -157,6 +274,7 @@ export function ShippingChoice({
   offers,
   selected,
   problem,
+  messages,
 }: {
   country: string;
   group: string;
@@ -164,6 +282,8 @@ export function ShippingChoice({
   offers: Offer[];
   selected?: string;
   problem?: boolean;
+  /** The cart's messages about this group and its chosen option. */
+  messages?: CartMessage[];
 }) {
   const [value, setValue] = useState(selected ?? "");
   const [error, setError] = useState<string>();
@@ -218,6 +338,7 @@ export function ShippingChoice({
           />
         ))}
       </RadioList>
+      <CartMessages messages={messages} />
       {error && <Banner status="error" title={error} />}
     </VStack>
   );

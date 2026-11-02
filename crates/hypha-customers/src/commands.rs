@@ -1,7 +1,7 @@
 use hypha_core::{
-    Actor, Address, AddressError, AddressId, AddressParts, AuthError, Clock, Ctx, CustomerGroupId,
-    CustomerId, Email, EmailError, ErrorCode, Handle, IdGenerator, Keyset, Page, PageRequest,
-    RepoError, Scope, report_duplicate,
+    Actor, AddressError, AddressFormats, AddressId, AddressParts, AuthError, Clock, Ctx,
+    CustomerGroupId, CustomerId, Email, EmailError, ErrorCode, Handle, IdGenerator, Keyset, Page,
+    PageRequest, RepoError, Scope, report_duplicate,
 };
 use thiserror::Error;
 
@@ -222,16 +222,18 @@ pub struct SaveAddress {
     pub default_billing: bool,
 }
 
+/// Adds an address, checked and normalised by its country's format (`formats`).
 pub async fn add_address<R: CustomerRepo, I: IdGenerator>(
     ctx: &Ctx,
     customers: &R,
     ids: &I,
+    formats: &impl AddressFormats,
     customer: CustomerId,
     input: SaveAddress,
 ) -> Result<Customer, CommandError> {
     ctx.require(Scope::CustomersWrite)?;
 
-    let address = Address::new(input.address)?;
+    let address = formats.validate(input.address)?.address;
     let mut customer = load(customers, customer).await?;
     customer.add_address(
         AddressId::from_uuid(ids.new_uuid()),
@@ -243,17 +245,19 @@ pub async fn add_address<R: CustomerRepo, I: IdGenerator>(
     Ok(customer)
 }
 
-/// Replaces an address, defaults included: `false` stops it being that default.
+/// Replaces an address, defaults included: `false` stops it being that default. Checked
+/// like a new one.
 pub async fn update_address<R: CustomerRepo>(
     ctx: &Ctx,
     customers: &R,
+    formats: &impl AddressFormats,
     customer: CustomerId,
     address: AddressId,
     input: SaveAddress,
 ) -> Result<Customer, CommandError> {
     ctx.require(Scope::CustomersWrite)?;
 
-    let parts = Address::new(input.address)?;
+    let parts = formats.validate(input.address)?.address;
     let mut customer = load(customers, customer).await?;
     customer.update_address(
         address,

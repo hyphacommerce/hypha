@@ -133,6 +133,14 @@
     "rate_limits": {
       "$ref": "#/$defs/RateLimits",
       "default": {
+        "address_suggest_ip": {
+          "burst": 120,
+          "per": "1s"
+        },
+        "address_suggest_session": {
+          "burst": 30,
+          "per": "2s"
+        },
         "agent_call": {
           "burst": 120,
           "per": "500ms"
@@ -716,6 +724,22 @@
       "description": "Limits on the routes that need no credentials, and on the storefront routes that call\nrate apps. Counted per instance.",
       "type": "object",
       "properties": {
+        "address_suggest_ip": {
+          "description": "Address suggestions and resolving one, per client address: each is a lookup the\nstore's autocomplete app may be billed for. Generous, since forms ask as people\ntype, and a storefront without `server.trusted_proxies` sends every shopper's\nfrom one address.",
+          "$ref": "#/$defs/Quota",
+          "default": {
+            "burst": 120,
+            "per": "1s"
+          }
+        },
+        "address_suggest_session": {
+          "description": "Address suggestions and resolving one, per typing session (the form's `session`).",
+          "$ref": "#/$defs/Quota",
+          "default": {
+            "burst": 30,
+            "per": "2s"
+          }
+        },
         "agent_call": {
           "description": "An agent's calls, per agent: reads, previews, proposals and writes.",
           "$ref": "#/$defs/Quota",

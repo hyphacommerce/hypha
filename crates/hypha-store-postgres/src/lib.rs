@@ -21,6 +21,7 @@ mod batch;
 mod carts;
 mod categories;
 mod channels;
+mod checkout_rules;
 mod columns;
 mod config;
 mod custom_fields;
