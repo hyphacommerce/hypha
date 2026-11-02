@@ -31,6 +31,7 @@ mod tables;
 pub mod text;
 pub mod time;
 pub mod timezone;
+pub mod verification;
 pub mod version;
 pub mod weight;
 
@@ -90,5 +91,9 @@ pub use secret::{SealError, Sealed, SecretBox};
 pub use text::{MAX_TEXT_LEN, TextError, optional_text, required_text};
 pub use time::{Stamped, Stamps, Timestamp, stamp_insert, stamp_update};
 pub use timezone::{Timezone, TimezoneError};
+pub use verification::{
+    AddressPrecision, AddressVerification, AddressVerifier, FieldStatus, NoVerification,
+    SuggestedAddress, VerificationFlags, VerifyContext, verify_address,
+};
 pub use version::{Version, Versioned};
 pub use weight::{TotalWeight, Weight};

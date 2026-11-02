@@ -120,6 +120,26 @@ pub fn stamp_update(aggregate: &mut impl Stamped, now: Timestamp) {
     aggregate.set_stamps(stamps);
 }
 
+/// `Timestamp` as its microseconds, for JSON a store keeps (`#[serde(with = …)]`): the
+/// API writes RFC 3339 at its edges instead.
+pub mod serde_micros {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    use super::Timestamp;
+
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's `with` passes the field by reference"
+    )]
+    pub fn serialize<S: Serializer>(at: &Timestamp, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_i64(at.unix_micros())
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Timestamp, D::Error> {
+        Ok(Timestamp::from_unix_micros(i64::deserialize(d)?))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

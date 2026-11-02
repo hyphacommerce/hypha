@@ -10,8 +10,8 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::address::{AddressField, AddressWarning};
-use crate::{AppKey, CheckoutRuleId};
+use crate::address::{AddressField, AddressVerdict, AddressWarning};
+use crate::{AddressVerification, AppKey, CheckoutRuleId};
 
 /// Whether a message stops checkout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -244,6 +244,15 @@ impl Message {
     /// The house number a country's addresses need: a warning, since some addresses
     /// rightly have none (a named building, a farm).
     pub const HOUSE_NUMBER_MISSING: MessageCode = MessageCode::builtin("house_number_missing");
+    /// The verification app would correct the address; the cart carries its suggestion.
+    pub const ADDRESS_CORRECTIONS_SUGGESTED: MessageCode =
+        MessageCode::builtin("address_corrections_suggested");
+    /// The building takes mail, but an apartment or unit is missing.
+    pub const APARTMENT_MISSING: MessageCode = MessageCode::builtin("apartment_missing");
+    /// The verification app found more than one place.
+    pub const ADDRESS_AMBIGUOUS: MessageCode = MessageCode::builtin("address_ambiguous");
+    /// The verification app found no place mail is delivered to.
+    pub const ADDRESS_UNDELIVERABLE: MessageCode = MessageCode::builtin("address_undeliverable");
 
     /// `message` is plain text for the shopper: trimmed, 1 to `MAX_TEXT_LEN` characters.
     pub fn new(
@@ -281,6 +290,42 @@ impl Message {
             message: warning.message.clone(),
             source: MessageSource::Format,
         }
+    }
+
+    /// What a kept verification tells the shopper: a warning for each verdict but
+    /// `deliverable` and `unknown` (a failure isn't the shopper's problem). Verification
+    /// never blocks on its own; a checkout rule can make a verdict an error.
+    pub fn verification_warning(verification: &AddressVerification) -> Option<Self> {
+        let (code, path, message) = match verification.verdict {
+            AddressVerdict::Deliverable | AddressVerdict::Unknown => return None,
+            AddressVerdict::DeliverableWithFixes => (
+                Self::ADDRESS_CORRECTIONS_SUGGESTED,
+                MessagePath::ShippingAddress,
+                "This address may have a mistake. Check the suggested address.",
+            ),
+            AddressVerdict::MissingSubpremise => (
+                Self::APARTMENT_MISSING,
+                MessagePath::ShippingAddressField(AddressField::Line2),
+                "Add an apartment, suite or unit number.",
+            ),
+            AddressVerdict::Ambiguous => (
+                Self::ADDRESS_AMBIGUOUS,
+                MessagePath::ShippingAddress,
+                "We couldn't pin this address down. Check the street, number and postal code.",
+            ),
+            AddressVerdict::Undeliverable => (
+                Self::ADDRESS_UNDELIVERABLE,
+                MessagePath::ShippingAddress,
+                "We couldn't find this address. Check it before you continue.",
+            ),
+        };
+        Some(Self {
+            severity: Severity::Warning,
+            code,
+            path,
+            message: message.to_string(),
+            source: MessageSource::Verification,
+        })
     }
 
     pub fn severity(&self) -> Severity {
@@ -499,9 +544,75 @@ mod tests {
         for code in warning_codes {
             assert!(MessageCode::is_valid(code.as_str()), "{}", code.as_str());
         }
-        assert!(MessageCode::is_valid(
-            Message::HOUSE_NUMBER_MISSING.as_str()
-        ));
+        for code in [
+            Message::HOUSE_NUMBER_MISSING,
+            Message::ADDRESS_CORRECTIONS_SUGGESTED,
+            Message::APARTMENT_MISSING,
+            Message::ADDRESS_AMBIGUOUS,
+            Message::ADDRESS_UNDELIVERABLE,
+        ] {
+            assert!(MessageCode::is_valid(code.as_str()), "{code}");
+        }
+    }
+
+    fn verified(verdict: AddressVerdict) -> AddressVerification {
+        AddressVerification {
+            digest: "d".to_string(),
+            verdict,
+            precision: None,
+            fields: Default::default(),
+            suggested: None,
+            suggested_digest: None,
+            flags: Default::default(),
+            app: None,
+            reference: None,
+            failure: None,
+            checked_at: crate::Timestamp::from_unix_micros(0),
+        }
+    }
+
+    #[test]
+    fn a_deliverable_or_unknown_address_says_nothing() {
+        assert_eq!(
+            Message::verification_warning(&verified(AddressVerdict::Deliverable)),
+            None
+        );
+        assert_eq!(
+            Message::verification_warning(&verified(AddressVerdict::Unknown)),
+            None
+        );
+    }
+
+    #[test]
+    fn each_other_verdict_warns_where_the_shopper_fixes_it() {
+        let said: Vec<(String, String)> = [
+            AddressVerdict::DeliverableWithFixes,
+            AddressVerdict::MissingSubpremise,
+            AddressVerdict::Ambiguous,
+            AddressVerdict::Undeliverable,
+        ]
+        .into_iter()
+        .filter_map(|v| Message::verification_warning(&verified(v)))
+        .map(|m| (m.code().to_string(), m.path().to_string()))
+        .collect();
+        assert_eq!(
+            said,
+            [
+                ("address_corrections_suggested", "$.shipping_address"),
+                ("apartment_missing", "$.shipping_address.line2"),
+                ("address_ambiguous", "$.shipping_address"),
+                ("address_undeliverable", "$.shipping_address"),
+            ]
+            .map(|(c, p)| (c.to_string(), p.to_string()))
+        );
+    }
+
+    #[test]
+    fn a_verification_warning_never_blocks() {
+        let message =
+            Message::verification_warning(&verified(AddressVerdict::Undeliverable)).unwrap();
+        assert_eq!(message.severity(), Severity::Warning);
+        assert_eq!(message.source(), &MessageSource::Verification);
     }
 
     #[test]
