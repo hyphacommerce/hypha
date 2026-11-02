@@ -21,6 +21,7 @@ pub struct OrderFilter {
     currency: Option<Currency>,
     placed_from: Option<Timestamp>,
     placed_before: Option<Timestamp>,
+    address_review: Option<bool>,
     fields: Vec<FieldFilter>,
 }
 
@@ -42,6 +43,9 @@ pub struct OrderFilterInput {
     pub placed_from: Option<Timestamp>,
     /// Placed before this instant.
     pub placed_before: Option<Timestamp>,
+    /// Only orders whose shipping address needs review (`true`), or only those that
+    /// don't (`false`): `Order::needs_address_review`.
+    pub address_review: Option<bool>,
 }
 
 impl OrderFilter {
@@ -65,6 +69,7 @@ impl OrderFilter {
             currency: input.currency,
             placed_from: input.placed_from,
             placed_before: input.placed_before,
+            address_review: input.address_review,
             fields: Vec::new(),
         })
     }
@@ -128,6 +133,10 @@ impl OrderFilter {
         self.placed_before
     }
 
+    pub fn address_review(&self) -> Option<bool> {
+        self.address_review
+    }
+
     /// Whether `order` is in the list. Adapters that filter in storage must agree (the
     /// repository contract checks).
     pub fn matches(&self, order: &Order) -> bool {
@@ -154,6 +163,9 @@ impl OrderFilter {
             && self.currency.is_none_or(|c| c == order.currency())
             && self.placed_from.is_none_or(|t| order.placed_at() >= t)
             && self.placed_before.is_none_or(|t| order.placed_at() < t)
+            && self
+                .address_review
+                .is_none_or(|r| r == order.needs_address_review())
     }
 }
 

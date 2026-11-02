@@ -92,6 +92,7 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
         taxes_included: order.taxes_included(),
         subtotal: order.subtotal(),
         shipping_address: order.shipping_address().cloned(),
+        address_check: cart.address_check().cloned(),
         shipping_groups: order
             .shipping_lines()
             .iter()

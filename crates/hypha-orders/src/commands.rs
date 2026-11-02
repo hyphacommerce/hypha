@@ -1,11 +1,12 @@
 use hypha_core::{
-    AuthError, Ctx, CustomerId, ErrorCode, Keyset, OrderId, Page, PageRequest, RepoError, Scope,
+    AddressError, AddressFormats, AddressParts, AddressVerifier, AuthError, Clock, Ctx, CustomerId,
+    ErrorCode, Keyset, Message, OrderId, Page, PageRequest, RepoError, Scope, VerifyContext,
 };
 use thiserror::Error;
 
 use crate::{
-    Order, OrderError, OrderFilter, OrderFilterInput, OrderRepo, OrderSort, OrderStats,
-    OrderSummary,
+    Order, OrderAddressCheck, OrderError, OrderFilter, OrderFilterInput, OrderRepo, OrderSort,
+    OrderStats, OrderSummary,
 };
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
@@ -18,6 +19,8 @@ pub enum CommandError {
     Order(#[from] OrderError),
     #[error("order {0} not found")]
     OrderNotFound(OrderId),
+    #[error(transparent)]
+    Address(#[from] AddressError),
 }
 
 impl ErrorCode for CommandError {
@@ -27,6 +30,7 @@ impl ErrorCode for CommandError {
             CommandError::Repo(e) => e.code(),
             CommandError::Order(e) => e.code(),
             CommandError::OrderNotFound(_) => "order_not_found",
+            CommandError::Address(e) => e.code(),
         }
     }
 }
@@ -93,4 +97,54 @@ pub async fn get_order<R: OrderRepo>(
 
 async fn load<R: OrderRepo>(orders: &R, id: OrderId) -> Result<Order, CommandError> {
     orders.get(id).await?.ok_or(CommandError::OrderNotFound(id))
+}
+
+/// Staff looked at the order's shipping address and it's fine: it no longer needs review
+/// (`order.address_marked_valid`, once).
+pub async fn mark_order_address_valid<R: OrderRepo>(
+    ctx: &Ctx,
+    orders: &R,
+    clock: &impl Clock,
+    id: OrderId,
+) -> Result<Order, CommandError> {
+    ctx.require(Scope::OrdersWrite)?;
+    let mut order = load(orders, id).await?;
+    if order.mark_address_valid(ctx.actor().reference(), clock.now())? {
+        orders.update(&mut order).await?;
+    }
+    Ok(order)
+}
+
+/// Changes where an order ships, before anything has: the address passes its country's
+/// format like any written address, the store's verification app is asked again, and the
+/// new check replaces the old (no longer marked valid). Shipping isn't priced again: the
+/// order keeps what was charged.
+pub async fn change_order_shipping_address<R: OrderRepo>(
+    ctx: &Ctx,
+    orders: &R,
+    formats: &impl AddressFormats,
+    verifier: &impl AddressVerifier,
+    id: OrderId,
+    address: AddressParts,
+) -> Result<Order, CommandError> {
+    ctx.require(Scope::OrdersWrite)?;
+    let checked = formats.validate(address)?;
+    let mut order = load(orders, id).await?;
+    order.may_ship_to(checked.address.country())?;
+    let digest = verifier.digest(&checked.address);
+    let verification = verifier
+        .verify(&checked.address, &digest, VerifyContext::Order)
+        .await?;
+    let check = OrderAddressCheck {
+        verification,
+        warnings: checked
+            .warnings
+            .iter()
+            .map(Message::format_warning)
+            .collect(),
+        marked_valid: None,
+    };
+    order.change_shipping_address(checked.address, check)?;
+    orders.update(&mut order).await?;
+    Ok(order)
 }

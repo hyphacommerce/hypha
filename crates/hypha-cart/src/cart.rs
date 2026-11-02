@@ -1,7 +1,7 @@
 use hypha_core::{
-    Address, AddressParts, CartId, ChannelId, CountryCode, CustomerId, Email, MarketId, OrderId,
-    PaymentMethodId, Price, ProductId, Quantity, ShippingGroupId, ShippingOptionId, Stamped,
-    Stamps, Timestamp, VariantId, Version, Versioned,
+    Address, AddressParts, AddressVerification, CartId, ChannelId, CountryCode, CustomerId, Email,
+    MarketId, OrderId, PaymentMethodId, Price, ProductId, Quantity, ShippingGroupId,
+    ShippingOptionId, Stamped, Stamps, Timestamp, VariantId, Version, Versioned,
 };
 use hypha_shipping::ProviderKey;
 
@@ -93,6 +93,8 @@ pub struct Cart {
     status: CartStatus,
     /// In `country`.
     shipping_address: Option<Address>,
+    /// What the store's verification app said about the address, when one was asked.
+    address_check: Option<AddressVerification>,
     /// The choice for the cart's one group of shippable lines.
     shipping: Option<SelectedShipping>,
     /// How the buyer will pay: checked when chosen and again at checkout.
@@ -140,6 +142,7 @@ impl Cart {
             customer: None,
             status: CartStatus::Open,
             shipping_address: None,
+            address_check: None,
             shipping: None,
             payment_method: None,
             marketing_opt_in: false,
@@ -158,6 +161,7 @@ impl Cart {
         }
         if self.shipping_address.is_some() {
             self.shipping_address = None;
+            self.address_check = None;
             self.shipping = None;
             changed = true;
         }
@@ -257,8 +261,13 @@ impl Cart {
     }
 
     /// Where the cart ships; it must be in the cart's country. A new address drops the
-    /// shipping choice: what's offered depends on the destination.
-    pub fn set_shipping_address(&mut self, address: Option<Address>) -> Result<(), CartError> {
+    /// shipping choice: what's offered depends on the destination. `check` is what
+    /// verification said about it (none without an address).
+    pub fn set_shipping_address(
+        &mut self,
+        address: Option<Address>,
+        check: Option<AddressVerification>,
+    ) -> Result<(), CartError> {
         self.ensure_open()?;
         if let Some(a) = &address
             && a.country() != self.country
@@ -271,6 +280,7 @@ impl Cart {
         if address != self.shipping_address {
             self.shipping = None;
         }
+        self.address_check = check.filter(|_| address.is_some());
         self.shipping_address = address;
         Ok(())
     }
@@ -399,6 +409,11 @@ impl Cart {
         self.shipping_address.as_ref()
     }
 
+    /// What verification said about the shipping address, when it was asked.
+    pub fn address_check(&self) -> Option<&AddressVerification> {
+        self.address_check.as_ref()
+    }
+
     pub fn shipping(&self) -> Option<&SelectedShipping> {
         self.shipping.as_ref()
     }
@@ -433,6 +448,8 @@ pub struct CartSnapshot {
     pub order: Option<OrderId>,
     /// Checked by `Address::new` on restore.
     pub shipping_address: Option<AddressParts>,
+    /// Only with an address.
+    pub address_check: Option<AddressVerification>,
     pub shipping: Option<SelectedShipping>,
     pub payment_method: Option<PaymentMethodId>,
     pub marketing_opt_in: bool,
@@ -472,6 +489,7 @@ impl Cart {
                 CartStatus::Completed { order } => Some(order),
             },
             shipping_address: self.shipping_address.as_ref().map(|a| a.parts().clone()),
+            address_check: self.address_check.clone(),
             shipping: self.shipping.clone(),
             payment_method: self.payment_method,
             marketing_opt_in: self.marketing_opt_in,
@@ -534,6 +552,7 @@ impl Cart {
                 None => CartStatus::Open,
                 Some(order) => CartStatus::Completed { order },
             },
+            address_check: s.address_check.filter(|_| shipping_address.is_some()),
             shipping_address,
             shipping: s.shipping,
             payment_method: s.payment_method,

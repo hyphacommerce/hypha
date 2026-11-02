@@ -70,6 +70,7 @@ fn mugs(id: OrderId, unit: i64) -> Order {
             unit_cost: None,
         }],
         shipping_address: None,
+        address_check: None,
         shipping_lines: vec![],
         discounts: Vec::new(),
         discount_total: eur(0),

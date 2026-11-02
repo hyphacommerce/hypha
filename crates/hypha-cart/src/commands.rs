@@ -1,11 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
-    AddressError, AddressFormats, AddressParts, AuthError, CartId, CategoryId, Clock, CountryCode,
-    CountryError, Ctx, CustomerGroupId, CustomerId, Email, EmailError, ErrorCode, HasBatch,
-    HasClock, HasIdempotency, IdGenerator, IdempotencyError, IdempotencyRecord, IdempotencyRequest,
-    Idempotent, MarketId, Money, MoneyError, ProductId, Quantity, QuantityError, RepoError, Scope,
-    ShippingGroupId, ShippingOptionId, StageIdempotency, Timestamp, VariantId, earlier_id,
+    AddressError, AddressFormats, AddressParts, AddressVerifier, AuthError, CartId, CategoryId,
+    Clock, CountryCode, CountryError, Ctx, CustomerGroupId, CustomerId, Email, EmailError,
+    ErrorCode, HasBatch, HasClock, HasIdempotency, IdGenerator, IdempotencyError,
+    IdempotencyRecord, IdempotencyRequest, Idempotent, MarketId, Money, MoneyError, ProductId,
+    Quantity, QuantityError, RepoError, Scope, ShippingGroupId, ShippingOptionId, StageIdempotency,
+    Timestamp, VariantId, VerifyContext, earlier_id, verify_address,
 };
 use hypha_customers::{CustomerGroupRepo, CustomerRepo, HasCustomerGroups, HasCustomers};
 use hypha_inventory::{HasInventoryItems, HasLocations, StockContext};
@@ -891,11 +892,13 @@ fn product_ids(cart: &Cart) -> Vec<ProductId> {
 
 /// Sets where the cart ships, or clears it with `None`. It must be in the cart's
 /// country and pass its format (`formats`), which normalises it; a new address drops the
-/// shipping choice.
+/// shipping choice. The store's verification app (`verifier`) is asked about it, and its
+/// answer kept with the cart.
 pub async fn set_shipping_address<S: HasCarts + PricingPorts>(
     ctx: &Ctx,
     ports: &S,
     formats: &impl AddressFormats,
+    verifier: &impl AddressVerifier,
     id: CartId,
     address: Option<AddressParts>,
 ) -> Result<PricedCart, CommandError> {
@@ -904,7 +907,13 @@ pub async fn set_shipping_address<S: HasCarts + PricingPorts>(
         .map(|parts| formats.validate(parts).map(|checked| checked.address))
         .transpose()?;
     let mut cart = load_open_cart(ctx, ports, id).await?;
-    cart.set_shipping_address(address)?;
+    // Asked before the write, so the cart and its check are stored together; the same
+    // address (or its accepted suggestion) reuses what's kept.
+    let check = match &address {
+        Some(a) => verify_address(verifier, a, cart.address_check(), VerifyContext::Cart).await?,
+        None => None,
+    };
+    cart.set_shipping_address(address, check)?;
     let priced = reprice(ports, &cart).await?;
     ports.carts().update(&mut cart).await?;
     Ok(priced)

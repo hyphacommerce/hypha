@@ -229,6 +229,7 @@ impl World {
             &Ctx::system(),
             &self.ports,
             &Formats,
+            &hypha_core::NoVerification,
             cart,
             Some(address(country)),
         ))
@@ -523,6 +524,7 @@ fn a_new_address_drops_the_choice() {
         &Ctx::system(),
         &w.ports,
         &Formats,
+        &hypha_core::NoVerification,
         cart,
         Some(moved),
     ))

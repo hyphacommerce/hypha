@@ -255,6 +255,7 @@ fn world() -> InMemoryPorts {
         }],
         lines,
         shipping_address: Some(address),
+        address_check: None,
         subtotal: eur(10800),
         shipping_total: eur(490),
         tax_total: eur(0),

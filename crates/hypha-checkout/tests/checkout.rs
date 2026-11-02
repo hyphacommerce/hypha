@@ -2285,6 +2285,7 @@ fn cart_with_address(world: &World) -> CartId {
         &world.ports.storefront(),
         &world.ports,
         &Formats,
+        &hypha_core::NoVerification,
         cart,
         Some(address),
     ))

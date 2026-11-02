@@ -1,4 +1,4 @@
-use hypha_core::{Currency, ErrorCode, MoneyError, OrderId, OrderLineId, TextError};
+use hypha_core::{CountryCode, Currency, ErrorCode, MoneyError, OrderId, OrderLineId, TextError};
 use thiserror::Error;
 
 /// Why an order can't be built or changed. Checkout builds orders from a priced cart, so
@@ -58,6 +58,16 @@ pub enum OrderError {
     /// which only bad stored data or a bug breaks.
     #[error("filter: {0}")]
     Filter(TextError),
+    /// Changing the shipping address once something has shipped.
+    #[error("order {0} has fulfilled lines; its address can't change")]
+    Fulfilled(OrderId),
+    #[error("the address is in {address}, but the order ships to {order}")]
+    AddressCountryMismatch {
+        address: CountryCode,
+        order: CountryCode,
+    },
+    #[error("order {0} has no shipping address")]
+    NoShippingAddress(OrderId),
     /// Sorting a list by total without the `currency` filter.
     #[error("sorting by total needs one currency: filter by currency")]
     SortNeedsCurrency,
@@ -84,6 +94,9 @@ impl ErrorCode for OrderError {
             OrderError::OverFulfilled { .. } => "over_fulfilled",
             OrderError::NotFulfilled { .. } => "line_not_fulfilled",
             OrderError::HasFulfillments(_) => "order_has_fulfillments",
+            OrderError::Fulfilled(_) => "order_fulfilled",
+            OrderError::AddressCountryMismatch { .. } => "address_country_mismatch",
+            OrderError::NoShippingAddress(_) => "order_has_no_shipping_address",
             OrderError::Filter(e) => e.code(),
             OrderError::SortNeedsCurrency => "sort_needs_currency",
         }

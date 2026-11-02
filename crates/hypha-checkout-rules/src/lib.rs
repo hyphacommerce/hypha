@@ -9,17 +9,25 @@ pub mod error;
 pub mod events;
 pub mod repo;
 pub mod rule;
+pub mod settings;
 
 pub use commands::{
-    CommandError, RulePatch, create_checkout_rule, delete_checkout_rule, get_checkout_rule,
-    list_checkout_rules, update_checkout_rule,
+    CommandError, RulePatch, UpdateCheckoutSettings, create_checkout_rule, delete_checkout_rule,
+    get_checkout_rule, get_checkout_settings, list_checkout_rules, update_checkout_rule,
+    update_checkout_settings,
 };
 pub use engine::{RuleInput, RuleLine, VerifiedFacts, evaluate, names_categories};
 pub use error::{CheckoutRuleError, Problem};
 pub use events::{CHECKOUT_RULE, CheckoutRuleCreated, CheckoutRuleDeleted, CheckoutRuleUpdated};
-pub use repo::{CheckoutRuleRepo, HasCheckoutRules, keys};
+pub use repo::{
+    CheckoutRuleRepo, CheckoutSettingsRepo, HasCheckoutRules, HasCheckoutSettings, keys,
+};
 pub use rule::{
     AddressFlag, CheckoutRule, CheckoutRuleSnapshot, MAX_AMOUNTS, MAX_CONDITIONS, MAX_FIELD_LENGTH,
     MAX_LIST, MAX_MESSAGE_CHARS, MAX_PATTERN_CHARS, MAX_POSTAL_ENTRIES, MAX_RULES, MAX_VALUES,
     PostalRange, RuleAppliesTo, RuleCondition, RuleCountries, RuleDraft, RuleField, RuleOutcome,
+};
+pub use settings::{
+    CHECKOUT_SETTINGS, CheckoutSettings, CheckoutSettingsSnapshot, CheckoutSettingsUpdated,
+    VERIFY_POINT,
 };

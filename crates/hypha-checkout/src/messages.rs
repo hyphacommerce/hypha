@@ -6,7 +6,8 @@ use std::collections::HashMap;
 
 use hypha_cart::{PricedCart, PricingPorts, product_categories};
 use hypha_checkout_rules::{
-    CheckoutRuleRepo, HasCheckoutRules, RuleInput, RuleLine, evaluate, names_categories,
+    CheckoutRuleRepo, HasCheckoutRules, RuleInput, RuleLine, VerifiedFacts, evaluate,
+    names_categories,
 };
 use hypha_core::{AddressFlags, AddressFormats, CartId, Message, ProductId, RepoError};
 
@@ -31,7 +32,8 @@ impl<F: AddressFormats> CartChecks for F {
 }
 
 /// The cart's messages, in the order a storefront shows them: the address's format
-/// warnings, then the merchant's checkout rules in their order. A checked-out cart has
+/// warnings, what its verification found (kept with the cart, never asked again here),
+/// then the merchant's checkout rules in their order. A checked-out cart has
 /// none: nothing about it can change.
 ///
 /// The address isn't checked again for its problems: it passed them when it was set, and
@@ -52,6 +54,11 @@ pub async fn cart_messages<S: PricingPorts + HasCheckoutRules>(
     if let Some(checked) = &checked {
         messages.extend(checked.warnings.iter().map(Message::format_warning));
     }
+    let verification = cart
+        .address_check
+        .as_ref()
+        .filter(|_| cart.shipping_address.is_some());
+    messages.extend(verification.and_then(Message::verification_warning));
 
     let rules = ports.checkout_rules().list().await?;
     if rules.iter().any(|r| r.enabled()) {
@@ -66,7 +73,13 @@ pub async fn cart_messages<S: PricingPorts + HasCheckoutRules>(
             flags: checked
                 .as_ref()
                 .map_or(AddressFlags::default(), |c| c.flags),
-            verification: None,
+            verification: verification.map(|v| VerifiedFacts {
+                verdict: Some(v.verdict),
+                po_box: v.flags.po_box,
+                residential: v.flags.residential,
+                business: v.flags.business,
+                vacant: v.flags.vacant,
+            }),
             email: cart.email.as_ref().map(|e| e.as_str().to_string()),
             country: cart.country,
             market: Some(cart.market),

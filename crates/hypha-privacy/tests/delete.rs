@@ -105,6 +105,7 @@ fn order_for(ana: CustomerId, n: u128) -> Order {
             unit_cost: None,
         }],
         shipping_address: None,
+        address_check: None,
         shipping_lines: vec![],
         subtotal: eur(500),
         shipping_total: eur(0),

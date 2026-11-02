@@ -1,9 +1,13 @@
-use hypha_core::{AuthError, CheckoutRuleId, Ctx, ErrorCode, IdGenerator, RepoError, Scope};
+use hypha_core::{
+    AppKey, AppKeyError, AppPoints, AuthError, CheckoutRuleId, Ctx, ErrorCode, IdGenerator,
+    RepoError, Scope,
+};
 
 use crate::{
     error::CheckoutRuleError,
-    repo::{CheckoutRuleRepo, HasCheckoutRules},
+    repo::{CheckoutRuleRepo, CheckoutSettingsRepo, HasCheckoutRules, HasCheckoutSettings},
     rule::{CheckoutRule, MAX_RULES, RuleAppliesTo, RuleCondition, RuleDraft, RuleOutcome},
+    settings::{CheckoutSettings, VERIFY_POINT},
 };
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -18,6 +22,10 @@ pub enum CommandError {
     NotFound(CheckoutRuleId),
     #[error("a store has at most {max} checkout rules")]
     TooMany { max: usize },
+    #[error(transparent)]
+    AppKey(#[from] AppKeyError),
+    #[error("{0} isn't installed, enabled and granted to answer address.verify")]
+    VerificationAppUnavailable(AppKey),
 }
 
 impl ErrorCode for CommandError {
@@ -28,6 +36,8 @@ impl ErrorCode for CommandError {
             CommandError::Rule(e) => e.code(),
             CommandError::NotFound(_) => "checkout_rule_not_found",
             CommandError::TooMany { .. } => "too_many_checkout_rules",
+            CommandError::AppKey(e) => e.code(),
+            CommandError::VerificationAppUnavailable(_) => "verification_app_unavailable",
         }
     }
 }
@@ -146,4 +156,51 @@ pub async fn delete_checkout_rule<S: HasCheckoutRules>(
     rule.mark_deleted();
     ports.checkout_rules().delete(&mut rule).await?;
     Ok(())
+}
+
+/// The store's checkout settings; the defaults (nothing asked) until saved.
+pub async fn get_checkout_settings<S: HasCheckoutSettings>(
+    ctx: &Ctx,
+    ports: &S,
+) -> Result<CheckoutSettings, CommandError> {
+    ctx.require(Scope::CheckoutRulesRead)?;
+    Ok(ports.checkout_settings().get().await?.unwrap_or_default())
+}
+
+/// Changes only what's `Some`, like a JSON Merge Patch.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UpdateCheckoutSettings {
+    /// The app verifying addresses (`Some(None)`: none).
+    pub verification_app: Option<Option<String>>,
+}
+
+/// Changes the settings. A verification app must be installed, enabled and granted what
+/// `address.verify` needs, as `apps` says (`verification_app_unavailable`); an app named
+/// already stays named while it's checked, so an outage doesn't block other changes.
+pub async fn update_checkout_settings<S: HasCheckoutSettings>(
+    ctx: &Ctx,
+    ports: &S,
+    apps: &impl AppPoints,
+    input: UpdateCheckoutSettings,
+) -> Result<CheckoutSettings, CommandError> {
+    ctx.require(Scope::CheckoutRulesWrite)?;
+    let stored = ports.checkout_settings().get().await?;
+    let is_new = stored.is_none();
+    let mut settings = stored.unwrap_or_default();
+    if let Some(app) = input.verification_app {
+        let app = app.map(|key| AppKey::new(&key)).transpose()?;
+        if let Some(key) = &app
+            && settings.verification_app() != Some(key)
+            && !apps.answers(key, VERIFY_POINT).await?
+        {
+            return Err(CommandError::VerificationAppUnavailable(key.clone()));
+        }
+        settings.set_verification_app(app);
+    }
+    if is_new {
+        ports.checkout_settings().insert(&mut settings).await?;
+    } else {
+        ports.checkout_settings().update(&mut settings).await?;
+    }
+    Ok(settings)
 }

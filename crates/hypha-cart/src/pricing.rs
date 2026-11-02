@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
 use hypha_core::{
-    Address, AssetId, CartId, ChannelId, CountryCode, Currency, CustomerId, Email, MarketId, Money,
-    MoneyError, OrderId, PaymentMethodId, Price, PriceListId, ProductId, Quantity, VariantId,
-    Weight,
+    Address, AddressVerification, AssetId, CartId, ChannelId, CountryCode, Currency, CustomerId,
+    Email, MarketId, Money, MoneyError, OrderId, PaymentMethodId, Price, PriceListId, ProductId,
+    Quantity, VariantId, Weight,
 };
 use hypha_inventory::{Availability, StockContext};
 use hypha_pricing::{PricingContext, ResolvedPrice, VariantPrices, resolve_price};
@@ -128,6 +128,8 @@ pub struct PricedCart {
     pub subtotal: Money,
     /// Where the cart ships.
     pub shipping_address: Option<Address>,
+    /// What verification said about it, when it was asked.
+    pub address_check: Option<AddressVerification>,
     /// The groups of lines that need shipping, with the buyer's choice; empty when nothing
     /// in the cart is shipped. One group for now.
     pub shipping_groups: Vec<PricedShippingGroup>,
@@ -379,6 +381,7 @@ pub fn price_cart_with_shipping(
         taxes_included: tax.prices_include_tax,
         subtotal: totals.subtotal,
         shipping_address: cart.shipping_address().cloned(),
+        address_check: cart.address_check().cloned(),
         shipping_groups,
         shipping_total: totals.shipping_total,
         discounts: outcome.applications,

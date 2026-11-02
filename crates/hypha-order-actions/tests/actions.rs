@@ -135,6 +135,7 @@ impl World {
             email: Email::new("ana@example.hr").unwrap(),
             lines: vec![line(mugs(), 2001, 3), line(ebook(), 2002, 1)],
             shipping_address: None,
+            address_check: None,
             shipping_lines: vec![],
             subtotal: eur(2000),
             shipping_total: eur(0),

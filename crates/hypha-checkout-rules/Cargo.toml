@@ -10,6 +10,7 @@ hypha-core.workspace = true
 regex = "1.13"
 serde.workspace = true
 thiserror.workspace = true
+uuid.workspace = true
 utoipa = { version = "6", optional = true }
 
 [features]
@@ -18,7 +19,6 @@ openapi = ["dep:utoipa", "hypha-core/openapi"]
 
 [dev-dependencies]
 serde_json.workspace = true
-uuid.workspace = true
 
 [lints]
 workspace = true

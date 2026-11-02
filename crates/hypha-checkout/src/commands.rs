@@ -21,8 +21,9 @@ use hypha_inventory::{
     InventoryItem, ReservationRef, StageInventoryItems, StockContext, reserve_lines,
 };
 use hypha_orders::{
-    DiscountClass, DiscountShare, HasOrders, NewOrder, Order, OrderDiscount, OrderError, OrderLine,
-    OrderRepo, OrderShippingLine, OrderTax, OrderTaxSource, StageOrders, repo::keys as order_keys,
+    DiscountClass, DiscountShare, HasOrders, NewOrder, Order, OrderAddressCheck, OrderDiscount,
+    OrderError, OrderLine, OrderRepo, OrderShippingLine, OrderTax, OrderTaxSource, StageOrders,
+    repo::keys as order_keys,
 };
 use hypha_payments::{
     HasPaymentMethods, HasPayments, NewPayment, NextAction, Payment, PaymentError, PaymentMethod,
@@ -747,6 +748,11 @@ async fn attempt<
             None
         }
     };
+    // What the cart knew about its address goes with the order, for staff to review.
+    let address_check = priced
+        .shipping_address
+        .as_ref()
+        .map(|_| OrderAddressCheck::placed(priced.address_check.clone(), &messages));
     refuse_errors(cart.id(), messages)?;
 
     let lines = priced
@@ -850,6 +856,7 @@ async fn attempt<
         email,
         lines,
         shipping_address: priced.shipping_address.clone(),
+        address_check,
         shipping_lines,
         discounts: order_discounts,
         discount_total: priced.discount_total,
