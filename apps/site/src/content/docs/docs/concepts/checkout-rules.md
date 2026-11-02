@@ -105,7 +105,9 @@ Every cart response has `messages`:
   merchant's, an app's the app's.
 
 The format adds warnings of its own: `house_number_missing` when the country needs a
-house number and the first line has no digit.
+house number and the first line has no digit. A built-in warning is left out where an
+error (a rule's, an app's) points at the same place, so a house-number rule doesn't show
+beside it.
 
 ### Checkout blocked
 
@@ -186,7 +188,8 @@ Each answers messages with paths, as rules do. Its answer is kept on the cart an
 again only when what it would be sent changed; checkout always asks a stale one again.
 
 Per app, the merchant decides whether it's asked and whether its failure blocks checkout
-(off by default); a blocking app that fails adds `validation_unavailable`. The
+(off by default); a blocking app that fails adds `validation_unavailable`. That one may
+pass on a retry, so a payment the shopper already made isn't given back for it alone. The
 [apps guide](/docs/guides/apps/) has a worked example.
 
 ## Orders
