@@ -9,7 +9,9 @@ use hypha_checkout_rules::{
     CheckoutRuleRepo, HasCheckoutRules, RuleInput, RuleLine, VerifiedFacts, evaluate,
     names_categories,
 };
-use hypha_core::{AddressFlags, AddressFormats, CartId, Message, ProductId, RepoError};
+use hypha_core::{
+    AddressFlags, AddressFormats, CartId, Message, MessagePath, MessageSource, ProductId, RepoError,
+};
 
 use crate::{
     CommandError,
@@ -137,7 +139,29 @@ pub async fn cart_messages<S: PricingPorts + HasCheckoutRules>(
     }
     let validators = checks.validators().validators(cart).await?;
     messages.extend(app_messages(&validators, cart));
-    Ok(messages)
+    Ok(without_echoed_warnings(messages))
+}
+
+/// `messages` without the built-in warnings (the format's, the verification's) on a path
+/// that already carries an error: the shopper has that error to fix there, and a
+/// merchant's rule often says the same thing more firmly (a house number required where
+/// the format only suspects it's missing).
+fn without_echoed_warnings(messages: Vec<Message>) -> Vec<Message> {
+    let errors: Vec<MessagePath> = messages
+        .iter()
+        .filter(|m| m.is_error())
+        .map(Message::path)
+        .collect();
+    messages
+        .into_iter()
+        .filter(|m| {
+            let built_in = matches!(
+                m.source(),
+                MessageSource::Format | MessageSource::Verification
+            );
+            m.is_error() || !built_in || !errors.contains(&m.path())
+        })
+        .collect()
 }
 
 /// `checkout_blocked` with every error among `messages`, warnings left out; nothing when
@@ -157,10 +181,7 @@ pub(crate) fn refuse_errors(cart: CartId, messages: Vec<Message>) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hypha_core::{
-        AddressField, AddressWarning, AddressWarningCode, MessageCode, MessagePath, MessageSource,
-        Severity,
-    };
+    use hypha_core::{AddressField, AddressWarning, AddressWarningCode, MessageCode, Severity};
     use uuid::Uuid;
 
     fn cart() -> CartId {
@@ -204,6 +225,43 @@ mod tests {
                 cart: cart(),
                 messages: vec![error()],
             })
+        );
+    }
+
+    fn rule_on_line1(severity: Severity) -> Message {
+        Message::new(
+            severity,
+            MessageCode::new("house_number_required").unwrap(),
+            MessagePath::ShippingAddressField(AddressField::Line1),
+            "Add your house number.",
+            MessageSource::Rule {
+                rule: hypha_core::CheckoutRuleId::from_uuid(Uuid::from_u128(9)),
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_built_in_warning_under_an_error_is_left_out() {
+        assert_eq!(
+            without_echoed_warnings(vec![warning(), rule_on_line1(Severity::Error)]),
+            vec![rule_on_line1(Severity::Error)]
+        );
+    }
+
+    #[test]
+    fn a_built_in_warning_beside_another_warning_stays() {
+        assert_eq!(
+            without_echoed_warnings(vec![warning(), rule_on_line1(Severity::Warning)]),
+            vec![warning(), rule_on_line1(Severity::Warning)]
+        );
+    }
+
+    #[test]
+    fn a_built_in_warning_elsewhere_than_the_error_stays() {
+        assert_eq!(
+            without_echoed_warnings(vec![warning(), error()]),
+            vec![warning(), error()]
         );
     }
 }
