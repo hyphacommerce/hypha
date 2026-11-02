@@ -35,6 +35,8 @@ use crate::testing::*;
 mod addresses;
 // Agents, their calls and proposals.
 mod agents;
+// Checkout rules and the messages they put on carts.
+mod checkout_rules;
 // Apps installed through OAuth, and personal data.
 mod app_extensions;
 // Apps' custom fields, synced with their manifests.

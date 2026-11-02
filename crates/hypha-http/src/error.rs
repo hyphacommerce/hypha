@@ -1923,6 +1923,41 @@ fn discount_details(e: &hypha_discounts::CommandError) -> Option<Value> {
     }
 }
 
+impl From<hypha_checkout_rules::CommandError> for ApiError {
+    fn from(e: hypha_checkout_rules::CommandError) -> Self {
+        use hypha_checkout_rules::{CheckoutRuleError as R, CommandError as E};
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // Rules only arrive in URLs.
+            E::NotFound(_) => StatusCode::NOT_FOUND,
+            E::Rule(R::Invalid(_)) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::TooMany { .. } => StatusCode::CONFLICT,
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        let details = checkout_rule_details(&e);
+        Self::domain(status, e).with_details(details)
+    }
+}
+
+/// `invalid_checkout_rule`: `{"problems": [{"path", "code", "message"}]}`, every broken
+/// rule; `too_many_checkout_rules`: `{"max"}`.
+fn checkout_rule_details(e: &hypha_checkout_rules::CommandError) -> Option<Value> {
+    use hypha_checkout_rules::{CheckoutRuleError as R, CommandError as E};
+    match e {
+        E::Rule(R::Invalid(problems)) => Some(json!({
+            "problems": problems
+                .iter()
+                .map(|p| json!({"path": p.path, "code": p.code, "message": p.message}))
+                .collect::<Vec<_>>()
+        })),
+        E::TooMany { max } => Some(json!({ "max": max })),
+        _ => None,
+    }
+}
+
 impl From<hypha_agents::CommandError> for ApiError {
     fn from(e: hypha_agents::CommandError) -> Self {
         use hypha_agents::{AgentError as A, CommandError as E, ProposalError as P};

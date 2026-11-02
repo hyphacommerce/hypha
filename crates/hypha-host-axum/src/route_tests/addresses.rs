@@ -139,7 +139,7 @@ async fn a_location_address_is_checked() {
 /// The cart's market also sells to the Netherlands, where addresses have house numbers: a
 /// Dutch cart for one mug, with an email and a way to pay. Returns (the publishable key,
 /// the cart's path).
-async fn dutch_cart(app: &TestApp) -> (String, String) {
+pub(super) async fn dutch_cart(app: &TestApp) -> (String, String) {
     let (pk, _, _) = cart_for_three_mugs(app).await;
     let (_, markets) = send(app, "GET", "/admin/markets", None).await;
     let market = markets["items"][0]["id"].as_str().unwrap();

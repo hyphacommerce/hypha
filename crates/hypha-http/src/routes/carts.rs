@@ -1,10 +1,11 @@
 use axum::{Json, extract::State, http::StatusCode, response::Response};
 use hypha_cart::{
-    AddLine, CreateCart, GroupOffers, LineStatus, PricedCart, PricedShippingGroup, SetLineQuantity,
-    add_discount_code, add_line, create_cart, remove_cart_line, remove_discount_code,
-    select_shipping, set_cart_customer, set_cart_email, set_line_quantity, set_shipping_address,
-    shipping_offers,
+    AddLine, CreateCart, GroupOffers, LineStatus, PricedCart, PricedShippingGroup, PricingPorts,
+    SetLineQuantity, add_discount_code, add_line, create_cart, remove_cart_line,
+    remove_discount_code, select_shipping, set_cart_customer, set_cart_email, set_line_quantity,
+    set_shipping_address, shipping_offers,
 };
+use hypha_checkout_rules::HasCheckoutRules;
 use hypha_core::{
     AssetId, CartId, CheckoutRuleId, CountryCode, Currency, CustomerId, DiscountId, Email,
     ErrorCode, MarketId, Message, MessageSource, Money, OrderId, PaymentMethodId, ProductId,
@@ -338,10 +339,8 @@ impl From<&PricedCart> for CartResponse {
                 .iter()
                 .map(CartDiscountCodeResponse::from)
                 .collect(),
-            messages: hypha_checkout::cart_messages(&hypha_addresses::Formats, cart)
-                .iter()
-                .map(CartMessageResponse::from)
-                .collect(),
+            // Filled by `cart_response`, which reads the store's checkout rules.
+            messages: Vec::new(),
             tax_total: cart.tax_total,
             total: cart.total,
             fully_available: cart.is_fully_available(),
@@ -607,14 +606,19 @@ pub async fn remove_code<S: Storage>(
     ))
 }
 
-/// The response for `cart` with its lines' images: the assets loaded in one query and
-/// their URLs made. Without file storage the lines show none.
-pub async fn cart_response<P: HasAssets>(
+/// The response for `cart` with its messages and its lines' images: the assets loaded in
+/// one query and their URLs made. Without file storage the lines show none.
+pub async fn cart_response<P: HasAssets + PricingPorts + HasCheckoutRules>(
     cart: &PricedCart,
     ports: &P,
     media: Option<&Media>,
 ) -> Result<CartResponse, ApiError> {
     let mut response = CartResponse::from(cart);
+    response.messages = hypha_checkout::cart_messages(ports, &hypha_addresses::Formats, cart)
+        .await?
+        .iter()
+        .map(CartMessageResponse::from)
+        .collect();
     let image = |l: &hypha_cart::PricedLine| l.details.as_ref().and_then(|d| d.image);
     let ids: Vec<AssetId> = cart.lines.iter().filter_map(image).collect();
     let Some(media) = media.filter(|_| !ids.is_empty()) else {

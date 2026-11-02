@@ -17,6 +17,7 @@ pub use auth::password_reset_in_background;
 pub mod carts;
 pub mod categories;
 pub mod channels;
+pub mod checkout_rules;
 pub mod custom_fields;
 pub mod customer_groups;
 pub mod customers;
@@ -223,6 +224,13 @@ macro_rules! route_table {
             [admin, POST, "/admin/customers/{id}/sessions/revoke", customers::revoke_sessions],
             [admin, PUT, "/admin/customers/{id}/marketing/{channel}", customers::set_consent],
             [admin, PUT, "/admin/customers/{id}/groups", customers::set_groups],
+            // checkout rules
+            [admin, GET, "/admin/checkout-rules", checkout_rules::list],
+            [admin, POST, "/admin/checkout-rules", checkout_rules::create],
+            [admin, POST, "/admin/checkout-rules/test", checkout_rules::test],
+            [admin, GET, "/admin/checkout-rules/{id}", checkout_rules::fetch],
+            [admin, PATCH, "/admin/checkout-rules/{id}", checkout_rules::update],
+            [admin, DELETE, "/admin/checkout-rules/{id}", checkout_rules::remove],
             // discounts and their codes
             [admin, GET, "/admin/discounts", discounts::list],
             [admin, POST, "/admin/discounts", discounts::create],
