@@ -26,10 +26,17 @@ import { DetailSkeleton } from "@/components/skeletons";
 import {
   CancelledBadge,
   FulfillmentBadge,
+  NeedsReviewBadge,
   PaymentBadge,
   PaymentStatusBadge,
 } from "@/components/status";
-import { CANCEL_REASONS, type Currencies, formatMoney } from "@/lib/format";
+import {
+  CANCEL_REASONS,
+  type Currencies,
+  formatMoney,
+  formatUnitCost,
+  unitCostTotal,
+} from "@/lib/format";
 import {
   channelNames,
   loadCountries,
@@ -37,11 +44,13 @@ import {
   loaded,
   requireStaff,
   sessionClient,
+  staffNames,
 } from "@/lib/hypha";
 import { type Extensions, loadExtensions } from "@/lib/app-extensions";
 import { definitionsOf } from "@/lib/custom-fields-server";
 import { canMarkPaid, providerLabel } from "@/lib/payments";
 
+import { AddressCheckCard, EditAddressButton } from "./address-check";
 import { EmailsCard } from "./emails";
 import { CancelOrderButton, FulfilButton, type Place, ShipmentsCard } from "./fulfilment";
 import { MarkPaid } from "./mark-paid";
@@ -91,6 +100,7 @@ function UnitPrice({
           </Text>
         )}
       </HStack>
+      {line.unit_cost && <Margin line={line} cost={line.unit_cost} currencies={currencies} />}
       {line.price_list && (
         <Link href={`/markets/price-lists/${line.price_list}`}>
           <Text type="supporting">
@@ -101,6 +111,35 @@ function UnitPrice({
         </Link>
       )}
     </VStack>
+  );
+}
+
+/**
+ * What a unit cost the store when the order was placed, and the line's margin: what it
+ * was charged less what its units cost, when both are in one currency.
+ */
+function Margin({
+  line,
+  cost,
+  currencies,
+}: {
+  line: OrderLine;
+  cost: AdminSchemas["UnitCost"];
+  currencies: Currencies;
+}) {
+  const costs = unitCostTotal(cost, line.quantity);
+  const margin =
+    costs.currency === line.total.currency
+      ? { amount: line.total.amount - costs.amount, currency: costs.currency }
+      : null;
+  const share =
+    margin && line.total.amount > 0 ? Math.round((margin.amount / line.total.amount) * 100) : null;
+  return (
+    <Text type="supporting" color="secondary" hasTabularNumbers>
+      Cost {formatUnitCost(cost, currencies)}
+      {margin &&
+        ` · margin ${formatMoney(margin, currencies)}${share === null ? "" : ` (${share}%)`}`}
+    </Text>
   );
 }
 
@@ -272,6 +311,26 @@ async function Order({ id }: { id: string }) {
     client.GET("/admin/orders/{id}/custom-fields", { params: { path: { id } } }),
   ]);
   const order = loaded(found);
+  // The country's form, for changing the address: read once the order names its country.
+  // The address check names an app and a staff member by ID: their names, when it does
+  // (IDs stay where the role can't read apps or users).
+  const check = order.address_check;
+  const [format, people, apps] = await Promise.all([
+    order.shipping_address
+      ? client
+          .GET("/admin/address-formats/{country}", {
+            params: { path: { country: order.country } },
+          })
+          .then((r) => r.data)
+      : undefined,
+    check?.marked_valid ? staffNames(client) : new Map<string, string>(),
+    check?.verification?.app
+      ? client
+          .GET("/admin/apps")
+          .then((r) => new Map((r.data?.items ?? []).map((a) => [a.key, a.name])))
+      : new Map<string, string>(),
+  ]);
+  const canWriteOrders = me.scopes.includes("orders:write");
   const listNames = priceListNames(client, order.lines);
   const countryName = (code: string) => countries.find((c) => c.code === code)?.name ?? code;
   const fulfillments = shipments.data?.items ?? [];
@@ -294,6 +353,7 @@ async function Order({ id }: { id: string }) {
         badges={
           <HStack gap={1}>
             {cancelled && <CancelledBadge />}
+            {order.address_review && <NeedsReviewBadge />}
             <PaymentBadge status={order.financial_status} />
             <FulfillmentBadge status={order.fulfillment_status} />
           </HStack>
@@ -538,7 +598,7 @@ async function Order({ id }: { id: string }) {
                     [order.shipping_address.postal_code, order.shipping_address.city]
                       .filter(Boolean)
                       .join(" "),
-                    order.shipping_address.province,
+                    order.shipping_address.province_name ?? order.shipping_address.province,
                     countryName(order.shipping_address.country),
                   ]
                     .filter(Boolean)
@@ -548,8 +608,16 @@ async function Order({ id }: { id: string }) {
                   <MetadataListItem label="Phone">{order.shipping_address.phone}</MetadataListItem>
                 )}
               </MetadataList>
+              {canWriteOrders && format && <EditAddressButton order={order} format={format} />}
             </Card>
           )}
+
+          <AddressCheckCard
+            order={order}
+            format={format}
+            canWrite={canWriteOrders}
+            names={Object.fromEntries([...people, ...apps])}
+          />
 
           {definitions.length > 0 && fields.data && (
             <CustomFieldsCard

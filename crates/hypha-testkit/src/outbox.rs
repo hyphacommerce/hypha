@@ -3,11 +3,13 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use hypha_core::InventoryItemId;
 use hypha_core::{
     ActingAs, Actor, Clock, Delivery, DeliveryOutcome, DeliveryRecord, DeliveryStatus, EventRoute,
     OutboxRepo, Outcome, Page, PageRequest, PendingEvent, RepoError, StoredEvent, Timestamp,
     Version,
 };
+use hypha_inventory::{MovementFilter, StockMovement, StockMovementEntry, StockMovementRepo};
 use uuid::Uuid;
 
 use crate::FixedClock;
@@ -36,6 +38,8 @@ struct State {
     /// Events already fanned out, by `seq`.
     fanned_out: HashSet<i64>,
     deliveries: Vec<DeliveryRow>,
+    /// The stock ledger: written with the items that recorded it, like events.
+    movements: Vec<StockMovementEntry>,
 }
 
 struct DeliveryRow {
@@ -57,6 +61,7 @@ impl Default for State {
             events: Vec::new(),
             fanned_out: HashSet::new(),
             deliveries: Vec::new(),
+            movements: Vec::new(),
         }
     }
 }
@@ -83,6 +88,36 @@ impl InMemoryOutbox {
                 data: event.data,
             });
         }
+    }
+
+    /// Writes stock movements as the current actor, at the clock's time; positions count
+    /// up from 1.
+    pub(crate) fn write_movements(&self, movements: Vec<StockMovement>) {
+        let mut state = self.inner.lock().unwrap();
+        let actor = state.actor;
+        for m in movements {
+            let position = i64::try_from(state.movements.len()).unwrap_or(i64::MAX) + 1;
+            state.movements.push(StockMovementEntry {
+                position,
+                item: m.item,
+                variant: m.variant,
+                location: m.location,
+                delta: m.delta,
+                after: m.after,
+                reason: m.reason,
+                source: m.source,
+                note: m.note.map(|n| n.as_str().to_string()),
+                unit_cost: m.unit_cost,
+                average_after: m.average_after,
+                actor,
+                at: self.clock.now(),
+            });
+        }
+    }
+
+    /// Every ledger row written so far, oldest first.
+    pub fn movements(&self) -> Vec<StockMovementEntry> {
+        self.inner.lock().unwrap().movements.clone()
     }
 
     /// The time writes are stamped with now.
@@ -146,6 +181,35 @@ impl State {
             next_attempt_at: row.next_attempt_at,
             last_error: row.last_error.clone(),
         })
+    }
+}
+
+impl StockMovementRepo for InMemoryOutbox {
+    async fn list(
+        &self,
+        item: InventoryItemId,
+        filter: &MovementFilter,
+        page: PageRequest<i64>,
+    ) -> Result<Page<StockMovementEntry>, RepoError> {
+        let state = self.inner.lock().unwrap();
+        let rows: Vec<StockMovementEntry> = state
+            .movements
+            .iter()
+            .rev()
+            .filter(|m| m.item == item && filter.matches(m))
+            .filter(|m| page.after.is_none_or(|after| m.position < after))
+            .take(page.limit.get() as usize + 1)
+            .cloned()
+            .collect();
+        Ok(Page::from_overfetch(rows, page.limit))
+    }
+
+    async fn cost_recorded(&self) -> Result<bool, RepoError> {
+        let state = self.inner.lock().unwrap();
+        Ok(state
+            .movements
+            .iter()
+            .any(|m| m.unit_cost.is_some() || m.average_after.is_some()))
     }
 }
 

@@ -48,7 +48,7 @@ impl UploadPurpose {
         }
     }
 
-    fn extension(&self) -> &'static str {
+    fn extension(self) -> &'static str {
         match self {
             UploadPurpose::PriceImport => "csv",
         }

@@ -181,6 +181,93 @@
         ],
         "type": "object"
       },
+      "AddressFieldDto": {
+        "description": "A field of an address, as named in requests and responses.\n\nKnown values: `first_name`, `last_name`, `company`, `line1`, `line2`, `city`, `province`, `postal_code`, `country`, `phone`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "first_name",
+          "last_name",
+          "company",
+          "line1",
+          "line2",
+          "city",
+          "province",
+          "postal_code",
+          "country",
+          "phone"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "AddressFormatResponse": {
+        "properties": {
+          "autocomplete": {
+            "description": "Whether the store has an address autocomplete app: offer suggestions on the first\nline through `…/address-suggestions`.",
+            "type": "boolean"
+          },
+          "country": {
+            "$ref": "#/components/schemas/CountryCode"
+          },
+          "house_number_required": {
+            "description": "Whether the first line is expected to hold a house number.",
+            "type": "boolean"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Each field's label, by field (\"State\", \"ZIP code\"). English for now.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "postal_code": {
+            "$ref": "#/components/schemas/PostalCodeUse"
+          },
+          "postal_code_example": {
+            "description": "A postal code in the country's shape, for a placeholder.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "regions": {
+            "description": "The regions to choose from, where the country lists them: the region is then a\nselect and `province` holds the code. Empty where it's free text or not asked.",
+            "items": {
+              "$ref": "#/components/schemas/RegionResponse"
+            },
+            "type": "array"
+          },
+          "required": {
+            "description": "The fields a write refuses empty (`422 invalid_address`, `required`).",
+            "items": {
+              "$ref": "#/components/schemas/AddressFieldDto"
+            },
+            "type": "array"
+          },
+          "rows": {
+            "description": "The form's fields, row by row, in the country's order; the country itself apart.",
+            "items": {
+              "items": {
+                "$ref": "#/components/schemas/AddressFieldDto"
+              },
+              "type": "array"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "country",
+          "rows",
+          "required",
+          "labels",
+          "postal_code",
+          "regions",
+          "house_number_required",
+          "autocomplete"
+        ],
+        "type": "object"
+      },
       "AddressId": {
         "description": "A AddressId: `addr_` and 32 hex digits.",
         "examples": [
@@ -191,7 +278,7 @@
       },
       "AddressRequest": {
         "additionalProperties": false,
-        "description": "An address for the address book. Sending it again (PUT) replaces it whole,\nincluding whether it is a default.",
+        "description": "An address for the address book. Sending it again (PUT) replaces it whole,\nincluding whether it is a default. Checked against its country's format (`GET\n…/address-formats/{country}`); every problem comes back at once as `422\ninvalid_address` with `details.problems: [{field, code, message}]`.",
         "properties": {
           "city": {
             "type": "string"
@@ -304,6 +391,14 @@
             ]
           },
           "province": {
+            "description": "The region's code where the country lists regions (`CA`), else as entered.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "province_name": {
+            "description": "The region's name beside its code (\"California\"), where the country lists\nregions.",
             "type": [
               "string",
               "null"
@@ -328,6 +423,59 @@
           "country"
         ],
         "type": "object"
+      },
+      "AddressSuggestionResponse": {
+        "properties": {
+          "description": {
+            "description": "The rest, shown smaller (\"10000 Zagreb, Croatia\").",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "description": "Send it to `GET …/address-suggestions/{id}` when this one is picked.",
+            "type": "string"
+          },
+          "label": {
+            "description": "The main line (\"Ilica 1\").",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "type": "object"
+      },
+      "AddressSuggestionsResponse": {
+        "description": "What to show under the field.",
+        "properties": {
+          "suggestions": {
+            "description": "At most `limit`; none when the app couldn't answer (the person types on).",
+            "items": {
+              "$ref": "#/components/schemas/AddressSuggestionResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "suggestions"
+        ],
+        "type": "object"
+      },
+      "AddressVerdict": {
+        "description": "What an address verification provider concluded about an address, overall.\n\nKnown values: `deliverable`, `deliverable_with_fixes`, `missing_subpremise`, `ambiguous`, `undeliverable`, `unknown`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "deliverable",
+          "deliverable_with_fixes",
+          "missing_subpremise",
+          "ambiguous",
+          "undeliverable",
+          "unknown"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
       },
       "AssetId": {
         "description": "A AssetId: `asset_` and 32 hex digits.",
@@ -447,6 +595,38 @@
         ],
         "pattern": "^cart_[0-9a-f]{32}$",
         "type": "string"
+      },
+      "CartMessageResponse": {
+        "description": "Something about the cart for the shopper to see or fix.",
+        "properties": {
+          "code": {
+            "description": "snake_case, for code. Built-in codes (`house_number_missing`) are a contract like\nerror codes; a checkout rule's is the merchant's, a validation app's the app's.",
+            "type": "string"
+          },
+          "message": {
+            "description": "Plain text for the shopper.",
+            "type": "string"
+          },
+          "path": {
+            "description": "An RFC 9535 JSONPath into this response, from a closed set: `$` (the cart),\n`$.email`, `$.shipping_address`, `$.shipping_address.<field>`,\n`$.shipping_groups[<i>]` (the group and its chosen option) or `$.lines[<i>]`. Show\nthe message by that field; one a client doesn't place goes at the top.",
+            "example": "$.shipping_address.line1",
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/SeverityDto"
+          },
+          "source": {
+            "$ref": "#/components/schemas/MessageSourceDto"
+          }
+        },
+        "required": [
+          "severity",
+          "code",
+          "path",
+          "message",
+          "source"
+        ],
+        "type": "object"
       },
       "CartPaymentMethodResponse": {
         "description": "A payment method as a storefront lists it for a cart.",
@@ -604,6 +784,13 @@
             "description": "Whether the buyer ticked \"Email me with news and offers\" (`PUT …/marketing`):\ncheckout records the consent then.",
             "type": "boolean"
           },
+          "messages": {
+            "description": "What the shopper should know about the cart, each under the field its `path` names:\nerrors stop checkout and starting its payment (`409 checkout_blocked`), warnings\nnever do. Empty once the cart is checked out.",
+            "items": {
+              "$ref": "#/components/schemas/CartMessageResponse"
+            },
+            "type": "array"
+          },
           "order": {
             "oneOf": [
               {
@@ -641,6 +828,17 @@
               {
                 "$ref": "#/components/schemas/PostalAddressResponse",
                 "description": "Where it ships: in the cart's country. Required at checkout when something ships."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "shipping_address_check": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ShippingAddressCheckResponse",
+                "description": "What the store's address verification app said about the shipping address (asked\nwhen it was set); `null` without an address or a verification app."
               },
               {
                 "type": "null"
@@ -696,7 +894,8 @@
           "marketing_opt_in",
           "discounts",
           "discount_total",
-          "discount_codes"
+          "discount_codes",
+          "messages"
         ],
         "type": "object"
       },
@@ -794,6 +993,14 @@
           }
         ],
         "description": "What checkout answers: the placed order and what the shopper must do next to pay."
+      },
+      "CheckoutRuleId": {
+        "description": "A CheckoutRuleId: `crule_` and 32 hex digits.",
+        "examples": [
+          "crule_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^crule_[0-9a-f]{32}$",
+        "type": "string"
       },
       "ConsentResponse": {
         "description": "A channel's marketing consent.",
@@ -1642,6 +1849,76 @@
         "pattern": "^mkt_[0-9a-f]{32}$",
         "type": "string"
       },
+      "MessageSourceDto": {
+        "description": "Who said it: the address's format, the store's verification app, one of the merchant's\ncheckout rules, or a validation app.",
+        "oneOf": [
+          {
+            "properties": {
+              "type": {
+                "enum": [
+                  "format"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "type": {
+                "enum": [
+                  "verification"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "rule": {
+                "$ref": "#/components/schemas/CheckoutRuleId"
+              },
+              "type": {
+                "enum": [
+                  "rule"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "rule",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "app": {
+                "description": "The app's key.",
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "app"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "app",
+              "type"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "Money": {
         "description": "An amount of money in one currency.",
         "examples": [
@@ -1844,6 +2121,17 @@
               "null"
             ]
           },
+          "purchase_order_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PurchaseOrderId",
+                "description": "The purchase order an email to a supplier sent; `null` for every other email."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "redacted": {
             "description": "Personal fields left out for this caller: an API key or app without the matching\n`customer_data:*` scope. They are absent from the object then, whatever the schema\nsays. Never sent to staff or storefronts.",
             "items": {
@@ -1901,7 +2189,7 @@
         "x-hypha-open-enum": true
       },
       "NotificationTemplateKey": {
-        "description": "One of the store's templates. The names are stable.\n\nKnown values: `layout`, `order_confirmation`, `order_shipped`, `order_tracking_updated`, `order_cancelled`, `staff_new_order`, `staff_invite`, `staff_password_reset`, `customer_login_code`, `customer_erasure_requested`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "description": "One of the store's templates. The names are stable.\n\nKnown values: `layout`, `order_confirmation`, `order_shipped`, `order_tracking_updated`, `order_cancelled`, `staff_new_order`, `staff_invite`, `staff_password_reset`, `customer_login_code`, `customer_erasure_requested`, `supplier_purchase_order`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
           "layout",
           "order_confirmation",
@@ -1912,7 +2200,8 @@
           "staff_invite",
           "staff_password_reset",
           "customer_login_code",
-          "customer_erasure_requested"
+          "customer_erasure_requested",
+          "supplier_purchase_order"
         ],
         "type": "string",
         "x-hypha-open-enum": true
@@ -2100,6 +2389,10 @@
       "OrderSummaryResponse": {
         "description": "An order in a list: what a table of orders shows, without lines.",
         "properties": {
+          "address_review": {
+            "description": "Whether its shipping address needs review (`?address=needs_review`).",
+            "type": "boolean"
+          },
           "cancelled_at": {
             "description": "When it was cancelled, RFC 3339 in UTC; `null` if it wasn't.",
             "type": [
@@ -2180,7 +2473,8 @@
           "financial_status",
           "fulfillment_status",
           "total",
-          "item_count"
+          "item_count",
+          "address_review"
         ],
         "type": "object"
       },
@@ -2405,7 +2699,7 @@
       },
       "PostalAddressRequest": {
         "additionalProperties": false,
-        "description": "Sent: checked by `Address::new` (last name, first line and city required; text is\ntrimmed, at most 255 characters per field).",
+        "description": "Sent: last name, first line and city required, text trimmed, at most 255 characters\nper field. A cart's or a location's address is also checked against its country's\nformat (`GET …/address-formats/{country}`): its required fields, the postal code's\nshape, the region (a name, alternate name or code, stored as the code where the\ncountry lists regions). Every problem comes back at once as `422 invalid_address`\nwith `details.problems: [{field, code, message}]`.",
         "properties": {
           "city": {
             "type": "string"
@@ -2510,6 +2804,14 @@
             ]
           },
           "province": {
+            "description": "The region's code where the country lists regions (`CA`), else as entered.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "province_name": {
+            "description": "The region's name beside its code (\"California\"), where the country lists\nregions.",
             "type": [
               "string",
               "null"
@@ -2533,6 +2835,17 @@
           "country"
         ],
         "type": "object"
+      },
+      "PostalCodeUse": {
+        "description": "How a country uses postal codes.\n\nKnown values: `none`, `required`, `recommended`, `optional`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "none",
+          "required",
+          "recommended",
+          "optional"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
       },
       "PriceBreakDto": {
         "additionalProperties": false,
@@ -2647,6 +2960,72 @@
         },
         "required": [
           "app"
+        ],
+        "type": "object"
+      },
+      "PurchaseOrderId": {
+        "description": "A PurchaseOrderId: `po_` and 32 hex digits.",
+        "examples": [
+          "po_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^po_[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "RegionResponse": {
+        "properties": {
+          "code": {
+            "description": "What `province` holds: `CA`, `M`.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The English name: \"California\", \"Madrid\".",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name"
+        ],
+        "type": "object"
+      },
+      "ResolvedAddressResponse": {
+        "description": "The picked suggestion's address, normalised like any address a form sends (the region\nas its code, the postal code upper-cased), to fill the form with. Names and phone\naren't part of it.",
+        "properties": {
+          "address": {
+            "$ref": "#/components/schemas/SuggestedAddressResponse"
+          },
+          "problems": {
+            "description": "What saving it as it is would refuse (a missing postal code), so the form can say\nso before the person saves. Empty when it passes.",
+            "items": {
+              "$ref": "#/components/schemas/ResolvedProblem"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "address",
+          "problems"
+        ],
+        "type": "object"
+      },
+      "ResolvedProblem": {
+        "description": "One thing about the resolved address the country's format check doesn't accept: the\nform fills it in anyway and shows this under the field.",
+        "properties": {
+          "code": {
+            "description": "`required`, `too_long`, `invalid_format`, `unknown_region` or `region_mismatch`,\nas `invalid_address`'s problems.",
+            "type": "string"
+          },
+          "field": {
+            "$ref": "#/components/schemas/AddressFieldDto"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "code",
+          "message"
         ],
         "type": "object"
       },
@@ -3019,6 +3398,47 @@
             ]
           }
         },
+        "type": "object"
+      },
+      "SeverityDto": {
+        "description": "Whether a message stops checkout: `error` does, `warning` never.\n\nKnown values: `error`, `warning`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "error",
+          "warning"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "ShippingAddressCheckResponse": {
+        "description": "What the store's verification app said about a cart's shipping address. Show\n`suggested` as \"Did you mean …?\": setting it is free (it's known deliverable), and\nkeeping the address as entered needs nothing recorded.",
+        "properties": {
+          "checked_at": {
+            "description": "RFC 3339, UTC.",
+            "type": "string"
+          },
+          "flags": {
+            "$ref": "#/components/schemas/VerificationFlags"
+          },
+          "suggested": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SuggestedAddressResponse",
+                "description": "The corrected address, when the app is confident of it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/AddressVerdict"
+          }
+        },
+        "required": [
+          "verdict",
+          "flags",
+          "checked_at"
+        ],
         "type": "object"
       },
       "ShippingGroupId": {
@@ -3937,6 +4357,67 @@
         ],
         "type": "object"
       },
+      "SuggestedAddressResponse": {
+        "description": "An address a verification app suggests: where it is, without who lives there.",
+        "properties": {
+          "city": {
+            "type": "string"
+          },
+          "company": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "country": {
+            "type": "string"
+          },
+          "line1": {
+            "type": "string"
+          },
+          "line2": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "postal_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "province": {
+            "description": "The region's code where the country lists regions.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "province_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "redacted": {
+            "description": "Personal fields left out for this caller (`customer_data:address`).",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "line1",
+          "city",
+          "country"
+        ],
+        "type": "object"
+      },
       "TaxClassId": {
         "description": "A TaxClassId: `txc_` and 32 hex digits.",
         "examples": [
@@ -4031,6 +4512,36 @@
         ],
         "pattern": "^var_[0-9a-f]{32}$",
         "type": "string"
+      },
+      "VerificationFlags": {
+        "description": "What the provider says the address is; `None` where it doesn't know.",
+        "properties": {
+          "business": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "po_box": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "residential": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "vacant": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -5220,6 +5731,361 @@
         ],
         "x-hypha-customer-session": true,
         "x-hypha-scopes": []
+      }
+    },
+    "/storefront/address-formats/{country}": {
+      "get": {
+        "operationId": "storefront.address_formats.storefront",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "country",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CountryCode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressFormatResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "A country's address form: its fields in order, required ones, labels, regions.",
+        "tags": [
+          "address_formats"
+        ],
+        "x-hypha-scopes": []
+      }
+    },
+    "/storefront/address-suggestions": {
+      "get": {
+        "operationId": "storefront.address_suggestions.storefront_suggest",
+        "parameters": [
+          {
+            "description": "What's typed so far, 3 to 200 characters.",
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The country the form is for (`HR`): suggestions stay in it.",
+            "in": "query",
+            "name": "country",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "A token the form makes for one address being typed and keeps until one is picked\n(1 to 512 letters, digits, `-` and `_`): providers bill per session, and the rate\nlimit counts per session.",
+            "in": "query",
+            "name": "session",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "At most this many suggestions (1 to 5, 5 by default).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressSuggestionsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An unknown or malformed query parameter (`invalid_query`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The store has no autocomplete app (`autocomplete_unavailable`)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "`q`, `session` or `limit` breaks its rule (`invalid_suggestion_query`)"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Over the rate limit per client address or per session (`rate_limited`); see `Retry-After`"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Addresses for what a shopper has typed so far, from the store's autocomplete app.\nDebounce keystrokes; `404 autocomplete_unavailable` without an app (the address\nformat's `autocomplete` says so beforehand); no suggestions when the app fails.",
+        "tags": [
+          "address_suggestions"
+        ],
+        "x-hypha-scopes": [
+          "carts:write"
+        ]
+      }
+    },
+    "/storefront/address-suggestions/{id}": {
+      "get": {
+        "operationId": "storefront.address_suggestions.storefront_resolve",
+        "parameters": [
+          {
+            "description": "The suggestion's `id`.",
+            "example": "ilica-1",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The country the form is for: the address must be in it.",
+            "in": "query",
+            "name": "country",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The session the suggestion was offered in.",
+            "in": "query",
+            "name": "session",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolvedAddressResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The store has no autocomplete app (`autocomplete_unavailable`)"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Over the rate limit per client address or per session (`rate_limited`); see `Retry-After`"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The app couldn't give the address (`app_unavailable`)"
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "The address a shopper picked, normalised, with what saving it would refuse. `502\napp_unavailable` when the app can't give it: the shopper types it instead.",
+        "tags": [
+          "address_suggestions"
+        ],
+        "x-hypha-scopes": [
+          "carts:write"
+        ]
       }
     },
     "/storefront/app-extensions": {
@@ -6474,7 +7340,7 @@
                 }
               }
             },
-            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+            "description": "The cart can't be checked out as it is: `cart_empty`, `cart_email_missing`, `cart_unavailable`, `shipping_address_required`, `shipping_option_required`, `shipping_option_unavailable`, `total_changed`, `discounts_changed`, `payment_method_required`, `payment_method_unavailable`, `payment_required`, `payment_pending`, `payment_failed`, `cart_payment_committed`, `cart_completed`; or, after those, `checkout_blocked`: the cart has error messages, every one in `details.messages` (each as a cart's `messages` item; warnings left out). Also a concurrent change (`concurrent_modification`, safe to retry)."
           },
           "413": {
             "content": {
@@ -6532,7 +7398,7 @@
             "publishable_key": []
           }
         ],
-        "summary": "Places the order for the cart. Takes an `Idempotency-Key` header: a retry returns the\norder the first request placed. The body is `{}` or `{\"expected_total\": …}`. Something\nto pay needs a payment method chosen (`PUT …/payment-method`; 409\n`payment_method_required`) and still offered (409 `payment_method_unavailable`). An\nonline method's money must be committed first (`POST …/payment`): none started is 409\n`payment_required`, not yet committed `payment_pending` (its provider was asked; try\nagain shortly, or it completes when the provider reports), declined or released\n`payment_failed` (start paying again). If the order can't be placed once the money is\ncommitted (a line sold out meanwhile), the money is given back. A cart checked out\nalready answers with its order for an hour after it was placed (the provider's report\nmay have completed it), then `409 cart_completed`.",
+        "summary": "Places the order for the cart. Takes an `Idempotency-Key` header: a retry returns the\norder the first request placed. The body is `{}` or `{\"expected_total\": …}`. Something\nto pay needs a payment method chosen (`PUT …/payment-method`; 409\n`payment_method_required`) and still offered (409 `payment_method_unavailable`). An\nonline method's money must be committed first (`POST …/payment`): none started is 409\n`payment_required`, not yet committed `payment_pending` (its provider was asked; try\nagain shortly, or it completes when the provider reports), declined or released\n`payment_failed` (start paying again). If the order can't be placed once the money is\ncommitted (a line sold out meanwhile), the money is given back. A cart checked out\nalready answers with its order for an hour after it was placed (the provider's report\nmay have completed it), then `409 cart_completed`. A cart with an error among its\n`messages` is `409 checkout_blocked`, after the checks above.",
         "tags": [
           "orders"
         ],
@@ -7570,7 +8436,7 @@
                 }
               }
             },
-            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+            "description": "No payment can start for the cart now: checkout's checks (`cart_empty`, `total_changed`, `payment_method_required`, …), `payment_method_offline`, `cart_nothing_to_pay`, `cart_payment_committed`; or, after those, `checkout_blocked`: the cart has error messages, every one in `details.messages` (each as a cart's `messages` item; warnings left out), and no money is taken for it. Also a concurrent change (`concurrent_modification`, safe to retry)."
           },
           "413": {
             "content": {
@@ -7628,7 +8494,7 @@
             "publishable_key": []
           }
         ],
-        "summary": "Starts paying for the cart before its order exists: an online method's money is\ncommitted first, and checkout places the order once it is. Runs checkout's checks (409\n`total_changed`, `payment_method_required`, …). A pending payment of the same method and\ntotal is started again (the provider resumes it); otherwise a new one is made and the\nold ones released. Refused for a manual method (409 `payment_method_offline`: check out\ninstead), a total of zero (409 `cart_nothing_to_pay`) and a cart whose money is\ncommitted already (409 `cart_payment_committed`: check out).",
+        "summary": "Starts paying for the cart before its order exists: an online method's money is\ncommitted first, and checkout places the order once it is. Runs checkout's checks (409\n`total_changed`, `payment_method_required`, …). A pending payment of the same method and\ntotal is started again (the provider resumes it); otherwise a new one is made and the\nold ones released. Refused for a manual method (409 `payment_method_offline`: check out\ninstead), a total of zero (409 `cart_nothing_to_pay`) and a cart whose money is\ncommitted already (409 `cart_payment_committed`: check out), then a cart with an error\namong its `messages` (409 `checkout_blocked`): no money is taken for a cart checkout\nwould refuse.",
         "tags": [
           "orders"
         ],

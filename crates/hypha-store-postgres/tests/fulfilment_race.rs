@@ -5,6 +5,15 @@
 //!
 //! Needs `DATABASE_URL` like the contract tests; skips itself without it.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
 use futures_util::future::join_all;
 use hypha_core::{
     CartId, CountryCode, Ctx, Currency, CustomerId, Email, InventoryItemId, LocationId, MarketId,
@@ -101,8 +110,10 @@ async fn shop(url: &str, schema: &str) -> PgStore<Client> {
             fulfilled_quantity: 0,
             compare_at_price: None,
             price_list: None,
+            unit_cost: None,
         }],
         shipping_address: None,
+        address_check: None,
         shipping_lines: vec![],
         subtotal: eur(3000),
         shipping_total: eur(0),
@@ -113,7 +124,7 @@ async fn shop(url: &str, schema: &str) -> PgStore<Client> {
     OrderRepo::insert(&store, &mut order).await.unwrap();
 
     let mut item = InventoryItem::new(mug_item(), variant, true, false);
-    item.set_on_hand(warehouse(), 10, None).unwrap();
+    item.set_on_hand(warehouse(), 10, None, None).unwrap();
     let reference = ReservationRef::new(&mugs().to_string()).unwrap();
     item.reserve(&reference, Quantity::new(3).unwrap(), &[location])
         .unwrap();

@@ -1,8 +1,9 @@
 use std::collections::HashSet;
 
 use hypha_core::{
-    Address, AssetId, CartId, CountryCode, Currency, CustomerId, Email, MarketId, Money,
-    MoneyError, OrderId, PaymentMethodId, Price, PriceListId, ProductId, Quantity, VariantId,
+    Address, AddressVerification, AppCheck, AssetId, CartId, ChannelId, CountryCode, Currency,
+    CustomerId, Email, MarketId, Money, MoneyError, OrderId, PaymentMethodId, Price, PriceListId,
+    ProductId, Quantity, VariantId, Weight,
 };
 use hypha_inventory::{Availability, StockContext};
 use hypha_pricing::{PricingContext, ResolvedPrice, VariantPrices, resolve_price};
@@ -78,6 +79,9 @@ pub struct LineDetails {
     /// What to show for the line: the variant's image, else the product's first media item;
     /// `None` without one, or once checked out.
     pub image: Option<AssetId>,
+    /// One unit's weight when the variant is shipped; `None` when it isn't, has no weight,
+    /// or the cart is checked out.
+    pub shipping_weight: Option<Weight>,
 }
 
 /// A cart line with its current status. A read model: computed, never stored.
@@ -110,6 +114,8 @@ pub struct PricedCart {
     /// The currency of every amount in the cart.
     pub currency: Currency,
     pub country: CountryCode,
+    /// The sales channel the cart was made in.
+    pub channel: ChannelId,
     pub email: Option<Email>,
     pub customer: Option<CustomerId>,
     /// The order this cart was checked out as; `None` while it is open.
@@ -122,6 +128,10 @@ pub struct PricedCart {
     pub subtotal: Money,
     /// Where the cart ships.
     pub shipping_address: Option<Address>,
+    /// What verification said about it, when it was asked.
+    pub address_check: Option<AddressVerification>,
+    /// Each validation app's last answer about the cart, as kept with it.
+    pub app_checks: Vec<AppCheck>,
     /// The groups of lines that need shipping, with the buyer's choice; empty when nothing
     /// in the cart is shipped. One group for now.
     pub shipping_groups: Vec<PricedShippingGroup>,
@@ -362,6 +372,7 @@ pub fn price_cart_with_shipping(
         market: pricing.market.id(),
         currency,
         country: cart.country(),
+        channel: cart.channel(),
         email: cart.email().cloned(),
         customer: cart.customer(),
         order: match cart.status() {
@@ -372,6 +383,8 @@ pub fn price_cart_with_shipping(
         taxes_included: tax.prices_include_tax,
         subtotal: totals.subtotal,
         shipping_address: cart.shipping_address().cloned(),
+        address_check: cart.address_check().cloned(),
+        app_checks: cart.app_checks().to_vec(),
         shipping_groups,
         shipping_total: totals.shipping_total,
         discounts: outcome.applications,
@@ -549,6 +562,7 @@ fn line_details(product: &Product, variant: VariantId) -> Option<LineDetails> {
         sku: found.sku().map(str::to_string),
         handle: Some(product.handle().as_str().to_string()),
         image: found.media().or_else(|| product.media().first().copied()),
+        shipping_weight: found.weight().filter(|_| found.requires_shipping()),
     })
 }
 
@@ -981,6 +995,7 @@ mod tests {
                 sku: Some("SH-M".to_string()),
                 handle: Some("shirt".to_string()),
                 image: None,
+                shipping_weight: None,
             })
         );
     }
@@ -1029,6 +1044,7 @@ mod tests {
                 sku: None,
                 handle: Some("p1".to_string()),
                 image: None,
+                shipping_weight: None,
             })
         );
     }
@@ -1218,7 +1234,7 @@ mod tests {
             true,
             false,
         );
-        item.set_on_hand(location, on_hand, None).unwrap();
+        item.set_on_hand(location, on_hand, None, None).unwrap();
         StockContext {
             items: HashMap::from([(vid(11), item)]),
             locations: vec![Location::new(location, "Zagreb".to_string(), vec![mid()], 0).unwrap()],

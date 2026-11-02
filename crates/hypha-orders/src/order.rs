@@ -4,12 +4,16 @@ use hypha_core::{
     Address, CartId, ChannelId, CountryCode, Currency, CustomerId, DiscountId, Email, MarketId,
     Money, OrderId, OrderLineId, PendingEvent, Price, PriceListId, ProductId, Quantity, Recorded,
     Recorder, ShippingGroupId, ShippingOptionId, Stamped, Stamps, Subject, TaxClassId, TaxRate,
-    TaxRegionId, Timestamp, VariantId, Version, Versioned, required_text,
+    TaxRegionId, Timestamp, UnitCost, VariantId, Version, Versioned, required_text,
 };
 
 use crate::{
     OrderError,
-    events::{ORDER, OrderCancelled, OrderFulfillmentStatusChanged, OrderPaid, OrderPlaced},
+    address_check::{MarkedValid, OrderAddressCheck},
+    events::{
+        ORDER, OrderAddressMarkedValid, OrderCancelled, OrderFulfillmentStatusChanged, OrderPaid,
+        OrderPlaced, OrderShippingAddressChanged, ShippingAddressPayload,
+    },
 };
 
 /// An order's human number (`#1001`) from `OrderRepo::next_number`: unique and
@@ -258,6 +262,10 @@ pub struct OrderLine {
     pub compare_at_price: Option<Price>,
     /// The price list `unit_price` came from; `None` for the base price.
     pub price_list: Option<PriceListId>,
+    /// What one unit cost the store when the order was placed (its inventory item's
+    /// average, in the store's currency), for the order's margin. `None` without a cost,
+    /// and for lines placed before costs were kept.
+    pub unit_cost: Option<UnitCost>,
 }
 
 impl OrderLine {
@@ -327,6 +335,8 @@ pub struct NewOrder {
     pub lines: Vec<OrderLine>,
     /// Where it ships; required with shipping lines.
     pub shipping_address: Option<Address>,
+    /// What the cart knew about the address when it was checked out.
+    pub address_check: Option<OrderAddressCheck>,
     pub shipping_lines: Vec<OrderShippingLine>,
     /// The discounts applied, one per reward; lines and shipping lines name them by index.
     pub discounts: Vec<OrderDiscount>,
@@ -372,6 +382,8 @@ pub struct Order {
     email: Email,
     lines: Vec<OrderLine>,
     shipping_address: Option<Address>,
+    /// `None` for orders placed before addresses were checked, and without an address.
+    address_check: Option<OrderAddressCheck>,
     shipping_lines: Vec<OrderShippingLine>,
     discounts: Vec<OrderDiscount>,
     discount_total: Money,
@@ -430,6 +442,7 @@ impl Order {
             email: new.email,
             lines: new.lines,
             shipping_address: new.shipping_address,
+            address_check: new.address_check,
             shipping_lines: new.shipping_lines,
             discounts: new.discounts,
             discount_total: new.discount_total,
@@ -637,6 +650,10 @@ impl Order {
         if self.shipping_address.take().is_some() {
             changed = true;
         }
+        // The check may hold a suggested address.
+        if self.address_check.take().is_some() {
+            changed = true;
+        }
         changed
     }
 
@@ -658,6 +675,81 @@ impl Order {
 
     pub fn shipping_lines(&self) -> &[OrderShippingLine] {
         &self.shipping_lines
+    }
+
+    /// What was known about the shipping address: its verification, the warnings the
+    /// order was placed with, and who marked it valid.
+    pub fn address_check(&self) -> Option<&OrderAddressCheck> {
+        self.address_check.as_ref()
+    }
+
+    /// Whether staff should look at the address before shipping (`OrderAddressCheck`).
+    pub fn needs_address_review(&self) -> bool {
+        self.shipping_address.is_some()
+            && self
+                .address_check
+                .as_ref()
+                .is_some_and(OrderAddressCheck::needs_review)
+    }
+
+    /// Staff looked at the address and it's fine: it needs no review any more. Returns
+    /// whether that's news (marking it again changes nothing).
+    pub fn mark_address_valid(&mut self, by: String, at: Timestamp) -> Result<bool, OrderError> {
+        if self.shipping_address.is_none() {
+            return Err(OrderError::NoShippingAddress(self.id));
+        }
+        let check = self
+            .address_check
+            .get_or_insert_with(OrderAddressCheck::default);
+        if check.marked_valid.is_some() {
+            return Ok(false);
+        }
+        check.marked_valid = Some(MarkedValid { by: by.clone(), at });
+        let marked = OrderAddressMarkedValid { order: self.id, by };
+        self.events.record(self.subject(), &marked);
+        Ok(true)
+    }
+
+    /// Whether the shipping address may change to one in `country`: not for an order that
+    /// ships nothing (it was placed without one), not once it's cancelled or anything has
+    /// shipped, and only within its country. Commands ask before spending a verification
+    /// on the new address.
+    pub fn may_ship_to(&self, country: CountryCode) -> Result<(), OrderError> {
+        if self.shipping_address.is_none() {
+            return Err(OrderError::NoShippingAddress(self.id));
+        }
+        if self.cancelled.is_some() {
+            return Err(OrderError::Cancelled(self.id));
+        }
+        if self.fulfillment_status != FulfillmentStatus::Unfulfilled {
+            return Err(OrderError::Fulfilled(self.id));
+        }
+        if country != self.country {
+            return Err(OrderError::AddressCountryMismatch {
+                address: country,
+                order: self.country,
+            });
+        }
+        Ok(())
+    }
+
+    /// Staff correct where the order ships, before anything has: the address must stay in
+    /// the order's country (its shipping and tax were priced for it, and aren't again),
+    /// and `check` (asked for the new address) replaces the old one.
+    pub fn change_shipping_address(
+        &mut self,
+        address: Address,
+        check: OrderAddressCheck,
+    ) -> Result<(), OrderError> {
+        self.may_ship_to(address.country())?;
+        let changed = OrderShippingAddressChanged {
+            order: self.id,
+            address: ShippingAddressPayload::from(&address),
+        };
+        self.shipping_address = Some(address);
+        self.address_check = Some(check);
+        self.events.record(self.subject(), &changed);
+        Ok(())
     }
 
     pub fn shipping_total(&self) -> Money {
@@ -715,6 +807,7 @@ pub struct OrderSnapshot {
     /// In display order.
     pub lines: Vec<OrderLine>,
     pub shipping_address: Option<Address>,
+    pub address_check: Option<OrderAddressCheck>,
     pub shipping_lines: Vec<OrderShippingLine>,
     pub discounts: Vec<OrderDiscount>,
     pub discount_total: Money,
@@ -745,6 +838,7 @@ impl Order {
             email: self.email.clone(),
             lines: self.lines.clone(),
             shipping_address: self.shipping_address.clone(),
+            address_check: self.address_check.clone(),
             shipping_lines: self.shipping_lines.clone(),
             discounts: self.discounts.clone(),
             discount_total: self.discount_total,
@@ -887,6 +981,7 @@ impl Order {
             customer: s.customer,
             email: s.email,
             lines: s.lines,
+            address_check: s.address_check.filter(|_| s.shipping_address.is_some()),
             shipping_address: s.shipping_address,
             shipping_lines: s.shipping_lines,
             discounts: s.discounts,
@@ -980,6 +1075,7 @@ mod tests {
             fulfilled_quantity: 0,
             compare_at_price: None,
             price_list: None,
+            unit_cost: None,
         }
     }
 
@@ -1029,6 +1125,7 @@ mod tests {
     fn shipping_counts_in_the_totals_and_its_tax_in_the_tax_total() {
         let order = Order::place(NewOrder {
             shipping_address: Some(zagreb()),
+            address_check: None,
             shipping_lines: vec![shipping_line(400, Some(100))],
             shipping_total: eur(400),
             tax_total: eur(600),
@@ -1047,6 +1144,7 @@ mod tests {
     fn totals_that_leave_out_shipping_dont_add_up() {
         let result = Order::place(NewOrder {
             shipping_address: Some(zagreb()),
+            address_check: None,
             shipping_lines: vec![shipping_line(400, None)],
             ..new_order()
         });
@@ -1091,6 +1189,7 @@ mod tests {
             email: Email::new("ana@example.hr").unwrap(),
             lines: vec![line(1, 1000, 2, Some(500)), line(2, 400, 1, None)],
             shipping_address: None,
+            address_check: None,
             shipping_lines: vec![],
             discounts: vec![],
             discount_total: eur(0),
@@ -1611,5 +1710,132 @@ mod tests {
             order.take_events()[0].data["discount_codes"],
             serde_json::json!(["WELCOME10", "SPRING"])
         );
+    }
+
+    // ---- the shipping address ----
+
+    fn undeliverable() -> OrderAddressCheck {
+        OrderAddressCheck {
+            verification: Some(hypha_core::AddressVerification {
+                digest: "d".to_string(),
+                verdict: hypha_core::AddressVerdict::Undeliverable,
+                precision: None,
+                fields: Default::default(),
+                suggested: None,
+                suggested_digest: None,
+                flags: Default::default(),
+                app: None,
+                reference: None,
+                failure: None,
+                checked_at: at(),
+            }),
+            warnings: Vec::new(),
+            marked_valid: None,
+        }
+    }
+
+    fn shipped_to_zagreb() -> Order {
+        let mut order = Order::place(NewOrder {
+            shipping_address: Some(zagreb()),
+            address_check: Some(undeliverable()),
+            ..new_order()
+        })
+        .unwrap();
+        order.take_events();
+        order
+    }
+
+    #[test]
+    fn an_undeliverable_address_needs_review_until_marked_valid() {
+        let mut order = shipped_to_zagreb();
+        assert!(order.needs_address_review());
+        assert_eq!(
+            order.mark_address_valid("system".to_string(), at()),
+            Ok(true)
+        );
+        assert!(!order.needs_address_review());
+        assert_eq!(event_types(&mut order), ["order.address_marked_valid"]);
+    }
+
+    #[test]
+    fn marking_valid_again_changes_nothing() {
+        let mut order = shipped_to_zagreb();
+        order
+            .mark_address_valid("system".to_string(), at())
+            .unwrap();
+        order.take_events();
+        assert_eq!(
+            order.mark_address_valid("system".to_string(), at()),
+            Ok(false)
+        );
+        assert!(order.take_events().is_empty());
+    }
+
+    #[test]
+    fn an_order_without_an_address_has_nothing_to_mark() {
+        let mut order = placed();
+        assert_eq!(
+            order.mark_address_valid("system".to_string(), at()),
+            Err(OrderError::NoShippingAddress(order.id()))
+        );
+    }
+
+    #[test]
+    fn an_order_that_ships_nothing_gets_no_address() {
+        let mut order = placed();
+        assert_eq!(
+            order.change_shipping_address(zagreb(), undeliverable()),
+            Err(OrderError::NoShippingAddress(order.id()))
+        );
+    }
+
+    #[test]
+    fn a_new_address_replaces_the_check_and_says_so() {
+        let mut order = shipped_to_zagreb();
+        order
+            .mark_address_valid("system".to_string(), at())
+            .unwrap();
+        order.take_events();
+        order
+            .change_shipping_address(zagreb(), undeliverable())
+            .unwrap();
+        assert_eq!(order.address_check().unwrap().marked_valid, None);
+        assert!(order.needs_address_review());
+        let events = order.take_events();
+        assert_eq!(events[0].event_type, "order.shipping_address_changed");
+        assert_eq!(events[0].data["address"]["line1"], "Ilica 1");
+    }
+
+    #[test]
+    fn an_address_in_another_country_is_refused() {
+        let mut order = shipped_to_zagreb();
+        let mut parts = zagreb().parts().clone();
+        parts.country = "SI".to_string();
+        let ljubljana = Address::new(parts).unwrap();
+        assert_eq!(
+            order.change_shipping_address(ljubljana, undeliverable()),
+            Err(OrderError::AddressCountryMismatch {
+                address: CountryCode::new("SI").unwrap(),
+                order: CountryCode::new("HR").unwrap(),
+            })
+        );
+    }
+
+    #[test]
+    fn the_address_stays_once_anything_is_fulfilled() {
+        let mut order = shipped_to_zagreb();
+        let line = order.lines()[0].id;
+        order.fulfil(&[(line, q(1))]).unwrap();
+        assert_eq!(
+            order.change_shipping_address(zagreb(), undeliverable()),
+            Err(OrderError::Fulfilled(order.id()))
+        );
+    }
+
+    #[test]
+    fn erasing_the_buyer_takes_the_check_too() {
+        let mut order = shipped_to_zagreb();
+        order.redact(Email::new("erased@example.invalid").unwrap());
+        assert_eq!(order.address_check(), None);
     }
 }

@@ -165,7 +165,7 @@ export async function OrderDetails({
                   to.line1,
                   to.line2,
                   [to.postal_code, to.city].filter(Boolean).join(" "),
-                  to.province,
+                  to.province_name ?? to.province,
                 ]
                   .filter(Boolean)
                   .map((line) => (

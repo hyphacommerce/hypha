@@ -689,6 +689,7 @@ accessors! {
     hypha_tax::HasTaxRegions => TaxRegions, tax_regions;
     hypha_inventory::HasInventoryItems => InventoryItems, inventory_items;
     hypha_inventory::HasLocations => Locations, locations;
+    hypha_inventory::HasStockMovements => StockMovements, stock_movements;
     hypha_customers::HasCustomers => Customers, customers;
     hypha_customers::HasCustomerGroups => CustomerGroups, customer_groups;
     hypha_core::HasIdempotency => Idempotency, idempotency;
@@ -728,6 +729,13 @@ accessors! {
     hypha_custom_fields::HasCustomFieldValues => CustomFieldValues, custom_field_values;
     hypha_agents::HasAgents => Agents, agents;
     hypha_discounts::HasDiscounts => Discounts, discounts;
+    hypha_purchasing::HasSuppliers => Suppliers, suppliers;
+    hypha_purchasing::HasSupplierVariants => SupplierVariants, supplier_variants;
+    hypha_purchasing::HasPurchaseOrders => PurchaseOrders, purchase_orders;
+    hypha_purchasing::HasReceipts => Receipts, receipts;
+    hypha_inventory::HasTransfers => Transfers, transfers;
+    hypha_checkout_rules::HasCheckoutRules => CheckoutRules, checkout_rules;
+    hypha_checkout_rules::HasCheckoutSettings => CheckoutSettings, checkout_settings;
     hypha_agents::HasProposals => Proposals, proposals;
     hypha_agents::HasAgentCalls => AgentCalls, agent_calls;
     hypha_core::HasPreviewTokens => PreviewTokens, preview_tokens;
@@ -736,7 +744,7 @@ accessors! {
 /// Runs a load that takes several queries (a root row, then its children) in one
 /// consistent snapshot: `REPEATABLE READ READ ONLY`. Without it, a write committing
 /// between the queries could pair a new root with old children, `restore` would reject
-/// the mix, and the reader would get a 500 (review plan B3). One query is consistent on
+/// the mix, and the reader would get a 500. One query is consistent on
 /// its own; single-query reads don't need this. In a preview the snapshot can't be
 /// taken (the isolation of a transaction is fixed by its first query): the load reads the
 /// preview's own view, in a savepoint.

@@ -23,7 +23,10 @@ change is in the [changelog](/changelog); see [Releases and upgrades](/docs/rele
 | Prices | Price lists that compete on the lowest price: sales and clearances on a schedule, compare-at prices, quantity breaks, prices for customer groups, a spreadsheet editor with CSV import |
 | Discounts | Codes and automatic discounts: amounts or percentages off products, the order or shipping, buy X get Y, volume tiers, combinations, usage limits |
 | Checkout | Carts priced per market, shipping zones and rates (or a rate app), manual payment methods and online payments started before the order exists |
+| Addresses | Address forms laid out by each country's format, postal codes and regions checked, house numbers expected where they're used; apps that verify and autocomplete addresses |
+| Checkout rules | Rules merchants set without code (no PO boxes for express, a house number in Germany, limits by weight or subtotal), messages on the cart pointing at the field or line they're about, and apps that validate the cart |
 | Orders | Fulfilment by location with tracking, cancellations, refunds, inventory per location |
+| Purchasing | Suppliers with their catalogues and costs, purchase orders sent by email, goods received in parts, landed costs and a moving average unit cost, incoming stock, transfers between locations, a stock ledger |
 | Customers | Accounts with email sign-in codes, addresses, marketing consent, data export and erasure |
 | Staff | Roles and scopes, two-factor sign-in, invites, API keys |
 | Email | Jinja templates with previews and test sends, sent over SMTP or Resend |

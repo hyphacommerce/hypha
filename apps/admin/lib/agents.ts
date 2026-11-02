@@ -53,10 +53,16 @@ export const GRANT_AREAS: { area: string; canWrite: boolean }[] = [
   { area: "notifications", canWrite: true },
   { area: "custom_fields", canWrite: true },
   { area: "agents", canWrite: false },
+  { area: "discounts", canWrite: true },
+  { area: "purchasing", canWrite: true },
+  { area: "checkout_rules", canWrite: true },
 ];
 
-/** Write scopes an agent may only propose: a person approves every use. */
-export const PROPOSE_ONLY = ["customers:erase"];
+/** Write scopes an agent may only propose (a person approves every use), with their labels. */
+export const PROPOSE_ONLY: { scope: string; label: string }[] = [
+  { scope: "customers:erase", label: "Erase customers' personal data" },
+  { scope: "purchasing:send", label: "Email purchase orders to suppliers" },
+];
 
 /** The personal data a grant may let an agent see; none by default. */
 export const CUSTOMER_DATA = [

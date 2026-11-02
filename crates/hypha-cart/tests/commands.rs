@@ -1,3 +1,13 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
+
 use hypha_cart::{
     AddLine, CartError, CartRepo, CommandError, CreateCart, LineError, LineStatus, PricedCart,
     SetLineQuantity, add_discount_code, add_line, create_cart, get_cart, remove_cart_line,
@@ -195,7 +205,7 @@ impl World {
         }
         let id = InventoryItemId::from_uuid(vid(name).as_uuid());
         let mut item = InventoryItem::new(id, vid(name), true, false);
-        item.set_on_hand(warehouse(), on_hand, None).unwrap();
+        item.set_on_hand(warehouse(), on_hand, None, None).unwrap();
         block_on(self.inventory_items.insert(&mut item)).unwrap();
     }
 
@@ -307,12 +317,17 @@ fn create_cart_picks_the_market_of_its_country() {
 }
 
 /// What an empty cart in the Croatian market prices to, whatever else is set up.
-fn empty_in_croatia(id: CartId, taxes_included: bool) -> PricedCart {
+fn empty_in_croatia(
+    id: CartId,
+    channel: hypha_core::ChannelId,
+    taxes_included: bool,
+) -> PricedCart {
     PricedCart {
         id,
         market: market_id(),
         currency: Currency::EUR,
         country: hr(),
+        channel,
         email: None,
         customer: None,
         order: None,
@@ -320,6 +335,8 @@ fn empty_in_croatia(id: CartId, taxes_included: bool) -> PricedCart {
         taxes_included,
         subtotal: eur(0),
         shipping_address: None,
+        address_check: None,
+        app_checks: Vec::new(),
         shipping_groups: vec![],
         shipping_total: eur(0),
         discounts: vec![],
@@ -339,7 +356,10 @@ fn a_new_cart_is_priced_from_its_market() {
     world.stock("mug", 2);
     world.set_prices_include_tax();
     let cart = world.create_cart_in("HR").unwrap();
-    assert_eq!(cart, empty_in_croatia(cart.id, true));
+    assert_eq!(
+        cart,
+        empty_in_croatia(cart.id, world.storefront().channel().unwrap(), true)
+    );
     assert_eq!(world.get(cart.id), Ok(cart));
 }
 
@@ -355,8 +375,22 @@ fn an_emptied_cart_prices_like_a_new_one() {
         cart,
         vid("mug"),
     ));
-    assert_eq!(emptied, Ok(empty_in_croatia(cart, false)));
-    assert_eq!(world.get(cart), Ok(empty_in_croatia(cart, false)));
+    assert_eq!(
+        emptied,
+        Ok(empty_in_croatia(
+            cart,
+            world.storefront().channel().unwrap(),
+            false
+        ))
+    );
+    assert_eq!(
+        world.get(cart),
+        Ok(empty_in_croatia(
+            cart,
+            world.storefront().channel().unwrap(),
+            false
+        ))
+    );
 }
 
 #[test]
@@ -873,7 +907,7 @@ fn stock_at_a_location_serving_another_market_does_not_count() {
     let mut item = block_on(world.inventory_items.get_by_variant(vid("mug")))
         .unwrap()
         .unwrap();
-    item.set_on_hand(far.id(), 50, None).unwrap();
+    item.set_on_hand(far.id(), 50, None, None).unwrap();
     block_on(world.inventory_items.update(&mut item)).unwrap();
     let cart = world.create_cart();
 
@@ -982,7 +1016,7 @@ fn set_cart_customer_rejects_an_unknown_customer() {
 
 // ---- review fixes (docs/plans/2026-10-14-review-cleanup.md) ----
 
-/// B1: a line whose total overflows used to be stored (and then shown as unavailable).
+/// A line whose total overflows used to be stored (and then shown as unavailable).
 #[test]
 fn add_line_refuses_a_line_whose_total_overflows_and_stores_nothing() {
     let world = World::new();
@@ -998,7 +1032,7 @@ fn add_line_refuses_a_line_whose_total_overflows_and_stores_nothing() {
     assert_eq!(world.stored_line_count(cart), 0);
 }
 
-/// B2: lines that each fit can stop fitting together after a price change; the cart
+/// Lines that each fit can stop fitting together after a price change; the cart
 /// must stay readable, with the line that doesn't fit marked unavailable.
 #[test]
 fn a_cart_whose_total_overflows_stays_readable() {
@@ -1020,7 +1054,7 @@ fn a_cart_whose_total_overflows_stays_readable() {
     assert_eq!(priced.total, eur(6_000_030_000_000_000));
 }
 
-/// B4: linking copies the customer's email onto the cart and reveals whether a
+/// Linking copies the customer's email onto the cart and reveals whether a
 /// `cus_…` exists, so it needs `customers:read` too, checked before any lookup.
 #[test]
 fn set_cart_customer_requires_customers_read_to_link() {
@@ -1202,6 +1236,10 @@ fn remove_cart_line_takes_the_variant_out() {
 
 // ---------- idempotency keys ----------
 
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "commands take the key as an `Option`"
+)]
 fn keyed(key: &str, fingerprint: u8) -> Option<IdempotencyRequest> {
     Some(IdempotencyRequest {
         key: key.to_string(),
@@ -1319,7 +1357,7 @@ fn a_command_that_fails_records_no_key() {
     let mut item = block_on(world.inventory_items.get_by_variant(vid("mug")))
         .unwrap()
         .unwrap();
-    item.set_on_hand(warehouse(), 5, None).unwrap();
+    item.set_on_hand(warehouse(), 5, None, None).unwrap();
     block_on(world.inventory_items.update(&mut item)).unwrap();
 
     // Nothing was recorded, so the retry runs for real.

@@ -7,6 +7,8 @@ license.workspace = true
 [dependencies]
 hypha-core.workspace = true
 hypha-cart = { path = "../hypha-cart" }
+hypha-checkout-rules = { path = "../hypha-checkout-rules" }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hypha-customers = { path = "../hypha-customers" }
 hypha-discounts = { path = "../hypha-discounts" }
 hypha-inventory = { path = "../hypha-inventory" }
@@ -19,6 +21,8 @@ thiserror.workspace = true
 tracing = "0.1"
 
 [dev-dependencies]
+hypha-addresses = { path = "../hypha-addresses" }
+hypha-categories = { path = "../hypha-categories" }
 serde_json.workspace = true
 uuid.workspace = true
 hypha-markets = { path = "../hypha-markets" }

@@ -17,7 +17,7 @@ use crate::platform::read_body;
 
 /// Builds the sender `config` names, its key read through `env`
 /// (`HYPHA_RESEND_API_KEY`, a Worker secret).
-pub fn email_sender(
+pub(crate) fn email_sender(
     config: &EmailConfig,
     env: impl Fn(&str) -> Option<String>,
 ) -> Result<HostMail, String> {

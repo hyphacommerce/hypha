@@ -5,6 +5,7 @@ import {
   ArchiveBoxIcon,
   BanknotesIcon,
   BuildingStorefrontIcon,
+  ClipboardDocumentListIcon,
   CodeBracketIcon,
   Cog6ToothIcon,
   CpuChipIcon,
@@ -17,6 +18,7 @@ import {
   PhotoIcon,
   PuzzlePieceIcon,
   ReceiptPercentIcon,
+  ShieldCheckIcon,
   ShoppingBagIcon,
   Squares2X2Icon,
   TableCellsIcon,
@@ -98,6 +100,17 @@ export const NAV_SECTIONS: NavSection[] = [
         children: [{ label: "Categories", href: "/products/categories", scope: "products:read" }],
       },
       { label: "Inventory", href: "/inventory", icon: ArchiveBoxIcon, scope: "inventory:read" },
+      {
+        label: "Purchasing",
+        href: "/purchase-orders",
+        icon: ClipboardDocumentListIcon,
+        scope: "purchasing:read",
+        children: [
+          { label: "Purchase orders", href: "/purchase-orders", scope: "purchasing:read" },
+          { label: "Suppliers", href: "/suppliers", scope: "purchasing:read" },
+          { label: "Transfers", href: "/transfers", scope: "inventory:read" },
+        ],
+      },
       {
         label: "Customers",
         href: "/customers",
@@ -184,6 +197,13 @@ export const SETTINGS_GROUPS: { title: string; description: string; pages: Setti
         icon: TruckIcon,
         scope: "shipping:read",
         description: "Zones, rates and live-rate apps.",
+      },
+      {
+        label: "Checkout",
+        href: "/settings/checkout",
+        icon: ShieldCheckIcon,
+        scope: "checkout_rules:read",
+        description: "Rules on addresses and carts: no PO boxes, a phone for couriers.",
       },
       {
         label: "Search",

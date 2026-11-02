@@ -495,7 +495,7 @@ impl AppManifest {
         for (n, name) in document.scopes.iter().enumerate() {
             match Scope::parse(name) {
                 Some(scope) if scopes.contains(&scope) => {
-                    c.add(&format!("scopes[{n}]"), format!("lists {name:?} twice"))
+                    c.add(&format!("scopes[{n}]"), format!("lists {name:?} twice"));
                 }
                 Some(scope) => scopes.push(scope),
                 None => c.add(&format!("scopes[{n}]"), format!("{name:?} is not a scope")),

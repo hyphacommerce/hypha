@@ -201,7 +201,7 @@ fn reach(applies_to: &AppliesTo, marks: &mut Vec<Target>) -> bool {
         AppliesTo::All => return true,
         AppliesTo::Products(products) => marks.extend(products.iter().map(|p| Target::Product(*p))),
         AppliesTo::Categories(categories) => {
-            marks.extend(categories.iter().map(|c| Target::Category(*c)))
+            marks.extend(categories.iter().map(|c| Target::Category(*c)));
         }
     }
     false

@@ -41,7 +41,10 @@ impl SecretBox for XChaChaBox {
             msg: plaintext,
             aad: context,
         };
-        // Encryption only fails for messages of hundreds of gigabytes.
+        #[expect(
+            clippy::expect_used,
+            reason = "encryption only fails for messages of hundreds of gigabytes"
+        )]
         let ciphertext = self
             .cipher
             .encrypt(&XNonce::from(nonce), payload)

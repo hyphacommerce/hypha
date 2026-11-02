@@ -248,7 +248,7 @@ mod tests {
     #[test]
     fn new_accepts_countries() {
         let m = market(1, &["RS", "HR"]).unwrap();
-        assert_eq!(m.countries(), &[cc("RS"), cc("HR")])
+        assert_eq!(m.countries(), &[cc("RS"), cc("HR")]);
     }
 
     #[test]
@@ -261,7 +261,7 @@ mod tests {
         assert_eq!(
             market(1, &["RS", "RS"]),
             Err(MarketError::DuplicateCountry(cc("RS")))
-        )
+        );
     }
 
     #[test]
@@ -301,7 +301,7 @@ mod tests {
     fn remove_country_removes_it() {
         let mut m = market(1, &["RS", "HR"]).unwrap();
         assert_eq!(m.remove_country(cc("HR")), Ok(()));
-        assert!(m.countries.len() == 1)
+        assert!(m.countries.len() == 1);
     }
 
     #[test]

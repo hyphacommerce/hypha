@@ -27,9 +27,8 @@ impl<C: PgConnection> SporeSettingsRepo for PgStore<C> {
             .map_err(repo_error)?;
         let Some(row) = row else { return Ok(None) };
         let text: String = col(&row, "settings")?;
-        let values = match serde_json::from_str(&text) {
-            Ok(serde_json::Value::Object(values)) => values,
-            _ => return Err(corrupt(format!("spore {key}'s settings aren't an object"))),
+        let Ok(serde_json::Value::Object(values)) = serde_json::from_str(&text) else {
+            return Err(corrupt(format!("spore {key}'s settings aren't an object")));
         };
         Ok(Some(SporeSettings::restore(
             key.clone(),

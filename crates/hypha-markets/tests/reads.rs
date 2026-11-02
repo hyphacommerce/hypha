@@ -1,5 +1,14 @@
 //! The admin's reads of its setup.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
 use hypha_core::{
     Actor, AuthError, BasisPoints, CatalogId, CountryCode, Ctx, Currency, MarketId, Money, Page,
     PageLimit, PageRequest, Price, PriceListId, ProductId, Scope, Timestamp, UserId, VariantId,

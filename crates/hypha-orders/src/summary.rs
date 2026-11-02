@@ -23,6 +23,8 @@ pub struct OrderSummary {
     pub total: Money,
     /// How many items, adding up line quantities.
     pub item_count: u64,
+    /// Whether its shipping address needs review (`Order::needs_address_review`).
+    pub address_review: bool,
 }
 
 impl Order {
@@ -44,6 +46,7 @@ impl Order {
                 .iter()
                 .map(|l| u64::from(l.quantity.value()))
                 .sum(),
+            address_review: self.needs_address_review(),
         }
     }
 }

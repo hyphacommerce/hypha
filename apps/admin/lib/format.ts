@@ -46,6 +46,78 @@ export function moneyInput({ amount, currency }: Money, currencies: Currencies):
   return (amount / 10 ** digits).toFixed(digits);
 }
 
+type UnitCost = AdminSchemas["UnitCost"];
+
+/** Extra decimals a unit cost keeps beyond the currency's minor unit. */
+const COST_PLACES = 4;
+
+/**
+ * A unit cost's amount (a decimal string of minor units, "412.5") as a decimal string
+ * of the currency's major unit ("4.125" for EUR), exactly: shifted as text, never through
+ * a float.
+ */
+function costInMajorUnits({ amount, currency }: UnitCost, currencies: Currencies): string {
+  const digits = minorUnits(currencies, currency);
+  const [whole = "0", fraction = ""] = amount.split(".");
+  const padded = whole.padStart(digits + 1, "0");
+  const major = padded.slice(0, padded.length - digits).replace(/^0+(?=\d)/, "");
+  const decimals = (padded.slice(padded.length - digits) + fraction).replace(/0+$/, "");
+  return decimals ? `${major}.${decimals}` : major;
+}
+
+/**
+ * "€4.125": a unit cost, with the currency's digits and the extra ones it carries (up to
+ * 4 more), trailing zeros beyond the currency's dropped.
+ */
+export function formatUnitCost(cost: UnitCost, currencies: Currencies): string {
+  const digits = minorUnits(currencies, cost.currency);
+  return new Intl.NumberFormat("en-IE", {
+    style: "currency",
+    currency: cost.currency,
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits + COST_PLACES,
+  }).format(Number(costInMajorUnits(cost, currencies)));
+}
+
+/** The decimal form of a unit cost for an input ("4.125"). */
+export function unitCostInput(cost: UnitCost, currencies: Currencies): string {
+  return costInMajorUnits(cost, currencies);
+}
+
+/**
+ * A unit cost's amount (minor units as a decimal string, as the API takes it) from what
+ * someone typed in the major unit ("4.125" EUR is "412.5"), or null when it isn't a
+ * non-negative amount with at most the currency's digits and 4 more. Shifted as text.
+ */
+export function parseUnitCost(
+  input: string,
+  currency: string,
+  currencies: Currencies,
+): string | null {
+  const digits = minorUnits(currencies, currency);
+  const match = /^(\d+)(?:[.,](\d*))?$/.exec(input.trim());
+  if (!match) return null;
+  const [, whole = "0", fraction = ""] = match;
+  if (fraction.length > digits + COST_PLACES) return null;
+  const minor = (whole + fraction.slice(0, digits).padEnd(digits, "0")).replace(/^0+(?=\d)/, "");
+  const rest = fraction.slice(digits).replace(/0+$/, "");
+  if (!Number.isSafeInteger(Number(minor))) return null;
+  return rest ? `${minor}.${rest}` : minor;
+}
+
+/**
+ * What `quantity` units cost at `cost`, in minor units rounded half away from zero, as
+ * money: computed on integers (1/10,000 of a minor unit), never floats.
+ */
+export function unitCostTotal(cost: UnitCost, quantity: number): Money {
+  const [whole = "0", fraction = ""] = cost.amount.split(".");
+  const scaled = BigInt(whole + fraction.padEnd(COST_PLACES, "0"));
+  const scale = 10n ** BigInt(COST_PLACES);
+  const total = scaled * BigInt(quantity);
+  const rounded = (total + scale / 2n) / scale;
+  return { amount: Number(rounded), currency: cost.currency };
+}
+
 /**
  * Minor units from what someone typed ("18", "18.5", "18.50"), or null when it isn't a
  * non-negative amount with at most the currency's digits. Parsed as text, so 0.1 + 0.2

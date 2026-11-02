@@ -5,6 +5,15 @@
 //! stock, Blue is S 2800), Cotton Shirt (2; Red L and Green L, both 1500), Čaša Mug (3,
 //! 900) and Linen Towel (4, 1200, out of stock), the last two created at once.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
 use hypha_core::{MarketId, Money, VariantId};
 use hypha_search_index::{
     FacetKey, FacetValue, Filter, Group, PriceBounds, SearchQuery, SearchResults, Sort, reference,

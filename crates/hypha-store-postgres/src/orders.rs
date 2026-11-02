@@ -7,9 +7,9 @@ use hypha_core::{
     VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_orders::{
-    Cancellation, DiscountClass, DiscountShare, Order, OrderDiscount, OrderFilter, OrderLine,
-    OrderNumber, OrderRepo, OrderShippingLine, OrderSnapshot, OrderSort, OrderStats, OrderSummary,
-    OrderTax, OrderTaxSource, SalesFigures, SalesQuery,
+    Cancellation, DiscountClass, DiscountShare, Order, OrderAddressCheck, OrderDiscount,
+    OrderFilter, OrderLine, OrderNumber, OrderRepo, OrderShippingLine, OrderSnapshot, OrderSort,
+    OrderStats, OrderSummary, OrderTax, OrderTaxSource, SalesFigures, SalesQuery,
 };
 use tokio_postgres::{Row, types::Type};
 use uuid::Uuid;
@@ -18,8 +18,8 @@ use crate::{
     columns::{
         ADDRESS_LEN, address_assignments, address_columns, address_from_row, address_values, col,
         currency_from_db, id_and_address, micros, opt_micros, opt_ts, stamp_columns,
-        stamps_from_row, tax_rate_from_db, tax_rate_to_db, ts, version_from_db, version_to_db,
-        write_stamps,
+        stamps_from_row, tax_rate_from_db, tax_rate_to_db, ts, unit_cost_from_db, unit_cost_to_db,
+        version_from_db, version_to_db, write_stamps,
     },
     error::{corrupt, repo_error},
     field_filters::{Params, field_predicates},
@@ -56,7 +56,7 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
                 match (&after.key, sort) {
                     (SortKey::Id, OrderSort::Newest | OrderSort::Oldest) => {}
                     (SortKey::Int(n), OrderSort::TotalDesc | OrderSort::TotalAsc) => {
-                        total_key = Some(*n)
+                        total_key = Some(*n);
                     }
                     (key, sort) => {
                         return Err(RepoError::Backend(format!(
@@ -93,7 +93,7 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
                     .collect()
             });
         let us = |t: Option<Timestamp>| t.map(|t| t.unix_micros());
-        let mut extra = Params::after(14);
+        let mut extra = Params::after(15);
         let fields = field_predicates(filter.fields(), "o.id", &mut extra);
         let mut conn = self.conn().await;
         let rows = conn
@@ -102,7 +102,7 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
                 &format!(
                     "SELECT o.id, o.number, {placed},
                      o.channel_id, o.customer_id, o.email, o.country, o.currency, o.total,
-                     o.financial_status, o.fulfillment_status, {cancelled},
+                     o.financial_status, o.fulfillment_status, {cancelled}, o.address_review,
                      (SELECT coalesce(sum(quantity), 0) FROM order_lines
                       WHERE order_id = o.id)::bigint AS item_count
                  FROM orders o
@@ -120,6 +120,7 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
                    AND ($13::bigint IS NULL
                         OR o.placed_at < 'epoch'::timestamptz + $13 * interval '1 microsecond')
                    AND ($14::uuid IS NULL OR o.customer_id = $14)
+                   AND ($15::bool IS NULL OR o.address_review = $15)
                    {fields}
                  ORDER BY {order} LIMIT $2",
                     placed = micros("o.placed_at"),
@@ -140,6 +141,7 @@ impl<C: PgConnection> OrderRepo for PgStore<C> {
                     (&us(filter.placed_from()), Type::INT8),
                     (&us(filter.placed_before()), Type::INT8),
                     (&filter.customer().map(|c| c.as_uuid()), Type::UUID),
+                    (&filter.address_review(), Type::BOOL),
                 ]),
             )
             .await
@@ -411,13 +413,31 @@ async fn write_shipping(tx: &impl Queries, s: &OrderSnapshot) -> Result<(), Repo
     let id = s.id.as_uuid();
     let address = address_values(s.shipping_address.as_ref().map(|a| a.parts()));
     let total = s.shipping_total.amount();
+    let check = s
+        .address_check
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|e| corrupt(format!("order {} address check: {e}", s.id)))?;
+    // Derived, for the "needs review" filter: `Order::needs_address_review`'s rule.
+    let review = s.shipping_address.is_some()
+        && s.address_check
+            .as_ref()
+            .is_some_and(OrderAddressCheck::needs_review);
     let mut params = id_and_address(&id, &address);
     params.push((&total, Type::INT8));
+    params.push((&check, Type::TEXT));
+    params.push((&review, Type::BOOL));
+    let n = 2 + ADDRESS_LEN;
     tx.query_typed(
         &format!(
-            "UPDATE orders SET {}, shipping_total = ${} WHERE id = $1",
+            "UPDATE orders SET {}, shipping_total = ${}, address_check = ${}::text::jsonb,
+                 address_review = ${}
+             WHERE id = $1",
             address_assignments("shipping_", 2),
-            2 + ADDRESS_LEN,
+            n,
+            n + 1,
+            n + 2,
         ),
         &params,
     )
@@ -513,6 +533,8 @@ async fn insert_lines(
         .iter()
         .map(|l| i64::from(l.fulfilled_quantity))
         .collect();
+    let (costs, cost_currencies): (Vec<Option<i64>>, Vec<Option<&str>>) =
+        lines.iter().map(|l| unit_cost_to_db(l.unit_cost)).unzip();
     let tax_rates = lines
         .iter()
         .map(|l| l.tax.map(|t| tax_rate_to_db(t.rate)).transpose())
@@ -537,19 +559,19 @@ async fn insert_lines(
         "INSERT INTO order_lines (order_id, position, id, product_id, variant_id, quantity,
              product_title, variant_title, sku, unit_price, total, tax_rate_ppm, tax_class_id,
              tax_amount, tax_region_id, fulfilled_quantity, compare_at_amount, price_list_id,
-             subtotal, discounts)
+             subtotal, discounts, unit_cost, unit_cost_currency)
          SELECT $1, (n - 1)::integer, id, product_id, variant_id, quantity, product_title,
              variant_title, sku, unit_price, total, tax_rate_ppm, tax_class_id, tax_amount,
              tax_region_id, fulfilled_quantity, compare_at, price_list, subtotal,
-             discounts::jsonb
+             discounts::jsonb, unit_cost, unit_cost_currency
          FROM unnest($2::uuid[], $3::uuid[], $4::uuid[], $5::bigint[], $6::text[], $7::text[],
                      $8::text[], $9::bigint[], $10::bigint[], $11::integer[], $12::uuid[],
                      $13::bigint[], $14::uuid[], $15::bigint[], $16::bigint[], $17::uuid[],
-                     $18::bigint[], $19::text[])
+                     $18::bigint[], $19::text[], $20::bigint[], $21::text[])
               WITH ORDINALITY AS t (id, product_id, variant_id, quantity, product_title,
                   variant_title, sku, unit_price, total, tax_rate_ppm, tax_class_id,
                   tax_amount, tax_region_id, fulfilled_quantity, compare_at, price_list,
-                  subtotal, discounts, n)",
+                  subtotal, discounts, unit_cost, unit_cost_currency, n)",
         &[
             (&order.as_uuid(), Type::UUID),
             (&ids, Type::UUID_ARRAY),
@@ -570,6 +592,8 @@ async fn insert_lines(
             (&price_lists, Type::UUID_ARRAY),
             (&subtotals, Type::INT8_ARRAY),
             (&shares, Type::TEXT_ARRAY),
+            (&costs, Type::INT8_ARRAY),
+            (&cost_currencies, Type::TEXT_ARRAY),
         ],
     )
     .await
@@ -595,7 +619,8 @@ async fn load(client: &impl Queries, ids: &[Uuid]) -> Result<Vec<Order>, RepoErr
                 "SELECT id, version, number, {}, cart_id, channel_id, market_id, currency, country,
                      taxes_included, customer_id, email, subtotal, tax_total, total,
                      financial_status, fulfillment_status, {}, cancel_reason, {},
-                     shipping_total, discounts::text AS discounts, discount_total, {}
+                     shipping_total, discounts::text AS discounts, discount_total,
+                     address_check::text AS address_check, {}
                  FROM orders WHERE id = ANY($1)",
                 micros("placed_at"),
                 micros("cancelled_at"),
@@ -616,7 +641,7 @@ async fn load(client: &impl Queries, ids: &[Uuid]) -> Result<Vec<Order>, RepoErr
             "SELECT id, product_id, variant_id, quantity, product_title, variant_title, sku,
                  unit_price, total, tax_rate_ppm, tax_class_id, tax_amount, tax_region_id,
                  fulfilled_quantity, order_id, compare_at_amount, price_list_id, subtotal,
-                 discounts::text AS discounts
+                 discounts::text AS discounts, unit_cost, unit_cost_currency
              FROM order_lines WHERE order_id = ANY($1) ORDER BY order_id, position",
             &param,
         )
@@ -709,6 +734,10 @@ fn order_from_db(
         email: Email::new(&email).map_err(corrupt)?,
         lines,
         shipping_address,
+        address_check: col::<Option<String>>(row, "address_check")?
+            .map(|text| serde_json::from_str(&text))
+            .transpose()
+            .map_err(|e| corrupt(format!("order address check: {e}")))?,
         shipping_lines,
         discounts: discounts_in(&col::<String>(row, "discounts")?, &money)?,
         discount_total: money(col(row, "discount_total")?)?,
@@ -745,6 +774,7 @@ fn summary_from_db(row: &Row) -> Result<OrderSummary, RepoError> {
         cancelled_at: opt_ts(col(row, "cancelled_at")?),
         total: Money::new(col(row, "total")?, currency_from_db(&currency)?).map_err(corrupt)?,
         item_count: u64::try_from(items).map_err(|_| corrupt(format!("order {id} item count")))?,
+        address_review: col(row, "address_review")?,
     })
 }
 
@@ -837,6 +867,10 @@ fn line_from_db(
             .map(|amount| money(amount).and_then(|m| Price::new(m).map_err(corrupt)))
             .transpose()?,
         price_list: col::<Option<Uuid>>(line, "price_list_id")?.map(PriceListId::from_uuid),
+        unit_cost: unit_cost_from_db(
+            col(line, "unit_cost")?,
+            col::<Option<String>>(line, "unit_cost_currency")?.as_deref(),
+        )?,
     })
 }
 

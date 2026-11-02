@@ -1,6 +1,6 @@
 use hypha_core::{
-    Address, AddressParts, Email, Language, RepoError, StoreId, Timestamp, Timezone, Version,
-    Versioned,
+    Address, AddressParts, Currency, Email, Language, RepoError, StoreId, Timestamp, Timezone,
+    Version, Versioned,
 };
 use hypha_stores::{SetupStep, Store, StoreRepo, repo::keys};
 use uuid::Uuid;
@@ -41,6 +41,7 @@ async fn details_round_trip<R: StoreRepo>(repo: &R) {
     s.set_legal_address(Some(address));
     s.set_timezone(Some(Timezone::new("Europe/Zagreb").unwrap()));
     s.set_default_language(Language::new("sr-Latn-RS").unwrap());
+    s.set_currency(Some(Currency::RSD));
     s.set_setup_step(Some(SetupStep::new("shipping").unwrap()));
     // A microsecond past a whole second, so precision is checked too.
     s.finish_setup(Timestamp::from_unix_micros(1_767_225_600_000_001));
@@ -54,6 +55,7 @@ async fn details_round_trip<R: StoreRepo>(repo: &R) {
     s.set_legal_name(None).unwrap();
     s.set_legal_address(None);
     s.set_timezone(None);
+    s.set_currency(None);
     repo.update(&mut s).await.unwrap();
     assert_eq!(repo.get(s.id()).await, Ok(Some(s)));
 }

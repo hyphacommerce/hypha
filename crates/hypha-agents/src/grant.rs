@@ -52,8 +52,9 @@ pub const NEVER_GRANTED: [Scope; 5] = [
     Scope::AgentsWrite,
 ];
 
-/// Write scopes an agent may only propose: a person approves every use.
-pub const PROPOSE_ONLY: [Scope; 1] = [Scope::CustomersErase];
+/// Write scopes an agent may only propose: a person approves every use (erasing someone,
+/// emailing a supplier).
+pub const PROPOSE_ONLY: [Scope; 2] = [Scope::CustomersErase, Scope::PurchasingSend];
 
 /// The most operations an allowlist names: more than the admin surface has.
 pub const MAX_OPERATIONS: usize = 1000;
@@ -149,10 +150,10 @@ fn kind(scope: Scope) -> Kind {
     }
 }
 
-fn position(scope: &Scope) -> usize {
+fn position(scope: Scope) -> usize {
     Scope::ALL
         .iter()
-        .position(|s| s == scope)
+        .position(|s| *s == scope)
         .unwrap_or(Scope::ALL.len())
 }
 
@@ -223,7 +224,7 @@ impl GrantError {
 }
 
 fn sorted_once(mut scopes: Vec<Scope>) -> Vec<Scope> {
-    scopes.sort_by_key(position);
+    scopes.sort_by_key(|s| position(*s));
     scopes.dedup();
     scopes
 }
@@ -301,7 +302,7 @@ impl Grant {
             return Err(GrantError::ProposeOnly(*s));
         }
         let mut write = write;
-        write.sort_by_key(|(s, _)| position(s));
+        write.sort_by_key(|(s, _)| position(*s));
         if let Some(pair) = write.windows(2).find(|w| w[0].0 == w[1].0) {
             return Err(GrantError::DuplicateWrite(pair[0].0));
         }
@@ -743,6 +744,16 @@ mod tests {
     }
 
     #[test]
+    fn emailing_suppliers_is_propose_only() {
+        assert_eq!(
+            Grant::new(input(&[], &[("purchasing:send", "apply")], &[])),
+            Err(GrantError::ProposeOnly(Scope::PurchasingSend))
+        );
+        let g = grant(&[], &[("purchasing:send", "propose")], &[]);
+        assert_eq!(g.write(), [(Scope::PurchasingSend, WriteMode::Propose)]);
+    }
+
+    #[test]
     fn each_scope_goes_in_its_own_list() {
         assert_eq!(
             Grant::new(input(&["products:write"], &[], &[])),
@@ -800,12 +811,13 @@ mod tests {
             Some(&[op("admin.products.fetch"), op("admin.products.list")][..])
         );
         i.operations = Some(vec!["products".to_string()]);
+        let refused = Grant::new(i).unwrap_err();
         assert_eq!(
-            Grant::new(i.clone()),
-            Err(GrantError::Operation(OperationIdError(
-                "products".to_string()
-            )))
+            refused,
+            GrantError::Operation(OperationIdError("products".to_string()))
         );
+        assert_eq!(refused.operation(), Some("products"));
+        assert_eq!(GrantError::TooManyOperations { max: 1 }.operation(), None);
         let many = |n: usize| (0..n).map(|k| op(&format!("admin.ops.op{k}"))).collect();
         assert!(
             Grant::default()

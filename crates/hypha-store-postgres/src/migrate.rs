@@ -459,6 +459,76 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "discount_usages_by_code",
             sql: include_str!("../migrations/0087_discount_usages_by_code.sql"),
         },
+        Migration {
+            version: 88,
+            name: "store_currency",
+            sql: include_str!("../migrations/0088_store_currency.sql"),
+        },
+        Migration {
+            version: 89,
+            name: "stock_movements",
+            sql: include_str!("../migrations/0089_stock_movements.sql"),
+        },
+        Migration {
+            version: 90,
+            name: "unit_costs",
+            sql: include_str!("../migrations/0090_unit_costs.sql"),
+        },
+        Migration {
+            version: 91,
+            name: "suppliers",
+            sql: include_str!("../migrations/0091_suppliers.sql"),
+        },
+        Migration {
+            version: 92,
+            name: "purchase_orders",
+            sql: include_str!("../migrations/0092_purchase_orders.sql"),
+        },
+        Migration {
+            version: 93,
+            name: "receipts",
+            sql: include_str!("../migrations/0093_receipts.sql"),
+        },
+        Migration {
+            version: 94,
+            name: "notification_purchase_orders",
+            sql: include_str!("../migrations/0094_notification_purchase_orders.sql"),
+        },
+        Migration {
+            version: 95,
+            name: "transfers",
+            sql: include_str!("../migrations/0095_transfers.sql"),
+        },
+        Migration {
+            version: 96,
+            name: "purchase_order_extra_applied",
+            sql: include_str!("../migrations/0096_purchase_order_extra_applied.sql"),
+        },
+        Migration {
+            version: 97,
+            name: "purchase_order_sent_revision",
+            sql: include_str!("../migrations/0097_purchase_order_sent_revision.sql"),
+        },
+        Migration {
+            version: 98,
+            name: "checkout_rules",
+            sql: include_str!("../migrations/0098_checkout_rules.sql"),
+        },
+        Migration {
+            version: 99,
+            name: "address_verification",
+            sql: include_str!("../migrations/0099_address_verification.sql"),
+        },
+        Migration {
+            version: 100,
+            name: "address_autocomplete",
+            sql: include_str!("../migrations/0100_address_autocomplete.sql"),
+        },
+        Migration {
+            version: 101,
+            name: "validation_apps",
+            sql: include_str!("../migrations/0101_validation_apps.sql"),
+        },
     ],
 };
 
@@ -607,7 +677,7 @@ pub async fn migrate(client: &mut Client, sets: &[MigrationSet]) -> Result<(), M
     check_sets(sets)?;
 
     // Creating or upgrading the bookkeeping table happens under the same lock as every
-    // migration, so two hosts starting at once can't race on it (review plan B8).
+    // migration, so two hosts starting at once can't race on it.
     let tx = client.transaction().await?;
     let prepared: Result<(), MigrateError> = async {
         lock(&tx).await?;

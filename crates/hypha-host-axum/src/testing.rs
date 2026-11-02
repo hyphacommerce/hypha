@@ -8,6 +8,15 @@
 //! template migrated once per set of migrations, so tests run in parallel and a rerun
 //! starts clean.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "test support: a broken fixture panics the test using it, and fixtures cast small counters"
+)]
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 

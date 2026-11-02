@@ -38,3 +38,23 @@ export function DateTime({ value, short = false }: { value: string; short?: bool
     </time>
   );
 }
+
+/**
+ * A calendar date the API keeps as noon UTC (an expected date): the day in UTC, never
+ * the store's zone, which would move it to the next day east of UTC+12. No time of day:
+ * `short` "11 Nov" in tables, else "11 Nov 2026".
+ */
+export function CalendarDate({ value, short = false }: { value: string; short?: boolean }) {
+  const format = (year: boolean) =>
+    new Intl.DateTimeFormat("en-GB", {
+      day: "numeric",
+      month: "short",
+      ...(year ? { year: "numeric" } : {}),
+      timeZone: "UTC",
+    }).format(new Date(value));
+  return (
+    <time dateTime={value.slice(0, 10)} title={format(true)}>
+      {format(!short)}
+    </time>
+  );
+}

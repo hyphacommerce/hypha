@@ -65,6 +65,6 @@ mod tests {
         );
 
         assert!(size.has_value(small));
-        assert!(!size.has_value(other))
+        assert!(!size.has_value(other));
     }
 }

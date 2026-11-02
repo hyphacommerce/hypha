@@ -4,7 +4,7 @@
 
 use hypha_core::{
     AssetId, Email, EventId, HasBatch, Language, NotificationId, OrderId, PageLimit, PageRequest,
-    RepoError, Timestamp, Version, Versioned,
+    PurchaseOrderId, RepoError, Timestamp, Version, Versioned,
 };
 use hypha_media::{
     AssetRepo, AssetUsage, AssetUsageRepo, HasAssetUsages, HasAssets, MimeType, StageAssetUsages,
@@ -352,6 +352,7 @@ fn message(
         subject: format!("Order #{n} — confirmed"),
         event: event.map(eid),
         order: order.map(oid),
+        purchase_order: None,
     })
 }
 
@@ -365,6 +366,7 @@ fn queued(n: u128, template: TemplateKey, to: &str, due: i64) -> Notification {
             subject: format!("Order #{n} — shipped"),
             event: Some(eid(n)),
             order: Some(oid(1)),
+            purchase_order: None,
         },
         QueuedEmail {
             sender_name: Some("Fern & Field — é".to_string()),
@@ -404,6 +406,7 @@ async fn notification_round_trips<R: NotificationRepo>(repo: &R) {
             subject: "Shipped".to_string(),
             event: Some(eid(3)),
             order: Some(oid(1)),
+            purchase_order: None,
         },
         "the template is turned off",
     );
@@ -610,10 +613,43 @@ async fn notifications_listed<R: NotificationRepo>(repo: &R) {
     assert_eq!(listed(failed, None, 10).await, (vec![nid(4)], false));
     let together = NotificationFilter {
         order: Some(oid(1)),
+        purchase_order: None,
         template: Some(TemplateKey::OrderConfirmation),
         status: Some(NotificationStatus::Sending),
     };
     assert_eq!(listed(together, None, 10).await, (vec![nid(1)], false));
+
+    // An email to a supplier names its purchase order, and lists by it.
+    let mut supplier = Notification::queued(
+        NewNotification {
+            id: nid(6),
+            template: TemplateKey::SupplierPurchaseOrder,
+            to: email("orders@spore.example"),
+            subject: "Purchase order PO-1001".to_string(),
+            event: Some(eid(6)),
+            order: None,
+            purchase_order: Some(PurchaseOrderId::from_uuid(Uuid::from_u128(7))),
+        },
+        QueuedEmail {
+            sender_name: None,
+            reply_to: None,
+            html: "<p>PO-1001</p>".to_string(),
+            text: "PO-1001".to_string(),
+        },
+        at(0),
+    );
+    repo.insert(&mut supplier).await.unwrap();
+    assert_eq!(repo.get(nid(6)).await, Ok(Some(supplier)));
+    let of_po = NotificationFilter {
+        purchase_order: Some(PurchaseOrderId::from_uuid(Uuid::from_u128(7))),
+        ..NotificationFilter::default()
+    };
+    assert_eq!(listed(of_po, None, 10).await, (vec![nid(6)], false));
+    let other_po = NotificationFilter {
+        purchase_order: Some(PurchaseOrderId::from_uuid(Uuid::from_u128(8))),
+        ..NotificationFilter::default()
+    };
+    assert_eq!(listed(other_po, None, 10).await, (vec![], false));
 }
 
 async fn notification_queue_round_trips<R: NotificationRepo>(repo: &R) {
@@ -629,6 +665,7 @@ async fn notification_queue_round_trips<R: NotificationRepo>(repo: &R) {
             subject: "New order".to_string(),
             event: None,
             order: None,
+            purchase_order: None,
         },
         QueuedEmail {
             sender_name: None,

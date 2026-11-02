@@ -1,4 +1,4 @@
-//! Multi-query loads read one consistent snapshot (review plan B3), against a real
+//! Multi-query loads read one consistent snapshot, against a real
 //! Postgres. Needs `DATABASE_URL` like the contract tests; skips itself without it.
 //!
 //! A writer keeps moving a customer's default address to a new address and removing
@@ -7,6 +7,15 @@
 //! the address book, `restore` would reject it, and the load would fail with
 //! `RepoError::Backend`.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
 use hypha_core::{Address, AddressId, AddressParts, CustomerId, Email, RepoError};
 use hypha_customers::{Customer, CustomerRepo};
 use hypha_store_postgres::{CORE, PgStore, migrate};

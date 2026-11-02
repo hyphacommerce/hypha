@@ -348,6 +348,10 @@ mod tests {
         let secure =
             answer(json!({"next_action": {"type": "redirect", "url": "https://pay.example"}}));
         assert_eq!(PaymentsStart::check(&start(), &secure), Ok(()));
+        for local in ["http://localhost:3000/pay", "http://127.0.0.1:3000/pay"] {
+            let local = answer(json!({"next_action": {"type": "redirect", "url": local}}));
+            assert_eq!(PaymentsStart::check(&start(), &local), Ok(()));
+        }
     }
 
     #[test]

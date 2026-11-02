@@ -113,6 +113,8 @@ define_id!(CatalogId, "cat");
 define_id!(PriceListId, "pl");
 // Discounts: automatic, or by code (codes are keyed by their normalised text).
 define_id!(DiscountId, "disc");
+// The merchant's checkout rules: conditions on a cart that end in a message.
+define_id!(CheckoutRuleId, "crule");
 define_id!(UserId, "user");
 define_id!(AgentId, "agent");
 // A write an agent proposed, waiting for a person.
@@ -126,6 +128,13 @@ define_id!(TaxRegionId, "txreg");
 
 define_id!(LocationId, "loc");
 define_id!(InventoryItemId, "invi");
+// Stock moved between the store's own locations.
+define_id!(TransferId, "trf");
+
+// Purchasing: suppliers, purchase orders and the receipts of what arrived.
+define_id!(SupplierId, "sup");
+define_id!(PurchaseOrderId, "po");
+define_id!(ReceiptId, "rcpt");
 
 define_id!(CustomerId, "cus");
 define_id!(CustomerGroupId, "cgrp");
@@ -212,6 +221,6 @@ mod tests {
     #[test]
     fn deserialize_rejects_wrong_prefix() {
         let json = format!("\"{}\"", VariantId::from_uuid(Uuid::from_u128(1)));
-        assert!(serde_json::from_str::<ProductId>(&json).is_err())
+        assert!(serde_json::from_str::<ProductId>(&json).is_err());
     }
 }

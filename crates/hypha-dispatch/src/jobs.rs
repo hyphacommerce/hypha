@@ -279,7 +279,10 @@ pub async fn deliver_due<S: DispatchPorts>(
         outcomes.push(Outcome::of(delivery, outcome));
     }
     record(ports, &outcomes).await?;
-    Ok(Progress::of(leased.len() as u32, settings.batch))
+    Ok(Progress::of(
+        u32::try_from(leased.len()).unwrap_or(u32::MAX),
+        settings.batch,
+    ))
 }
 
 /// Deletes events (and their deliveries) older than `keep_events`.

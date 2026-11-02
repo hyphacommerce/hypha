@@ -92,6 +92,14 @@ async fn write_shipping(tx: &impl Queries, s: &CartSnapshot) -> Result<(), RepoE
     let service = quote.map(|q| q.service.as_str());
     let reference = quote.and_then(|q| q.reference.as_deref());
     let quoted_at = quote.map(|q| q.quoted_at.unix_micros());
+    let check = s
+        .address_check
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|e| corrupt(format!("cart {} address check: {e}", s.id)))?;
+    let app_checks = serde_json::to_string(&s.app_checks)
+        .map_err(|e| corrupt(format!("cart {} app checks: {e}", s.id)))?;
     let mut params = id_and_address(&id, &address);
     params.extend([
         (&option as &(dyn ToSql + Sync), Type::UUID),
@@ -101,13 +109,16 @@ async fn write_shipping(tx: &impl Queries, s: &CartSnapshot) -> Result<(), RepoE
         (&service, Type::TEXT),
         (&reference, Type::TEXT),
         (&quoted_at, Type::INT8),
+        (&check, Type::TEXT),
+        (&app_checks, Type::TEXT),
     ]);
     let n = 2 + ADDRESS_LEN;
     tx.query_typed(
         &format!(
             "UPDATE carts SET {}, shipping_option_id = ${}, quote_amount = ${},
                     quote_currency = ${}, quote_provider = ${}, quote_service = ${},
-                    quote_reference = ${}, quoted_at = {}
+                    quote_reference = ${}, quoted_at = {}, address_check = ${}::text::jsonb,
+                    app_checks = ${}::text::jsonb
              WHERE id = $1",
             address_assignments("shipping_", 2),
             n,
@@ -117,6 +128,8 @@ async fn write_shipping(tx: &impl Queries, s: &CartSnapshot) -> Result<(), RepoE
             n + 4,
             n + 5,
             ts(n + 6),
+            n + 7,
+            n + 8,
         ),
         &params,
     )
@@ -289,7 +302,8 @@ fn select_carts() -> String {
         "SELECT id, version, market_id, country, email, customer_id, order_id, channel_id,
                 payment_method_id, marketing_opt_in, discount_codes, {},
                 shipping_option_id, quote_amount, quote_currency, quote_provider,
-                quote_service, quote_reference, {}, {}
+                quote_service, quote_reference, address_check::text AS address_check,
+                app_checks::text AS app_checks, {}, {}
          FROM carts",
         address_columns("shipping_"),
         micros("quoted_at"),
@@ -330,6 +344,12 @@ fn cart_from_row(row: &Row, id: CartId, lines: Vec<CartLineSnapshot>) -> Result<
         marketing_opt_in: col(row, "marketing_opt_in")?,
         discount_codes: col(row, "discount_codes")?,
         shipping_address: address_from_row(row, "shipping_")?,
+        address_check: col::<Option<String>>(row, "address_check")?
+            .map(|text| serde_json::from_str(&text))
+            .transpose()
+            .map_err(|e| corrupt(format!("cart {id} address check: {e}")))?,
+        app_checks: serde_json::from_str(&col::<String>(row, "app_checks")?)
+            .map_err(|e| corrupt(format!("cart {id} app checks: {e}")))?,
         shipping: match col::<Option<Uuid>>(row, "shipping_option_id")? {
             None => None,
             Some(option) => Some(SelectedShipping {

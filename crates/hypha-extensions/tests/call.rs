@@ -1,5 +1,14 @@
 //! `call::<P>`: what it sends, how it judges each answer, and what it records.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
 use std::{cell::RefCell, time::Duration};
 
 use hypha_core::{
@@ -260,6 +269,21 @@ fn an_answer_breaking_the_points_rules_is_invalid() {
         })
     );
     assert_eq!(log.all()[0].error.as_deref(), Some("3 is odd"));
+}
+
+#[test]
+fn an_answer_at_the_cap_is_read() {
+    assert_eq!(MAX_ANSWER_BYTES, 256 * 1024);
+    let empty = r#"{"n": 2, "pad": ""}"#.len();
+    let full = format!(
+        r#"{{"n": 2, "pad": "{}"}}"#,
+        "x".repeat(MAX_ANSWER_BYTES - empty)
+    );
+    let fake = FakeApp::ok(200, &full);
+    assert_eq!(
+        run(&fake, &InMemoryExtensionCallRepo::default(), None),
+        Ok(Reply { n: 2 })
+    );
 }
 
 #[test]

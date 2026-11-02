@@ -52,6 +52,27 @@ impl<C: PgConnection> ExtensionEndpointRepo for PgStore<C> {
         row.as_ref().map(from_row).transpose()
     }
 
+    async fn list_for_point(
+        &self,
+        point: &str,
+    ) -> Result<Vec<(AppKey, ExtensionEndpoint)>, RepoError> {
+        let mut conn = self.conn().await;
+        conn.db()
+            .query_typed(
+                "SELECT app, point, version, url FROM app_extension_endpoints
+                 WHERE point = $1 ORDER BY app COLLATE \"C\"",
+                &[(&point, Type::TEXT)],
+            )
+            .await
+            .map_err(repo_error)?
+            .iter()
+            .map(|row| {
+                let app: String = col(row, "app")?;
+                Ok((AppKey::new(&app).map_err(corrupt)?, from_row(row)?))
+            })
+            .collect()
+    }
+
     async fn replace_for_app(
         &self,
         app: &AppKey,

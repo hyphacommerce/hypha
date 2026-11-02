@@ -255,6 +255,8 @@ export type StockChange = {
   tracked: boolean;
   continueSelling: boolean;
   levels: { location: string; onHand: number; expected: number | null }[];
+  /** Why the counts changed, kept in the stock history; blank for none. */
+  note: string;
 };
 
 export async function variantStock(variant: string): Promise<{ stock?: Stock; error?: string }> {
@@ -302,7 +304,11 @@ export async function saveVariantStock(
       if (level.onHand === level.expected) continue;
       const { data, error } = await client.PUT("/admin/inventory-items/{id}/levels/{location_id}", {
         params: { path: { id: item, location_id: level.location } },
-        body: { on_hand: level.onHand, expected_on_hand: level.expected },
+        body: {
+          on_hand: level.onHand,
+          expected_on_hand: level.expected,
+          note: change.note.trim() === "" ? null : change.note,
+        },
       });
       if (error) return { error: describe(error), stock };
       stock = data;

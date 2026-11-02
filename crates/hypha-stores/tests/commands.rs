@@ -1,6 +1,16 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
+
 use hypha_core::{
-    Actor, AddressParts, AuthError, CountryError, Ctx, EmailError, LanguageError, Scope, StoreId,
-    TimezoneError, UserId,
+    Actor, AddressParts, AuthError, CountryError, Ctx, Currency, CurrencyError, EmailError,
+    LanguageError, Scope, StoreId, TimezoneError, UserId, Versioned,
 };
 use hypha_stores::{
     CommandError, Store, StoreError, StoreRepo, UpdateStore, create_store, ensure_single_store,
@@ -303,6 +313,111 @@ fn update_store_rejects_bad_details_and_changes_nothing() {
     assert_eq!(
         block_on(get_store(&Ctx::system(), &repo, store.id())),
         Ok(store)
+    );
+}
+
+#[test]
+fn a_new_store_has_no_currency_until_one_is_chosen() {
+    let repo = InMemoryStoreRepo::default();
+    let ids = SequentialIds::default();
+    let store = block_on(create_store(&Ctx::system(), &repo, &ids, "Acme")).unwrap();
+    assert_eq!(store.currency(), None);
+    let update = |currency: Option<&str>| {
+        let input = UpdateStore {
+            currency: Some(currency.map(str::to_string)),
+            ..UpdateStore::default()
+        };
+        block_on(update_store(
+            &Ctx::system(),
+            &repo,
+            &clock(),
+            store.id(),
+            input,
+        ))
+    };
+
+    assert_eq!(update(Some("EUR")).unwrap().currency(), Some(Currency::EUR));
+    assert_eq!(
+        block_on(get_store(&Ctx::system(), &repo, store.id()))
+            .unwrap()
+            .currency(),
+        Some(Currency::EUR)
+    );
+    assert_eq!(update(None).unwrap().currency(), None);
+}
+
+#[test]
+fn the_currency_is_fixed_once_a_cost_is_recorded() {
+    let repo = InMemoryStoreRepo::default();
+    let ids = SequentialIds::default();
+    let store = block_on(create_store(&Ctx::system(), &repo, &ids, "Acme")).unwrap();
+    let update = |currency: Option<&str>, locked: bool| {
+        let input = UpdateStore {
+            currency: Some(currency.map(str::to_string)),
+            currency_locked: locked,
+            ..UpdateStore::default()
+        };
+        block_on(update_store(
+            &Ctx::system(),
+            &repo,
+            &clock(),
+            store.id(),
+            input,
+        ))
+    };
+    update(Some("EUR"), false).unwrap();
+
+    assert_eq!(update(Some("USD"), true), Err(CommandError::CurrencyLocked));
+    assert_eq!(update(None, true), Err(CommandError::CurrencyLocked));
+    assert_eq!(
+        update(Some("EUR"), true).unwrap().currency(),
+        Some(Currency::EUR),
+        "the same currency again is no change"
+    );
+    let stored = block_on(get_store(&Ctx::system(), &repo, store.id())).unwrap();
+    assert_eq!(stored.currency(), Some(Currency::EUR));
+}
+
+#[test]
+fn a_lock_alone_changes_nothing() {
+    let repo = InMemoryStoreRepo::default();
+    let ids = SequentialIds::default();
+    let store = block_on(create_store(&Ctx::system(), &repo, &ids, "Acme")).unwrap();
+    let input = UpdateStore {
+        currency_locked: true,
+        ..UpdateStore::default()
+    };
+    let same = block_on(update_store(
+        &Ctx::system(),
+        &repo,
+        &clock(),
+        store.id(),
+        input,
+    ))
+    .unwrap();
+    assert_eq!(same.version(), store.version());
+}
+
+#[test]
+fn update_store_refuses_an_unknown_currency() {
+    let repo = InMemoryStoreRepo::default();
+    let ids = SequentialIds::default();
+    let store = block_on(create_store(&Ctx::system(), &repo, &ids, "Acme")).unwrap();
+    let input = UpdateStore {
+        currency: Some(Some("eur".to_string())),
+        ..UpdateStore::default()
+    };
+    assert_eq!(
+        block_on(update_store(
+            &Ctx::system(),
+            &repo,
+            &clock(),
+            store.id(),
+            input
+        )),
+        Err(CommandError::Currency(CurrencyError::Unknown(
+            "eur".to_string()
+        )))
     );
 }
 

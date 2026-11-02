@@ -130,7 +130,10 @@ pub async fn sync<S: SyncPorts, I: SearchIndex>(
         .search_queue()
         .lease(now, now.plus(settings.lease), settings.batch)
         .await?;
-    let mut progress = Progress::of(marks.len() as u32, settings.batch);
+    let mut progress = Progress::of(
+        u32::try_from(marks.len()).unwrap_or(u32::MAX),
+        settings.batch,
+    );
     if marks.is_empty() {
         return Ok(Synced {
             progress,
@@ -421,7 +424,7 @@ async fn queue_every_product<S: SyncPorts>(ports: &S) -> Result<(), RepoError> {
                 after = Some(Keyset {
                     key: SortKey::Id,
                     id: last.id,
-                })
+                });
             }
             _ => return Ok(()),
         }

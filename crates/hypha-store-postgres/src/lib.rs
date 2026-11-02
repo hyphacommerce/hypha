@@ -5,7 +5,7 @@
 //! a VPS, Lambda; pooled connections) and on Cloudflare Workers through Hyperdrive (one
 //! connection per request; Hyperdrive pools).
 //!
-//! Rules, from the design note:
+//! Rules:
 //! - queries go through `Queries` (`store.rs`): unprepared (`query_typed*`) unless the
 //!   host's connection keeps a `StatementCache`, which only a host connected straight to
 //!   Postgres should: named prepared statements don't survive transaction pooling
@@ -21,6 +21,7 @@ mod batch;
 mod carts;
 mod categories;
 mod channels;
+mod checkout_rules;
 mod columns;
 mod config;
 mod custom_fields;
@@ -44,16 +45,21 @@ mod outbox;
 mod payments;
 mod preview_tokens;
 mod products;
+mod purchase_orders;
+mod receipts;
 mod sales;
 mod search;
 mod shipping;
 pub mod spore_check;
 mod spore_settings;
+mod stock_movements;
 mod store;
 mod stores;
+mod suppliers;
 mod tax;
 #[cfg(feature = "testing")]
 pub mod testing;
+mod transfers;
 mod users;
 
 pub use batch::PgBatch;

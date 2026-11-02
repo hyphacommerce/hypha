@@ -38,6 +38,7 @@ const FULFILMENT: AdminSchemas["FulfillmentStatusDto"][] = [
   "fulfilled",
 ];
 const SORTS = ["newest", "oldest", "total_desc", "total_asc"] as const;
+const ADDRESS = ["needs_review"] as const;
 
 /** The header and the table's toolbar render at once; the rows stream in. */
 export default async function OrdersPage({
@@ -81,6 +82,7 @@ async function OrderRows({ params }: { params: SearchParams }) {
           // A customer page's "View all"; no chip offers it.
           customer: one(params, "customer"),
           country: one(params, "country"),
+          address: oneOf(params, "address", ADDRESS),
           currency: one(params, "currency"),
           placed_from: placed && startOfDay(placed.start, timeZone),
           placed_before: placed && startOfDay(nextDay(placed.end), timeZone),

@@ -130,6 +130,18 @@ pub struct InstalledManifest {
     pub fetched_at: Timestamp,
 }
 
+/// Events about cost, which only apps reading purchasing get, whatever their subject.
+const COST_EVENTS: &[&str] = &["inventory_item.cost_changed"];
+
+/// The read scope an event needs, for apps with a grant: its subject kind's
+/// (`event_scope`), except for cost, which needs `purchasing:read`.
+pub fn route_scope(route: &EventRoute<'_>) -> Option<Scope> {
+    if COST_EVENTS.contains(&route.event_type) {
+        return Some(Scope::PurchasingRead);
+    }
+    event_scope(route.subject_kind)
+}
+
 /// The read scope an event's subject kind needs, for apps with a grant: an app is only sent
 /// events about what it may read. `None` for a kind no scope covers, which granted apps
 /// aren't sent.
@@ -146,6 +158,9 @@ pub fn event_scope(subject_kind: &str) -> Option<Scope> {
         "fulfillment" => Scope::FulfillmentsRead,
         "shipping_zone" => Scope::ShippingRead,
         "asset" => Scope::MediaRead,
+        "supplier" | "purchase_order" | "receipt" => Scope::PurchasingRead,
+        "transfer" => Scope::InventoryRead,
+        "checkout_rule" | "checkout_settings" => Scope::CheckoutRulesRead,
         // Definitions; `<owner>.custom_fields_updated` events are about their owner
         // (`product`, `category`, `customer`, `order`) and go by its read scope.
         "custom_field_definition" => Scope::CustomFieldsRead,
@@ -258,7 +273,7 @@ impl App {
     }
 
     /// A spore, with its declared scopes as its grant (approved by the host: the
-    /// operator chose it by building it in, SP2), recording `app.installed`.
+    /// operator chose it by building it in), recording `app.installed`.
     pub fn spore(new: NewSpore<'_>) -> Result<Self, AppError> {
         let mut app = App::new(NewApp {
             key: AppKey::of_spore(new.name)?,
@@ -537,11 +552,12 @@ impl App {
             return false;
         }
         match (&self.grant, &self.manifest) {
-            (Some(grant), _) => event_scope(route.subject_kind).is_some_and(|s| grant.has(s)),
+            (Some(grant), _) => route_scope(route).is_some_and(|s| grant.has(s)),
             // Installed from a manifest but not granted: nothing.
             (None, Some(_)) => false,
-            // Made by hand (webhooks only): as subscribed.
-            (None, None) => true,
+            // Made by hand (webhooks only): as subscribed, but no cost, as no personal
+            // data: nothing grants it.
+            (None, None) => !COST_EVENTS.contains(&route.event_type),
         }
     }
 
@@ -790,6 +806,51 @@ mod tests {
         })
         .unwrap();
         assert!(app.wants_event(&REDACTED));
+    }
+
+    fn inventory_route(event_type: &'static str) -> EventRoute<'static> {
+        EventRoute {
+            event_type,
+            subject_kind: "inventory_item",
+            subject_id: Uuid::from_u128(9),
+        }
+    }
+
+    #[test]
+    fn cost_changes_need_purchasing_read_not_inventory_read() {
+        assert_eq!(
+            route_scope(&inventory_route("inventory_item.cost_changed")),
+            Some(Scope::PurchasingRead)
+        );
+        assert_eq!(
+            route_scope(&inventory_route("inventory_item.changed")),
+            Some(Scope::InventoryRead)
+        );
+        assert_eq!(event_scope("purchase_order"), Some(Scope::PurchasingRead));
+    }
+
+    #[test]
+    fn checkout_rule_events_need_checkout_rules_read() {
+        assert_eq!(event_scope("checkout_rule"), Some(Scope::CheckoutRulesRead));
+        assert_eq!(
+            event_scope("checkout_settings"),
+            Some(Scope::CheckoutRulesRead)
+        );
+    }
+
+    #[test]
+    fn a_hand_made_app_gets_no_cost_changes() {
+        let app = App::new(NewApp {
+            key: AppKey::new("app_stock").unwrap(),
+            id: AppId::from_uuid(Uuid::from_u128(2)),
+            name: "Stock".to_string(),
+            secret: Sealed::from_bytes(vec![1]),
+            webhook: Some(Webhook::new("https://stock.example/hooks", None).unwrap()),
+            subscriptions: vec!["inventory_item.*".to_string()],
+        })
+        .unwrap();
+        assert!(app.wants_event(&inventory_route("inventory_item.changed")));
+        assert!(!app.wants_event(&inventory_route("inventory_item.cost_changed")));
     }
 
     #[test]

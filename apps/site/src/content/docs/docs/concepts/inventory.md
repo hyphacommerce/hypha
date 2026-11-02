@@ -24,5 +24,47 @@ When a shopper checks out, the order **reserves** the stock it takes, in the sam
 that creates the order, so two shoppers can't buy the last unit twice. Fulfilling the
 order takes the units out of the location they ship from; cancelling gives them back.
 
+## Stock history
+
+Every change to a count leaves a row in the item's **history**
+(`GET /admin/inventory-items/{id}/movements`), written in the same transaction as the
+change, so no change goes unrecorded. Each row says how many units moved and how many were
+left, why, what caused it (a fulfilment, a receipt, a transfer, a purchase order, a person)
+and who made it. At each location, the rows add up to what's on hand; levels that existed
+before the history began start with an `opening` row.
+
+| Reason | Written when |
+| --- | --- |
+| `counted` | A count is set (`PUT …/levels/{location_id}`): the change from the old count |
+| `correction`, `damaged`, `shrinkage`, `promotion`, `other` | An adjustment (`POST …/adjustments`) with that `reason` (`correction` by default) and an optional `note` |
+| `sold`, `restocked` | A fulfilment takes units out, or a cancelled one puts them back |
+| `received` | A [purchase order's receipt](/docs/concepts/purchasing/#receiving) brings units in (taking it back is a negative row) |
+| `transfer_out`, `transfer_in` | A [transfer](/docs/concepts/purchasing/#transfers) ships from or arrives at a location (units lost in transit are a `shrinkage` row with no units) |
+| `cost_adjustment` | The unit cost changed, by hand or by a late purchase order cost: no units, no location |
+
+The history is filtered by `location`, `reason` and time (`from`, `to`), newest first.
+Each item response also names its variant's `product`, and every level shows what's
+`incoming` there from purchase orders and transfers.
+
 Stock changes are events like any other: apps and the storefront's cached pages follow
 them through webhooks.
+
+## Unit cost
+
+An item can keep what one unit cost you (`unit_cost`), in the store's **base currency**
+(`PATCH /admin/store` with `currency`, or the setup wizard). Set it by hand with
+`PUT /admin/inventory-items/{id}/cost` (`purchasing:write`); receiving purchase orders keeps
+it as a moving average. Costs go to 4 decimals past the minor unit, as a decimal string of
+minor units: `{"amount": "0.35", "currency": "EUR"}` is €0.0035.
+
+- Every row of the history carries the cost of its units then, so the cost of goods sold
+  and the stock's value never move when the cost changes later. A cost change is a row of
+  its own (`cost_adjustment`, no location) with the cost before and after.
+- Each order line keeps the cost of its units when the order was placed, for the order's
+  margin.
+- Once a cost is recorded or a purchase order is ordered, the base currency can't change
+  (`409 store_currency_locked`).
+- Cost is shown only to callers holding `purchasing:read`, staff included; elsewhere the
+  fields are absent and listed in the object's `redacted`. Apps get
+  `inventory_item.cost_changed` only with `purchasing:read`.
+

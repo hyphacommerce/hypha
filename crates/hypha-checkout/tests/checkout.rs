@@ -1,16 +1,38 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
+
+use hypha_addresses::Formats;
 use hypha_cart::{
     AddLine, CartRepo, CartStatus, CreateCart, add_line, create_cart, set_cart_customer,
-    set_cart_email,
+    set_cart_email, set_shipping_address,
 };
+use hypha_categories::{Category, CategoryRepo, NewCategory};
 use hypha_checkout::{
-    CartPaymentStarted, Checkout, CommandError, Placed, StartCartPayment, cart_payment_methods,
-    checkout, complete_paid_checkout, set_payment_method, start_cart_payment, view_cart,
+    CartPaymentStarted, Checkout, CommandError, Placed, StartCartPayment, cart_messages,
+    cart_payment_methods, checkout, complete_paid_checkout, set_payment_method, start_cart_payment,
+    view_cart,
+};
+use hypha_checkout_rules::{
+    CheckoutRule, RuleAppliesTo, RuleCondition, RuleDraft, RuleField, RuleOutcome,
+    create_checkout_rule,
 };
 use hypha_core::{
     Actor, AuthError, CartId, Clock, CountryCode, Ctx, Currency, CustomerId, Email,
     IdempotencyRequest, Idempotent, InventoryItemId, LocationId, MarketId, Money, Price, ProductId,
     Quantity, Scope, TaxRate, TaxRegionId, UserId, VariantId,
 };
+use hypha_core::{
+    Address, AddressField, AddressFlags, AddressFormats, AddressParts, AddressWarning,
+    AddressWarningCode, CheckedAddress, Message,
+};
+use hypha_core::{CategoryId, MessageCode, MessagePath, MessageSource, Severity};
 use hypha_core::{PaymentMethodId, Versioned};
 use hypha_customers::{Customer, CustomerRepo};
 use hypha_inventory::{InventoryItem, InventoryItemRepo, Location, LocationRepo, ReservationRef};
@@ -123,7 +145,7 @@ impl World {
             true,
             false,
         );
-        item.set_on_hand(warehouse(), 5, None).unwrap();
+        item.set_on_hand(warehouse(), 5, None, None).unwrap();
         block_on(world.inventory_items.insert(&mut item)).unwrap();
 
         let mut vat = TaxRegion::new(region(), hr(), TaxRate::new(250_000).unwrap());
@@ -207,6 +229,7 @@ impl World {
             &self.clock,
             &NoRateProviders,
             &(ManualProvider,),
+            &Formats,
             input,
         ))
     }
@@ -250,6 +273,28 @@ fn checkout_places_an_order_from_the_priced_cart() {
     assert_eq!(tax.source, OrderTaxSource::RateTable { region: region() });
 
     assert_eq!(block_on(world.orders.get(order.id())), Ok(Some(order)));
+}
+
+#[test]
+fn each_line_keeps_what_a_unit_cost_when_it_was_placed() {
+    let world = World::new();
+    let cost = hypha_core::UnitCost::parse("412.5", Currency::EUR).unwrap();
+    let mut mug = block_on(world.inventory_items.get_by_variant(vid("mug")))
+        .unwrap()
+        .unwrap();
+    mug.set_unit_cost(Some(cost), None);
+    block_on(world.inventory_items.update(&mut mug)).unwrap();
+
+    let order = world.checkout(world.cart()).unwrap();
+    let costs: Vec<_> = order
+        .lines()
+        .iter()
+        .map(|l| (l.variant, l.unit_cost))
+        .collect();
+    // The cup has no inventory item, so no cost.
+    assert_eq!(costs, [(vid("mug"), Some(cost)), (vid("cup"), None)]);
+    let stored = block_on(world.orders.get(order.id())).unwrap().unwrap();
+    assert_eq!(stored.lines()[0].unit_cost, Some(cost));
 }
 
 #[test]
@@ -310,6 +355,64 @@ fn a_customer_with_the_email_is_reused() {
     block_on(world.customers.insert(&mut Customer::new(id, ana()))).unwrap();
     let order = world.checkout(world.cart()).unwrap();
     assert_eq!(order.customer(), id);
+}
+
+/// Ticks the cart's marketing box.
+fn tick_marketing(world: &World, cart: CartId) {
+    block_on(hypha_cart::set_cart_marketing(
+        &Ctx::system(),
+        &world.ports,
+        cart,
+        true,
+    ))
+    .unwrap();
+}
+
+fn email_consent(world: &World, id: CustomerId) -> hypha_customers::MarketingConsent {
+    block_on(world.customers.get(id))
+        .unwrap()
+        .unwrap()
+        .marketing_consent(hypha_customers::Channel::Email)
+}
+
+#[test]
+fn ticking_the_box_subscribes_a_known_customer() {
+    let world = World::new();
+    let id = CustomerId::from_uuid(Uuid::from_u128(1500));
+    block_on(world.customers.insert(&mut Customer::new(id, ana()))).unwrap();
+    let cart = world.cart();
+    tick_marketing(&world, cart);
+    world.checkout(cart).unwrap();
+    let consent = email_consent(&world, id);
+    assert_eq!(
+        (consent.state, consent.source),
+        (
+            hypha_customers::ConsentState::Subscribed,
+            Some(hypha_customers::ConsentSource::Checkout)
+        )
+    );
+}
+
+#[test]
+fn an_erased_customer_ticking_the_box_orders_but_isnt_subscribed() {
+    let world = World::new();
+    let id = CustomerId::from_uuid(Uuid::from_u128(1500));
+    block_on(world.customers.insert(&mut Customer::new(id, ana()))).unwrap();
+    let cart = world.cart();
+    block_on(set_cart_customer(
+        &Ctx::system(),
+        &world.ports,
+        cart,
+        Some(id),
+    ))
+    .unwrap();
+    let mut customer = block_on(world.customers.get(id)).unwrap().unwrap();
+    customer.erase(world.clock.now());
+    block_on(world.customers.update(&mut customer)).unwrap();
+    tick_marketing(&world, cart);
+    let before = email_consent(&world, id);
+    assert_eq!(world.checkout(cart).map(|o| o.customer()), Ok(id));
+    assert_eq!(email_consent(&world, id), before);
 }
 
 #[test]
@@ -1233,6 +1336,7 @@ fn start_paying(
         &world.clock,
         &NoRateProviders,
         &(ManualProvider, app),
+        &Formats,
         StartCartPayment {
             cart,
             expected_total: None,
@@ -1259,6 +1363,7 @@ fn check_out_by(
         &world.clock,
         &NoRateProviders,
         &(ManualProvider, app),
+        &Formats,
         input,
     ))
 }
@@ -1455,6 +1560,7 @@ fn a_report_completes_the_checkout_and_the_shopper_then_gets_that_order() {
             &world.clock,
             &NoRateProviders,
             &(ManualProvider, &app),
+            &Formats,
             payment.id(),
         ))
     };
@@ -1485,6 +1591,7 @@ fn completing_a_paid_checkout_needs_payments_write() {
             &world.clock,
             &NoRateProviders,
             &(ManualProvider, &app),
+            &Formats,
             payment.id(),
         ))
         .map(|_| ()),
@@ -1504,7 +1611,7 @@ fn money_is_given_back_when_the_order_cant_be_placed() {
     let mut item = block_on(world.inventory_items.get_by_variant(vid("mug")))
         .unwrap()
         .unwrap();
-    item.set_on_hand(warehouse(), 0, None).unwrap();
+    item.set_on_hand(warehouse(), 0, None, None).unwrap();
     block_on(world.inventory_items.update(&mut item)).unwrap();
     assert!(matches!(
         check_out_by(&world, cart, &app),
@@ -1547,7 +1654,7 @@ fn money_given_back_is_not_committed_and_paying_starts_again() {
     let mut item = block_on(world.inventory_items.get_by_variant(vid("mug")))
         .unwrap()
         .unwrap();
-    item.set_on_hand(warehouse(), 0, None).unwrap();
+    item.set_on_hand(warehouse(), 0, None, None).unwrap();
     block_on(world.inventory_items.update(&mut item)).unwrap();
     assert!(check_out_by(&world, cart, &app).is_err());
     let refunded = block_on(world.payments.get(payment.id())).unwrap().unwrap();
@@ -1558,7 +1665,7 @@ fn money_given_back_is_not_committed_and_paying_starts_again() {
     );
     // Restocked: the shopper pays again, a new payment (the refunded one counts for
     // nothing).
-    item.set_on_hand(warehouse(), 5, None).unwrap();
+    item.set_on_hand(warehouse(), 5, None, None).unwrap();
     block_on(world.inventory_items.update(&mut item)).unwrap();
     app.state.set(ProviderState::Open);
     let again = start_paying(&world, cart, &app).unwrap();
@@ -1612,6 +1719,7 @@ fn a_committed_payment_of_a_cart_checked_out_with_another_goes_back() {
         &world.clock,
         &NoRateProviders,
         &(ManualProvider, &app),
+        &Formats,
         stray.id(),
     ));
     assert_eq!(done.map(|p| p.is_some()), Ok(false));
@@ -1801,6 +1909,27 @@ fn storage_failures_dont_give_money_back() {
     );
 }
 
+#[test]
+fn an_app_that_didnt_answer_doesnt_give_money_back() {
+    let blocked = CommandError::CheckoutBlocked {
+        cart: CartId::from_uuid(Uuid::from_u128(1)),
+        messages: vec![Message::validation_unavailable(&validating_app())],
+    };
+    assert!(!blocked.gives_money_back());
+}
+
+#[test]
+fn an_error_beside_an_app_that_didnt_answer_gives_money_back() {
+    let blocked = CommandError::CheckoutBlocked {
+        cart: CartId::from_uuid(Uuid::from_u128(1)),
+        messages: vec![
+            Message::validation_unavailable(&validating_app()),
+            app_says(Severity::Error),
+        ],
+    };
+    assert!(blocked.gives_money_back());
+}
+
 // ---- scopes of the cart's payment commands ----
 
 fn caller_with(scopes: Vec<Scope>) -> Ctx {
@@ -1823,6 +1952,7 @@ fn starting_a_cart_payment_needs_checkout() {
         &world.clock,
         &NoRateProviders,
         &(ManualProvider,),
+        &Formats,
         StartCartPayment {
             cart,
             expected_total: None,
@@ -1906,6 +2036,40 @@ fn used_elsewhere(world: &World, discount: hypha_core::DiscountId, customer: Cus
         at: world.clock.now(),
     });
     block_on(world.ports.commit(batch)).unwrap();
+}
+
+#[test]
+fn two_discounts_on_one_order_each_count_a_use() {
+    use hypha_discounts::{
+        ClassSet, Discount, DiscountDraft, DiscountRepo, ItemSet, Kind, Method, Reward, Target,
+        Value,
+    };
+    let world = World::new();
+    let offer = |n: u128, target: Target| {
+        let kind = Kind::Standard {
+            rewards: vec![Reward {
+                target,
+                value: Value::Percent(hypha_core::BasisPoints::new(1000).unwrap()),
+            }],
+        };
+        let mut draft = DiscountDraft::new(&format!("Offer {n}"), Method::Automatic, kind);
+        draft.combines_with = ClassSet::ALL;
+        let id = hypha_core::DiscountId::from_uuid(Uuid::from_u128(n));
+        block_on(
+            world
+                .discounts
+                .insert(&mut Discount::new(id, draft).unwrap()),
+        )
+        .unwrap();
+        id
+    };
+    let items = offer(9000, Target::Items(ItemSet::all()));
+    let order = offer(9001, Target::Subtotal);
+    world.checkout(world.cart()).unwrap();
+    assert_eq!(
+        block_on(world.discounts.usage_counts(&[items, order])),
+        Ok([(items, 1), (order, 1)].into())
+    );
 }
 
 #[test]
@@ -2053,6 +2217,7 @@ fn a_report_completing_a_cart_that_lost_its_discounts_last_use_gives_the_money_b
             &world.clock,
             &NoRateProviders,
             &(ManualProvider, &app),
+            &Formats,
             payment.id(),
         ))
         .map(|_| ()),
@@ -2094,4 +2259,551 @@ fn a_checked_out_cart_reads_with_its_orders_discounts() {
         (eur(240), 1, eur(2700))
     );
     assert_eq!(viewed.discounts[0].title, "Welcome");
+}
+
+/// Formats that take every address and warn that its first line has no house number.
+struct WarnsOfHouseNumbers;
+
+impl AddressFormats for WarnsOfHouseNumbers {
+    fn check(&self, address: &Address) -> CheckedAddress {
+        CheckedAddress {
+            address: address.clone(),
+            problems: Vec::new(),
+            warnings: vec![house_number_missing()],
+            flags: AddressFlags::default(),
+        }
+    }
+
+    fn region_name(&self, _: CountryCode, _: &str) -> Option<&str> {
+        None
+    }
+}
+
+fn house_number_missing() -> AddressWarning {
+    AddressWarning {
+        field: AddressField::Line1,
+        code: AddressWarningCode::HouseNumberMissing,
+        message: "Add a house number".to_string(),
+    }
+}
+
+/// The world's cart with an address in Zagreb.
+fn cart_with_address(world: &World) -> CartId {
+    let cart = world.cart();
+    let address = AddressParts {
+        first_name: None,
+        last_name: "Horvat".to_string(),
+        company: None,
+        line1: "Ilica".to_string(),
+        line2: None,
+        city: "Zagreb".to_string(),
+        province: None,
+        postal_code: Some("10000".to_string()),
+        country: "HR".to_string(),
+        phone: None,
+    };
+    block_on(set_shipping_address(
+        &world.ports.storefront(),
+        &world.ports,
+        &Formats,
+        &hypha_core::NoVerification,
+        cart,
+        Some(address),
+    ))
+    .unwrap();
+    cart
+}
+
+#[test]
+fn a_carts_messages_carry_its_addresss_format_warnings() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let priced = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();
+    assert_eq!(
+        block_on(cart_messages(&world.ports, &WarnsOfHouseNumbers, &priced)).unwrap(),
+        vec![Message::format_warning(&house_number_missing())]
+    );
+}
+
+#[test]
+fn a_cart_without_an_address_has_no_messages() {
+    let world = World::new();
+    let cart = world.cart();
+    let priced = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();
+    assert_eq!(
+        block_on(cart_messages(&world.ports, &WarnsOfHouseNumbers, &priced)).unwrap(),
+        Vec::new()
+    );
+}
+
+#[test]
+fn a_checked_out_cart_has_no_messages() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    world.checkout(cart).unwrap();
+    let priced = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();
+    assert_eq!(
+        block_on(cart_messages(&world.ports, &WarnsOfHouseNumbers, &priced)).unwrap(),
+        Vec::new()
+    );
+}
+
+#[test]
+fn warnings_dont_stop_checkout() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let input = Checkout {
+        cart,
+        expected_total: None,
+        idempotency: None,
+        return_url: None,
+    };
+    let placed = block_on(checkout(
+        &Ctx::system(),
+        &world.ports,
+        &world.ids,
+        &world.clock,
+        &NoRateProviders,
+        &(ManualProvider,),
+        &WarnsOfHouseNumbers,
+        input,
+    ));
+    assert!(placed.is_ok(), "{placed:?}");
+}
+
+// ---- checkout rules ----
+
+/// An error rule with `conditions`, added last.
+fn add_rule(
+    world: &World,
+    applies_to: RuleAppliesTo,
+    conditions: Vec<RuleCondition>,
+    severity: Severity,
+) -> CheckoutRule {
+    let draft = RuleDraft {
+        name: "Courier rule".to_string(),
+        enabled: true,
+        applies_to,
+        conditions,
+        outcome: RuleOutcome {
+            severity,
+            message: "Add a phone number for the courier.".to_string(),
+            path: None,
+            code: Some("phone_required".to_string()),
+        },
+    };
+    block_on(create_checkout_rule(
+        &Ctx::system(),
+        &world.ports,
+        &world.ids,
+        draft,
+    ))
+    .unwrap()
+}
+
+fn phone_missing() -> Vec<RuleCondition> {
+    vec![RuleCondition::FieldMissing {
+        field: RuleField::Phone,
+    }]
+}
+
+fn rule_message(rule: &CheckoutRule, severity: Severity, path: MessagePath) -> Message {
+    Message::new(
+        severity,
+        MessageCode::new("phone_required").unwrap(),
+        path,
+        "Add a phone number for the courier.",
+        MessageSource::Rule { rule: rule.id() },
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_rules_error_blocks_checkout_before_anything_is_reserved() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let rule = add_rule(
+        &world,
+        RuleAppliesTo::default(),
+        phone_missing(),
+        Severity::Error,
+    );
+    assert_eq!(
+        world.checkout(cart),
+        Err(CommandError::CheckoutBlocked {
+            cart,
+            messages: vec![rule_message(
+                &rule,
+                Severity::Error,
+                MessagePath::ShippingAddressField(AddressField::Phone)
+            )],
+        })
+    );
+    assert_eq!(world.mug_reserved(), 0);
+}
+
+#[test]
+fn a_rules_warning_shows_on_the_cart_and_lets_checkout_go_on() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let rule = add_rule(
+        &world,
+        RuleAppliesTo::default(),
+        phone_missing(),
+        Severity::Warning,
+    );
+    let priced = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();
+    assert_eq!(
+        block_on(cart_messages(&world.ports, &Formats, &priced)).unwrap(),
+        vec![rule_message(
+            &rule,
+            Severity::Warning,
+            MessagePath::ShippingAddressField(AddressField::Phone)
+        )]
+    );
+    assert!(world.checkout(cart).is_ok());
+}
+
+#[test]
+fn a_rule_for_a_market_the_cart_isnt_in_says_nothing() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let elsewhere = RuleAppliesTo {
+        markets: vec![MarketId::from_uuid(Uuid::from_u128(77))],
+        ..RuleAppliesTo::default()
+    };
+    add_rule(&world, elsewhere, phone_missing(), Severity::Error);
+    assert!(world.checkout(cart).is_ok());
+}
+
+#[test]
+fn starting_a_payment_is_blocked_by_a_rules_error() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    pay_by_card(&world, cart);
+    let rule = add_rule(
+        &world,
+        RuleAppliesTo::default(),
+        phone_missing(),
+        Severity::Error,
+    );
+    let app = CardApp::default();
+    assert_eq!(
+        start_paying(&world, cart, &app).map(|_| ()),
+        Err(CommandError::CheckoutBlocked {
+            cart,
+            messages: vec![rule_message(
+                &rule,
+                Severity::Error,
+                MessagePath::ShippingAddressField(AddressField::Phone)
+            )],
+        })
+    );
+    assert!(
+        block_on(world.payments.list_for_cart(cart))
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_rule_about_a_category_reads_the_lines_categories_with_their_ancestors() {
+    let world = World::new();
+    let cart = world.cart();
+    let category = |n: u128, parent: Option<u128>| {
+        let id = |n| CategoryId::from_uuid(Uuid::from_u128(n));
+        Category::new(NewCategory {
+            id: id(n),
+            name: format!("Category {n}"),
+            handle: Handle::new(&format!("category-{n}")).unwrap(),
+            description: None,
+            parent: parent.map(id),
+            position: 0,
+            visible: true,
+        })
+        .unwrap()
+    };
+    // Kitchen › Mugs; the cup is in Mugs.
+    for mut c in [category(1, None), category(2, Some(1))] {
+        block_on(world.ports.categories.insert(&mut c)).unwrap();
+    }
+    let mugs = CategoryId::from_uuid(Uuid::from_u128(2));
+    block_on(world.ports.categories.add_products(mugs, &[pid("cup")])).unwrap();
+    let rule = add_rule(
+        &world,
+        RuleAppliesTo::default(),
+        vec![RuleCondition::CartContains {
+            products: Vec::new(),
+            categories: vec![CategoryId::from_uuid(Uuid::from_u128(1))],
+        }],
+        Severity::Warning,
+    );
+    let priced = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();
+    let cup_line = priced
+        .lines
+        .iter()
+        .position(|l| l.product == pid("cup"))
+        .unwrap();
+    assert_eq!(
+        block_on(cart_messages(&world.ports, &Formats, &priced)).unwrap(),
+        vec![rule_message(
+            &rule,
+            Severity::Warning,
+            MessagePath::Line(u32::try_from(cup_line).unwrap())
+        )]
+    );
+}
+
+// ---- validation apps ----
+
+/// One validation app: its digest is the cart's total, so a changed cart is a new question.
+struct OneApp {
+    blocks: bool,
+    answer: Result<Vec<Message>, String>,
+    asked: std::cell::Cell<u32>,
+}
+
+fn validating_app() -> hypha_core::AppKey {
+    hypha_core::AppKey::new("app_rules").unwrap()
+}
+
+impl OneApp {
+    fn saying(answer: Result<Vec<Message>, String>, blocks: bool) -> Self {
+        Self {
+            blocks,
+            answer,
+            asked: std::cell::Cell::new(0),
+        }
+    }
+}
+
+impl hypha_checkout::CheckoutValidators for OneApp {
+    type Body = ();
+
+    async fn validators(
+        &self,
+        cart: &hypha_cart::PricedCart,
+    ) -> Result<Vec<hypha_checkout::Validator<()>>, hypha_core::RepoError> {
+        Ok(vec![hypha_checkout::Validator {
+            app: validating_app(),
+            block_on_failure: self.blocks,
+            digest: cart.total.amount().to_string(),
+            body: (),
+        }])
+    }
+
+    async fn ask(
+        &self,
+        _validator: &hypha_checkout::Validator<()>,
+        _step: hypha_core::ValidationStep,
+    ) -> Result<Vec<Message>, String> {
+        self.asked.set(self.asked.get() + 1);
+        self.answer.clone()
+    }
+}
+
+fn app_says(severity: Severity) -> Message {
+    Message::new(
+        severity,
+        MessageCode::new("alcohol_restricted").unwrap(),
+        MessagePath::ShippingAddressField(AddressField::PostalCode),
+        "We can't ship alcohol to this postal code.",
+        MessageSource::App {
+            app: validating_app(),
+        },
+    )
+    .unwrap()
+}
+
+fn checkout_checked(world: &World, cart: CartId, app: &OneApp) -> Result<Placed, CommandError> {
+    let input = Checkout {
+        cart,
+        expected_total: None,
+        idempotency: None,
+        return_url: None,
+    };
+    block_on(checkout(
+        &Ctx::system(),
+        &world.ports,
+        &world.ids,
+        &world.clock,
+        &NoRateProviders,
+        &(ManualProvider,),
+        &hypha_checkout::Checks {
+            formats: Formats,
+            validators: app,
+        },
+        input,
+    ))
+    .map(|placed| placed.value)
+}
+
+fn validate(world: &World, cart: CartId, app: &OneApp, step: hypha_core::ValidationStep) {
+    let mut priced = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();
+    block_on(hypha_checkout::validate_cart(
+        &Ctx::system(),
+        &world.ports,
+        &hypha_checkout::Checks {
+            formats: Formats,
+            validators: app,
+        },
+        &world.clock,
+        &mut priced,
+        step,
+    ))
+    .unwrap();
+}
+
+fn kept_checks(world: &World, cart: CartId) -> Vec<hypha_core::AppCheck> {
+    block_on(world.carts.get(cart))
+        .unwrap()
+        .unwrap()
+        .app_checks()
+        .to_vec()
+}
+
+#[test]
+fn an_apps_error_blocks_checkout_before_anything_is_reserved() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let app = OneApp::saying(Ok(vec![app_says(Severity::Error)]), false);
+    assert_eq!(
+        checkout_checked(&world, cart, &app),
+        Err(CommandError::CheckoutBlocked {
+            cart,
+            messages: vec![app_says(Severity::Error)],
+        })
+    );
+    assert_eq!(world.mug_reserved(), 0);
+}
+
+#[test]
+fn a_refused_checkout_keeps_the_apps_answer() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let app = OneApp::saying(Ok(vec![app_says(Severity::Error)]), false);
+    checkout_checked(&world, cart, &app).unwrap_err();
+    checkout_checked(&world, cart, &app).unwrap_err();
+    assert_eq!(app.asked.get(), 1);
+    assert_eq!(
+        kept_checks(&world, cart)[0].messages,
+        vec![app_says(Severity::Error)]
+    );
+}
+
+#[test]
+fn an_apps_warning_lets_checkout_go_on() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let app = OneApp::saying(Ok(vec![app_says(Severity::Warning)]), false);
+    assert!(checkout_checked(&world, cart, &app).is_ok());
+}
+
+#[test]
+fn an_answer_for_the_same_cart_isnt_asked_again_at_checkout() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let app = OneApp::saying(Ok(Vec::new()), false);
+    validate(&world, cart, &app, hypha_core::ValidationStep::Address);
+    checkout_checked(&world, cart, &app).unwrap();
+    assert_eq!(app.asked.get(), 1);
+}
+
+#[test]
+fn a_cart_changed_since_is_asked_again_at_checkout() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let app = OneApp::saying(Ok(Vec::new()), false);
+    validate(&world, cart, &app, hypha_core::ValidationStep::Address);
+    world.add(cart, "cup", 1);
+    checkout_checked(&world, cart, &app).unwrap();
+    assert_eq!(app.asked.get(), 2);
+}
+
+#[test]
+fn a_kept_answer_shows_on_the_cart() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let app = OneApp::saying(Ok(vec![app_says(Severity::Warning)]), false);
+    validate(&world, cart, &app, hypha_core::ValidationStep::Address);
+    let priced = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();
+    let checks = hypha_checkout::Checks {
+        formats: Formats,
+        validators: &app,
+    };
+    assert_eq!(
+        block_on(cart_messages(&world.ports, &checks, &priced)).unwrap(),
+        vec![app_says(Severity::Warning)]
+    );
+}
+
+#[test]
+fn a_failing_app_that_doesnt_block_lets_checkout_go_on() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let app = OneApp::saying(Err("no answer within 2 s".to_string()), false);
+    assert!(checkout_checked(&world, cart, &app).is_ok());
+}
+
+#[test]
+fn a_failing_app_that_blocks_stops_checkout() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let app = OneApp::saying(Err("no answer within 2 s".to_string()), true);
+    assert_eq!(
+        checkout_checked(&world, cart, &app),
+        Err(CommandError::CheckoutBlocked {
+            cart,
+            messages: vec![Message::validation_unavailable(&validating_app())],
+        })
+    );
+}
+
+#[test]
+fn a_failed_answer_is_asked_again_at_checkout() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let failing = OneApp::saying(Err("no answer within 2 s".to_string()), true);
+    validate(&world, cart, &failing, hypha_core::ValidationStep::Address);
+    let back = OneApp::saying(Ok(Vec::new()), true);
+    assert!(checkout_checked(&world, cart, &back).is_ok());
+    assert_eq!(back.asked.get(), 1);
+}
+
+#[test]
+fn an_apps_error_stops_its_payment_from_starting() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    pay_by_card(&world, cart);
+    let card = CardApp::default();
+    let app = OneApp::saying(Ok(vec![app_says(Severity::Error)]), false);
+    let started = block_on(start_cart_payment(
+        &world.ports.storefront(),
+        &world.ports,
+        &world.ids,
+        &world.clock,
+        &NoRateProviders,
+        &(ManualProvider, &card),
+        &hypha_checkout::Checks {
+            formats: Formats,
+            validators: &app,
+        },
+        StartCartPayment {
+            cart,
+            expected_total: None,
+            return_url: None,
+        },
+    ));
+    assert_eq!(
+        started.map(|_| ()),
+        Err(CommandError::CheckoutBlocked {
+            cart,
+            messages: vec![app_says(Severity::Error)],
+        })
+    );
+    assert!(
+        block_on(world.payments.list_for_cart(cart))
+            .unwrap()
+            .is_empty()
+    );
 }

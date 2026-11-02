@@ -672,7 +672,7 @@ impl hypha_core::ErrorCode for SettingsReadError {
 }
 
 /// A spore's settings in plain text, secrets opened, for the spore itself (as core
-/// reads: no scope, the spore is trusted code, SP2). `None` before the merchant first
+/// reads: no scope, the spore is trusted code). `None` before the merchant first
 /// saves them. A spore deserializes the map into its own type.
 pub async fn read_spore_settings<S: HasSporeSettings + ?Sized>(
     ports: &S,

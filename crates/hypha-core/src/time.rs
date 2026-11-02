@@ -16,6 +16,15 @@ pub struct Timestamp(i64);
 impl Timestamp {
     pub const UNIX_EPOCH: Timestamp = Timestamp(0);
 
+    /// The sooner of two times either of which may be unknown: one known time wins over
+    /// none.
+    pub fn earliest(a: Option<Timestamp>, b: Option<Timestamp>) -> Option<Timestamp> {
+        match (a, b) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
     pub const fn from_unix_micros(micros: i64) -> Self {
         Self(micros)
     }
@@ -48,6 +57,10 @@ impl Timestamp {
 }
 
 /// A duration's whole microseconds, capped at `i64::MAX`.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "checked against `i64::MAX` first"
+)]
 const fn micros(duration: Duration) -> i64 {
     let micros = duration.as_micros();
     if micros > i64::MAX as u128 {
@@ -107,9 +120,35 @@ pub fn stamp_update(aggregate: &mut impl Stamped, now: Timestamp) {
     aggregate.set_stamps(stamps);
 }
 
+/// `Timestamp` as its microseconds, for JSON a store keeps (`#[serde(with = …)]`): the
+/// API writes RFC 3339 at its edges instead.
+pub mod serde_micros {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    use super::Timestamp;
+
+    pub fn serialize<S: Serializer>(at: &Timestamp, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_i64(at.unix_micros())
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Timestamp, D::Error> {
+        Ok(Timestamp::from_unix_micros(i64::deserialize(d)?))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn earliest_takes_the_sooner_or_the_one_known() {
+        let (early, late) = (Timestamp(1), Timestamp(2));
+        assert_eq!(Timestamp::earliest(Some(late), Some(early)), Some(early));
+        assert_eq!(Timestamp::earliest(Some(early), Some(late)), Some(early));
+        assert_eq!(Timestamp::earliest(None, Some(late)), Some(late));
+        assert_eq!(Timestamp::earliest(Some(early), None), Some(early));
+        assert_eq!(Timestamp::earliest(None, None), None);
+    }
 
     #[derive(Default)]
     struct Thing(Option<Stamps>);

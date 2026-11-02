@@ -1174,12 +1174,12 @@ fn percent_decode(segment: &str) -> String {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        let hex = |b: u8| (b as char).to_digit(16);
+        let hex = |b: u8| (b as char).to_digit(16).and_then(|d| u8::try_from(d).ok());
         if bytes[i] == b'%'
             && i + 2 < bytes.len()
             && let (Some(h), Some(l)) = (hex(bytes[i + 1]), hex(bytes[i + 2]))
         {
-            out.push((h * 16 + l) as u8);
+            out.push(h * 16 + l);
             i += 3;
             continue;
         }
@@ -1454,6 +1454,11 @@ pub async fn refresh<S: Storage>(
     let removes = |m: &hypha_apps::AppManifest| crate::app_fields::removes_fields(&stored, m);
     let prepared =
         prepare_refresh(&ctx, &ports, &state.manifests(), &state.env, &key, removes).await?;
+    // A manifest applied at once may register `checkout.validate` under scopes the grant
+    // already has: a sixth validation app is refused.
+    if let Refreshed::Updated(app) = &prepared.answer {
+        crate::checkout_validate::ensure_room_for_app(&ports, app).await?;
+    }
     let refreshed = crate::app_fields::commit_applying(&ports, &state.env, prepared).await?;
     Ok(Json(match refreshed {
         Refreshed::Updated(app) => RefreshResponse {
@@ -1513,7 +1518,7 @@ mod tests {
             match target.surface() {
                 Surface::Admin => assert_eq!(Target::from(admin_target(target).unwrap()), target),
                 Surface::Storefront => {
-                    assert_eq!(Target::from(storefront_target(target).unwrap()), target)
+                    assert_eq!(Target::from(storefront_target(target).unwrap()), target);
                 }
             }
         }

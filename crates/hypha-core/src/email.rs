@@ -100,7 +100,7 @@ impl From<Email> for String {
 mod tests {
     use super::*;
 
-    /// Review plan B9: SMTP's 254 is bytes, not characters.
+    /// SMTP's 254 is bytes, not characters.
     #[test]
     fn max_length_counts_bytes() {
         let ascii = format!("{}@example.hr", "a".repeat(254 - "@example.hr".len()));
@@ -171,5 +171,14 @@ mod tests {
             Email::new("ana@x.hr").ok()
         );
         assert!(serde_json::from_str::<Email>("\"nope\"").is_err());
+    }
+
+    #[test]
+    fn only_the_placeholder_domain_is_a_placeholder() {
+        let erased = Email::placeholder(uuid::Uuid::from_u128(7));
+        assert!(erased.is_placeholder());
+        let lookalike = format!("x@sub.{}", Email::PLACEHOLDER_DOMAIN);
+        assert!(!Email::new(&lookalike).unwrap().is_placeholder());
+        assert!(!Email::new("ana@example.com").unwrap().is_placeholder());
     }
 }

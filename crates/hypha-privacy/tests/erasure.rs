@@ -1,5 +1,14 @@
 //! Erasing a customer's personal data and exporting it.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
 use hypha_auth::{IdentityRepo as _, SessionRepo as _};
 use std::time::Duration;
 
@@ -83,8 +92,10 @@ fn order_for(ana: CustomerId, n: u128, cart: CartId) -> Order {
             fulfilled_quantity: 0,
             compare_at_price: None,
             price_list: None,
+            unit_cost: None,
         }],
         shipping_address: Some(address()),
+        address_check: None,
         shipping_lines: vec![],
         subtotal: eur(500),
         shipping_total: eur(0),
@@ -103,7 +114,7 @@ fn cart_of(ana: CustomerId, n: u128) -> Cart {
     );
     cart.set_customer(Some((ana, Email::new("ana@example.hr").unwrap())))
         .unwrap();
-    cart.set_shipping_address(Some(address())).unwrap();
+    cart.set_shipping_address(Some(address()), None).unwrap();
     cart
 }
 
@@ -397,6 +408,7 @@ fn erasing_redacts_the_orders_email_records() {
             subject: "Order #1001 confirmed".to_string(),
             event: None,
             order: Some(ana_order()),
+            purchase_order: None,
         },
         QueuedEmail {
             sender_name: None,
@@ -529,4 +541,26 @@ fn the_job_erases_the_others_when_one_erasure_fails() {
     };
     assert!(erased(bo_id));
     assert!(!erased(ana_id()));
+}
+
+#[test]
+fn erasing_reaches_every_page_of_the_customers_orders_and_only_theirs() {
+    let (ports, clock) = world();
+    // A page holds 100: Ana has 101 orders, Bob one.
+    for n in 2..=101 {
+        let mut order = order_for(ana_id(), n, CartId::from_uuid(Uuid::from_u128(7000 + n)));
+        block_on(ports.orders.insert(&mut order)).unwrap();
+    }
+    let bob = CustomerId::from_uuid(Uuid::from_u128(4242));
+    let bobs = OrderId::from_uuid(Uuid::from_u128(1500));
+    let mut order = order_for(bob, 500, CartId::from_uuid(Uuid::from_u128(7500)));
+    block_on(ports.orders.insert(&mut order)).unwrap();
+
+    let erased = block_on(erase_customer(&ports, clock.now(), ana_id()))
+        .unwrap()
+        .expect("erased");
+    assert_eq!(erased.orders.len(), 101);
+    assert!(!erased.orders.contains(&bobs));
+    let kept = block_on(ports.orders.get(bobs)).unwrap().unwrap();
+    assert!(!kept.email().is_placeholder());
 }

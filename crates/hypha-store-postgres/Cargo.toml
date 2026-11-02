@@ -24,12 +24,14 @@ hypha-shipping = { path = "../hypha-shipping" }
 hypha-search-index = { path = "../hypha-search-index" }
 hypha-channels = { path = "../hypha-channels" }
 hypha-categories = { path = "../hypha-categories" }
+hypha-checkout-rules = { path = "../hypha-checkout-rules" }
 hypha-payments = { path = "../hypha-payments" }
 hypha-notifications = { path = "../hypha-notifications" }
 hypha-extensions = { path = "../hypha-extensions" }
 hypha-custom-fields = { path = "../hypha-custom-fields" }
 hypha-agents = { path = "../hypha-agents" }
 hypha-discounts = { path = "../hypha-discounts" }
+hypha-purchasing = { path = "../hypha-purchasing" }
 hypha-promotions = { path = "../hypha-promotions" }
 serde.workspace = true
 serde_json.workspace = true
@@ -54,7 +56,10 @@ tokio-postgres = { version = "0.7.18", default-features = false, features = ["js
 hypha-store-postgres = { path = ".", features = ["testing"] }
 # Workflows sit above this adapter; only the race tests drive one.
 hypha-checkout = { path = "../hypha-checkout" }
+# Checkout takes the address formats its cart messages come from.
+hypha-addresses = { path = "../hypha-addresses" }
 hypha-order-actions = { path = "../hypha-order-actions" }
+hypha-receiving = { path = "../hypha-receiving" }
 hypha-testkit = { path = "../hypha-testkit", features = ["contract"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 tokio-postgres = { version = "0.7.18" }

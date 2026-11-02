@@ -176,6 +176,23 @@ impl ExtensionEndpointRepo for InMemoryExtensionEndpointRepo {
             .and_then(|all| all.iter().find(|e| e.point == point).cloned()))
     }
 
+    async fn list_for_point(
+        &self,
+        point: &str,
+    ) -> Result<Vec<(AppKey, ExtensionEndpoint)>, RepoError> {
+        // The map is by key, so this is in key order already.
+        Ok(self
+            .endpoints
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|(app, all)| {
+                let found = all.iter().find(|e| e.point == point)?;
+                Some((AppKey::new(app).ok()?, found.clone()))
+            })
+            .collect())
+    }
+
     async fn replace_for_app(
         &self,
         app: &AppKey,

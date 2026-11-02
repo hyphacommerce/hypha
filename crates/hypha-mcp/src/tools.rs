@@ -669,6 +669,7 @@ mod tests {
         assert_eq!(singular("orders"), "order");
         assert_eq!(singular("address"), "address");
         assert_eq!(singular("bus"), "bus");
+        assert_eq!(singular("ties"), "tie");
     }
 
     #[test]
@@ -695,6 +696,14 @@ mod tests {
         );
         assert!(tool["inputSchema"]["properties"].get("query").is_none());
         assert_eq!(tool["annotations"]["readOnlyHint"], false);
+        assert!(
+            tool["description"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("Your mode for it is propose"),
+            "{}",
+            tool["description"]
+        );
     }
 
     #[test]
@@ -710,7 +719,7 @@ mod tests {
                 schema: json!({"allOf": [{"$ref": "#/$defs/Update"}],
                     "$defs": {"Update": {"type": "object",
                         "properties": {"item": {"$ref": "#/$defs/Item"}}},
-                        "Item": item.clone(), "Id": {"type": "string"}}}),
+                        "Item": item, "Id": {"type": "string"}}}),
                 required: true,
             }),
             output: None,
@@ -797,6 +806,44 @@ mod tests {
                 .map(|e| e["structuredContent"]["code"].clone()),
             Some(json!("invalid_arguments"))
         );
+    }
+
+    #[test]
+    fn a_tag_outranks_a_summary_word_and_part_of_an_id_still_counts() {
+        let ops = vec![
+            op(
+                "admin.stock.adjust",
+                "Adjust",
+                &["warehouse"],
+                Access::Write,
+            ),
+            op("admin.other.thing", "Warehouse notes", &[], Access::Read),
+        ];
+        assert_eq!(
+            ids(rank(&ops, Some("warehouse"), None)),
+            ["admin.stock.adjust", "admin.other.thing"]
+        );
+        assert_eq!(ids(rank(&ops, Some("adj"), None)), ["admin.stock.adjust"]);
+        assert!(
+            rank(&ops, Some("ad"), None).is_empty(),
+            "two letters are too few"
+        );
+    }
+
+    #[test]
+    fn the_call_tool_documents_its_key_and_preview_token() {
+        let call = fixed_definitions()
+            .into_iter()
+            .find(|t| t["name"] == "call")
+            .unwrap_or_default();
+        let properties = &call["inputSchema"]["properties"];
+        assert_eq!(properties["idempotency_key"]["maxLength"], 255);
+        assert_eq!(properties["preview_token"]["type"], "string");
+        let find = fixed_definitions()
+            .into_iter()
+            .find(|t| t["name"] == "find_operations")
+            .unwrap_or_default();
+        assert_eq!(find["annotations"]["readOnlyHint"], true);
     }
 
     #[test]

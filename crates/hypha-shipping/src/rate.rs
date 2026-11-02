@@ -179,6 +179,7 @@ mod tests {
     fn subtotal(amount: i64) -> Money {
         Money::new(amount, Currency::EUR).unwrap()
     }
+    #[expect(clippy::unnecessary_wraps, reason = "a cart's weight is optional")]
     fn grams(g: u32) -> Option<TotalWeight> {
         Some(TotalWeight::default().add(Weight::from_grams(g), 1))
     }

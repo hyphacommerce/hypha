@@ -445,6 +445,65 @@ impl<S> AppState<S> {
         }
     }
 
+    /// The store's address verification for a request (`address_verify.rs`); calls are
+    /// recorded with `correlation` (the cart or order they're for).
+    pub fn verifier<'a, P>(
+        &'a self,
+        ports: &'a P,
+        correlation: Option<String>,
+    ) -> crate::address_verify::HostVerifier<'a, P> {
+        crate::address_verify::HostVerifier {
+            ports,
+            endpoints: self.app_endpoints(ports),
+            caller: self.extensions(),
+            env: &self.env,
+            clock: &self.clock,
+            correlation,
+        }
+    }
+
+    /// The store's validation apps for one request (`checkout_validate.rs`).
+    pub fn validators<'a, P>(
+        &'a self,
+        ports: &'a P,
+    ) -> crate::checkout_validate::HostValidators<'a, P> {
+        crate::checkout_validate::HostValidators {
+            ports,
+            endpoints: self.app_endpoints(ports),
+            caller: self.extensions(),
+            env: &self.env,
+            asked: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// What a cart's messages come from for one request: the address formats and the
+    /// store's validation apps.
+    pub fn cart_checks<'a, P>(
+        &'a self,
+        ports: &'a P,
+    ) -> hypha_checkout::Checks<
+        hypha_addresses::Formats,
+        crate::checkout_validate::HostValidators<'a, P>,
+    > {
+        hypha_checkout::Checks {
+            formats: hypha_addresses::Formats,
+            validators: self.validators(ports),
+        }
+    }
+
+    /// The store's address autocomplete for one request (`address_suggest.rs`).
+    pub fn autocomplete<'a, P>(
+        &'a self,
+        ports: &'a P,
+    ) -> crate::address_suggest::HostAutocomplete<'a, P> {
+        crate::address_suggest::HostAutocomplete {
+            ports,
+            endpoints: self.app_endpoints(ports),
+            caller: self.extensions(),
+            env: &self.env,
+        }
+    }
+
     /// Where a request's apps answer extension points (`app_endpoints.rs`).
     pub fn app_endpoints<'a, P>(
         &'a self,
@@ -478,7 +537,8 @@ impl<S: Storage> AppState<S> {
             + hypha_apps::HasApps
             + hypha_apps::HasExtensionEndpoints
             + hypha_apps::HasSporeSettings
-            + hypha_extensions::HasExtensionCalls,
+            + hypha_extensions::HasExtensionCalls
+            + hypha_checkout_rules::HasCheckoutSettings,
     {
         let (Some(cart), None) = (payment.cart(), payment.order()) else {
             return Ok(None);
@@ -495,6 +555,7 @@ impl<S: Storage> AppState<S> {
             &self.clock,
             &rates,
             &providers,
+            &self.cart_checks(ports),
             payment.id(),
         )
         .await?;
@@ -569,6 +630,7 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_shipping::HasShippingZones
         + hypha_shipping::HasAppProviders
         + hypha_core::HasOutbox
+        + hypha_inventory::HasStockMovements
         + hypha_core::ActingAs
         + hypha_core::SignalsDispatch
         + hypha_apps::HasApps
@@ -593,6 +655,13 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_agents::HasProposals
         + hypha_agents::HasAgentCalls
         + hypha_discounts::HasDiscounts
+        + hypha_purchasing::HasSuppliers
+        + hypha_purchasing::HasSupplierVariants
+        + hypha_purchasing::HasPurchaseOrders
+        + hypha_receiving::ReceivingPorts
+        + hypha_inventory::TransferPorts
+        + hypha_checkout_rules::HasCheckoutSettings
+        + hypha_inventory::HasLocations
         + HasBatch<
             Batch: hypha_core::StageEvents
                        + hypha_markets::StageCatalogProducts

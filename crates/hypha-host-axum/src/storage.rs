@@ -23,7 +23,7 @@ use hypha_http::payments::CoreProviders;
 
 /// A pooled connection: deadpool-postgres's client, with the statements prepared on it,
 /// kept as long as the connection.
-pub struct PgConn {
+pub(crate) struct PgConn {
     client: deadpool_postgres::ClientWrapper,
     /// `None` with `database.statement_cache = false`.
     statements: Option<StatementCache>,
@@ -33,7 +33,7 @@ pub struct PgConn {
 
 /// deadpool-postgres's manager (connecting, TLS, recycling), keeping a statement cache
 /// with each connection it makes.
-pub struct PgManager {
+pub(crate) struct PgManager {
     inner: deadpool_postgres::Manager,
     statement_cache: bool,
 }
@@ -68,8 +68,8 @@ impl deadpool::managed::Manager for PgManager {
 pub struct PooledClient(Option<deadpool::managed::Object<PgManager>>);
 
 impl PooledClient {
+    #[expect(clippy::expect_used, reason = "`Some` until it's dropped")]
     fn conn(&mut self) -> &mut PgConn {
-        // `Some` until it's dropped.
         self.0.as_deref_mut().expect("a pooled client in use")
     }
 }

@@ -206,7 +206,7 @@ pub trait PriceListRepo {
 }
 
 /// Whatever holds the `MarketRepo`: a host's per-request ports, a test world. Commands
-/// bind just the accessors they use (review plan D1); `hypha_cart::CartPorts` is
+/// bind just the accessors they use; `hypha_cart::CartPorts` is
 /// the union of all of them.
 pub trait HasMarkets {
     type Markets: MarketRepo;
@@ -222,7 +222,7 @@ impl<T: HasMarkets + ?Sized> HasMarkets for &T {
 }
 
 /// Whatever holds the `CatalogRepo`: a host's per-request ports, a test world. Commands
-/// bind just the accessors they use (review plan D1); `hypha_cart::CartPorts` is
+/// bind just the accessors they use; `hypha_cart::CartPorts` is
 /// the union of all of them.
 pub trait HasCatalogs {
     type Catalogs: CatalogRepo;
@@ -238,7 +238,7 @@ impl<T: HasCatalogs + ?Sized> HasCatalogs for &T {
 }
 
 /// Whatever holds the `PriceListRepo`: a host's per-request ports, a test world. Commands
-/// bind just the accessors they use (review plan D1); `hypha_cart::CartPorts` is
+/// bind just the accessors they use; `hypha_cart::CartPorts` is
 /// the union of all of them.
 pub trait HasPriceLists {
     type PriceLists: PriceListRepo;

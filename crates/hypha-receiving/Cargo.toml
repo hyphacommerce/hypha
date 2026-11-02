@@ -1,0 +1,19 @@
+[package]
+name = "hypha-receiving"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+hypha-core.workspace = true
+hypha-inventory = { path = "../hypha-inventory" }
+hypha-purchasing = { path = "../hypha-purchasing" }
+thiserror.workspace = true
+
+[dev-dependencies]
+hypha-testkit = { path = "../hypha-testkit" }
+pollster = "1.0"
+uuid.workspace = true
+
+[lints]
+workspace = true

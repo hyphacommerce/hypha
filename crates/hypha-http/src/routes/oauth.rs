@@ -542,6 +542,7 @@ impl<S: Storage> FromRequestParts<SharedState<S>> for Issuer {
     responses((status = 200, description = "OK", body = ServerMetadata)),
     security(()),
 )]
+#[expect(clippy::unused_async, reason = "axum takes only async handlers")]
 pub async fn metadata<S: Storage>(Issuer(base): Issuer) -> Json<ServerMetadata> {
     Json(ServerMetadata {
         authorization_endpoint: format!("{base}/oauth/authorize"),
@@ -681,7 +682,7 @@ impl CustomFieldChangesDto {
             match find(field) {
                 None => dto.added.push(of_manifest(field)),
                 Some(d) if d.field_type().to_string() == field.field_type.to_string() => {
-                    dto.kept.push(of_manifest(field))
+                    dto.kept.push(of_manifest(field));
                 }
                 Some(_) => dto.retyped.push(of_manifest(field)),
             }
@@ -894,8 +895,9 @@ pub async fn fetch_request<S: Storage>(
 /// (`not_allowed_to_grant`, 403, otherwise). 409 `oauth_request_expired` after ten
 /// minutes, `oauth_request_decided` once answered; `app_installed_from_other_url` (or,
 /// for an upload, `app_installed_from_url`) when the key is an app installed from
-/// another manifest URL since the request was made. A private app's approval answers
-/// with its `credentials` (and no `redirect_to`), shown this once.
+/// another manifest URL since the request was made; `too_many_validation_apps` when it
+/// would make a sixth app validate checkouts. A private app's approval answers with its
+/// `credentials` (and no `redirect_to`), shown this once.
 #[utoipa::path(
     post,
     path = "/admin/oauth/requests/{id}/approve",
@@ -910,6 +912,10 @@ pub async fn approve_request<S: Storage>(
     PathId(id): PathId<OAuthRequestId>,
 ) -> Result<Response, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
+    // Authorised before the limit is looked at, so a caller without the scope learns
+    // nothing about the store's apps.
+    ctx.require(Scope::AppsWrite)?;
+    crate::checkout_validate::ensure_room_for_request(&ports, id).await?;
     // The manifest applied and the app's custom fields synced to it, in one commit.
     let prepared = prepare_approval(&ctx, &ports, &state.env, id).await?;
     let approval = crate::app_fields::commit_applying(&ports, &state.env, prepared).await?;
@@ -1023,6 +1029,10 @@ mod tests {
         server
     }
 
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "a request's peer address is optional"
+    )]
     fn ip(s: &str) -> Option<IpAddr> {
         Some(s.parse().unwrap())
     }

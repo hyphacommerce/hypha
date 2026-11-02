@@ -5,6 +5,15 @@
 //! Without either URL the tests print a notice and pass, so `cargo test --workspace`
 //! still works on machines without Docker.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
 use hypha_store_postgres::testing::{TestDatabase, test_database_url};
 use hypha_store_postgres::{CORE, PgStore};
 use hypha_testkit::contract;
@@ -133,6 +142,12 @@ async fn store_repo() {
 async fn batch() {
     let Some(url) = database_url() else { return };
     contract::batch(async || fresh_store(&url, "contract_batch").await).await;
+}
+
+#[tokio::test]
+async fn stock_movements() {
+    let Some(url) = database_url() else { return };
+    contract::stock_movements(async || fresh_store(&url, "contract_stock_movements").await).await;
 }
 
 #[tokio::test]
@@ -465,4 +480,51 @@ async fn custom_field_filters() {
         fresh_store(&url, "contract_custom_field_filters").await
     })
     .await;
+}
+
+#[tokio::test]
+async fn purchase_order_repo() {
+    let Some(url) = database_url() else { return };
+    contract::purchase_order_repo(async || fresh_store(&url, "contract_purchase_orders").await)
+        .await;
+}
+
+#[tokio::test]
+async fn receipt_repo() {
+    let Some(url) = database_url() else { return };
+    contract::receipt_repo(async || fresh_store(&url, "contract_receipts").await).await;
+}
+
+#[tokio::test]
+async fn transfer_repo() {
+    let Some(url) = database_url() else { return };
+    contract::transfer_repo(async || fresh_store(&url, "contract_transfers").await).await;
+}
+
+#[tokio::test]
+async fn checkout_rule_repo() {
+    let Some(url) = database_url() else { return };
+    contract::checkout_rule_repo(async || fresh_store(&url, "contract_checkout_rules").await).await;
+}
+
+#[tokio::test]
+async fn checkout_settings_repo() {
+    let Some(url) = database_url() else { return };
+    contract::checkout_settings_repo(async || {
+        fresh_store(&url, "contract_checkout_settings").await
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn supplier_repo() {
+    let Some(url) = database_url() else { return };
+    contract::supplier_repo(async || fresh_store(&url, "contract_suppliers").await).await;
+}
+
+#[tokio::test]
+async fn supplier_variants() {
+    let Some(url) = database_url() else { return };
+    contract::supplier_variants(async || fresh_store(&url, "contract_supplier_variants").await)
+        .await;
 }

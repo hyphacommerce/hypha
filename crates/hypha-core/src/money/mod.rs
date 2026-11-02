@@ -3,13 +3,19 @@ use thiserror::Error;
 
 mod basis_points;
 mod currency;
+mod decimal;
+mod exchange_rate;
 mod price;
 mod tax_rate;
+mod unit_cost;
 
 pub use basis_points::BasisPoints;
 pub use currency::{Currency, CurrencyError};
+pub use decimal::div_round;
+pub use exchange_rate::ExchangeRate;
 pub use price::Price;
 pub use tax_rate::TaxRate;
+pub use unit_cost::UnitCost;
 
 /// An amount in minor units (1050 = €10.50) and its currency.
 ///
@@ -50,6 +56,10 @@ pub enum MoneyError {
     InvalidBasisPoints(i32),
     #[error("tax rate must be at most 1000000 (100%), got {0}")]
     InvalidTaxRate(u32),
+    #[error("a unit cost is a decimal string of minor units with at most 4 decimals, not {0:?}")]
+    InvalidUnitCost(String),
+    #[error("an exchange rate is a positive decimal string with at most 8 decimals, not {0:?}")]
+    InvalidExchangeRate(String),
 }
 
 impl crate::ErrorCode for MoneyError {
@@ -60,6 +70,8 @@ impl crate::ErrorCode for MoneyError {
             MoneyError::Negative => "negative_amount",
             MoneyError::InvalidBasisPoints(_) => "invalid_basis_points",
             MoneyError::InvalidTaxRate(_) => "invalid_tax_rate",
+            MoneyError::InvalidUnitCost(_) => "invalid_unit_cost",
+            MoneyError::InvalidExchangeRate(_) => "invalid_exchange_rate",
         }
     }
 }

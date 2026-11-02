@@ -1,0 +1,276 @@
+{% extends "layout" %}
+
+{% block preheader %}{{ shop.name }}'s order {{ purchase_order.number }} for {{ purchase_order.total.formatted }}.{% endblock %}
+
+{% block content %}
+<p
+  style="font-size:22px;line-height:30px;font-weight:700;color:#18181b;margin:8px 0 16px;margin-top:8px;margin-right:0;margin-bottom:16px;margin-left:0">
+  Purchase order {{ purchase_order.number }}
+</p>
+<p
+  style="font-size:15px;line-height:24px;color:#18181b;margin:0 0 16px;margin-top:0;margin-right:0;margin-bottom:16px;margin-left:0">
+  Hello {{ supplier.name }}, here is our purchase order{% if purchase_order.revision %}
+    (revision {{ purchase_order.revision }}, replacing the earlier one){% endif %}. Please confirm it and tell us if anything can't be delivered as listed.
+</p>
+{% if message %}
+  <table
+    align="center"
+    width="100%"
+    border="0"
+    cellpadding="0"
+    cellspacing="0"
+    role="presentation"
+    style="background-color:#f4f4f5;border-left:3px solid {{ brand.accent }};border-radius:4px;margin:0 0 16px">
+    <tbody>
+      <tr>
+        <td style="padding:14px 16px">
+          <pre
+            style='white-space:pre-wrap;font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;font-size:14px;line-height:22px;color:#18181b;margin:0'>
+{{ message }}</pre>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+{% endif %}
+{% if purchase_order.ordered_at %}
+  <p
+    style="font-size:15px;line-height:24px;color:#18181b;margin:0 0 4px;margin-top:0;margin-right:0;margin-bottom:4px;margin-left:0">
+    <span style="color:#71717a">Ordered:</span> {{ purchase_order.ordered_at.formatted }}
+  </p>
+{% endif %}
+{% if purchase_order.expected_at %}
+  <p
+    style="font-size:15px;line-height:24px;color:#18181b;margin:0 0 4px;margin-top:0;margin-right:0;margin-bottom:4px;margin-left:0">
+    <span style="color:#71717a">Expected by:</span> {{ purchase_order.expected_at.formatted }}
+  </p>
+{% endif %}
+{% if purchase_order.supplier_reference %}
+  <p
+    style="font-size:15px;line-height:24px;color:#18181b;margin:0 0 4px;margin-top:0;margin-right:0;margin-bottom:4px;margin-left:0">
+    <span style="color:#71717a">Your reference:</span> {{ purchase_order.supplier_reference }}
+  </p>
+{% endif %}
+{% if purchase_order.payment_terms %}
+  <p
+    style="font-size:15px;line-height:24px;color:#18181b;margin:0 0 4px;margin-top:0;margin-right:0;margin-bottom:4px;margin-left:0">
+    <span style="color:#71717a">Payment terms:</span> {{ purchase_order.payment_terms.summary }}{% if purchase_order.payment_terms.note %}
+      ({{ purchase_order.payment_terms.note }}){% endif %}
+  </p>
+{% endif %}
+<p
+  style="font-size:15px;line-height:22px;font-weight:600;color:#18181b;margin:24px 0 8px;margin-top:24px;margin-right:0;margin-bottom:8px;margin-left:0">
+  Items
+</p>
+<table align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
+  <tbody>
+    <tr>
+      <td>
+        {% for line in purchase_order.lines %}
+          <table
+            align="center"
+            width="100%"
+            border="0"
+            cellpadding="0"
+            cellspacing="0"
+            role="presentation"
+            style="border-bottom:1px solid #e4e4e7">
+            <tbody style="width:100%">
+              <tr style="width:100%">
+                <td data-id="__react-email-column" style="padding:10px 0;vertical-align:top">
+                  <p
+                    style="font-size:15px;line-height:24px;color:#18181b;margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                    {{ line.title }}
+                  </p>
+                  {% if line.variant %}
+                    <p
+                      style="font-size:13px;line-height:20px;color:#71717a;margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                      {{ line.variant }}
+                    </p>
+                  {% endif %}
+                  {% if line.supplier_sku or line.sku %}
+                    <p
+                      style="font-size:13px;line-height:20px;color:#71717a;margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                      {% if line.supplier_sku %}Your code {{ line.supplier_sku }}{% endif %}{% if line.supplier_sku and line.sku %} · {% endif %}{% if line.sku %}Our SKU {{ line.sku }}{% endif %}
+                    </p>
+                  {% endif %}
+                </td>
+                <td
+                  align="right"
+                  data-id="__react-email-column"
+                  style="padding:10px 0;vertical-align:top;width:56px">
+                  <p
+                    style="font-size:15px;line-height:24px;color:#71717a;margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                    × {{ line.quantity }}
+                  </p>
+                </td>
+                <td
+                  align="right"
+                  data-id="__react-email-column"
+                  style="padding:10px 0;vertical-align:top;width:130px">
+                  <p
+                    style="font-size:15px;line-height:24px;color:#18181b;margin:0;white-space:nowrap;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                    {{ line.total.formatted }}
+                  </p>
+                  <p
+                    style="font-size:13px;line-height:20px;color:#71717a;margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                    {{ line.unit_cost.formatted }} each
+                  </p>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        {% endfor %}
+      </td>
+    </tr>
+  </tbody>
+</table>
+<table
+  align="center"
+  width="100%"
+  border="0"
+  cellpadding="0"
+  cellspacing="0"
+  role="presentation"
+  style="margin-top:12px">
+  <tbody>
+    <tr>
+      <td>
+        <table
+          align="center"
+          width="100%"
+          border="0"
+          cellpadding="0"
+          cellspacing="0"
+          role="presentation">
+          <tbody style="width:100%">
+            <tr style="width:100%">
+              <td data-id="__react-email-column" style="padding:3px 0">
+                <p
+                  style="font-size:15px;line-height:24px;color:#71717a;margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                  Subtotal
+                </p>
+              </td>
+              <td align="right" data-id="__react-email-column" style="padding:3px 0">
+                <p
+                  style="font-size:15px;line-height:24px;color:#71717a;margin:0;white-space:nowrap;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                  {{ purchase_order.subtotal.formatted }}
+                </p>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        {% for cost in purchase_order.costs %}
+          <table
+            align="center"
+            width="100%"
+            border="0"
+            cellpadding="0"
+            cellspacing="0"
+            role="presentation">
+            <tbody style="width:100%">
+              <tr style="width:100%">
+                <td data-id="__react-email-column" style="padding:3px 0">
+                  <p
+                    style="font-size:15px;line-height:24px;color:#71717a;margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                    {{ cost.label }}{% if cost.description %} ({{ cost.description }}){% endif %}
+                  </p>
+                </td>
+                <td align="right" data-id="__react-email-column" style="padding:3px 0">
+                  <p
+                    style="font-size:15px;line-height:24px;color:#71717a;margin:0;white-space:nowrap;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                    {{ cost.amount.formatted }}
+                  </p>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        {% endfor %}
+        {% if purchase_order.tax %}
+          <table
+            align="center"
+            width="100%"
+            border="0"
+            cellpadding="0"
+            cellspacing="0"
+            role="presentation">
+            <tbody style="width:100%">
+              <tr style="width:100%">
+                <td data-id="__react-email-column" style="padding:3px 0">
+                  <p
+                    style="font-size:15px;line-height:24px;color:#71717a;margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                    Tax
+                  </p>
+                </td>
+                <td align="right" data-id="__react-email-column" style="padding:3px 0">
+                  <p
+                    style="font-size:15px;line-height:24px;color:#71717a;margin:0;white-space:nowrap;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                    {{ purchase_order.tax.formatted }}
+                  </p>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        {% endif %}
+        <table
+          align="center"
+          width="100%"
+          border="0"
+          cellpadding="0"
+          cellspacing="0"
+          role="presentation">
+          <tbody style="width:100%">
+            <tr style="width:100%">
+              <td data-id="__react-email-column" style="padding:3px 0">
+                <p
+                  style="font-size:15px;line-height:24px;color:#18181b;margin:0;font-weight:700;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                  Total
+                </p>
+              </td>
+              <td align="right" data-id="__react-email-column" style="padding:3px 0">
+                <p
+                  style="font-size:15px;line-height:24px;color:#18181b;margin:0;font-weight:700;white-space:nowrap;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">
+                  {{ purchase_order.total.formatted }}
+                </p>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </td>
+    </tr>
+  </tbody>
+</table>
+{% if purchase_order.ship_to %}
+  <p
+    style="font-size:15px;line-height:22px;font-weight:600;color:#18181b;margin:24px 0 8px;margin-top:24px;margin-right:0;margin-bottom:8px;margin-left:0">
+    Ship to
+  </p>
+  <p
+    style="font-size:15px;line-height:24px;color:#18181b;margin:0 0 8px;margin-top:0;margin-right:0;margin-bottom:8px;margin-left:0">
+    {{ purchase_order.ship_to.name }}<br />{% if purchase_order.ship_to.address %}{% if purchase_order.ship_to.address.contact %}{{ purchase_order.ship_to.address.contact }}<br />{% endif %}{% if purchase_order.ship_to.address.company %}{{ purchase_order.ship_to.address.company }}<br />{% endif %}{{ purchase_order.ship_to.address.line1 }}<br />{% if purchase_order.ship_to.address.line2 %}{{ purchase_order.ship_to.address.line2 }}<br />{% endif %}{% if purchase_order.ship_to.address.postal_code %}{{ purchase_order.ship_to.address.postal_code }} {% endif %}{{ purchase_order.ship_to.address.city }}<br />{% if purchase_order.ship_to.address.province %}{{ purchase_order.ship_to.address.province }}<br />{% endif %}{{ purchase_order.ship_to.address.country }}{% if purchase_order.ship_to.address.phone %}<br />{{ purchase_order.ship_to.address.phone }}{% endif %}{% endif %}
+  </p>
+{% endif %}
+{% if purchase_order.note_to_supplier %}
+  <p
+    style="font-size:15px;line-height:22px;font-weight:600;color:#18181b;margin:24px 0 8px;margin-top:24px;margin-right:0;margin-bottom:8px;margin-left:0">
+    Notes
+  </p>
+  <table
+    align="center"
+    width="100%"
+    border="0"
+    cellpadding="0"
+    cellspacing="0"
+    role="presentation"
+    style="background-color:#f4f4f5;border-left:3px solid {{ brand.accent }};border-radius:4px;margin:0 0 16px">
+    <tbody>
+      <tr>
+        <td style="padding:14px 16px">
+          <pre
+            style='white-space:pre-wrap;font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;font-size:14px;line-height:22px;color:#18181b;margin:0'>
+{{ purchase_order.note_to_supplier }}</pre>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+{% endif %}
+{% endblock %}

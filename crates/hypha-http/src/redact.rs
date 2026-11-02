@@ -17,6 +17,11 @@
 //!   `users:read` governs them, not these scopes.
 //! - Webhooks and extension requests: the receiving app's grant decides (a hand-made
 //!   app without a grant sees no personal data).
+//!
+//! Cost (what a unit cost the store: items', stock movements' and order lines') follows
+//! its own rule: absent unless the caller holds `purchasing:read`, staff sessions
+//! included, and listed in the object's `redacted` likewise. What the business pays its
+//! suppliers is for those who buy, not for everyone who works the store.
 
 use std::fmt;
 
@@ -48,7 +53,14 @@ pub struct Redaction {
 const NAME: &[&str] = &["first_name", "last_name"];
 const EMAIL: &[&str] = &["email"];
 const PHONE: &[&str] = &["phone"];
-const ADDRESS: &[&str] = &["line1", "line2", "city", "province", "postal_code"];
+const ADDRESS: &[&str] = &[
+    "line1",
+    "line2",
+    "city",
+    "province",
+    "province_name",
+    "postal_code",
+];
 
 impl Redaction {
     /// Nothing removed.
@@ -106,6 +118,8 @@ impl Redaction {
         let removed: Vec<&'static str> = self
             .removed()
             .filter(|f| [NAME, PHONE, ADDRESS].iter().any(|g| g.contains(f)))
+            // An extension's address has the region's code only.
+            .filter(|f| *f != "province_name")
             .collect();
         for field in &removed {
             match *field {
@@ -138,7 +152,7 @@ impl Redaction {
     /// Removes the personal fields among `only` from `object`, listing what it removed
     /// in its `redacted`. Fields that aren't there (or are `null`) are listed all the
     /// same, so the list doesn't tell which ones had a value.
-    fn strip(&self, object: &mut Fields, only: &[&[&str]]) {
+    fn strip(self, object: &mut Fields, only: &[&[&str]]) {
         let removed: Vec<&str> = self
             .removed()
             .filter(|field| only.iter().any(|group| group.contains(field)))
@@ -157,14 +171,14 @@ impl Redaction {
 
     /// A postal address (an order's, a cart's, an address-book entry): names, phone and
     /// street, postal code, city, province.
-    fn address(&self, node: &mut Node) {
+    fn address(self, node: &mut Node) {
         if let Node::Object(object) = node {
             self.strip(object, &[NAME, PHONE, ADDRESS]);
         }
     }
 
     /// A customer: names, email, phone, and the address book.
-    fn customer(&self, node: &mut Node) {
+    fn customer(self, node: &mut Node) {
         if let Node::Object(object) = node {
             if let Some(Node::Array(addresses)) = field(object, "addresses") {
                 addresses.iter_mut().for_each(|a| self.address(a));
@@ -173,20 +187,33 @@ impl Redaction {
         }
     }
 
-    /// An order or a cart: the buyer's email and the addresses.
-    fn order(&self, node: &mut Node) {
+    /// An order or a cart: the buyer's email and the addresses, a verification's
+    /// suggested address among them.
+    fn order(self, node: &mut Node) {
         if let Node::Object(object) = node {
             for key in ["shipping_address", "billing_address"] {
                 if let Some(address) = field(object, key) {
                     self.address(address);
                 }
             }
+            // A cart's `shipping_address_check`, an order's `address_check.verification`.
+            if let Some(Node::Object(check)) = field(object, "shipping_address_check")
+                && let Some(suggested) = field(check, "suggested")
+            {
+                self.address(suggested);
+            }
+            if let Some(Node::Object(check)) = field(object, "address_check")
+                && let Some(Node::Object(verification)) = field(check, "verification")
+                && let Some(suggested) = field(verification, "suggested")
+            {
+                self.address(suggested);
+            }
             self.strip(object, &[EMAIL]);
         }
     }
 
     /// An email's record: who it went to.
-    fn notification(&self, node: &mut Node) {
+    fn notification(self, node: &mut Node) {
         if let Node::Object(object) = node
             && self.email
         {
@@ -199,7 +226,7 @@ impl Redaction {
     }
 
     /// Any value (a webhook payload): every personal field anywhere in it.
-    fn deep(&self, value: &mut Value) {
+    fn deep(self, value: &mut Value) {
         match value {
             Value::Object(object) => {
                 object.values_mut().for_each(|v| self.deep(v));
@@ -322,19 +349,26 @@ impl<'de> Visitor<'de> for NodeVisitor {
     }
 }
 
-/// The DTO families that carry personal data.
+/// The DTO families that carry personal data or cost.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Family {
     Customer,
-    /// Orders and carts.
+    /// Orders and carts: personal data, and each order line's cost.
     Order,
     Notification,
     /// A discount's use: its customer's names and email.
     DiscountUsage,
+    /// An inventory item: its cost.
+    InventoryItem,
+    /// A row of the stock ledger: its costs.
+    StockMovement,
 }
 
+/// The cost fields, which need `purchasing:read`.
+const COST: &[&str] = &["unit_cost", "average_after"];
+
 impl Family {
-    fn apply(self, r: &Redaction, node: &mut Node) {
+    fn apply(self, r: Redaction, node: &mut Node) {
         match self {
             Family::Customer => r.customer(node),
             Family::Order => r.order(node),
@@ -344,8 +378,61 @@ impl Family {
                     r.strip(object, &[NAME, EMAIL]);
                 }
             }
+            Family::InventoryItem | Family::StockMovement => {}
         }
     }
+
+    /// Removes the cost fields, for a caller without `purchasing:read`.
+    fn hide_cost(self, node: &mut Node) {
+        match self {
+            Family::Order => {
+                if let Node::Object(object) = node
+                    && let Some(Node::Array(lines)) = field(object, "lines")
+                {
+                    lines.iter_mut().for_each(|line| hide_keys(line, COST));
+                }
+            }
+            Family::InventoryItem | Family::StockMovement => hide_keys(node, COST),
+            Family::Customer | Family::Notification | Family::DiscountUsage => {}
+        }
+    }
+}
+
+/// Removes `keys` from an object and lists those it had in its `redacted`, beside any
+/// listed already. A DTO always writes its cost fields (`null` without one), so what's
+/// listed doesn't tell whether there was a value; a DTO without them (a cart's line) lists
+/// nothing.
+fn hide_keys(node: &mut Node, keys: &[&str]) {
+    let Node::Object(object) = node else {
+        return;
+    };
+    let removed: Vec<&str> = keys
+        .iter()
+        .copied()
+        .filter(|k| object.iter().any(|(key, _)| key == k))
+        .collect();
+    if removed.is_empty() {
+        return;
+    }
+    object.retain(|(key, _)| !removed.contains(&key.as_str()));
+    let names = removed.iter().map(|k| Value::String((*k).into()));
+    match field(object, "redacted") {
+        // Listed by another rule here, or by the DTO itself.
+        Some(Node::Scalar(Value::Array(listed))) => listed.extend(names),
+        Some(Node::Array(listed)) => listed.extend(names.map(Node::Scalar)),
+        _ => {
+            object.retain(|(key, _)| key != "redacted");
+            object.push((
+                "redacted".to_string(),
+                Node::Scalar(Value::Array(names.collect())),
+            ));
+        }
+    }
+}
+
+/// Whether `ctx` sees cost.
+fn sees_cost(ctx: &Ctx) -> bool {
+    ctx.has_scope(Scope::PurchasingRead)
 }
 
 /// A response with the caller's redaction applied: what handlers of those families
@@ -377,7 +464,10 @@ pub fn one_with_fields(
     let mut node = Node::of(dto)?;
     let r = Redaction::of(ctx);
     if !r.is_none() {
-        family.apply(&r, &mut node);
+        family.apply(r, &mut node);
+    }
+    if !sees_cost(ctx) {
+        family.hide_cost(&mut node);
     }
     hide_fields(&mut node, hidden);
     Ok(Redacted(node))
@@ -392,13 +482,17 @@ pub fn page_with_fields(
 ) -> Result<Redacted, ApiError> {
     let mut node = Node::of(page)?;
     let r = Redaction::of(ctx);
-    if (!r.is_none() || !hidden.is_empty())
+    let hide_cost = !sees_cost(ctx);
+    if (!r.is_none() || !hidden.is_empty() || hide_cost)
         && let Node::Object(fields) = &mut node
         && let Some(Node::Array(items)) = field(fields, "items")
     {
         for item in items.iter_mut() {
             if !r.is_none() {
-                family.apply(&r, item);
+                family.apply(r, item);
+            }
+            if hide_cost {
+                family.hide_cost(item);
             }
             hide_fields(item, hidden);
         }
@@ -598,6 +692,60 @@ mod tests {
         );
     }
 
+    fn costed_order() -> Value {
+        json!({
+            "id": "ord_1",
+            "lines": [
+                {"id": "ol_1", "unit_cost": {"amount": "250", "currency": "EUR"}},
+                {"id": "ol_2", "unit_cost": null}
+            ]
+        })
+    }
+
+    #[test]
+    fn cost_is_hidden_from_staff_without_purchasing_read() {
+        let staff = Ctx::new(
+            Actor::User(UserId::from_uuid(Uuid::from_u128(1))),
+            vec![Scope::OrdersRead],
+        );
+        let seen =
+            serde_json::to_value(one(&staff, Family::Order, costed_order()).unwrap()).unwrap();
+        assert_eq!(
+            seen,
+            json!({
+                "id": "ord_1",
+                "lines": [
+                    {"id": "ol_1", "redacted": ["unit_cost"]},
+                    {"id": "ol_2", "redacted": ["unit_cost"]}
+                ]
+            })
+        );
+    }
+
+    #[test]
+    fn purchasing_read_shows_cost_to_anyone() {
+        let key = Ctx::new(
+            Actor::ApiKey(ApiKeyId::from_uuid(Uuid::from_u128(2))),
+            vec![Scope::PurchasingRead],
+        );
+        let seen = serde_json::to_value(one(&key, Family::Order, costed_order()).unwrap()).unwrap();
+        assert_eq!(seen["lines"], costed_order()["lines"]);
+    }
+
+    #[test]
+    fn cost_joins_what_is_already_redacted() {
+        let row = json!({"position": 3, "unit_cost": null, "average_after": null,
+                         "redacted": ["note"]});
+        let page = json!({"items": [row], "has_more": false});
+        let seen =
+            serde_json::to_value(super::page(&app(vec![]), Family::StockMovement, page).unwrap())
+                .unwrap();
+        assert_eq!(
+            seen["items"][0],
+            json!({"position": 3, "redacted": ["note", "unit_cost", "average_after"]})
+        );
+    }
+
     #[test]
     fn staff_see_everything() {
         let staff = Ctx::new(Actor::User(UserId::from_uuid(Uuid::from_u128(1))), vec![]);
@@ -619,9 +767,36 @@ mod tests {
                 "shipping_address": {
                     "company": "Acme", "country": "HR",
                     "redacted": ["first_name", "last_name", "phone", "line1", "line2", "city",
-                                 "province", "postal_code"]
+                                 "province", "province_name", "postal_code"]
                 }
             })
+        );
+    }
+
+    #[test]
+    fn a_verifications_suggested_address_is_redacted_like_the_address() {
+        let suggested = json!({"line1": "Ilica 1", "city": "Zagreb", "country": "HR"});
+        let cart = json!({"id": "cart_1", "shipping_address_check": {
+            "verdict": "deliverable_with_fixes", "suggested": suggested}});
+        let order = json!({"id": "ord_1", "address_check": {"verification": {
+            "verdict": "deliverable_with_fixes", "suggested": suggested}}});
+        let without = app(vec![Scope::OrdersRead]);
+        let cart = serde_json::to_value(one(&without, Family::Order, cart).unwrap()).unwrap();
+        let order = serde_json::to_value(one(&without, Family::Order, order).unwrap()).unwrap();
+        for seen in [
+            &cart["shipping_address_check"]["suggested"],
+            &order["address_check"]["verification"]["suggested"],
+        ] {
+            assert_eq!(seen.get("line1"), None);
+            assert_eq!(seen["country"], "HR");
+        }
+        let with = app(vec![Scope::OrdersRead, Scope::CustomerDataAddress]);
+        let order = json!({"id": "ord_1", "address_check": {"verification": {
+            "suggested": {"line1": "Ilica 1", "city": "Zagreb", "country": "HR"}}}});
+        let seen = serde_json::to_value(one(&with, Family::Order, order).unwrap()).unwrap();
+        assert_eq!(
+            seen["address_check"]["verification"]["suggested"]["line1"],
+            "Ilica 1"
         );
     }
 

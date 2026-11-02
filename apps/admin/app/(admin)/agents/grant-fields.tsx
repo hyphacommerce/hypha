@@ -207,9 +207,7 @@ export function GrantFields({
                 </div>
               );
             })}
-            {PROPOSE_ONLY.map((scope) =>
-              writeRow(scope, "Erase customers' personal data", undefined, true),
-            )}
+            {PROPOSE_ONLY.map(({ scope, label }) => writeRow(scope, label, undefined, true))}
           </div>
         </VStack>
       </Card>

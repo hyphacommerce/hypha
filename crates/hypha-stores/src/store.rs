@@ -1,6 +1,6 @@
 use hypha_core::{
-    Address, AddressParts, Email, Language, Stamped, Stamps, StoreId, Timestamp, Timezone, Version,
-    Versioned, optional_text,
+    Address, AddressParts, Currency, Email, Language, Stamped, Stamps, StoreId, Timestamp,
+    Timezone, Version, Versioned, optional_text,
 };
 
 use crate::error::StoreError;
@@ -20,6 +20,8 @@ pub struct Store {
     legal_address: Option<Address>,
     timezone: Option<Timezone>,
     default_language: Language,
+    /// The base currency every cost is kept in; `None` until the merchant chooses one.
+    currency: Option<Currency>,
     setup: SetupProgress,
 }
 
@@ -78,6 +80,7 @@ impl Store {
             legal_address: None,
             timezone: None,
             default_language: english(),
+            currency: None,
             setup: SetupProgress::default(),
         })
     }
@@ -116,6 +119,12 @@ impl Store {
     /// written in.
     pub fn set_default_language(&mut self, language: Language) {
         self.default_language = language;
+    }
+
+    /// The currency costs are kept in. Whether it may still change (no cost recorded in
+    /// the old one) is the command's to check.
+    pub fn set_currency(&mut self, currency: Option<Currency>) {
+        self.currency = currency;
     }
 
     /// The setup guide step the merchant is on; `None` clears it.
@@ -169,6 +178,10 @@ impl Store {
         &self.default_language
     }
 
+    pub fn currency(&self) -> Option<Currency> {
+        self.currency
+    }
+
     pub fn snapshot(&self) -> StoreSnapshot {
         StoreSnapshot {
             id: self.id,
@@ -181,6 +194,7 @@ impl Store {
             legal_address: self.legal_address.as_ref().map(|a| a.parts().clone()),
             timezone: self.timezone,
             default_language: self.default_language.clone(),
+            currency: self.currency,
             setup_step: self.setup.step.as_ref().map(|s| s.as_str().to_string()),
             setup_finished_at: self.setup.finished_at,
         }
@@ -197,6 +211,7 @@ impl Store {
         store.legal_address = s.legal_address.map(Address::new).transpose()?;
         store.timezone = s.timezone;
         store.default_language = s.default_language;
+        store.currency = s.currency;
         store.setup = SetupProgress {
             step: s.setup_step.as_deref().map(SetupStep::new).transpose()?,
             finished_at: s.setup_finished_at,
@@ -206,8 +221,11 @@ impl Store {
 }
 
 /// `en`: the language a new store's content is written in.
+#[expect(
+    clippy::expect_used,
+    reason = "a literal `Language::new` always accepts (a test checks it)"
+)]
 fn english() -> Language {
-    // A literal that `Language::new` always accepts (a test checks it).
     Language::new("en").expect("\"en\" is a valid language tag")
 }
 
@@ -245,6 +263,7 @@ pub struct StoreSnapshot {
     pub legal_address: Option<AddressParts>,
     pub timezone: Option<Timezone>,
     pub default_language: Language,
+    pub currency: Option<Currency>,
     pub setup_step: Option<String>,
     pub setup_finished_at: Option<Timestamp>,
 }

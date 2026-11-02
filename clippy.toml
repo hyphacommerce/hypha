@@ -1,0 +1,4 @@
+# A failing test should panic: these lints are for the code the tests run.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

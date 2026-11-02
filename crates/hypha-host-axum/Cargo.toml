@@ -8,10 +8,7 @@ publish = false
 [dependencies]
 # The routes, the state and everything but the runtime.
 hypha-http = { path = "../hypha-http" }
-hypha-dispatch = { path = "../hypha-dispatch" }
 hypha-payments = { path = "../hypha-payments" }
-hypha-merchandising = { path = "../hypha-merchandising" }
-hypha-search = { path = "../hypha-search" }
 hypha-core = { workspace = true, features = ["openapi"] }
 hypha-config = { path = "../hypha-config" }
 hypha-inventory = { path = "../hypha-inventory" }
@@ -27,7 +24,6 @@ hypha-store-s3 = { path = "../hypha-store-s3" }
 hypha-stores = { path = "../hypha-stores" }
 hypha-users = { path = "../hypha-users" }
 hypha-notifications = { path = "../hypha-notifications" }
-hypha-mail = { path = "../hypha-mail" }
 hypha-mail-resend = { path = "../hypha-mail-resend" }
 # The test host (`testing`, feature `testing`): API keys, requests through the router.
 hypha-auth = { path = "../hypha-auth", optional = true }

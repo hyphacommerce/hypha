@@ -13,7 +13,8 @@ import { redirect } from "next/navigation";
 
 import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 
-import { api, describe, loadCountries, shopperApi } from "@/lib/api";
+import { type AddressValues, type FieldProblems, asField } from "@/lib/address";
+import { api, describe, loadCountries, refusedWith, shopperApi } from "@/lib/api";
 import { type ListingPage, readListingPage } from "@/lib/listing-data";
 import { formatRange } from "@/lib/money";
 import { COUNTRY_COOKIE } from "@/lib/routing";
@@ -22,8 +23,8 @@ import { checkOutCart } from "@/lib/checkout";
 import { accountApi, forgetSession, sessionHeaders } from "@/lib/account";
 import { cartId, forgetCart, link, mode, rememberCart } from "@/lib/site";
 
-/** What a refused action tells its form. */
-export type ActionResult = { error: string } | undefined;
+/** Why an action was refused; an address's problems by field (`invalid_address`). */
+export type ActionResult = { error: string; problems?: FieldProblems } | undefined;
 
 /** The shopper's cart as the API prices it. */
 export type Cart = StorefrontSchemas["CartResponse"];
@@ -31,10 +32,10 @@ export type Cart = StorefrontSchemas["CartResponse"];
 /** A cart action's answer: the cart as it is now, or why it was refused. */
 export type CartResult = { cart: Cart | null; error?: string };
 
-type ApiError = { code: string; error: string };
+type ApiError = { code: string; error: string; details?: unknown };
 
 function refused(error: ApiError): ActionResult {
-  return { error: describe(error) };
+  return refusedWith(error);
 }
 
 /** `value` trimmed, or `null` for a blank optional field. */
@@ -203,18 +204,7 @@ export async function removeDiscountCode(input: {
   return { cart: data ?? (await loadCart(input.country)) };
 }
 
-export type Details = {
-  email: string;
-  first_name: string;
-  last_name: string;
-  company: string;
-  line1: string;
-  line2: string;
-  postal_code: string;
-  city: string;
-  province: string;
-  phone: string;
-};
+export type Details = AddressValues & { email: string };
 
 /** Checkout's first step: the email, the marketing box and the shipping address,
  * together. One after the other: all write the cart, so at once they'd race for its
@@ -322,6 +312,9 @@ export async function placeOrder(input: {
     // A code's last use went to another order meanwhile: the summary re-renders with
     // the code's new state and total, which is what the shopper confirms next.
     if (result.code === "discounts_changed") refresh();
+    // The cart's errors show where they belong once the page re-renders: its messages
+    // are what checkout refused on.
+    if (result.code === "checkout_blocked") refresh();
     if (result.code === "payment_failed" || result.code === "payment_required") {
       return { error: result.error, step: "payment" };
     }
@@ -364,7 +357,13 @@ export async function startCartPayment(input: {
   if (error) {
     if (error.code === "cart_payment_committed") return { ...none, error: null, committed: true };
     // The page re-renders with what changed (the total, the methods).
-    if (error.code === "total_changed" || error.code === "payment_method_unavailable") refresh();
+    if (
+      error.code === "total_changed" ||
+      error.code === "payment_method_unavailable" ||
+      error.code === "checkout_blocked"
+    ) {
+      refresh();
+    }
     return { ...none, error: describe(error) };
   }
   const next = data.next_action ?? null;
@@ -422,6 +421,71 @@ export async function suggest(country: string, q: string): Promise<Suggestion[]>
     href: link(country, `/p/${hit.handle}`),
     image: hit.image?.kind === "image" ? (hit.image.thumbnail_url ?? hit.image.url) : null,
   }));
+}
+
+/** An address the store's autocomplete app offers while the shopper types line 1. */
+export type AddressSuggestion = { id: string; label: string; description: string | null };
+
+/**
+ * Addresses for what the shopper typed into line 1, from the store's autocomplete app
+ * (none when it has no app, it fails, or the shopper typed too little). `session` is the
+ * form's token for this address, the same until one is picked.
+ */
+export async function suggestAddresses(input: {
+  country: string;
+  q: string;
+  session: string;
+}): Promise<AddressSuggestion[]> {
+  const q = input.q.trim();
+  if (q.length < 3 || q.length > 200) return [];
+  const { data } = await (
+    await shopperApi()
+  ).GET("/storefront/address-suggestions", {
+    params: { query: { q, country: input.country, session: input.session } },
+  });
+  return (data?.suggestions ?? []).map((s) => ({
+    id: s.id,
+    label: s.label,
+    description: s.description ?? null,
+  }));
+}
+
+/** A picked suggestion as the form's values, with what saving it would refuse. */
+export type ResolvedAddress = {
+  values: Partial<AddressValues>;
+  problems: FieldProblems;
+};
+
+/** The picked suggestion's address, or `null` when the app couldn't give it (the shopper
+ * types it then). */
+export async function resolveAddress(input: {
+  country: string;
+  id: string;
+  session: string;
+}): Promise<ResolvedAddress | null> {
+  const { data } = await (
+    await shopperApi()
+  ).GET("/storefront/address-suggestions/{id}", {
+    params: { path: { id: input.id }, query: { country: input.country, session: input.session } },
+  });
+  if (!data) return null;
+  const a = data.address;
+  const problems: FieldProblems = {};
+  for (const p of data.problems) {
+    const field = asField(p.field);
+    if (field) problems[field] ??= p.message;
+  }
+  return {
+    values: {
+      company: a.company ?? "",
+      line1: a.line1,
+      line2: a.line2 ?? "",
+      city: a.city,
+      province: a.province ?? "",
+      postal_code: a.postal_code ?? "",
+    },
+    problems,
+  };
 }
 
 /**

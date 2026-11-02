@@ -98,7 +98,7 @@ mod tests {
         let mut m = market(1, "RS");
         block_on(repo.insert(&mut m)).unwrap();
         assert_eq!(m.version(), Version::new(1));
-        assert_eq!(block_on(repo.get(m.id())), Ok(Some(m)))
+        assert_eq!(block_on(repo.get(m.id())), Ok(Some(m)));
     }
 
     #[test]

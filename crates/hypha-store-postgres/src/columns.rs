@@ -3,7 +3,7 @@
 use hypha_auth::TokenHash;
 use hypha_core::{
     Actor, AddressParts, AgentId, ApiKeyId, Currency, RepoError, Scope, Stamps, TaxRate, Timestamp,
-    UserId, Version,
+    UnitCost, UserId, Version,
 };
 use tokio_postgres::{
     Row,
@@ -35,6 +35,28 @@ pub(crate) fn version_from_db(version: i64) -> Result<Version, RepoError> {
 
 pub(crate) fn currency_from_db(code: &str) -> Result<Currency, RepoError> {
     code.parse().map_err(corrupt)
+}
+
+/// A unit cost as its columns: the amount in 1/10,000 of a minor unit, and the currency.
+pub(crate) fn unit_cost_to_db(cost: Option<UnitCost>) -> (Option<i64>, Option<&'static str>) {
+    match cost {
+        Some(c) => (Some(c.scaled()), Some(c.currency().as_str())),
+        None => (None, None),
+    }
+}
+
+/// `unit_cost_to_db`'s inverse: both columns or neither.
+pub(crate) fn unit_cost_from_db(
+    scaled: Option<i64>,
+    currency: Option<&str>,
+) -> Result<Option<UnitCost>, RepoError> {
+    match (scaled, currency) {
+        (Some(scaled), Some(code)) => UnitCost::new(scaled, currency_from_db(code)?)
+            .map(Some)
+            .map_err(corrupt),
+        (None, None) => Ok(None),
+        _ => Err(corrupt("a unit cost without its currency")),
+    }
 }
 
 pub(crate) fn tax_rate_to_db(rate: TaxRate) -> Result<i32, RepoError> {
@@ -142,11 +164,11 @@ pub(crate) struct Prefixed<'a> {
 }
 
 impl<'a> Prefixed<'a> {
-    pub fn plain(row: &'a Row) -> Self {
+    pub(crate) fn plain(row: &'a Row) -> Self {
         Prefixed { row, prefix: "" }
     }
 
-    pub fn col<T: FromSql<'a>>(&self, name: &str) -> Result<T, RepoError> {
+    pub(crate) fn col<T: FromSql<'a>>(&self, name: &str) -> Result<T, RepoError> {
         if self.prefix.is_empty() {
             col(self.row, name)
         } else {

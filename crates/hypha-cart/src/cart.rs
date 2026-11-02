@@ -1,7 +1,7 @@
 use hypha_core::{
-    Address, AddressParts, CartId, ChannelId, CountryCode, CustomerId, Email, MarketId, OrderId,
-    PaymentMethodId, Price, ProductId, Quantity, ShippingGroupId, ShippingOptionId, Stamped,
-    Stamps, Timestamp, VariantId, Version, Versioned,
+    Address, AddressParts, AddressVerification, AppCheck, CartId, ChannelId, CountryCode,
+    CustomerId, Email, MarketId, OrderId, PaymentMethodId, Price, ProductId, Quantity,
+    ShippingGroupId, ShippingOptionId, Stamped, Stamps, Timestamp, VariantId, Version, Versioned,
 };
 use hypha_shipping::ProviderKey;
 
@@ -93,6 +93,10 @@ pub struct Cart {
     status: CartStatus,
     /// In `country`.
     shipping_address: Option<Address>,
+    /// What the store's verification app said about the address, when one was asked.
+    address_check: Option<AddressVerification>,
+    /// Each validation app's last answer about the cart.
+    app_checks: Vec<AppCheck>,
     /// The choice for the cart's one group of shippable lines.
     shipping: Option<SelectedShipping>,
     /// How the buyer will pay: checked when chosen and again at checkout.
@@ -140,6 +144,8 @@ impl Cart {
             customer: None,
             status: CartStatus::Open,
             shipping_address: None,
+            address_check: None,
+            app_checks: Vec::new(),
             shipping: None,
             payment_method: None,
             marketing_opt_in: false,
@@ -158,7 +164,13 @@ impl Cart {
         }
         if self.shipping_address.is_some() {
             self.shipping_address = None;
+            self.address_check = None;
             self.shipping = None;
+            changed = true;
+        }
+        // An app's messages may quote what it was sent.
+        if !self.app_checks.is_empty() {
+            self.app_checks.clear();
             changed = true;
         }
         changed
@@ -257,8 +269,13 @@ impl Cart {
     }
 
     /// Where the cart ships; it must be in the cart's country. A new address drops the
-    /// shipping choice: what's offered depends on the destination.
-    pub fn set_shipping_address(&mut self, address: Option<Address>) -> Result<(), CartError> {
+    /// shipping choice: what's offered depends on the destination. `check` is what
+    /// verification said about it (none without an address).
+    pub fn set_shipping_address(
+        &mut self,
+        address: Option<Address>,
+        check: Option<AddressVerification>,
+    ) -> Result<(), CartError> {
         self.ensure_open()?;
         if let Some(a) = &address
             && a.country() != self.country
@@ -271,7 +288,15 @@ impl Cart {
         if address != self.shipping_address {
             self.shipping = None;
         }
+        self.address_check = check.filter(|_| address.is_some());
         self.shipping_address = address;
+        Ok(())
+    }
+
+    /// Keeps the validation apps' answers: one per app, replacing what was kept.
+    pub fn set_app_checks(&mut self, checks: Vec<AppCheck>) -> Result<(), CartError> {
+        self.ensure_open()?;
+        self.app_checks = checks;
         Ok(())
     }
 
@@ -399,6 +424,16 @@ impl Cart {
         self.shipping_address.as_ref()
     }
 
+    /// What verification said about the shipping address, when it was asked.
+    pub fn address_check(&self) -> Option<&AddressVerification> {
+        self.address_check.as_ref()
+    }
+
+    /// Each validation app's last answer about the cart.
+    pub fn app_checks(&self) -> &[AppCheck] {
+        &self.app_checks
+    }
+
     pub fn shipping(&self) -> Option<&SelectedShipping> {
         self.shipping.as_ref()
     }
@@ -433,6 +468,9 @@ pub struct CartSnapshot {
     pub order: Option<OrderId>,
     /// Checked by `Address::new` on restore.
     pub shipping_address: Option<AddressParts>,
+    /// Only with an address.
+    pub address_check: Option<AddressVerification>,
+    pub app_checks: Vec<AppCheck>,
     pub shipping: Option<SelectedShipping>,
     pub payment_method: Option<PaymentMethodId>,
     pub marketing_opt_in: bool,
@@ -472,6 +510,8 @@ impl Cart {
                 CartStatus::Completed { order } => Some(order),
             },
             shipping_address: self.shipping_address.as_ref().map(|a| a.parts().clone()),
+            address_check: self.address_check.clone(),
+            app_checks: self.app_checks.clone(),
             shipping: self.shipping.clone(),
             payment_method: self.payment_method,
             marketing_opt_in: self.marketing_opt_in,
@@ -534,6 +574,8 @@ impl Cart {
                 None => CartStatus::Open,
                 Some(order) => CartStatus::Completed { order },
             },
+            address_check: s.address_check.filter(|_| shipping_address.is_some()),
+            app_checks: s.app_checks,
             shipping_address,
             shipping: s.shipping,
             payment_method: s.payment_method,
@@ -697,6 +739,8 @@ mod tests {
         assert_eq!(c.set_email(None), completed);
         assert_eq!(c.set_customer(None), completed);
         assert_eq!(c.complete(order()), completed);
+        assert_eq!(c.set_marketing_opt_in(true), completed);
+        assert_eq!(c.set_payment_method(None), completed);
         assert_eq!(c.lines().len(), 1);
     }
 
@@ -731,5 +775,115 @@ mod tests {
         let mut s = c.snapshot();
         s.lines.push(s.lines[0].clone());
         assert_eq!(Cart::restore(s), Err(RestoreError::DuplicateLine(vid(1))));
+    }
+
+    fn hr_address(country: &str) -> AddressParts {
+        AddressParts {
+            first_name: None,
+            last_name: "Horvat".to_string(),
+            company: None,
+            line1: "Ilica 1".to_string(),
+            line2: None,
+            city: "Zagreb".to_string(),
+            province: None,
+            postal_code: None,
+            country: country.to_string(),
+            phone: None,
+        }
+    }
+
+    fn checked() -> AddressVerification {
+        AddressVerification::failed(
+            "d".to_string(),
+            hypha_core::AppKey::new("app_verify").unwrap(),
+            "timeout".to_string(),
+            Timestamp::from_unix_micros(1),
+        )
+    }
+
+    #[test]
+    fn an_address_keeps_its_check_and_clearing_it_drops_both() {
+        let mut c = cart();
+        let address = Address::new(hr_address("HR")).unwrap();
+        c.set_shipping_address(Some(address), Some(checked()))
+            .unwrap();
+        assert_eq!(c.address_check(), Some(&checked()));
+        c.set_shipping_address(None, Some(checked())).unwrap();
+        assert_eq!(c.address_check(), None);
+    }
+
+    #[test]
+    fn redacting_a_cart_drops_its_address_check() {
+        let mut c = cart();
+        let address = Address::new(hr_address("HR")).unwrap();
+        c.set_shipping_address(Some(address), Some(checked()))
+            .unwrap();
+        c.redact(Email::new("erased@example.invalid").unwrap());
+        assert_eq!(c.address_check(), None);
+    }
+
+    #[test]
+    fn a_quote_holds_for_fifteen_minutes() {
+        let quote = StoredQuote {
+            amount: Price::new(hypha_core::Money::new(500, hypha_core::Currency::EUR).unwrap())
+                .unwrap(),
+            provider: ProviderKey::new("app_rates").unwrap(),
+            service: "standard".to_string(),
+            reference: None,
+            quoted_at: Timestamp::from_unix_micros(0),
+        };
+        assert_eq!(quote.expires_at(), Timestamp::from_unix_micros(900_000_000));
+    }
+
+    #[test]
+    fn redacting_replaces_the_email_once() {
+        let mut c = cart();
+        c.set_email(Some(Email::new("ana@example.hr").unwrap()))
+            .unwrap();
+        let placeholder = Email::placeholder(Uuid::from_u128(7));
+        assert!(c.redact(placeholder.clone()));
+        assert_eq!(c.email(), Some(&placeholder));
+        assert!(!c.redact(placeholder));
+    }
+
+    #[test]
+    fn restore_holds_up_to_the_most_codes_and_no_more() {
+        let mut s = cart().snapshot();
+        s.discount_codes = (0..MAX_CODES_PER_CART)
+            .map(|n| format!("CODE{n}"))
+            .collect();
+        assert!(Cart::restore(s.clone()).is_ok());
+        s.discount_codes.push("ONEMORE".to_string());
+        assert_eq!(
+            Cart::restore(s),
+            Err(RestoreError::Cart(CartError::TooManyDiscountCodes {
+                max: MAX_CODES_PER_CART
+            }))
+        );
+    }
+
+    #[test]
+    fn restore_rejects_a_code_held_twice() {
+        let mut s = cart().snapshot();
+        s.discount_codes = vec!["SAVE".to_string(), "SAVE".to_string()];
+        assert_eq!(
+            Cart::restore(s),
+            Err(RestoreError::DuplicateDiscountCode("SAVE".to_string()))
+        );
+    }
+
+    #[test]
+    fn restore_rejects_an_address_in_another_country() {
+        let mut s = cart().snapshot();
+        s.shipping_address = Some(hr_address("HR"));
+        assert!(Cart::restore(s.clone()).is_ok());
+        s.shipping_address = Some(hr_address("RS"));
+        assert_eq!(
+            Cart::restore(s),
+            Err(RestoreError::Cart(CartError::AddressCountryMismatch {
+                address: CountryCode::new("RS").unwrap(),
+                cart: CountryCode::new("HR").unwrap(),
+            }))
+        );
     }
 }

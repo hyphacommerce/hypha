@@ -31,7 +31,7 @@ pub(crate) struct Request<'a> {
 impl Signer<'_> {
     /// The query string of a presigned URL valid for `expires_in_secs` (without `?`).
     /// The client must send exactly `request.headers`.
-    pub fn presign(&self, request: &Request<'_>, expires_in_secs: u32) -> String {
+    pub(crate) fn presign(&self, request: &Request<'_>, expires_in_secs: u32) -> String {
         let (date, time) = amz_date(request.now);
         let scope = format!("{date}/{}/s3/aws4_request", self.region);
         let headers = with_host(request.host, request.headers);
@@ -65,7 +65,7 @@ impl Signer<'_> {
 
     /// The headers to add to `request` (`x-amz-date`, `x-amz-content-sha256`,
     /// `authorization`) for a request without a body.
-    pub fn authorize(&self, request: &Request<'_>) -> Vec<(String, String)> {
+    pub(crate) fn authorize(&self, request: &Request<'_>) -> Vec<(String, String)> {
         let (date, time) = amz_date(request.now);
         let scope = format!("{date}/{}/s3/aws4_request", self.region);
         let mut own = request.headers.to_vec();
@@ -109,7 +109,7 @@ impl Signer<'_> {
 }
 
 fn hmac(key: &[u8], data: &str) -> Vec<u8> {
-    // HMAC takes keys of any length, so this can't fail.
+    #[expect(clippy::expect_used, reason = "HMAC takes keys of any length")]
     let mut mac = Hmac::<Sha256>::new_from_slice(key).expect("HMAC accepts any key length");
     mac.update(data.as_bytes());
     mac.finalize().into_bytes().to_vec()
@@ -176,7 +176,7 @@ fn encode(s: &str, encode_slash: bool) -> String {
     for byte in s.bytes() {
         match byte {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                out.push(byte as char)
+                out.push(byte as char);
             }
             b'/' if !encode_slash => out.push('/'),
             _ => out.push_str(&format!("%{byte:02X}")),

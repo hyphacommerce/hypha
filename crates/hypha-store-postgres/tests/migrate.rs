@@ -1,5 +1,14 @@
 //! The migration runner against a real Postgres (needs `DATABASE_URL`, like contract.rs).
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
 use hypha_store_postgres::{CORE, MigrateError, Migration, MigrationSet, migrate};
 use tokio_postgres::{Client, NoTls};
 
@@ -125,7 +134,7 @@ async fn an_edited_migration_is_an_error() {
     );
 }
 
-/// Review plan B8: two hosts starting at once used to race on creating
+/// Two hosts starting at once used to race on creating
 /// `schema_migrations` before any lock was taken.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn two_runners_starting_at_once_both_succeed() {
@@ -855,5 +864,133 @@ async fn backfills_give_stripe_payments_their_intent_as_their_attempt() {
             None,
             None
         ]
+    );
+}
+
+/// Core before the store's base currency: migrations 0001 to 0087.
+const BEFORE_STORE_CURRENCY: MigrationSet = MigrationSet {
+    module: "core",
+    migrations: CORE.migrations.split_at(87).0,
+};
+
+/// The base currency 0088 gives a store whose markets charge in `currencies`.
+async fn store_currency_after(schema: &str, currencies: &[&str]) -> Option<Option<String>> {
+    let mut client = fresh_schema(schema).await?;
+    migrate(&mut client, &[BEFORE_STORE_CURRENCY])
+        .await
+        .unwrap();
+    client
+        .batch_execute(
+            "INSERT INTO stores (id, version, name) VALUES (gen_random_uuid(), 1, 'Shop')",
+        )
+        .await
+        .unwrap();
+    for currency in currencies {
+        client
+            .execute(
+                "INSERT INTO markets (id, version, name, currency)
+                 VALUES (gen_random_uuid(), 1, 'Market', $1)",
+                &[currency],
+            )
+            .await
+            .unwrap();
+    }
+    migrate(&mut client, &[CORE]).await.unwrap();
+    Some(
+        client
+            .query_one("SELECT currency FROM stores", &[])
+            .await
+            .unwrap()
+            .get(0),
+    )
+}
+
+#[tokio::test]
+async fn a_store_selling_in_one_currency_keeps_its_costs_in_it() {
+    let Some(currency) = store_currency_after("migrate_0088_one", &["EUR", "EUR"]).await else {
+        return;
+    };
+    assert_eq!(currency.as_deref(), Some("EUR"));
+}
+
+#[tokio::test]
+async fn a_store_selling_in_several_currencies_or_none_chooses_later() {
+    let Some(mixed) = store_currency_after("migrate_0088_mixed", &["EUR", "USD"]).await else {
+        return;
+    };
+    assert_eq!(mixed, None);
+    let none = store_currency_after("migrate_0088_none", &[]).await;
+    assert_eq!(none, Some(None));
+}
+
+/// Core before the stock ledger: migrations 0001 to 0088.
+const BEFORE_STOCK_MOVEMENTS: MigrationSet = MigrationSet {
+    module: "core",
+    migrations: CORE.migrations.split_at(88).0,
+};
+
+#[tokio::test]
+async fn every_counted_level_opens_the_ledger() {
+    let Some(mut client) = fresh_schema("migrate_0089_stock_movements").await else {
+        return;
+    };
+    migrate(&mut client, &[BEFORE_STOCK_MOVEMENTS])
+        .await
+        .unwrap();
+    client
+        .batch_execute(
+            "INSERT INTO inventory_items (id, version, variant_id, tracked, continue_selling)
+             VALUES ('00000000-0000-0000-0000-000000000001', 1,
+                     '00000000-0000-0000-0000-000000000011', true, false);
+             INSERT INTO inventory_levels (item_id, position, location_id, on_hand) VALUES
+                 ('00000000-0000-0000-0000-000000000001', 0,
+                  '00000000-0000-0000-0000-000000000021', 7),
+                 ('00000000-0000-0000-0000-000000000001', 1,
+                  '00000000-0000-0000-0000-000000000022', -2),
+                 ('00000000-0000-0000-0000-000000000001', 2,
+                  '00000000-0000-0000-0000-000000000023', 0);",
+        )
+        .await
+        .unwrap();
+    migrate(&mut client, &[CORE]).await.unwrap();
+
+    let rows = client
+        .query(
+            "SELECT variant_id::text, location_id::text, delta, after, reason, source_kind,
+                 actor_kind
+             FROM stock_movements ORDER BY position",
+            &[],
+        )
+        .await
+        .unwrap();
+    let read: Vec<(String, String, i64, i64, String, String, String)> = rows
+        .iter()
+        .map(|r| {
+            (
+                r.get(0),
+                r.get(1),
+                r.get(2),
+                r.get(3),
+                r.get(4),
+                r.get(5),
+                r.get(6),
+            )
+        })
+        .collect();
+    let row = |location: &str, n: i64| {
+        (
+            "00000000-0000-0000-0000-000000000011".to_string(),
+            format!("00000000-0000-0000-0000-0000000000{location}"),
+            n,
+            n,
+            "opening".to_string(),
+            "migration".to_string(),
+            "system".to_string(),
+        )
+    };
+    assert_eq!(
+        read,
+        [row("21", 7), row("22", -2)],
+        "an empty level opens nothing"
     );
 }

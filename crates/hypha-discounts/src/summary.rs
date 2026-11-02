@@ -556,7 +556,13 @@ fn date(at: Timestamp) -> String {
     ];
     let days = at.unix_micros().div_euclid(86_400_000_000);
     let (y, m, d) = civil_from_days(days);
-    format!("{d} {} {y}", MONTHS[(m - 1) as usize])
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "a civil month is 1 to 12"
+    )]
+    let month = MONTHS[(m - 1) as usize];
+    format!("{d} {month} {y}")
 }
 
 /// The proleptic Gregorian date `days` after 1970-01-01 (Howard Hinnant's algorithm).

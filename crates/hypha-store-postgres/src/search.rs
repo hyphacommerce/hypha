@@ -122,7 +122,7 @@ impl<C: PgConnection> SearchIndex for PgStore<C> {
                     Some(channel) => {
                         *channel_counts
                             .entry((channel, col(row, "key")?))
-                            .or_default() -= n
+                            .or_default() -= n;
                     }
                 }
             }

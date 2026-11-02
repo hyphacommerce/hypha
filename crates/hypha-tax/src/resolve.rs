@@ -159,7 +159,7 @@ mod tests {
                     region: region_id()
                 }
             }))
-        )
+        );
     }
 
     #[test]

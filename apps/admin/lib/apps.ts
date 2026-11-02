@@ -104,6 +104,7 @@ const AREAS: Record<string, string> = {
   categories: "categories",
   channels: "sales channels",
   checkout: "checkout",
+  checkout_rules: "checkout rules",
   custom_fields: "custom fields",
   customers: "customers",
   fulfillments: "fulfilments",
@@ -116,6 +117,7 @@ const AREAS: Record<string, string> = {
   payments: "payments",
   pricing: "prices",
   products: "products",
+  purchasing: "purchasing",
   search: "search",
   shipping: "shipping",
   staff: "staff",
@@ -134,6 +136,7 @@ export function areaLabel(area: string): string {
 /** What a scope lets an app do, in plain words: "See orders", "Change products". */
 export function scopeLabel(scope: string): string {
   if (isPersonalDataScope(scope)) return personalDataLabel(scope);
+  if (scope === "purchasing:send") return "Email purchase orders to suppliers";
   const [area = scope, action = ""] = scope.split(":");
   const what = AREAS[area] ?? area.replaceAll("_", " ");
   if (action === "read") return `See ${what}`;

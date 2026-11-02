@@ -5,6 +5,15 @@
 //!
 //! Needs `DATABASE_URL` like the contract tests; skips itself without it.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
 use futures_util::future::join_all;
 use hypha_cart::{AddLine, CreateCart, add_line, create_cart, set_cart_email};
 use hypha_channels::{Channel, ChannelKind, ChannelRepo};
@@ -116,7 +125,7 @@ async fn shop(url: &str, schema: &str, on_hand: i64) -> (PgStore<Client>, Client
     let mut location = Location::new(warehouse(), "Zagreb".to_string(), vec![market()], 0).unwrap();
     LocationRepo::insert(&store, &mut location).await.unwrap();
     let mut item = InventoryItem::new(mug_item(), mug(), true, false);
-    item.set_on_hand(warehouse(), on_hand, None).unwrap();
+    item.set_on_hand(warehouse(), on_hand, None, None).unwrap();
     InventoryItemRepo::insert(&store, &mut item).await.unwrap();
 
     let mut method = PaymentMethod::new(NewPaymentMethod {
@@ -235,6 +244,7 @@ async fn carts_racing_for_the_last_units_never_oversell() {
             &clock,
             &NoRateProviders,
             &(ManualProvider,),
+            &hypha_addresses::Formats,
             input,
         )
     }))
@@ -317,6 +327,7 @@ async fn one_cart_checked_out_at_once_becomes_one_order() {
             &clock,
             &NoRateProviders,
             &(ManualProvider,),
+            &hypha_addresses::Formats,
             input,
         )
     }))
@@ -377,6 +388,7 @@ async fn retries_with_the_same_key_all_get_the_one_order() {
             &clock,
             &NoRateProviders,
             &(ManualProvider,),
+            &hypha_addresses::Formats,
             input,
         )
     }))

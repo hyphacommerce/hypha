@@ -14,7 +14,7 @@ use hypha_http::outbound::{
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 
 /// The client for merchant-configured URLs under `policy`.
-pub fn client(policy: OutboundPolicy) -> Result<reqwest::Client, String> {
+pub(crate) fn client(policy: OutboundPolicy) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(3))
         .redirect(reqwest::redirect::Policy::none());
@@ -27,7 +27,7 @@ pub fn client(policy: OutboundPolicy) -> Result<reqwest::Client, String> {
 }
 
 /// The host's `HostCalls`, sending through `client`.
-pub fn host_calls(client: reqwest::Client) -> HostCalls {
+pub(crate) fn host_calls(client: reqwest::Client) -> HostCalls {
     HostCalls::new(move |call| {
         let client = client.clone();
         Box::pin(async move { send(&client, call).await })
@@ -37,7 +37,7 @@ pub fn host_calls(client: reqwest::Client) -> HostCalls {
 /// Sends `call` and returns its answer: the status, and the body read up to
 /// `call.max_answer` (empty when `discard_answer`; a longer 2xx body is `TooLarge`, a
 /// longer one of another status is left unread). Doesn't follow redirects.
-pub async fn send(
+pub(crate) async fn send(
     client: &reqwest::Client,
     call: OutboundCall,
 ) -> Result<OutboundAnswer, CallError> {

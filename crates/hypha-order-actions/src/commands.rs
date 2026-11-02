@@ -12,7 +12,7 @@ use hypha_fulfillment::{
 };
 use hypha_inventory::{
     HasInventoryItems, HasLocations, InventoryError, InventoryItem, InventoryItemRepo,
-    LocationRepo, ReservationRef, StageInventoryItems,
+    LocationRepo, ReservationRef, StageInventoryItems, StockSource,
 };
 use hypha_orders::{CancelReason, HasOrders, Order, OrderError, OrderRepo, StageOrders};
 use hypha_payments::{
@@ -278,9 +278,13 @@ impl Attempt<'_> {
         })?;
         order.fulfil(self.lines)?;
 
+        let source = StockSource::Fulfillment {
+            order: order.id(),
+            fulfillment: self.id,
+        };
         for &(line, quantity) in self.lines {
             stock.change(&order, line, |item, reference| {
-                item.fulfil(reference, location, quantity)
+                item.fulfil(reference, location, quantity, source)
             })?;
         }
 
@@ -345,9 +349,13 @@ async fn cancel_fulfillment_once<S: OrderActionPorts>(
     order.unfulfil(&lines)?;
     let location = fulfillment.location();
     let mut stock = Stock::load(ports, &order).await?;
+    let source = StockSource::Fulfillment {
+        order: order.id(),
+        fulfillment: id,
+    };
     for shipped in fulfillment.lines().iter().filter(|l| l.stock_taken) {
         stock.change(&order, shipped.line, |item, reference| {
-            item.restock(reference, location, shipped.quantity)?;
+            item.restock(reference, location, shipped.quantity, source)?;
             Ok(true)
         })?;
     }

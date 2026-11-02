@@ -195,6 +195,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/storefront/address-formats/{country}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A country's address form: its fields in order, required ones, labels, regions. */
+        get: operations["storefront.address_formats.storefront"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/address-suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Addresses for what a shopper has typed so far, from the store's autocomplete app.
+         *     Debounce keystrokes; `404 autocomplete_unavailable` without an app (the address
+         *     format's `autocomplete` says so beforehand); no suggestions when the app fails.
+         */
+        get: operations["storefront.address_suggestions.storefront_suggest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/storefront/address-suggestions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The address a shopper picked, normalised, with what saving it would refuse. `502
+         *     app_unavailable` when the app can't give it: the shopper types it instead.
+         */
+        get: operations["storefront.address_suggestions.storefront_resolve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/storefront/app-extensions": {
         parameters: {
             query?: never;
@@ -334,7 +392,8 @@ export interface paths {
          *     `payment_failed` (start paying again). If the order can't be placed once the money is
          *     committed (a line sold out meanwhile), the money is given back. A cart checked out
          *     already answers with its order for an hour after it was placed (the provider's report
-         *     may have completed it), then `409 cart_completed`.
+         *     may have completed it), then `409 cart_completed`. A cart with an error among its
+         *     `messages` is `409 checkout_blocked`, after the checks above.
          */
         post: operations["storefront.orders.checkout"];
         delete?: never;
@@ -470,7 +529,9 @@ export interface paths {
          *     total is started again (the provider resumes it); otherwise a new one is made and the
          *     old ones released. Refused for a manual method (409 `payment_method_offline`: check out
          *     instead), a total of zero (409 `cart_nothing_to_pay`) and a cart whose money is
-         *     committed already (409 `cart_payment_committed`: check out).
+         *     committed already (409 `cart_payment_committed`: check out), then a cart with an error
+         *     among its `messages` (409 `checkout_blocked`): no money is taken for a cart checkout
+         *     would refuse.
          */
         post: operations["storefront.orders.start_cart_payment"];
         delete?: never;
@@ -817,13 +878,48 @@ export interface components {
             variant: components["schemas"]["VariantId"];
         };
         /**
+         * @description A field of an address, as named in requests and responses.
+         *
+         *     Known values: `first_name`, `last_name`, `company`, `line1`, `line2`, `city`, `province`, `postal_code`, `country`, `phone`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        AddressFieldDto: string;
+        AddressFormatResponse: {
+            /**
+             * @description Whether the store has an address autocomplete app: offer suggestions on the first
+             *     line through `…/address-suggestions`.
+             */
+            autocomplete: boolean;
+            country: components["schemas"]["CountryCode"];
+            /** @description Whether the first line is expected to hold a house number. */
+            house_number_required: boolean;
+            /** @description Each field's label, by field ("State", "ZIP code"). English for now. */
+            labels: {
+                [key: string]: string;
+            };
+            postal_code: components["schemas"]["PostalCodeUse"];
+            /** @description A postal code in the country's shape, for a placeholder. */
+            postal_code_example?: string | null;
+            /**
+             * @description The regions to choose from, where the country lists them: the region is then a
+             *     select and `province` holds the code. Empty where it's free text or not asked.
+             */
+            regions: components["schemas"]["RegionResponse"][];
+            /** @description The fields a write refuses empty (`422 invalid_address`, `required`). */
+            required: components["schemas"]["AddressFieldDto"][];
+            /** @description The form's fields, row by row, in the country's order; the country itself apart. */
+            rows: components["schemas"]["AddressFieldDto"][][];
+        };
+        /**
          * @description A AddressId: `addr_` and 32 hex digits.
          * @example addr_0190f1a2b3c47d8e9f00112233445566
          */
         AddressId: string;
         /**
          * @description An address for the address book. Sending it again (PUT) replaces it whole,
-         *     including whether it is a default.
+         *     including whether it is a default. Checked against its country's format (`GET
+         *     …/address-formats/{country}`); every problem comes back at once as `422
+         *     invalid_address` with `details.problems: [{field, code, message}]`.
          */
         AddressRequest: {
             city: string;
@@ -850,7 +946,13 @@ export interface components {
             line2?: string | null;
             phone?: string | null;
             postal_code?: string | null;
+            /** @description The region's code where the country lists regions (`CA`), else as entered. */
             province?: string | null;
+            /**
+             * @description The region's name beside its code ("California"), where the country lists
+             *     regions.
+             */
+            province_name?: string | null;
             /**
              * @description Personal fields left out for this caller: an API key or app without the matching
              *     `customer_data:*` scope. They are absent from the object then, whatever the schema
@@ -858,6 +960,26 @@ export interface components {
              */
             redacted?: string[] | null;
         };
+        AddressSuggestionResponse: {
+            /** @description The rest, shown smaller ("10000 Zagreb, Croatia"). */
+            description?: string | null;
+            /** @description Send it to `GET …/address-suggestions/{id}` when this one is picked. */
+            id: string;
+            /** @description The main line ("Ilica 1"). */
+            label: string;
+        };
+        /** @description What to show under the field. */
+        AddressSuggestionsResponse: {
+            /** @description At most `limit`; none when the app couldn't answer (the person types on). */
+            suggestions: components["schemas"]["AddressSuggestionResponse"][];
+        };
+        /**
+         * @description What an address verification provider concluded about an address, overall.
+         *
+         *     Known values: `deliverable`, `deliverable_with_fixes`, `missing_subpremise`, `ambiguous`, `undeliverable`, `unknown`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        AddressVerdict: string;
         /**
          * @description A AssetId: `asset_` and 32 hex digits.
          * @example asset_0190f1a2b3c47d8e9f00112233445566
@@ -917,6 +1039,26 @@ export interface components {
          * @example cart_0190f1a2b3c47d8e9f00112233445566
          */
         CartId: string;
+        /** @description Something about the cart for the shopper to see or fix. */
+        CartMessageResponse: {
+            /**
+             * @description snake_case, for code. Built-in codes (`house_number_missing`) are a contract like
+             *     error codes; a checkout rule's is the merchant's, a validation app's the app's.
+             */
+            code: string;
+            /** @description Plain text for the shopper. */
+            message: string;
+            /**
+             * @description An RFC 9535 JSONPath into this response, from a closed set: `$` (the cart),
+             *     `$.email`, `$.shipping_address`, `$.shipping_address.<field>`,
+             *     `$.shipping_groups[<i>]` (the group and its chosen option) or `$.lines[<i>]`. Show
+             *     the message by that field; one a client doesn't place goes at the top.
+             * @example $.shipping_address.line1
+             */
+            path: string;
+            severity: components["schemas"]["SeverityDto"];
+            source: components["schemas"]["MessageSourceDto"];
+        };
         /** @description A payment method as a storefront lists it for a cart. */
         CartPaymentMethodResponse: {
             id: components["schemas"]["PaymentMethodId"];
@@ -972,6 +1114,12 @@ export interface components {
              *     checkout records the consent then.
              */
             marketing_opt_in: boolean;
+            /**
+             * @description What the shopper should know about the cart, each under the field its `path` names:
+             *     errors stop checkout and starting its payment (`409 checkout_blocked`), warnings
+             *     never do. Empty once the cart is checked out.
+             */
+            messages: components["schemas"]["CartMessageResponse"][];
             order?: components["schemas"]["OrderId"] | null;
             payment_method?: components["schemas"]["PaymentMethodId"] | null;
             /**
@@ -981,6 +1129,7 @@ export interface components {
              */
             redacted?: string[] | null;
             shipping_address?: components["schemas"]["PostalAddressResponse"] | null;
+            shipping_address_check?: components["schemas"]["ShippingAddressCheckResponse"] | null;
             /**
              * @description The groups of lines that ship together, each needing a chosen option before
              *     checkout; empty when nothing ships.
@@ -1037,6 +1186,11 @@ export interface components {
             next_action?: components["schemas"]["NextActionResponse"] | null;
             payment_error?: components["schemas"]["Error"] | null;
         };
+        /**
+         * @description A CheckoutRuleId: `crule_` and 32 hex digits.
+         * @example crule_0190f1a2b3c47d8e9f00112233445566
+         */
+        CheckoutRuleId: string;
         /** @description A channel's marketing consent. */
         ConsentResponse: {
             /** @description When the customer last said so, RFC 3339 in UTC; absent while never asked. */
@@ -1353,6 +1507,26 @@ export interface components {
          */
         MarketId: string;
         /**
+         * @description Who said it: the address's format, the store's verification app, one of the merchant's
+         *     checkout rules, or a validation app.
+         */
+        MessageSourceDto: {
+            /** @enum {string} */
+            type: "format";
+        } | {
+            /** @enum {string} */
+            type: "verification";
+        } | {
+            rule: components["schemas"]["CheckoutRuleId"];
+            /** @enum {string} */
+            type: "rule";
+        } | {
+            /** @description The app's key. */
+            app: string;
+            /** @enum {string} */
+            type: "app";
+        };
+        /**
          * @description An amount of money in one currency.
          * @example {
          *       "amount": 1050,
@@ -1428,6 +1602,7 @@ export interface components {
             provider?: string | null;
             /** @description The provider's ID for it, when it gives one. */
             provider_message_id?: string | null;
+            purchase_order_id?: components["schemas"]["PurchaseOrderId"] | null;
             /**
              * @description Personal fields left out for this caller: an API key or app without the matching
              *     `customer_data:*` scope. They are absent from the object then, whatever the schema
@@ -1451,7 +1626,7 @@ export interface components {
         /**
          * @description One of the store's templates. The names are stable.
          *
-         *     Known values: `layout`, `order_confirmation`, `order_shipped`, `order_tracking_updated`, `order_cancelled`, `staff_new_order`, `staff_invite`, `staff_password_reset`, `customer_login_code`, `customer_erasure_requested`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         *     Known values: `layout`, `order_confirmation`, `order_shipped`, `order_tracking_updated`, `order_cancelled`, `staff_new_order`, `staff_invite`, `staff_password_reset`, `customer_login_code`, `customer_erasure_requested`, `supplier_purchase_order`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
         NotificationTemplateKey: string;
@@ -1518,6 +1693,8 @@ export interface components {
         };
         /** @description An order in a list: what a table of orders shows, without lines. */
         OrderSummaryResponse: {
+            /** @description Whether its shipping address needs review (`?address=needs_review`). */
+            address_review: boolean;
             /** @description When it was cancelled, RFC 3339 in UTC; `null` if it wasn't. */
             cancelled_at?: string | null;
             /** @description The sales channel it was placed through. */
@@ -1640,8 +1817,12 @@ export interface components {
             status: components["schemas"]["PaymentStatusDto"];
         };
         /**
-         * @description Sent: checked by `Address::new` (last name, first line and city required; text is
-         *     trimmed, at most 255 characters per field).
+         * @description Sent: last name, first line and city required, text trimmed, at most 255 characters
+         *     per field. A cart's or a location's address is also checked against its country's
+         *     format (`GET …/address-formats/{country}`): its required fields, the postal code's
+         *     shape, the region (a name, alternate name or code, stored as the code where the
+         *     country lists regions). Every problem comes back at once as `422 invalid_address`
+         *     with `details.problems: [{field, code, message}]`.
          */
         PostalAddressRequest: {
             city: string;
@@ -1666,7 +1847,13 @@ export interface components {
             line2?: string | null;
             phone?: string | null;
             postal_code?: string | null;
+            /** @description The region's code where the country lists regions (`CA`), else as entered. */
             province?: string | null;
+            /**
+             * @description The region's name beside its code ("California"), where the country lists
+             *     regions.
+             */
+            province_name?: string | null;
             /**
              * @description Personal fields left out for this caller: an API key or app without the matching
              *     `customer_data:*` scope. They are absent from the object then, whatever the schema
@@ -1674,6 +1861,13 @@ export interface components {
              */
             redacted?: string[] | null;
         };
+        /**
+         * @description How a country uses postal codes.
+         *
+         *     Known values: `none`, `required`, `recommended`, `optional`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        PostalCodeUse: string;
         /** @description From `min_quantity` of the variant in one cart line, each costs `price`. */
         PriceBreakDto: {
             /** Format: int32 */
@@ -1729,6 +1923,43 @@ export interface components {
         /** @description An app with a storefront proxy (`/storefront/apps/{app}/proxy/…`). */
         ProxyExtension: {
             app: string;
+        };
+        /**
+         * @description A PurchaseOrderId: `po_` and 32 hex digits.
+         * @example po_0190f1a2b3c47d8e9f00112233445566
+         */
+        PurchaseOrderId: string;
+        RegionResponse: {
+            /** @description What `province` holds: `CA`, `M`. */
+            code: string;
+            /** @description The English name: "California", "Madrid". */
+            name: string;
+        };
+        /**
+         * @description The picked suggestion's address, normalised like any address a form sends (the region
+         *     as its code, the postal code upper-cased), to fill the form with. Names and phone
+         *     aren't part of it.
+         */
+        ResolvedAddressResponse: {
+            address: components["schemas"]["SuggestedAddressResponse"];
+            /**
+             * @description What saving it as it is would refuse (a missing postal code), so the form can say
+             *     so before the person saves. Empty when it passes.
+             */
+            problems: components["schemas"]["ResolvedProblem"][];
+        };
+        /**
+         * @description One thing about the resolved address the country's format check doesn't accept: the
+         *     form fills it in anyway and shows this under the field.
+         */
+        ResolvedProblem: {
+            /**
+             * @description `required`, `too_long`, `invalid_format`, `unknown_region` or `region_mismatch`,
+             *     as `invalid_address`'s problems.
+             */
+            code: string;
+            field: components["schemas"]["AddressFieldDto"];
+            message: string;
         };
         /**
          * @description One result: a listing, a product or a variant (the request's `group`), shown by
@@ -1844,6 +2075,25 @@ export interface components {
         };
         SetShippingAddressRequest: {
             address?: components["schemas"]["PostalAddressRequest"] | null;
+        };
+        /**
+         * @description Whether a message stops checkout: `error` does, `warning` never.
+         *
+         *     Known values: `error`, `warning`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        SeverityDto: string;
+        /**
+         * @description What the store's verification app said about a cart's shipping address. Show
+         *     `suggested` as "Did you mean …?": setting it is free (it's known deliverable), and
+         *     keeping the address as entered needs nothing recorded.
+         */
+        ShippingAddressCheckResponse: {
+            /** @description RFC 3339, UTC. */
+            checked_at: string;
+            flags: components["schemas"]["VerificationFlags"];
+            suggested?: components["schemas"]["SuggestedAddressResponse"] | null;
+            verdict: components["schemas"]["AddressVerdict"];
         };
         /**
          * @description A ShippingGroupId: `shgrp_` and 32 hex digits.
@@ -2157,6 +2407,20 @@ export interface components {
             /** @description Its option values ("M / Blue"); `null` for a product without options. */
             title?: string | null;
         };
+        /** @description An address a verification app suggests: where it is, without who lives there. */
+        SuggestedAddressResponse: {
+            city: string;
+            company?: string | null;
+            country: string;
+            line1: string;
+            line2?: string | null;
+            postal_code?: string | null;
+            /** @description The region's code where the country lists regions. */
+            province?: string | null;
+            province_name?: string | null;
+            /** @description Personal fields left out for this caller (`customer_data:address`). */
+            redacted?: string[] | null;
+        };
         /**
          * @description A TaxClassId: `txc_` and 32 hex digits.
          * @example txc_0190f1a2b3c47d8e9f00112233445566
@@ -2196,6 +2460,13 @@ export interface components {
          * @example var_0190f1a2b3c47d8e9f00112233445566
          */
         VariantId: string;
+        /** @description What the provider says the address is; `None` where it doesn't know. */
+        VerificationFlags: {
+            business?: boolean | null;
+            po_box?: boolean | null;
+            residential?: boolean | null;
+            vacant?: boolean | null;
+        };
     };
     responses: never;
     parameters: never;
@@ -3133,6 +3404,263 @@ export interface operations {
             };
             /** @description A server failure (`internal_error`). */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.address_formats.storefront": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                country: components["schemas"]["CountryCode"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddressFormatResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.address_suggestions.storefront_suggest": {
+        parameters: {
+            query: {
+                /** @description What's typed so far, 3 to 200 characters. */
+                q: string;
+                /** @description The country the form is for (`HR`): suggestions stay in it. */
+                country: string;
+                /**
+                 * @description A token the form makes for one address being typed and keeps until one is picked
+                 *     (1 to 512 letters, digits, `-` and `_`): providers bill per session, and the rate
+                 *     limit counts per session.
+                 */
+                session: string;
+                /** @description At most this many suggestions (1 to 5, 5 by default). */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddressSuggestionsResponse"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The store has no autocomplete app (`autocomplete_unavailable`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `q`, `session` or `limit` breaks its rule (`invalid_suggestion_query`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Over the rate limit per client address or per session (`rate_limited`); see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.address_suggestions.storefront_resolve": {
+        parameters: {
+            query: {
+                /** @description The country the form is for: the address must be in it. */
+                country: string;
+                /** @description The session the suggestion was offered in. */
+                session: string;
+            };
+            header?: never;
+            path: {
+                /**
+                 * @description The suggestion's `id`.
+                 * @example ilica-1
+                 */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResolvedAddressResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The store has no autocomplete app (`autocomplete_unavailable`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Over the rate limit per client address or per session (`rate_limited`); see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The app couldn't give the address (`app_unavailable`) */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4101,7 +4629,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            /** @description The cart can't be checked out as it is: `cart_empty`, `cart_email_missing`, `cart_unavailable`, `shipping_address_required`, `shipping_option_required`, `shipping_option_unavailable`, `total_changed`, `discounts_changed`, `payment_method_required`, `payment_method_unavailable`, `payment_required`, `payment_pending`, `payment_failed`, `cart_payment_committed`, `cart_completed`; or, after those, `checkout_blocked`: the cart has error messages, every one in `details.messages` (each as a cart's `messages` item; warnings left out). Also a concurrent change (`concurrent_modification`, safe to retry). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -4925,7 +5453,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            /** @description No payment can start for the cart now: checkout's checks (`cart_empty`, `total_changed`, `payment_method_required`, …), `payment_method_offline`, `cart_nothing_to_pay`, `cart_payment_committed`; or, after those, `checkout_blocked`: the cart has error messages, every one in `details.messages` (each as a cart's `messages` item; warnings left out), and no money is taken for it. Also a concurrent change (`concurrent_modification`, safe to retry). */
             409: {
                 headers: {
                     [name: string]: unknown;

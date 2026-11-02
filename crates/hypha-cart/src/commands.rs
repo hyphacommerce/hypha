@@ -1,13 +1,16 @@
+use std::collections::{HashMap, HashSet};
+
 use hypha_core::{
-    AddressError, AddressParts, AuthError, CartId, Clock, CountryCode, CountryError, Ctx,
-    CustomerGroupId, CustomerId, Email, EmailError, ErrorCode, HasBatch, HasClock, HasIdempotency,
-    IdGenerator, IdempotencyError, IdempotencyRecord, IdempotencyRequest, Idempotent, MarketId,
-    Money, MoneyError, ProductId, Quantity, QuantityError, RepoError, Scope, ShippingGroupId,
-    ShippingOptionId, StageIdempotency, Timestamp, VariantId, earlier_id,
+    AddressError, AddressFormats, AddressParts, AddressVerifier, AuthError, CartId, CategoryId,
+    Clock, CountryCode, CountryError, Ctx, CustomerGroupId, CustomerId, Email, EmailError,
+    ErrorCode, HasBatch, HasClock, HasIdempotency, IdGenerator, IdempotencyError,
+    IdempotencyRecord, IdempotencyRequest, Idempotent, MarketId, Money, MoneyError, ProductId,
+    Quantity, QuantityError, RepoError, Scope, ShippingGroupId, ShippingOptionId, StageIdempotency,
+    Timestamp, VariantId, VerifyContext, earlier_id, verify_address,
 };
 use hypha_customers::{CustomerGroupRepo, CustomerRepo, HasCustomerGroups, HasCustomers};
 use hypha_inventory::{HasInventoryItems, HasLocations, StockContext};
-use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists, Market, MarketRepo};
+use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists, Market, MarketRepo, PriceListRepo};
 use hypha_pricing::PricingContext;
 use hypha_products::{HasProducts, Product, ProductRepo};
 use hypha_shipping::{
@@ -823,6 +826,15 @@ async fn load_pricing<
     Ok((pricing, groups))
 }
 
+/// Each of `products`' categories with all their ancestors: what a rule about categories
+/// reads of a cart's lines. A product in none is left out.
+pub async fn product_categories<S: HasPriceLists>(
+    ports: &S,
+    products: &[ProductId],
+) -> Result<HashMap<ProductId, HashSet<CategoryId>>, RepoError> {
+    ports.price_lists().product_categories(products).await
+}
+
 /// The groups `customer` is in: who a list for groups prices for.
 pub async fn buyer_groups<S: HasCustomerGroups>(
     ports: &S,
@@ -879,17 +891,29 @@ fn product_ids(cart: &Cart) -> Vec<ProductId> {
 // ---------- shipping ----------
 
 /// Sets where the cart ships, or clears it with `None`. It must be in the cart's
-/// country; a new address drops the shipping choice.
+/// country and pass its format (`formats`), which normalises it; a new address drops the
+/// shipping choice. The store's verification app (`verifier`) is asked about it, and its
+/// answer kept with the cart.
 pub async fn set_shipping_address<S: HasCarts + PricingPorts>(
     ctx: &Ctx,
     ports: &S,
+    formats: &impl AddressFormats,
+    verifier: &impl AddressVerifier,
     id: CartId,
     address: Option<AddressParts>,
 ) -> Result<PricedCart, CommandError> {
     ctx.require(Scope::CartsWrite)?;
-    let address = address.map(hypha_core::Address::new).transpose()?;
+    let address = address
+        .map(|parts| formats.validate(parts).map(|checked| checked.address))
+        .transpose()?;
     let mut cart = load_open_cart(ctx, ports, id).await?;
-    cart.set_shipping_address(address)?;
+    // Asked before the write, so the cart and its check are stored together; the same
+    // address (or its accepted suggestion) reuses what's kept.
+    let check = match &address {
+        Some(a) => verify_address(verifier, a, cart.address_check(), VerifyContext::Cart).await?,
+        None => None,
+    };
+    cart.set_shipping_address(address, check)?;
     let priced = reprice(ports, &cart).await?;
     ports.carts().update(&mut cart).await?;
     Ok(priced)

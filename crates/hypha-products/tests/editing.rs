@@ -1,6 +1,15 @@
 //! The editing commands. The aggregate's rules are unit-tested in `product/edit.rs`; these
 //! check scopes, loading, storing and the repository keys.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
 use hypha_core::{
     Actor, AuthError, Ctx, Currency, Money, MoneyError, OptionValueId, ProductId, Scope, UserId,
     VariantId,

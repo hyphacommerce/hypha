@@ -510,7 +510,7 @@ mod worker_main {
             if let Some(event) = event {
                 event.wrote.set(true);
             }
-        })
+        });
     }
 
     /// The Rate Limiting bindings, at `rule as usize`; a rule without one counts in the
@@ -657,6 +657,11 @@ mod worker_main {
         };
         let event = Event::new(move |work| ctx.wait_until(work));
         let state = Arc::clone(&isolate.state);
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a cron's scheduled time is whole milliseconds since the epoch"
+        )]
         let at = tick.schedule() as u64;
         let kv = env.kv(JOBS_KV).ok();
         Scoped::new(&event, async move {

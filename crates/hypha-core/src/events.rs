@@ -125,7 +125,7 @@ pub trait ActingAs {
 
 impl<T: ActingAs + ?Sized> ActingAs for &T {
     fn act_as(&self, actor: Actor) {
-        (**self).act_as(actor)
+        (**self).act_as(actor);
     }
 }
 
@@ -144,7 +144,7 @@ pub trait SignalsDispatch {
 
 impl<T: SignalsDispatch + ?Sized> SignalsDispatch for &T {
     fn on_dispatch_work(&self, hook: DispatchHook) {
-        (**self).on_dispatch_work(hook)
+        (**self).on_dispatch_work(hook);
     }
 }
 
@@ -448,5 +448,17 @@ mod tests {
             },
         );
         assert_eq!(busy, Recorder::default());
+    }
+
+    #[test]
+    fn delivery_statuses_read_back_their_names() {
+        for status in [
+            DeliveryStatus::Pending,
+            DeliveryStatus::Succeeded,
+            DeliveryStatus::Failed,
+        ] {
+            assert_eq!(DeliveryStatus::parse(status.as_str()), Some(status));
+        }
+        assert_eq!(DeliveryStatus::parse("Pending"), None);
     }
 }

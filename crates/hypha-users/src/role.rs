@@ -188,4 +188,11 @@ mod tests {
             assert_eq!(Role::restore(role.snapshot()), Ok(role));
         }
     }
+
+    #[test]
+    fn only_the_owner_role_holds_every_scope() {
+        let mut s = Role::owner(rid()).snapshot();
+        s.name = "Admin".to_string();
+        assert_eq!(Role::restore(s), Err(RoleError::OwnerRoleFixed));
+    }
 }

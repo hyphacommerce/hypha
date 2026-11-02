@@ -246,6 +246,26 @@ mod tests {
     }
 
     #[test]
+    fn the_hasher_port_verifies_like_the_blocking_call() {
+        let password = Password::new("correct horse").unwrap();
+        let hash = pollster::block_on(CHEAP.hash_password(&password, [7; 16])).unwrap();
+        assert_eq!(
+            pollster::block_on(CHEAP.verify_password(&password, &hash)),
+            Ok(true)
+        );
+        let wrong = Password::attempt("correct horsf").unwrap();
+        assert_eq!(
+            pollster::block_on(CHEAP.verify_password(&wrong, &hash)),
+            Ok(false)
+        );
+    }
+
+    #[test]
+    fn the_default_cost_is_owasps_minimum() {
+        assert_eq!(Argon2id::OWASP, Argon2id::new(19_456, 2, 1));
+    }
+
+    #[test]
     fn verifying_uses_the_parameters_in_the_hash() {
         let password = Password::new("correct horse").unwrap();
         let old = Argon2id::new(32, 1, 1)

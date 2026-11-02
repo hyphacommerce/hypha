@@ -1,3 +1,13 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
+
 use hypha_core::{
     Actor, AuthError, Ctx, Email, EventId, NotificationId, OrderId, PageLimit, PageRequest, Scope,
     UserId,
@@ -212,6 +222,7 @@ fn record(ports: &InMemoryPorts, n: u128, order: Option<u128>) {
         subject: format!("Order {n}"),
         event: Some(EventId::from_uuid(Uuid::from_u128(100 + n))),
         order: order.map(|o| OrderId::from_uuid(Uuid::from_u128(o))),
+        purchase_order: None,
     });
     block_on(ports.notifications.insert(&mut message)).unwrap();
 }

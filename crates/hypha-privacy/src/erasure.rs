@@ -146,7 +146,7 @@ async fn orders_of<S: HasOrders>(ports: &S, customer: CustomerId) -> Result<Vec<
                 after = Some(Keyset {
                     key: OrderSort::Newest.key(last),
                     id: last.id,
-                })
+                });
             }
             _ => return Ok(orders),
         }
@@ -214,6 +214,7 @@ pub async fn erase_customer<S: ErasurePorts>(
                 .list(
                     NotificationFilter {
                         order: Some(*order),
+                        purchase_order: None,
                         template: None,
                         status: None,
                     },
@@ -356,6 +357,7 @@ pub async fn export_customer<S: ErasurePorts>(
                 .list(
                     NotificationFilter {
                         order: Some(order.id()),
+                        purchase_order: None,
                         template: None,
                         status: None,
                     },

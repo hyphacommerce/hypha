@@ -19,6 +19,7 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 thiserror.workspace = true
 
 [dev-dependencies]
+hypha-addresses = { path = "../hypha-addresses" }
 hypha-discounts = { path = "../hypha-discounts" }
 uuid.workspace = true
 hypha-testkit = { path = "../hypha-testkit" }

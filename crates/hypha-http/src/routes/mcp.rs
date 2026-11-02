@@ -99,6 +99,7 @@ fn metadata(issuer: String) -> Json<ProtectedResourceMetadata> {
     responses((status = 200, description = "OK", body = ProtectedResourceMetadata)),
     security(()),
 )]
+#[expect(clippy::unused_async, reason = "axum takes only async handlers")]
 pub async fn resource_metadata<S: Storage>(
     Issuer(issuer): Issuer,
 ) -> Json<ProtectedResourceMetadata> {
@@ -113,6 +114,7 @@ pub async fn resource_metadata<S: Storage>(
     responses((status = 200, description = "OK", body = ProtectedResourceMetadata)),
     security(()),
 )]
+#[expect(clippy::unused_async, reason = "axum takes only async handlers")]
 pub async fn root_resource_metadata<S: Storage>(
     Issuer(issuer): Issuer,
 ) -> Json<ProtectedResourceMetadata> {

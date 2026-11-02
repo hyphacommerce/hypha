@@ -196,7 +196,7 @@ impl MarketingConsent {
         true
     }
 
-    /// Back to never asked (an email change, Q7).
+    /// Back to never asked (an email change).
     pub(crate) fn reset(&mut self) -> bool {
         if *self == MarketingConsent::default() {
             return false;

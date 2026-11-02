@@ -1,5 +1,14 @@
 //! The OAuth flow's commands on the in-memory repos.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -7,9 +16,10 @@ use hypha_apps::{AppError, AppRepo, ManifestFetcher};
 use hypha_core::{Actor, AppKey, AuthError, Clock, Ctx, OAuthRequestId, Scope, UserId};
 use hypha_oauth::{
     Approval, AuthorizeError, AuthorizeInput, Authorized, CodeExchange, CommandError,
-    REFRESH_TOKEN_LIFETIME, Refresh, RequestStatus, TokenError, Uninstalled, UnredirectableError,
-    approve, authenticate_access_token, authorize, deny, exchange_code, narrow_grant, pkce,
-    refresh, refresh_manifest, request_private_app, revoke, uninstall,
+    REFRESH_TOKEN_LIFETIME, REQUEST_LIFETIME, Refresh, Refreshed, RequestClient, RequestStatus,
+    TokenError, Uninstalled, UnredirectableError, approve, authenticate_access_token, authorize,
+    deny, exchange_code, get_request, is_pending, narrow_grant, pkce, reasons, refresh,
+    refresh_manifest, request_history, request_private_app, revoke, uninstall,
 };
 use hypha_testkit::{InMemoryPorts, TestEnv};
 use pollster::block_on;
@@ -454,6 +464,12 @@ fn a_request_waits_ten_minutes_for_one_answer() {
         block_on(approve(&owner(), &ports, &env, unknown)),
         Err(CommandError::RequestNotFound(unknown))
     );
+
+    assert_eq!(REQUEST_LIFETIME, Duration::from_secs(600));
+    let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
+    let in_time = pending(&ports, &env, None, &fetcher(ALL));
+    later(&env, 599);
+    redirect(block_on(approve(&owner(), &ports, &env, in_time)));
 }
 
 #[test]
@@ -944,4 +960,202 @@ fn a_spore_has_no_manifest_to_refresh_nor_tokens_to_revoke() {
         block_on(hypha_oauth::uninstall(&owner(), &ports, &env, "spore_pay")),
         Err(CommandError::App(built_in))
     );
+}
+
+#[test]
+fn a_refresh_token_lasts_thirty_days() {
+    assert_eq!(
+        REFRESH_TOKEN_LIFETIME,
+        Duration::from_secs(30 * 24 * 60 * 60)
+    );
+}
+
+#[test]
+fn revoking_an_access_token_revokes_its_refresh_token_too() {
+    let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
+    let tokens = install(&ports, &env);
+    block_on(revoke(&ports, &env.clock, tokens.access_token.expose())).unwrap();
+    assert_eq!(
+        block_on(refresh(&ports, &env, refresh_with(&tokens, CLIENT, None))).map(|_| ()),
+        Err(TokenError::InvalidGrant(
+            "the refresh token was revoked".to_string()
+        ))
+    );
+}
+
+#[test]
+fn a_code_used_twice_revokes_only_the_tokens_it_gave() {
+    let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
+    let first_code = {
+        let id = pending(&ports, &env, None, &fetcher(ALL));
+        param(
+            &redirect(block_on(approve(&owner(), &ports, &env, id))),
+            "code",
+        )
+        .unwrap()
+    };
+    block_on(exchange_code(&ports, &env, exchange(&first_code))).unwrap();
+    // A second family, from a code the installed app gets at once.
+    let location = match block_on(authorize(&ports, &fetcher(ALL), &env, input(None))).unwrap() {
+        Authorized::Redirect(location) => location,
+        other => panic!("{other:?}"),
+    };
+    let second = block_on(exchange_code(
+        &ports,
+        &env,
+        exchange(&param(&location, "code").unwrap()),
+    ))
+    .unwrap();
+
+    assert!(block_on(exchange_code(&ports, &env, exchange(&first_code))).is_err());
+    assert!(
+        block_on(authenticate_access_token(
+            &ports,
+            &env.clock,
+            second.access_token.expose()
+        ))
+        .is_ok()
+    );
+}
+
+#[test]
+fn a_refresh_dropping_scopes_narrows_the_grant_at_once() {
+    let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
+    install(&ports, &env);
+    let refreshed = block_on(refresh_manifest(
+        &owner(),
+        &ports,
+        &fetcher(&["orders:read", "customer_data:email"]),
+        &env,
+        "app_shop",
+    ))
+    .unwrap();
+    assert!(matches!(refreshed, Refreshed::Updated(_)));
+    let app = block_on(ports.apps.get(&AppKey::new("app_shop").unwrap()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        app.grant().unwrap().scopes(),
+        &[Scope::OrdersRead, Scope::CustomerDataEmail]
+    );
+}
+
+#[test]
+fn an_app_may_refresh_itself_but_not_another_without_apps_write() {
+    let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
+    install(&ports, &env);
+    let app = block_on(ports.apps.get(&AppKey::new("app_shop").unwrap()))
+        .unwrap()
+        .unwrap();
+    let missing = Err(CommandError::Auth(AuthError::MissingScope(
+        Scope::AppsWrite,
+    )));
+
+    let itself = Ctx::new(Actor::App(app.id()), vec![]);
+    assert!(
+        block_on(refresh_manifest(
+            &itself,
+            &ports,
+            &fetcher(ALL),
+            &env,
+            "app_shop"
+        ))
+        .is_ok()
+    );
+
+    let another = Ctx::new(
+        Actor::App(hypha_core::AppId::from_uuid(Uuid::from_u128(77))),
+        vec![],
+    );
+    assert_eq!(
+        block_on(refresh_manifest(
+            &another,
+            &ports,
+            &fetcher(ALL),
+            &env,
+            "app_shop"
+        ))
+        .map(|_| ()),
+        Err(CommandError::Auth(AuthError::AppNotAuthorized(
+            Scope::AppsWrite
+        )))
+    );
+    let reader = Ctx::new(owner().actor(), vec![Scope::AppsRead]);
+    assert_eq!(
+        block_on(refresh_manifest(
+            &reader,
+            &ports,
+            &fetcher(ALL),
+            &env,
+            "app_shop"
+        ))
+        .map(|_| ()),
+        missing
+    );
+}
+
+#[test]
+fn a_state_may_be_512_characters() {
+    let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
+    let with_state = |len: usize| AuthorizeInput {
+        state: Some("s".repeat(len)),
+        ..input(None)
+    };
+    assert!(block_on(authorize(&ports, &fetcher(ALL), &env, with_state(512))).is_ok());
+    assert!(block_on(authorize(&ports, &fetcher(ALL), &env, with_state(513))).is_err());
+}
+
+#[test]
+fn a_request_is_pending_until_answered_or_expired_and_records_who_answered() {
+    let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
+    let id = pending(&ports, &env, None, &fetcher(ALL));
+    let read = || block_on(get_request(&owner(), &ports, id)).unwrap().0;
+    assert!(is_pending(&read(), env.clock.now()));
+    assert!(!is_pending(&read(), env.clock.now().plus(REQUEST_LIFETIME)));
+
+    redirect(block_on(approve(&owner(), &ports, &env, id)));
+    let answered = read();
+    assert!(!is_pending(&answered, env.clock.now()));
+    assert_eq!(answered.decided_by(), Some(owner().actor()));
+    assert_eq!(answered.decided_at(), Some(env.clock.now()));
+
+    let history = block_on(request_history(
+        &owner(),
+        &ports,
+        &AppKey::new("app_shop").unwrap(),
+    ))
+    .unwrap();
+    assert_eq!(history.len(), 1);
+}
+
+#[test]
+fn a_consent_page_shows_the_reasons_the_manifest_gives() {
+    let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
+    let id = pending(&ports, &env, None, &fetcher(ALL));
+    let request = block_on(get_request(&owner(), &ports, id)).unwrap().0;
+    let RequestClient::App(manifest) = request.client() else {
+        panic!("an app's request");
+    };
+    assert_eq!(
+        reasons(manifest, request.scopes()),
+        vec![(Scope::CustomerDataEmail, "receipts".to_string())]
+    );
+}
+
+#[test]
+fn a_private_app_uploaded_again_after_uninstalling_gets_a_new_secret() {
+    let (ports, env) = (InMemoryPorts::default(), TestEnv::default());
+    let upload = || {
+        block_on(request_private_app(
+            &owner(),
+            &ports,
+            &env,
+            &private_manifest(&["shipping:read"]),
+        ))
+        .unwrap()
+    };
+    credentials(block_on(approve(&owner(), &ports, &env, upload().id())));
+    block_on(uninstall(&owner(), &ports, &env.clock, "app_rates")).unwrap();
+    let again = credentials(block_on(approve(&owner(), &ports, &env, upload().id())));
+    assert!(again.app_secret.is_some());
 }

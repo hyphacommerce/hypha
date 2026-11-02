@@ -1,3 +1,13 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "test support: a broken fixture panics the test using it, and fixtures cast small counters"
+)]
+
 #[cfg(feature = "contract")]
 pub mod contract;
 
@@ -9,6 +19,7 @@ mod carts;
 mod catalogs;
 mod categories;
 mod channels;
+mod checkout_rules;
 mod clock;
 mod custom_fields;
 mod customer_groups;
@@ -32,13 +43,16 @@ mod ports;
 mod preview_tokens;
 mod price_lists;
 mod products;
+mod purchase_orders;
 mod search;
 mod shipping;
 mod spore_settings;
 mod stores;
+mod suppliers;
 mod table;
 mod tax_classes;
 mod tax_regions;
+mod transfers;
 mod users;
 
 pub use agents::InMemoryAgents;
@@ -51,6 +65,7 @@ pub use carts::InMemoryCartRepo;
 pub use catalogs::InMemoryCatalogRepo;
 pub use categories::InMemoryCategoryRepo;
 pub use channels::InMemoryChannelRepo;
+pub use checkout_rules::{InMemoryCheckoutRules, InMemoryCheckoutSettings};
 pub use clock::FixedClock;
 pub use custom_fields::InMemoryCustomFields;
 pub use customer_groups::InMemoryCustomerGroupRepo;
@@ -80,12 +95,15 @@ pub use ports::InMemoryPorts;
 pub use preview_tokens::InMemoryPreviewTokenRepo;
 pub use price_lists::InMemoryPriceListRepo;
 pub use products::InMemoryProductRepo;
+pub use purchase_orders::{InMemoryPurchaseOrders, InMemoryReceipts};
 pub use search::{
     InMemorySearchIndex, InMemorySearchQueue, InMemorySearchSettingsRepo, search_fixture,
 };
 pub use shipping::{InMemoryAppProviderRepo, InMemoryShippingZoneRepo, NoRateProviders};
 pub use spore_settings::InMemorySporeSettingsRepo;
 pub use stores::InMemoryStoreRepo;
+pub use suppliers::InMemorySuppliers;
 pub use tax_classes::InMemoryTaxClassRepo;
 pub use tax_regions::InMemoryTaxRegionRepo;
+pub use transfers::InMemoryTransfers;
 pub use users::{InMemoryInviteRepo, InMemoryRoleRepo, InMemoryUserRepo};

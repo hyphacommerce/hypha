@@ -31,7 +31,7 @@ use crate::ids::V7State;
 /// Time from JavaScript's `Date.now()` (`SystemTime::now()` panics on this target). Its
 /// resolution is a millisecond, and it stands still while a request computes (Workers
 /// advance it only on I/O, against timing attacks).
-pub struct JsClock;
+pub(crate) struct JsClock;
 
 impl Clock for JsClock {
     fn now(&self) -> Timestamp {
@@ -42,7 +42,7 @@ impl Clock for JsClock {
 
 /// UUIDv7 from `Date.now()` and `crypto.getRandomValues`, in order within an isolate.
 #[derive(Default)]
-pub struct JsIds(V7State);
+pub(crate) struct JsIds(V7State);
 
 impl IdGenerator for JsIds {
     fn new_uuid(&self) -> Uuid {
@@ -52,16 +52,19 @@ impl IdGenerator for JsIds {
     }
 }
 
+#[expect(
+    clippy::panic,
+    reason = "without a random source no token or key can be made safely: stop, as the \
+              native host does"
+)]
 fn fill_random(bytes: &mut [u8]) {
-    // Without a random source no token or key can be made safely: stop, as the native
-    // host does.
     if let Err(e) = getrandom::fill(bytes) {
         panic!("crypto.getRandomValues failed: {e}");
     }
 }
 
 /// The isolate's runtime.
-pub fn runtime() -> Runtime {
+pub(crate) fn runtime() -> Runtime {
     Runtime {
         clock: HostClock::new(JsClock),
         ids: HostIds::new(JsIds::default()),
@@ -75,7 +78,7 @@ pub fn runtime() -> Runtime {
 /// either, except in `wrangler dev`. A call to a co-located app's host goes through its
 /// Service Binding instead (`app_bindings`), the same request (URL, headers, signature)
 /// on Cloudflare's network; a binding the Worker lacks falls back to `fetch`.
-pub fn host_calls(env: Env, apps: AppBindings) -> HostCalls {
+pub(crate) fn host_calls(env: Env, apps: AppBindings) -> HostCalls {
     HostCalls::new(move |call| {
         let via = apps.binding_for(&call.url).and_then(|name| {
             env.service(name)
@@ -83,7 +86,7 @@ pub fn host_calls(env: Env, apps: AppBindings) -> HostCalls {
                     tracing::warn!(
                         binding = name,
                         "outbound call: no such Service Binding; sent by fetch"
-                    )
+                    );
                 })
                 .ok()
         });
@@ -206,7 +209,7 @@ const MEDIA_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// The media storage's HTTP (R2 or another S3 service) through `fetch`, each request
 /// aborted after `MEDIA_TIMEOUT`.
-pub fn host_http() -> HostHttp {
+pub(crate) fn host_http() -> HostHttp {
     HostHttp::new(|request| {
         Box::pin(SendFuture::new(async move {
             let controller = AbortController::default();

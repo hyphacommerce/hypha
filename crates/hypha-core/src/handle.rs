@@ -71,25 +71,25 @@ mod tests {
     #[test]
     fn accepts_valid_handle() {
         let valid_handle = "blue-shirt-42";
-        assert!(Handle::new(valid_handle).is_ok())
+        assert!(Handle::new(valid_handle).is_ok());
     }
 
     #[test]
     fn rejects_empty_string() {
         let empty = "";
-        assert_eq!(Handle::new(empty), Err(HandleError::Empty))
+        assert_eq!(Handle::new(empty), Err(HandleError::Empty));
     }
 
     #[test]
     fn rejects_uppercase_letters() {
         let upper = "Blue-Shirt";
-        assert_eq!(Handle::new(upper), Err(HandleError::InvalidChar('B')))
+        assert_eq!(Handle::new(upper), Err(HandleError::InvalidChar('B')));
     }
 
     #[test]
     fn rejects_spaces() {
         let space = " ";
-        assert_eq!(Handle::new(space), Err(HandleError::InvalidChar(' ')))
+        assert_eq!(Handle::new(space), Err(HandleError::InvalidChar(' ')));
     }
     #[test]
     fn rejects_edge_dash() {
@@ -98,7 +98,7 @@ mod tests {
                 Handle::new(handle),
                 Err(HandleError::EdgeDash),
                 "handle {handle:?}"
-            )
+            );
         }
     }
 }

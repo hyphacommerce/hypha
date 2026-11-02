@@ -1,3 +1,13 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
+
 use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
@@ -670,10 +680,7 @@ fn update_market_stores_prices_include_tax() {
     .unwrap();
 
     assert!(!changed.prices_include_tax());
-    assert_eq!(
-        block_on(markets.get(market.id())),
-        Ok(Some(changed.clone()))
-    );
+    assert_eq!(block_on(markets.get(market.id())), Ok(Some(changed)));
 
     let unchanged = block_on(update_market(
         &ctx,

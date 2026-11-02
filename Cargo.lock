@@ -927,6 +927,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypha-addresses"
+version = "0.1.0-beta.3"
+dependencies = [
+ "hypha-core",
+ "regex",
+]
+
+[[package]]
 name = "hypha-agents"
 version = "0.1.0-beta.3"
 dependencies = [
@@ -977,6 +985,7 @@ name = "hypha-cart"
 version = "0.1.0-beta.3"
 dependencies = [
  "futures-util",
+ "hypha-addresses",
  "hypha-channels",
  "hypha-core",
  "hypha-customers",
@@ -1024,7 +1033,11 @@ dependencies = [
 name = "hypha-checkout"
 version = "0.1.0-beta.3"
 dependencies = [
+ "futures-util",
+ "hypha-addresses",
  "hypha-cart",
+ "hypha-categories",
+ "hypha-checkout-rules",
  "hypha-core",
  "hypha-customers",
  "hypha-discounts",
@@ -1040,6 +1053,19 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "hypha-checkout-rules"
+version = "0.1.0-beta.3"
+dependencies = [
+ "hypha-core",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "utoipa",
  "uuid",
 ]
 
@@ -1115,6 +1141,7 @@ dependencies = [
 name = "hypha-customers"
 version = "0.1.0-beta.3"
 dependencies = [
+ "hypha-addresses",
  "hypha-core",
  "hypha-testkit",
  "pollster",
@@ -1149,6 +1176,7 @@ dependencies = [
  "hypha-inventory",
  "hypha-markets",
  "hypha-products",
+ "hypha-purchasing",
  "hypha-testkit",
  "pollster",
  "serde_json",
@@ -1198,17 +1226,13 @@ dependencies = [
  "hypha-config",
  "hypha-core",
  "hypha-custom-fields",
- "hypha-dispatch",
  "hypha-http",
  "hypha-inventory",
- "hypha-mail",
  "hypha-mail-resend",
  "hypha-markets",
- "hypha-merchandising",
  "hypha-notifications",
  "hypha-payments",
  "hypha-products",
- "hypha-search",
  "hypha-search-index",
  "hypha-spore-core",
  "hypha-store-postgres",
@@ -1244,15 +1268,10 @@ dependencies = [
  "hypha-apps",
  "hypha-config",
  "hypha-core",
- "hypha-custom-fields",
- "hypha-dispatch",
  "hypha-http",
- "hypha-mail",
  "hypha-mail-resend",
- "hypha-merchandising",
  "hypha-notifications",
  "hypha-payments",
- "hypha-search",
  "hypha-spore-core",
  "hypha-store-postgres",
  "hypha-store-s3",
@@ -1275,6 +1294,7 @@ dependencies = [
  "axum",
  "base64 0.23.1",
  "hmac",
+ "hypha-addresses",
  "hypha-agents",
  "hypha-apps",
  "hypha-auth",
@@ -1282,6 +1302,7 @@ dependencies = [
  "hypha-categories",
  "hypha-channels",
  "hypha-checkout",
+ "hypha-checkout-rules",
  "hypha-config",
  "hypha-core",
  "hypha-custom-fields",
@@ -1305,6 +1326,8 @@ dependencies = [
  "hypha-pricing",
  "hypha-privacy",
  "hypha-products",
+ "hypha-purchasing",
+ "hypha-receiving",
  "hypha-search",
  "hypha-search-index",
  "hypha-shipping",
@@ -1334,6 +1357,7 @@ dependencies = [
 name = "hypha-inventory"
 version = "0.1.0-beta.3"
 dependencies = [
+ "hypha-addresses",
  "hypha-core",
  "hypha-testkit",
  "pollster",
@@ -1354,6 +1378,7 @@ dependencies = [
  "hypha-notifications",
  "hypha-orders",
  "hypha-payments",
+ "hypha-purchasing",
  "hypha-stores",
  "hypha-testkit",
  "hypha-users",
@@ -1511,8 +1536,11 @@ dependencies = [
 name = "hypha-pricing"
 version = "0.1.0-beta.3"
 dependencies = [
+ "hypha-categories",
  "hypha-core",
  "hypha-markets",
+ "hypha-testkit",
+ "pollster",
  "thiserror",
  "uuid",
 ]
@@ -1567,6 +1595,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypha-purchasing"
+version = "0.1.0-beta.3"
+dependencies = [
+ "hypha-core",
+ "hypha-testkit",
+ "pollster",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "hypha-receiving"
+version = "0.1.0-beta.3"
+dependencies = [
+ "hypha-core",
+ "hypha-inventory",
+ "hypha-purchasing",
+ "hypha-testkit",
+ "pollster",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "hypha-search"
 version = "0.1.0-beta.3"
 dependencies = [
@@ -1610,7 +1664,6 @@ dependencies = [
  "pollster",
  "serde",
  "thiserror",
- "url",
  "uuid",
 ]
 
@@ -1656,6 +1709,7 @@ name = "hypha-store-postgres"
 version = "0.1.0-beta.3"
 dependencies = [
  "futures-util",
+ "hypha-addresses",
  "hypha-agents",
  "hypha-apps",
  "hypha-auth",
@@ -1663,6 +1717,7 @@ dependencies = [
  "hypha-categories",
  "hypha-channels",
  "hypha-checkout",
+ "hypha-checkout-rules",
  "hypha-core",
  "hypha-custom-fields",
  "hypha-customers",
@@ -1679,6 +1734,8 @@ dependencies = [
  "hypha-payments",
  "hypha-products",
  "hypha-promotions",
+ "hypha-purchasing",
+ "hypha-receiving",
  "hypha-search-index",
  "hypha-shipping",
  "hypha-store-postgres",
@@ -1742,6 +1799,7 @@ dependencies = [
  "hypha-cart",
  "hypha-categories",
  "hypha-channels",
+ "hypha-checkout-rules",
  "hypha-core",
  "hypha-custom-fields",
  "hypha-customer-accounts",
@@ -1758,6 +1816,7 @@ dependencies = [
  "hypha-payments",
  "hypha-products",
  "hypha-promotions",
+ "hypha-purchasing",
  "hypha-search-index",
  "hypha-shipping",
  "hypha-stores",

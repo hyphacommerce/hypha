@@ -274,13 +274,16 @@ step "remember the setup guide's step" 200 - -X PATCH "$BASE/admin/store" -H "$J
 contains "the step is kept" '"step":"market"'
 step "a setup step that isn't one" 422 invalid_setup_step -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"setup_step":"Market!"}'
 step "store details" 200 - -X PATCH "$BASE/admin/store" -H "$JSON" \
-    -d '{"contact_email":"Hello@E2E.example","description":"Mugs and cups.","timezone":"Europe/Zagreb","legal_address":{"last_name":"E2E","line1":"Ilica 1","city":"Zagreb","country":"HR"}}'
+    -d '{"contact_email":"Hello@E2E.example","description":"Mugs and cups.","timezone":"Europe/Zagreb","legal_address":{"last_name":"E2E","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR"}}'
 contains "the email is lowercased" '"contact_email":"hello@e2e.example"'
 contains "the address is kept" '"city":"Zagreb"'
 step "an unknown time zone" 422 unknown_timezone -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"timezone":"Mars/Base"}'
 step "a malformed language" 422 invalid_language -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"default_language":"en_GB"}'
 step "clear the legal address" 200 - -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"legal_address":null}'
 contains "it is gone" '"legal_address":null'
+step "choose the base currency costs are kept in" 200 - -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"currency":"EUR"}'
+contains "the currency is kept" '"currency":"EUR"'
+step "an unknown currency" 422 unknown_currency -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"currency":"eur"}'
 step "create mug" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
     -d '{"handle":"mug","title":"Mug","price":{"amount":1000,"currency":"EUR"}}'
 if [[ $BODY == *'"code":"handle_taken"'* ]]; then
@@ -673,6 +676,25 @@ step "an unknown handle" 404 product_not_found "$BASE/storefront/products/by-han
 step "an unknown parameter" 400 invalid_query "$BASE/storefront/products/by-handle/mug?currency=EUR"
 step "where the store sells" 200 - "$BASE/storefront/countries"
 contains "Croatia, in euros" "{\"country\":\"HR\",\"name\":\"Croatia\",\"market\":\"$MARKET\",\"currency\":\"EUR\",\"minor_units\":2"
+step "the US address form" 200 - "$BASE/storefront/address-formats/US"
+contains "city, state and ZIP code on one row" '["city","province","postal_code"]'
+contains "its labels" '"postal_code":"ZIP code","province":"State"'
+contains "states to choose from" '{"code":"CA","name":"California"}'
+contains "a ZIP code is required" '"postal_code":"required","postal_code_example":"90210"'
+step "cached for five minutes" 200 - -i "$BASE/storefront/address-formats/US"
+contains "privately: autocomplete is the store's" 'private, max-age=300'
+contains "no autocomplete app yet" '"autocomplete":false'
+step "Croatia's form, for staff" 200 - "$BASE/admin/address-formats/HR"
+contains "a postal code, no regions" '"required":["last_name","line1","postal_code","city"]'
+contains "no region list" '"regions":[]'
+step "no form for an unknown country" 404 unknown_country_code "$BASE/admin/address-formats/ZZ"
+step "no suggestions without an autocomplete app" 404 autocomplete_unavailable \
+    "$BASE/storefront/address-suggestions?q=Ilica&country=HR&session=e2e"
+step "two letters are too few to look up" 422 invalid_suggestion_query \
+    "$BASE/storefront/address-suggestions?q=Il&country=HR&session=e2e"
+contains "names the parameter" '"details":{"parameter":"q"}'
+step "a session is letters, digits, - and _" 422 invalid_suggestion_query \
+    "$BASE/storefront/address-suggestions?q=Ilica&country=HR&session=a%20b"
 step "create an Outlet channel" 201 - -X POST "$BASE/admin/channels" -H "$JSON" \
     -d '{"name":"Outlet","kind":"custom"}'
 OUTLET=$(id)
@@ -787,7 +809,7 @@ contains "it ships in one group, not chosen yet" '"selected":null,"problem":null
 SHGRP=$(shgrp)
 step "offers need an address" 409 shipping_address_required "$SHIP/shipping-options"
 step "an address in Slovenia" 422 address_country_mismatch -X PUT "$SHIP/shipping-address" -H "$JSON" \
-    -d '{"address":{"last_name":"Novak","line1":"Slovenska 1","city":"Ljubljana","country":"SI"}}'
+    -d '{"address":{"last_name":"Novak","line1":"Slovenska 1","city":"Ljubljana","postal_code":"1000","country":"SI"}}'
 step "ship to Zagreb" 200 - -X PUT "$SHIP/shipping-address" -H "$JSON" \
     -d '{"address":{"first_name":"Ana","last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR"}}'
 contains "the cart has the address" '"city":"Zagreb"'
@@ -889,7 +911,7 @@ step "checkout an unknown cart" 404 cart_not_found -X POST \
 step "checkout with an unknown field" 422 invalid_body -X POST "$CHECKOUT" -H "$JSON" \
     -d '{"total":1}'
 step "ship the keyed cart to Zagreb" 200 - -X PUT "$BASE/storefront/carts/$KEYED/shipping-address" -H "$JSON" \
-    -d '{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","country":"HR"}}'
+    -d '{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR"}}'
 step "standard, free from 10 EUR" 200 - -X PUT "$BASE/storefront/carts/$KEYED/shipping/$(shgrp)" -H "$JSON" \
     -d "{\"option\":\"$STANDARD\"}"
 step "checkout without an email" 409 cart_email_missing -X POST "$CHECKOUT" -H "$JSON" -d '{}'
@@ -992,6 +1014,87 @@ contains "with the order's number" '"order_number":'
 step "what it took off in all" 200 - "$BASE/admin/discounts/$WELCOME"
 contains "per currency" '"discounted_total":[{"amount":90,"currency":"EUR"}]'
 
+echo "## cart messages"
+step "a cart for Germany" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"DE"}'
+DE="$BASE/storefront/carts/$(id)"
+contains "a new cart has no messages" '"messages":[]'
+step "add a mug to it" 200 - -X POST "$DE/lines" -H "$JSON" -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
+DE_GROUP=$(shgrp)
+step "its email" 200 - -X PUT "$DE/email" -H "$JSON" -d '{"email":"lukas@example.de"}'
+step "a German address without a house number" 200 - -X PUT "$DE/shipping-address" -H "$JSON" \
+    -d '{"address":{"last_name":"Weber","line1":"Torstraße","city":"Berlin","postal_code":"10119","country":"DE"}}'
+contains "warns under the first line" '"messages":[{"severity":"warning","code":"house_number_missing","path":"$.shipping_address.line1","message":"Add a house number","source":{"type":"format"}}]'
+step "read again" 200 - "$DE"
+contains "the warning is worked out on every read" '"code":"house_number_missing"'
+step "ship it standard" 200 - -X PUT "$DE/shipping/$DE_GROUP" -H "$JSON" -d "{\"option\":\"$STANDARD\"}"
+step "pay it on delivery" 200 - -X PUT "$DE/payment-method" -H "$JSON" -d "{\"payment_method\":\"$COD\"}"
+step "a warning doesn't stop checkout" 201 - -X POST "$DE/checkout" -H "$JSON" -d '{}'
+step "the checked-out cart" 200 - "$DE"
+contains "has no messages" '"messages":[]'
+step "another cart for Germany" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"DE"}'
+DE="$BASE/storefront/carts/$(id)"
+step "a German address with its house number" 200 - -X PUT "$DE/shipping-address" -H "$JSON" \
+    -d '{"address":{"last_name":"Weber","line1":"Torstraße 140","city":"Berlin","postal_code":"10119","country":"DE"}}'
+contains "has nothing to say" '"messages":[]'
+
+echo "## checkout rules"
+RULES="$BASE/admin/checkout-rules"
+step "no checkout rules yet" 200 - "$RULES"
+contains "an empty list" '"items":[]'
+step "a rule needs a working pattern and a message" 422 invalid_checkout_rule -X POST "$RULES" -H "$JSON" \
+    -d '{"name":"Broken","conditions":[{"type":"field_matches","field":"line1","pattern":"(open"}],"outcome":{"severity":"error","message":" "}}'
+contains "every problem by path" '"code":"invalid_pattern","message":"unclosed group","path":"conditions[0].pattern"'
+contains "the empty message too" '"code":"empty","message":"write the message the shopper sees","path":"outcome.message"'
+step "a phone for standard shipping" 201 - -X POST "$RULES" -H "$JSON" \
+    -d "{\"name\":\"Phone for couriers\",\"applies_to\":{\"shipping_options\":[\"$STANDARD\"]},\"conditions\":[{\"type\":\"field_missing\",\"field\":\"phone\"}],\"outcome\":{\"severity\":\"error\",\"message\":\"Add a phone number for the courier.\",\"code\":\"phone_required\"}}"
+PHONE_RULE=$(id)
+contains "first in the list" '"position":0'
+step "no PO boxes, as a warning" 201 - -X POST "$RULES" -H "$JSON" \
+    -d '{"name":"No PO boxes","conditions":[{"type":"address_is","flag":"po_box"}],"outcome":{"severity":"warning","message":"We may not reach a PO box."}}'
+PO_RULE=$(id)
+contains "after it" '"position":1'
+step "move the PO box rule first" 200 - -X PATCH "$RULES/$PO_RULE" -H "$JSON" -d '{"position":0}'
+contains "it's first now" '"position":0'
+step "the rules in order" 200 - "$RULES"
+contains "the PO box rule leads" '"items":[{"id":"'"$PO_RULE"'"'
+step "try an address with standard shipping" 200 - -X POST "$RULES/test" -H "$JSON" \
+    -d "{\"address\":{\"last_name\":\"Weber\",\"line1\":\"Postfach 12\",\"city\":\"Berlin\",\"postal_code\":\"10119\",\"country\":\"DE\"},\"shipping_option\":\"$STANDARD\"}"
+contains "reads as a PO box" '"po_box":true'
+contains "the PO box warning" '"message":"We may not reach a PO box."'
+contains "and the phone, under the options" '"code":"phone_required","path":"$.shipping_groups[0]"'
+step "try a draft before saving it" 200 - -X POST "$RULES/test" -H "$JSON" \
+    -d '{"address":{"last_name":"Weber","line1":"Torstraße 140","city":"Berlin","postal_code":"10119","country":"DE"},"rule":{"name":"Not Berlin","conditions":[{"type":"field_contains","field":"city","values":["berlin"]}],"outcome":{"severity":"error","message":"Not to Berlin."}}}'
+contains "the draft's message, marked" '"message":"Not to Berlin.","source":{"type":"rule","rule":"crule_00000000000000000000000000000000"},"draft":true'
+step "try an address the format refuses" 200 - -X POST "$RULES/test" -H "$JSON" \
+    -d '{"address":{"last_name":"Weber","line1":"Torstraße 140","city":"Berlin","postal_code":"1","country":"DE"}}'
+contains "its problems by field" '"problems":[{"field":"postal_code","code":"invalid_format"'
+# The last German cart, still open: another would go over the carts-per-address limit.
+step "a mug in the open German cart" 200 - -X POST "$DE/lines" -H "$JSON" -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
+DE_GROUP=$(shgrp)
+step "its email" 200 - -X PUT "$DE/email" -H "$JSON" -d '{"email":"lukas@example.de"}'
+step "an address without a phone" 200 - -X PUT "$DE/shipping-address" -H "$JSON" \
+    -d '{"address":{"last_name":"Weber","line1":"Torstraße 140","city":"Berlin","postal_code":"10119","country":"DE"}}'
+contains "no messages before an option is chosen" '"messages":[]'
+step "ship it standard" 200 - -X PUT "$DE/shipping/$DE_GROUP" -H "$JSON" -d "{\"option\":\"$STANDARD\"}"
+contains "the rule's error under the options" '"messages":[{"severity":"error","code":"phone_required","path":"$.shipping_groups[0]","message":"Add a phone number for the courier.","source":{"type":"rule","rule":"'"$PHONE_RULE"'"}}]'
+step "pay it on delivery" 200 - -X PUT "$DE/payment-method" -H "$JSON" -d "{\"payment_method\":\"$COD\"}"
+step "the error blocks checkout" 409 checkout_blocked -X POST "$DE/checkout" -H "$JSON" -d '{}'
+contains "with the rule's message" '"details":{"messages":[{"code":"phone_required","message":"Add a phone number for the courier.","path":"$.shipping_groups[0]","severity":"error"'
+step "the address with a phone" 200 - -X PUT "$DE/shipping-address" -H "$JSON" \
+    -d '{"address":{"last_name":"Weber","line1":"Torstraße 140","city":"Berlin","postal_code":"10119","country":"DE","phone":"+49 30 1234567"}}'
+contains "nothing to fix" '"messages":[]'
+step "a new address clears the option: standard again" 200 - -X PUT "$DE/shipping/$DE_GROUP" -H "$JSON" \
+    -d "{\"option\":\"$STANDARD\"}"
+contains "and still nothing to fix" '"messages":[]'
+step "checkout goes on" 201 - -X POST "$DE/checkout" -H "$JSON" -d '{}'
+step "switch the phone rule off" 200 - -X PATCH "$RULES/$PHONE_RULE" -H "$JSON" -d '{"enabled":false}'
+contains "it's off" '"enabled":false'
+step "one rule" 200 - "$RULES/$PHONE_RULE"
+contains "keeps its outcome" '"outcome":{"severity":"error","message":"Add a phone number for the courier.","path":null,"code":"phone_required"}'
+step "delete the phone rule" 204 - -X DELETE "$RULES/$PHONE_RULE"
+step "a deleted rule" 404 checkout_rule_not_found "$RULES/$PHONE_RULE"
+step "delete the PO box rule" 204 - -X DELETE "$RULES/$PO_RULE"
+
 echo "## payment and search apps"
 step "a payment app that isn't installed" 422 payment_provider_unknown -X POST "$METHODS" -H "$JSON" \
     -d '{"provider":"app_pay","name":"Card"}'
@@ -1046,7 +1149,7 @@ PY
     CARD_CART="$BASE/storefront/carts/$(id)"
     step "a mug in it" 200 - -X POST "$CARD_CART/lines" -H "$JSON" -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
     step "shipped to Zagreb" 200 - -X PUT "$CARD_CART/shipping-address" -H "$JSON" \
-        -d '{"address":{"first_name":"Ana","last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","country":"HR"}}'
+        -d '{"address":{"first_name":"Ana","last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR"}}'
     step "by standard" 200 - -X PUT "$CARD_CART/shipping/$(shgrp)" -H "$JSON" -d "{\"option\":\"$STANDARD\"}"
     step "with an email" 200 - -X PUT "$CARD_CART/email" -H "$JSON" -d '{"email":"card@example.hr"}'
     step "the card is offered" 200 - "$CARD_CART/payment-methods"
@@ -1128,6 +1231,284 @@ PY
     contains "no search app" '"search_app":null'
 fi
 
+echo "## address verification"
+step "no verification app yet" 200 - "$BASE/admin/checkout-settings"
+contains "none is named" '"verification_app":null'
+step "an app that isn't there verifies nothing" 422 verification_app_unavailable -X PATCH \
+    "$BASE/admin/checkout-settings" -H "$JSON" -d '{"verification_app":"app_verify"}'
+# A verification app when python3 is here (the host must run with
+# HYPHA_ALLOW_PRIVATE_CALLBACKS=true to reach it): "Nowhere" is undeliverable, "Ilica 1a"
+# is Ilica 1 corrected, anything else is deliverable. It suggests addresses too: Ilica 1
+# and Ilica 12 (without its postal code), and "ljubljana" in another country. As a
+# validation app, two or more of the first line is an error; "/broken" always fails.
+if command -v python3 >/dev/null 2>&1; then
+    VERIFY_PORT=${E2E_VERIFY_PORT:-3198}
+    python3 - "$VERIFY_PORT" <<'PY' &
+import http.server, json, sys
+
+class App(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        sent = json.loads(self.rfile.read(int(self.headers.get("content-length", 0))))
+        if self.path == "/suggest":
+            answer = {"suggestions": [
+                {"id": "ilica-1", "label": "Ilica 1", "description": "10000 Zagreb, Croatia"},
+                {"id": "ilica-12", "label": "Ilica 12"},
+            ][:sent["limit"]]}
+            return self.answer(answer)
+        if self.path == "/broken":
+            self.send_response(500)
+            self.end_headers()
+            return
+        if self.path == "/validate":
+            line = (sent["cart"]["lines"] or [{}])[0]
+            answer = {"messages": []}
+            if line.get("quantity", 0) >= 2:
+                answer["messages"].append({"severity": "error", "code": "two_or_more",
+                    "path": "$.lines[0]", "message": "At most one mug per order."})
+            return self.answer(answer)
+        if self.path == "/resolve":
+            if sent["id"] == "ilica-1":
+                answer = {"address": {"line1": "Ilica 1", "city": "Zagreb",
+                                      "postal_code": "10000", "country": "HR"}}
+            elif sent["id"] == "ljubljana":
+                answer = {"address": {"line1": "Slovenska 1", "city": "Ljubljana",
+                                      "postal_code": "1000", "country": "SI"}}
+            else:
+                answer = {"address": {"line1": "Ilica 12", "city": "Zagreb", "country": "HR"}}
+            return self.answer(answer)
+        line1 = sent["address"]["line1"]
+        if "Nowhere" in line1:
+            answer = {"verdict": "undeliverable"}
+        elif line1 == "Ilica 1a":
+            answer = {"verdict": "deliverable_with_fixes",
+                      "fields": {"line1": {"status": "corrected"}},
+                      "suggested": {"line1": "Ilica 1", "city": "Zagreb",
+                                    "postal_code": "10000", "country": "HR"},
+                      "flags": {"residential": True}}
+        else:
+            answer = {"verdict": "deliverable"}
+        self.answer(answer)
+
+    def answer(self, answer):
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(answer).encode())
+
+    def log_message(self, *args):
+        pass
+
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), App).serve_forever()
+PY
+    VERIFIER=$!
+    disown "$VERIFIER"
+    sleep 1
+    VERIFY_URL="http://127.0.0.1:$VERIFY_PORT"
+    step "a verification app" 201 - -X POST "$BASE/admin/apps" -H "$JSON" \
+        -d '{"key":"app_verify","name":"Verify"}'
+    step "it answers address.verify" 200 - -X PUT "$BASE/admin/apps/app_verify/extension-points" \
+        -H "$JSON" -d "{\"extension_points\":[{\"point\":\"address.verify\",\"version\":1,\"url\":\"$VERIFY_URL/verify\"}]}"
+    step "addresses are verified by it" 200 - -X PATCH "$BASE/admin/checkout-settings" -H "$JSON" \
+        -d '{"verification_app":"app_verify"}'
+    contains "the setting is kept" '"verification_app":"app_verify"'
+    # Cart creation is rate limited per address: wait for one more.
+    sleep 3
+    step "a cart to verify" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
+    VERIFY_CART="$BASE/storefront/carts/$(id)"
+    step "a mug in it" 200 - -X POST "$VERIFY_CART/lines" -H "$JSON" \
+        -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
+    step "with an email" 200 - -X PUT "$VERIFY_CART/email" -H "$JSON" -d '{"email":"verify@example.hr"}'
+    step "an address with a mistake" 200 - -X PUT "$VERIFY_CART/shipping-address" -H "$JSON" \
+        -d '{"address":{"last_name":"Horvat","line1":"Ilica 1a","city":"Zagreb","postal_code":"10000","country":"HR"}}'
+    contains "the app suggests a correction" '"shipping_address_check":{"verdict":"deliverable_with_fixes","suggested":{"company":null,"line1":"Ilica 1"'
+    contains "a warning about it" '"code":"address_corrections_suggested","path":"$.shipping_address"'
+    contains "from the verification" '"source":{"type":"verification"}'
+    step "the same address again" 200 - -X PUT "$VERIFY_CART/shipping-address" -H "$JSON" \
+        -d '{"address":{"last_name":"Horvat","line1":"Ilica 1a","city":"Zagreb","postal_code":"10000","country":"HR"}}'
+    step "the suggestion taken" 200 - -X PUT "$VERIFY_CART/shipping-address" -H "$JSON" \
+        -d '{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR"}}'
+    contains "deliverable, as suggested" '"shipping_address_check":{"verdict":"deliverable","suggested":null'
+    lacks "no warning left" 'address_corrections_suggested'
+    step "the app's calls" 200 - "$BASE/admin/apps/app_verify/extension-calls"
+    if [[ $(grep -o '"point":"address.verify"' <<<"$BODY" | wc -l | tr -d ' ') == 1 ]]; then
+        echo "ok   one lookup for the address, its repeat and its suggestion"
+    else
+        echo "FAIL one lookup for the address, its repeat and its suggestion: $BODY"
+        FAILED=$((FAILED + 1))
+    fi
+    step "an address nobody delivers to" 200 - -X PUT "$VERIFY_CART/shipping-address" -H "$JSON" \
+        -d '{"address":{"last_name":"Horvat","line1":"Nowhere 1","city":"Zagreb","postal_code":"10000","country":"HR"}}'
+    contains "a warning, not an error" '"severity":"warning","code":"address_undeliverable"'
+    step "a rule refusing undeliverable addresses" 201 - -X POST "$BASE/admin/checkout-rules" -H "$JSON" \
+        -d '{"name":"Undeliverable","conditions":[{"type":"verification_is","verdicts":["undeliverable"]}],"outcome":{"severity":"error","message":"We can'"'"'t deliver to this address.","code":"undeliverable"}}'
+    UNDELIVERABLE_RULE=$(id)
+    step "the cart again" 200 - "$VERIFY_CART"
+    step "by standard" 200 - -X PUT "$VERIFY_CART/shipping/$(shgrp)" -H "$JSON" -d "{\"option\":\"$STANDARD\"}"
+    step "paid on delivery" 200 - -X PUT "$VERIFY_CART/payment-method" -H "$JSON" \
+        -d "{\"payment_method\":\"$COD\"}"
+    step "checkout refuses it" 409 checkout_blocked -X POST "$VERIFY_CART/checkout" -H "$JSON" -d '{}'
+    contains "with the rule's message" '"code":"undeliverable","message":"We can'"'"'t deliver to this address.","path":"$.shipping_address"'
+    step "the test panel asks the app too" 200 - -X POST "$BASE/admin/checkout-rules/test" -H "$JSON" \
+        -d '{"address":{"last_name":"Horvat","line1":"Nowhere 1","city":"Zagreb","postal_code":"10000","country":"HR"},"verify":true}'
+    contains "its verdict" '"verification":{"verdict":"undeliverable"'
+    contains "and the rule's error" '"code":"undeliverable"'
+    step "the rule goes" 204 - -X DELETE "$BASE/admin/checkout-rules/$UNDELIVERABLE_RULE"
+    step "checkout places it" 201 - -X POST "$VERIFY_CART/checkout" -H "$JSON" -d '{}'
+    VERIFY_ORDER=$(id)
+    step "the order kept its check" 200 - "$BASE/admin/orders/$VERIFY_ORDER"
+    contains "the verdict" '"address_check":{"verification":{"verdict":"undeliverable"'
+    contains "and the warning" '"warnings":[{"severity":"warning","code":"address_undeliverable"'
+    contains "it needs review" '"address_review":true'
+    step "orders needing review" 200 - "$BASE/admin/orders?address=needs_review"
+    contains "list it" "\"id\":\"$VERIFY_ORDER\""
+    step "staff mark it valid" 200 - -X POST "$BASE/admin/orders/$VERIFY_ORDER/address-check/mark-valid"
+    contains "by them" '"marked_valid":{"by":"user_'
+    contains "no longer needing review" '"address_review":false'
+    step "nothing needs review now" 200 - "$BASE/admin/orders?address=needs_review"
+    lacks "not listed" "$VERIFY_ORDER"
+    step "a new address without its postal code" 422 invalid_address -X PUT \
+        "$BASE/admin/orders/$VERIFY_ORDER/shipping-address" -H "$JSON" \
+        -d '{"address":{"last_name":"Horvat","line1":"Ilica 3","city":"Zagreb","country":"HR"}}'
+    contains "names the field" '"field":"postal_code"'
+    step "a new address in another country" 422 address_country_mismatch -X PUT \
+        "$BASE/admin/orders/$VERIFY_ORDER/shipping-address" -H "$JSON" \
+        -d '{"address":{"last_name":"Novak","line1":"Slovenska 1","city":"Ljubljana","postal_code":"1000","country":"SI"}}'
+    step "staff correct the address" 200 - -X PUT "$BASE/admin/orders/$VERIFY_ORDER/shipping-address" \
+        -H "$JSON" -d '{"address":{"last_name":"Horvat","line1":"Ilica 3","city":"Zagreb","postal_code":"10000","country":"HR"}}'
+    contains "it ships there" '"line1":"Ilica 3"'
+    contains "verified again" '"address_check":{"verification":{"verdict":"deliverable"'
+    contains "nobody has marked it yet" '"marked_valid":null'
+    step "the order's lookup" 200 - "$BASE/admin/apps/app_verify/extension-calls"
+    contains "is recorded for it" "\"correlation\":\"$VERIFY_ORDER\""
+    step "no more verification" 200 - -X PATCH "$BASE/admin/checkout-settings" -H "$JSON" \
+        -d '{"verification_app":null}'
+
+    echo "## address autocomplete"
+    step "an app that only verifies doesn't suggest" 422 autocomplete_app_unavailable -X PATCH \
+        "$BASE/admin/checkout-settings" -H "$JSON" -d '{"autocomplete_app":"app_verify"}'
+    step "it suggests addresses too" 200 - -X PUT "$BASE/admin/apps/app_verify/extension-points" \
+        -H "$JSON" -d "{\"extension_points\":[{\"point\":\"address.verify\",\"version\":1,\"url\":\"$VERIFY_URL/verify\"},{\"point\":\"address.suggest\",\"version\":1,\"url\":\"$VERIFY_URL/suggest\"},{\"point\":\"address.resolve\",\"version\":1,\"url\":\"$VERIFY_URL/resolve\"}]}"
+    step "addresses are suggested by it" 200 - -X PATCH "$BASE/admin/checkout-settings" \
+        -H "$JSON" -d '{"autocomplete_app":"app_verify"}'
+    contains "the setting is kept" '"autocomplete_app":"app_verify"'
+    step "the form says so" 200 - "$BASE/storefront/address-formats/HR"
+    contains "autocomplete on" '"autocomplete":true'
+    step "suggestions for what's typed" 200 - \
+        "$BASE/storefront/address-suggestions?q=Ilica&country=HR&session=e2e"
+    contains "the app's two" '{"suggestions":[{"id":"ilica-1","label":"Ilica 1","description":"10000 Zagreb, Croatia"},{"id":"ilica-12","label":"Ilica 12","description":null}]}'
+    step "no more than asked for" 200 - \
+        "$BASE/storefront/address-suggestions?q=Ilica&country=HR&session=e2e&limit=1"
+    lacks "one" 'ilica-12'
+    step "the picked one's address" 200 - \
+        "$BASE/storefront/address-suggestions/ilica-1?country=HR&session=e2e"
+    contains "its parts" '"line1":"Ilica 1","line2":null,"city":"Zagreb"'
+    contains "nothing to fix" '"problems":[]'
+    step "one missing its postal code" 200 - \
+        "$BASE/storefront/address-suggestions/ilica-12?country=HR&session=e2e"
+    contains "says so" '"problems":[{"field":"postal_code","code":"required"'
+    step "an address in another country is the app's failure" 502 app_unavailable \
+        "$BASE/storefront/address-suggestions/ljubljana?country=HR&session=e2e"
+    step "staff get suggestions too" 200 - \
+        "$BASE/admin/address-suggestions?q=Ilica&country=HR&session=e2e-staff"
+    contains "the same two" '"id":"ilica-12"'
+    step "the calls are logged" 200 - "$BASE/admin/apps/app_verify/extension-calls"
+    contains "suggestions" '"point":"address.suggest"'
+    contains "and resolving" '"point":"address.resolve"'
+    lacks "without what was typed" '"query":"Ilica"'
+    step "no more autocomplete" 200 - -X PATCH "$BASE/admin/checkout-settings" -H "$JSON" \
+        -d '{"autocomplete_app":null}'
+
+    echo "## validation apps"
+    validate_calls() {
+        step "the validation app's calls" 200 - "$BASE/admin/apps/app_rules/extension-calls"
+        if [[ $(grep -o '"point":"checkout.validate"' <<<"$BODY" | wc -l | tr -d ' ') == "$1" ]]; then
+            echo "ok   $2"
+        else
+            echo "FAIL $2: expected $1 calls: $BODY"
+            FAILED=$((FAILED + 1))
+        fi
+    }
+    step "a validation app" 201 - -X POST "$BASE/admin/apps" -H "$JSON" \
+        -d '{"key":"app_rules","name":"Rules"}'
+    step "it answers checkout.validate" 200 - -X PUT "$BASE/admin/apps/app_rules/extension-points" \
+        -H "$JSON" -d "{\"extension_points\":[{\"point\":\"checkout.validate\",\"version\":1,\"url\":\"$VERIFY_URL/validate\"}]}"
+    step "the settings list it" 200 - "$BASE/admin/checkout-settings"
+    contains "asked, not blocking" '"validation_apps":[{"app":"app_rules","enabled":true,"block_on_failure":false}]'
+    step "an app that doesn't validate can't be set" 422 validation_app_unavailable -X PATCH \
+        "$BASE/admin/checkout-settings" -H "$JSON" \
+        -d '{"validation_apps":[{"app":"app_verify","enabled":true,"block_on_failure":false}]}'
+    sleep 3
+    step "a cart to validate" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
+    RULES_CART="$BASE/storefront/carts/$(id)"
+    step "two mugs in it" 200 - -X POST "$RULES_CART/lines" -H "$JSON" \
+        -d "{\"variant\":\"$MUG_VAR\",\"quantity\":2}"
+    step "with an email" 200 - -X PUT "$RULES_CART/email" -H "$JSON" -d '{"email":"rules@example.hr"}'
+    step "an address" 200 - -X PUT "$RULES_CART/shipping-address" -H "$JSON" \
+        -d '{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR"}}'
+    contains "the app's error on the line" '"severity":"error","code":"two_or_more","path":"$.lines[0]","message":"At most one mug per order."'
+    contains "from the app" '"source":{"type":"app","app":"app_rules"}'
+    step "the same address again" 200 - -X PUT "$RULES_CART/shipping-address" -H "$JSON" \
+        -d '{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR"}}'
+    validate_calls 1 "the same cart is asked once"
+    step "the cart again" 200 - "$RULES_CART"
+    step "by standard" 200 - -X PUT "$RULES_CART/shipping/$(shgrp)" -H "$JSON" -d "{\"option\":\"$STANDARD\"}"
+    contains "still the app's error" '"code":"two_or_more"'
+    validate_calls 2 "a shipping choice asks again"
+    step "paid on delivery" 200 - -X PUT "$RULES_CART/payment-method" -H "$JSON" \
+        -d "{\"payment_method\":\"$COD\"}"
+    step "checkout refuses it" 409 checkout_blocked -X POST "$RULES_CART/checkout" -H "$JSON" -d '{}'
+    contains "with the app's error" '"code":"two_or_more","message":"At most one mug per order.","path":"$.lines[0]"'
+    validate_calls 2 "checkout used the kept answer"
+    step "one mug" 200 - -X PUT "$RULES_CART/lines/$MUG_VAR" -H "$JSON" -d '{"quantity":1}'
+    contains "the old answer shows until it's asked again" '"code":"two_or_more"'
+    validate_calls 2 "changing a line asks nobody"
+    step "checkout asks again and places it" 201 - -X POST "$RULES_CART/checkout" -H "$JSON" -d '{}'
+    validate_calls 3 "checkout asked the changed cart"
+
+    step "the app breaks" 200 - -X PUT "$BASE/admin/apps/app_rules/extension-points" \
+        -H "$JSON" -d "{\"extension_points\":[{\"point\":\"checkout.validate\",\"version\":1,\"url\":\"$VERIFY_URL/broken\"}]}"
+    sleep 3
+    step "another cart" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
+    RULES_CART="$BASE/storefront/carts/$(id)"
+    step "a mug in it" 200 - -X POST "$RULES_CART/lines" -H "$JSON" \
+        -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
+    step "with an email" 200 - -X PUT "$RULES_CART/email" -H "$JSON" -d '{"email":"rules@example.hr"}'
+    step "an address the failing app is asked about" 200 - -X PUT "$RULES_CART/shipping-address" \
+        -H "$JSON" -d '{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR"}}'
+    contains "its failure says nothing" '"messages":[]'
+    step "the cart again" 200 - "$RULES_CART"
+    step "by standard" 200 - -X PUT "$RULES_CART/shipping/$(shgrp)" -H "$JSON" -d "{\"option\":\"$STANDARD\"}"
+    step "paid on delivery" 200 - -X PUT "$RULES_CART/payment-method" -H "$JSON" \
+        -d "{\"payment_method\":\"$COD\"}"
+    step "its failure blocks checkout" 200 - -X PATCH "$BASE/admin/checkout-settings" -H "$JSON" \
+        -d '{"validation_apps":[{"app":"app_rules","enabled":true,"block_on_failure":true}]}'
+    contains "as set" '"block_on_failure":true'
+    step "the cart says so" 200 - "$RULES_CART"
+    contains "validation unavailable" '"severity":"error","code":"validation_unavailable","path":"$","message":"We can'"'"'t check your order right now. Try again in a moment."'
+    step "checkout refuses it" 409 checkout_blocked -X POST "$RULES_CART/checkout" -H "$JSON" -d '{}'
+    contains "while the app fails" '"code":"validation_unavailable"'
+    step "its failure is skipped again" 200 - -X PATCH "$BASE/admin/checkout-settings" -H "$JSON" \
+        -d '{"validation_apps":[{"app":"app_rules","enabled":true,"block_on_failure":false}]}'
+    step "checkout goes on without it" 201 - -X POST "$RULES_CART/checkout" -H "$JSON" -d '{}'
+
+    for n in 2 3 4 5 6; do
+        step "validation app $n" 201 - -X POST "$BASE/admin/apps" -H "$JSON" \
+            -d "{\"key\":\"app_rules_$n\",\"name\":\"Rules $n\"}"
+    done
+    for n in 2 3 4 5; do
+        step "app $n validates too" 200 - -X PUT "$BASE/admin/apps/app_rules_$n/extension-points" \
+            -H "$JSON" -d "{\"extension_points\":[{\"point\":\"checkout.validate\",\"version\":1,\"url\":\"$VERIFY_URL/validate\"}]}"
+    done
+    step "a sixth is refused" 409 too_many_validation_apps -X PUT \
+        "$BASE/admin/apps/app_rules_6/extension-points" -H "$JSON" \
+        -d "{\"extension_points\":[{\"point\":\"checkout.validate\",\"version\":1,\"url\":\"$VERIFY_URL/validate\"}]}"
+    contains "names the limit" '"max":5'
+    for key in app_rules app_rules_2 app_rules_3 app_rules_4 app_rules_5 app_rules_6; do
+        step "$key goes" 204 - -X DELETE "$BASE/admin/apps/$key"
+    done
+    kill "$VERIFIER" 2>/dev/null
+fi
+
 step "archive mug" 200 - -X PATCH "$BASE/admin/products/$MUG/status" -H "$JSON" -d '{"status":"archived"}'
 step "get cart" 200 - "$BASE/storefront/carts/$CART"
 contains "mug line is unavailable" '"status":"unavailable","reason_code":"product_not_active"'
@@ -1200,7 +1581,7 @@ step "lamp has no stock set up" 200 - "$BASE/admin/variants/$LAMP_VAR/inventory"
 contains "so it is untracked" '"id":null,'
 contains "reported as tracked: false" '"tracked":false'
 step "the lamp's stock, every variant at once" 200 - "$BASE/admin/products/$LAMP/inventory"
-contains "one untracked variant" "\"items\":[{\"id\":null,\"variant\":\"$LAMP_VAR\",\"tracked\":false"
+contains "one untracked variant, naming its product" "\"items\":[{\"id\":null,\"variant\":\"$LAMP_VAR\",\"product\":\"$LAMP\",\"tracked\":false"
 step "the setup checklist" 200 - "$BASE/admin/setup/checklist"
 contains "a market exists by now" '"market":true'
 step "create warehouse for the market" 201 - -X POST "$BASE/admin/locations" -H "$JSON" \
@@ -1212,7 +1593,7 @@ LAMP_ITEM=$(id)
 contains "tracked by default" '"tracked":true,"continue_selling":false,"levels":[]'
 step "2 lamps on hand" 200 - -X PUT "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" -H "$JSON" \
     -d '{"on_hand":2}'
-contains "level is stored" "\"levels\":[{\"location\":\"$WAREHOUSE\",\"on_hand\":2,\"reserved\":0,\"available\":2}]"
+contains "level is stored" "\"levels\":[{\"location\":\"$WAREHOUSE\",\"on_hand\":2,\"reserved\":0,\"available\":2,\"incoming\":0,\"next_expected_at\":null}]"
 step "create stock cart" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
 STOCK_CART=$(id)
 step "add 3 lamps" 409 out_of_stock -X POST "$BASE/storefront/carts/$STOCK_CART/lines" -H "$JSON" \
@@ -1223,13 +1604,180 @@ contains "lamps are available" '"fully_available":true'
 step "count with a stale expected" 409 on_hand_changed -X PUT \
     "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" -H "$JSON" -d '{"on_hand":1,"expected_on_hand":5}'
 step "a lamp broke (1 left)" 200 - -X PUT "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE" \
-    -H "$JSON" -d '{"on_hand":1,"expected_on_hand":2}'
+    -H "$JSON" -d '{"on_hand":1,"expected_on_hand":2,"note":"one broke"}'
 step "get stock cart" 200 - "$BASE/storefront/carts/$STOCK_CART"
 contains "lamp line ran out" '"status":"unavailable","reason_code":"out_of_stock"'
 contains "and is left out of the total" '"total":{"amount":0,"currency":"EUR"},"fully_available":false'
 step "delivery of 4" 200 - -X POST "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE/adjustments" \
     -H "$JSON" -d '{"delta":4}'
 contains "5 on hand" '"on_hand":5'
+step "a lamp given away" 200 - -X POST "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE/adjustments" \
+    -H "$JSON" -d '{"delta":-1,"reason":"promotion","note":"for a review"}'
+step "a reason that isn't one" 422 invalid_body -X POST \
+    "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE/adjustments" -H "$JSON" -d '{"delta":1,"reason":"sold"}'
+step "put it back" 200 - -X POST "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$WAREHOUSE/adjustments" \
+    -H "$JSON" -d '{"delta":1}'
+step "the lamp's stock history" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM/movements?limit=3"
+contains "newest first, by hand" "\"location\":\"$WAREHOUSE\",\"delta\":1,\"after\":5,\"reason\":\"correction\",\"source\":{\"type\":\"manual\"}"
+contains "the gift with its note" '"delta":-1,"after":4,"reason":"promotion","source":{"type":"manual"},"note":"for a review"'
+contains "more to come" '"has_more":true'
+step "only what was counted" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM/movements?reason=counted"
+contains "the count with its note" '"delta":-1,"after":1,"reason":"counted","source":{"type":"manual"},"note":"one broke"'
+contains "and the first one" '"delta":2,"after":2,"reason":"counted"'
+step "history of an unknown item" 404 inventory_item_not_found \
+    "$BASE/admin/inventory-items/invi_00000000000000000000000000000063/movements"
+step "a cost in another currency" 422 cost_currency_mismatch -X PUT "$BASE/admin/inventory-items/$LAMP_ITEM/cost" \
+    -H "$JSON" -d '{"unit_cost":{"amount":"500","currency":"USD"}}'
+step "what a lamp cost" 200 - -X PUT "$BASE/admin/inventory-items/$LAMP_ITEM/cost" \
+    -H "$JSON" -d '{"unit_cost":{"amount":"1250.5","currency":"EUR"},"note":"invoice 12"}'
+contains "finer than a cent" '"unit_cost":{"amount":"1250.5","currency":"EUR"}'
+step "the cost in the history" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM/movements?reason=cost_adjustment"
+contains "no units moved, the cost after" '"location":null,"delta":0,"after":null,"reason":"cost_adjustment","source":{"type":"manual"},"note":"invoice 12","unit_cost":null,"average_after":{"amount":"1250.5","currency":"EUR"}'
+step "the base currency is fixed now" 409 store_currency_locked -X PATCH "$BASE/admin/store" -H "$JSON" \
+    -d '{"currency":"USD"}'
+
+# --- suppliers and what they sell ---
+step "add a supplier" 201 - -X POST "$BASE/admin/suppliers" -H "$JSON" -d '{"name":"Lamp Works","currency":"EUR",
+    "contacts":[{"name":"Ana","email":"ana@lampworks.example","primary":true}],
+    "payment_terms":{"type":"net","days":30},"lead_time_days":10}'
+SUPPLIER=$(id)
+contains "with its terms" '"payment_terms":{"type":"net","days":30,"note":null}'
+step "two primary contacts" 422 several_primary_contacts -X POST "$BASE/admin/suppliers" -H "$JSON" \
+    -d '{"name":"Other","currency":"EUR","contacts":[{"name":"A","primary":true},{"name":"B","primary":true}]}'
+step "what they charge for lamps" 200 - -X PUT "$BASE/admin/suppliers/$SUPPLIER/variants/$LAMP_VAR" -H "$JSON" \
+    -d '{"supplier_sku":"LW-LAMP","unit_cost":{"amount":"1100","currency":"EUR"},"min_order_quantity":10}'
+contains "named after the product" '"product_title":"Lamp"'
+step "a price in another currency" 422 cost_currency_mismatch -X PUT \
+    "$BASE/admin/suppliers/$SUPPLIER/variants/$LAMP_VAR" -H "$JSON" -d '{"unit_cost":{"amount":"1","currency":"USD"}}'
+step "a variant that doesn't exist" 404 variant_not_found -X PUT \
+    "$BASE/admin/suppliers/$SUPPLIER/variants/var_00000000000000000000000000000063" -H "$JSON" -d '{}'
+step "the supplier's catalogue" 200 - "$BASE/admin/suppliers/$SUPPLIER/variants"
+contains "the lamp at their price" '"supplier_sku":"LW-LAMP","unit_cost":{"amount":"1100","currency":"EUR"}'
+step "who sells lamps" 200 - "$BASE/admin/variants/$LAMP_VAR/suppliers"
+contains "Lamp Works does" "\"supplier\":\"$SUPPLIER\",\"supplier_name\":\"Lamp Works\""
+step "their currency is fixed while they have prices" 409 supplier_currency_in_use -X PATCH \
+    "$BASE/admin/suppliers/$SUPPLIER" -H "$JSON" -d '{"currency":"USD"}'
+step "archive them" 200 - -X PATCH "$BASE/admin/suppliers/$SUPPLIER" -H "$JSON" -d '{"archived":true}'
+step "archived suppliers" 200 - "$BASE/admin/suppliers?archived=true&q=lamp"
+contains "Lamp Works is one" "\"id\":\"$SUPPLIER\""
+step "back to active" 200 - -X PATCH "$BASE/admin/suppliers/$SUPPLIER" -H "$JSON" -d '{"archived":false}'
+step "an unknown supplier" 404 supplier_not_found "$BASE/admin/suppliers/sup_00000000000000000000000000000063"
+
+# --- purchase orders ---
+step "draft a purchase order" 201 - -X POST "$BASE/admin/purchase-orders" -H "$JSON" \
+    -d "{\"supplier\":\"$SUPPLIER\",\"destination\":\"$WAREHOUSE\",\"lines\":[{\"variant\":\"$LAMP_VAR\",\"quantity\":10}],
+        \"costs\":[{\"kind\":\"shipping\",\"amount\":{\"amount\":2000,\"currency\":\"EUR\"}}]}"
+PO=$(id)
+contains "a draft from the supplier" '"status":"draft"'
+contains "priced from their catalogue" '"supplier_sku":"LW-LAMP","quantity":10,"unit_cost":{"amount":"1100","currency":"EUR"}'
+contains "shipping in each lamp's landed cost" '"landed_unit_cost":{"amount":"1300","currency":"EUR"}'
+step "a line nobody has a price for" 422 unit_cost_required -X POST "$BASE/admin/purchase-orders" -H "$JSON" \
+    -d "{\"supplier\":\"$SUPPLIER\",\"currency\":\"USD\",\"lines\":[{\"variant\":\"$LAMP_VAR\",\"quantity\":1}]}"
+step "place it with the supplier" 200 - -X POST "$BASE/admin/purchase-orders/$PO/order"
+contains "ordered" '"status":"ordered"'
+step "order more lamps" 200 - -X PATCH "$BASE/admin/purchase-orders/$PO" -H "$JSON" \
+    -d "{\"lines\":[{\"variant\":\"$LAMP_VAR\",\"quantity\":12}]}"
+contains "a revision" '"revision":1'
+step "the lamps on their way" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM"
+contains "12 incoming at the warehouse" '"incoming":12'
+forget_mail "ana@lampworks.example"
+step "send it to the supplier" 200 - -X POST "$BASE/admin/purchase-orders/$PO/send" -H "$JSON" \
+    -d '{"message":"Lamps before the sale, please."}'
+contains "sent" '"sent_at":"'
+step "too many words for a note" 422 message_too_long -X POST "$BASE/admin/purchase-orders/$PO/send" -H "$JSON" \
+    -d "{\"message\":\"$(printf 'x%.0s' $(seq 1 2001))\"}"
+mail "the supplier gets the order" "ana@lampworks.example" "Purchase order PO-"
+step "the order's emails" 200 - "$BASE/admin/notifications?purchase_order=$PO"
+contains "to the supplier" '"template":"supplier_purchase_order"'
+step "an ordered one isn't deleted" 409 purchase_order_not_draft -X DELETE "$BASE/admin/purchase-orders/$PO"
+step "open orders for lamps" 200 - "$BASE/admin/purchase-orders?status=ordered&variant=$LAMP_VAR&sort=expected_at"
+contains "this one" "\"id\":\"$PO\""
+step "a supplier on an order stays" 409 supplier_in_use -X DELETE "$BASE/admin/suppliers/$SUPPLIER"
+step "an unknown purchase order" 404 purchase_order_not_found \
+    "$BASE/admin/purchase-orders/po_00000000000000000000000000000063"
+
+# --- receiving (into a back room no market sells from, so the lamp's counts below stay) ---
+step "a back room" 201 - -X POST "$BASE/admin/locations" -H "$JSON" -d '{"name":"Back room"}'
+BACKROOM=$(id)
+RECEIPT_BODY="{\"location\":\"$BACKROOM\",\"lines\":[{\"variant\":\"$LAMP_VAR\",\"accepted\":5,\"rejected\":1}],\"note\":\"pallet 1\"}"
+step "5 lamps arrive, 1 broken" 201 - -X POST "$BASE/admin/purchase-orders/$PO/receipts" -H "$JSON" \
+    -H "Idempotency-Key: e2e-receipt-1" -d "$RECEIPT_BODY"
+# The answer is {receipt, purchase_order, new_items}: the receipt's own ID.
+RECEIPT=$(grep -o '"id":"rcpt_[0-9a-f]*"' <<<"$BODY" | head -1 | sed -E 's/.*"(rcpt_[0-9a-f]+)"/\1/')
+contains "at their landed cost" '"landed_unit_cost":{"amount":"1266.6667","currency":"EUR"}'
+contains "the order is partly received" '"receipt_status":"partial"'
+replayed "the same key answers with the same receipt" -X POST "$BASE/admin/purchase-orders/$PO/receipts" \
+    -H "$JSON" -H "Idempotency-Key: e2e-receipt-1" -d "$RECEIPT_BODY"
+step "more than is outstanding" 409 over_received -X POST "$BASE/admin/purchase-orders/$PO/receipts" -H "$JSON" \
+    -d "{\"location\":\"$BACKROOM\",\"lines\":[{\"variant\":\"$LAMP_VAR\",\"accepted\":7}]}"
+contains "6 are still to come" "\"outstanding\":6,\"variant\":\"$LAMP_VAR\""
+step "the lamps in the back room" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM/movements?location=$BACKROOM"
+contains "received there" '"reason":"received"'
+step "fewer on their way" 200 - "$BASE/admin/variants/$LAMP_VAR/inventory"
+contains "6 still incoming" '"incoming":6'
+step "the order's receipts" 200 - "$BASE/admin/purchase-orders/$PO/receipts"
+contains "this one" "\"id\":\"$RECEIPT\""
+step "take the receipt back" 200 - -X POST "$BASE/admin/receipts/$RECEIPT/cancel"
+contains "taken back" '"status":"cancelled"'
+contains "nothing received any more" '"receipt_status":"none"'
+step "not twice" 409 receipt_cancelled -X POST "$BASE/admin/receipts/$RECEIPT/cancel"
+step "an unknown receipt" 404 receipt_not_found "$BASE/admin/receipts/rcpt_00000000000000000000000000000063"
+
+# --- late costs (a bill that comes after the goods revalues what arrived) ---
+step "5 lamps arrive again" 201 - -X POST "$BASE/admin/purchase-orders/$PO/receipts" -H "$JSON" \
+    -d "{\"location\":\"$BACKROOM\",\"lines\":[{\"variant\":\"$LAMP_VAR\",\"accepted\":5}]}"
+RECEIPT2=$(grep -o '"id":"rcpt_[0-9a-f]*"' <<<"$BODY" | head -1 | sed -E 's/.*"(rcpt_[0-9a-f]+)"/\1/')
+step "the duties come later" 200 - -X PATCH "$BASE/admin/purchase-orders/$PO" -H "$JSON" \
+    -d '{"costs":[{"kind":"shipping","amount":{"amount":2000,"currency":"EUR"}},
+        {"kind":"duties","amount":{"amount":600,"currency":"EUR"},"allocation":"by_quantity"}]}'
+step "the lamp's cost changes" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM/movements?reason=cost_adjustment&limit=1"
+contains "revalued by the order" "\"reason\":\"cost_adjustment\",\"source\":{\"type\":\"purchase_order\",\"purchase_order\":\"$PO\"}"
+step "take those back too" 200 - -X POST "$BASE/admin/receipts/$RECEIPT2/cancel"
+
+# --- transfers (from the back room to a pop-up; neither serves a market, so the lamp's
+# counts below stay) ---
+step "a pop-up shop" 201 - -X POST "$BASE/admin/locations" -H "$JSON" -d '{"name":"Pop-up"}'
+POPUP=$(id)
+step "4 lamps in the back room" 200 - -X PUT "$BASE/admin/inventory-items/$LAMP_ITEM/levels/$BACKROOM" \
+    -H "$JSON" -d '{"on_hand":4}'
+step "a transfer going nowhere" 422 transfer_same_location -X POST "$BASE/admin/transfers" -H "$JSON" \
+    -d "{\"origin\":\"$BACKROOM\",\"destination\":\"$BACKROOM\"}"
+step "draft a transfer" 201 - -X POST "$BASE/admin/transfers" -H "$JSON" \
+    -d "{\"origin\":\"$BACKROOM\",\"destination\":\"$POPUP\",\"expected_at\":\"2030-01-02T12:00:00Z\",
+        \"reference\":\"Van 2\",\"lines\":[{\"variant\":\"$LAMP_VAR\",\"quantity\":3}]}"
+TRANSFER=$(id)
+contains "a draft, the lamp named" '"status":"draft"'
+contains "with its product" '"product_title":"Lamp"'
+step "ship it" 200 - -X POST "$BASE/admin/transfers/$TRANSFER/ship" -H "Idempotency-Key: e2e-ship-1"
+contains "on its way" '"status":"in_transit"'
+replayed "shipping again with the key ships nothing more" -X POST "$BASE/admin/transfers/$TRANSFER/ship" \
+    -H "Idempotency-Key: e2e-ship-1"
+step "a shipped transfer doesn't change" 409 transfer_not_draft -X PATCH "$BASE/admin/transfers/$TRANSFER" \
+    -H "$JSON" -d '{"note":"late"}'
+step "lamps on their way to the pop-up" 200 - "$BASE/admin/variants/$LAMP_VAR/inventory"
+contains "1 left in the back room" "\"location\":\"$BACKROOM\",\"on_hand\":1"
+contains "3 incoming at the pop-up" "\"location\":\"$POPUP\",\"on_hand\":0,\"reserved\":0,\"available\":0,\"incoming\":3,\"next_expected_at\":\"2030-01-02T12:00:00Z\""
+step "1 arrives, 1 broke on the way" 200 - -X POST "$BASE/admin/transfers/$TRANSFER/receive" -H "$JSON" \
+    -H "Idempotency-Key: e2e-transfer-in-1" -d "{\"lines\":[{\"variant\":\"$LAMP_VAR\",\"accepted\":1,\"rejected\":1}]}"
+contains "1 still on its way" '"in_transit":1'
+step "more than is on its way" 409 over_received -X POST "$BASE/admin/transfers/$TRANSFER/receive" -H "$JSON" \
+    -d "{\"lines\":[{\"variant\":\"$LAMP_VAR\",\"accepted\":2}]}"
+contains "1 is" "\"in_transit\":1,\"variant\":\"$LAMP_VAR\""
+step "the last one arrives" 200 - -X POST "$BASE/admin/transfers/$TRANSFER/receive" -H "$JSON" \
+    -d "{\"lines\":[{\"variant\":\"$LAMP_VAR\",\"accepted\":1}]}"
+contains "received" '"status":"received"'
+step "the pop-up's lamps" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM/movements?location=$POPUP"
+contains "the broken one, no units" '"delta":0,"after":1,"reason":"shrinkage"'
+contains "from the transfer" "\"source\":{\"type\":\"transfer\",\"transfer\":\"$TRANSFER\"}"
+step "received transfers of lamps" 200 - "$BASE/admin/transfers?status=received&variant=$LAMP_VAR"
+contains "this one" "\"id\":\"$TRANSFER\""
+step "a shipped transfer stays" 409 transfer_not_draft -X DELETE "$BASE/admin/transfers/$TRANSFER"
+step "a draft to throw away" 201 - -X POST "$BASE/admin/transfers" -H "$JSON" \
+    -d "{\"origin\":\"$POPUP\",\"destination\":\"$BACKROOM\"}"
+SPARE_TRANSFER=$(id)
+step "nothing to ship" 409 transfer_empty -X POST "$BASE/admin/transfers/$SPARE_TRANSFER/ship"
+step "throw it away" 204 - -X DELETE "$BASE/admin/transfers/$SPARE_TRANSFER"
+step "an unknown transfer" 404 transfer_not_found "$BASE/admin/transfers/trf_00000000000000000000000000000063"
 step "what runs low at the warehouse" 200 - "$BASE/admin/inventory-items?below=6&location=$WAREHOUSE"
 contains "the lamp runs low" "\"id\":\"$LAMP_ITEM\",\"variant\":\"$LAMP_VAR\",\"product\":\"$LAMP\""
 step "no lamp below zero" 200 - "$BASE/admin/inventory-items?below=0&product=$LAMP"
@@ -1268,12 +1816,16 @@ step "customers by text, by name" 200 - "$BASE/admin/customers?q=horvat&sort=nam
 contains "finds her" "\"items\":[{\"id\":\"$CUSTOMER\""
 step "customers by their IDs" 200 - "$BASE/admin/customers?ids=$CUSTOMER,cus_00000000000000000000000000000063"
 contains "only her" "\"items\":[{\"id\":\"$CUSTOMER\""
+step "a US address, its state by name" 201 - -X POST "$BASE/admin/customers/$CUSTOMER/addresses" -H "$JSON" \
+    -d '{"last_name":"Horvat","line1":"1600 Amphitheatre Pkwy","city":"Mountain View","province":"california","postal_code":"94043","country":"US"}'
+contains "stored as its code, named beside it" '"province":"CA","province_name":"California"'
+step "and removed again" 200 - -X DELETE "$BASE/admin/customers/$CUSTOMER/addresses/$(address)"
 step "add shipping address" 201 - -X POST "$BASE/admin/customers/$CUSTOMER/addresses" -H "$JSON" \
     -d '{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR","default_shipping":true}'
 ADDRESS=$(address)
 contains "it is the default shipping address" "\"default_shipping_address\":\"$ADDRESS\",\"default_billing_address\":null"
 step "move it to Split, billing only" 200 - -X PUT "$BASE/admin/customers/$CUSTOMER/addresses/$ADDRESS" -H "$JSON" \
-    -d '{"last_name":"Horvat","line1":"Riva 2","city":"Split","country":"HR","default_billing":true}'
+    -d '{"last_name":"Horvat","line1":"Riva 2","city":"Split","postal_code":"21000","country":"HR","default_billing":true}'
 contains "defaults follow the request" "\"default_shipping_address\":null,\"default_billing_address\":\"$ADDRESS\""
 contains "address is replaced" '"city":"Split"'
 step "get customer" 200 - "$BASE/admin/customers/$CUSTOMER"
@@ -1349,7 +1901,7 @@ contains "ticked" '"marketing_opt_in":true'
 step "a guest's email" 200 - -X PUT "$BASE/storefront/carts/$SHOP_CART/email" -H "$JSON" \
     -d '{"email":"guest@example.hr"}'
 step "ship to Zagreb" 200 - -X PUT "$BASE/storefront/carts/$SHOP_CART/shipping-address" -H "$JSON" \
-    -d '{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","country":"HR"}}'
+    -d '{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR"}}'
 step "standard (free)" 200 - -X PUT "$BASE/storefront/carts/$SHOP_CART/shipping/$(shgrp)" -H "$JSON" \
     -d "{\"option\":\"$STANDARD\"}"
 # (Checkout counts against the cart's quote limit, so this is a cart that's barely used.)
@@ -1399,7 +1951,7 @@ step "add 3 lamps" 200 - -X POST "$BASE/storefront/carts/$AGAIN_CART/lines" -H "
 step "same email" 200 - -X PUT "$BASE/storefront/carts/$AGAIN_CART/email" -H "$JSON" \
     -d '{"email":"guest@example.hr"}'
 step "ship to Zagreb" 200 - -X PUT "$BASE/storefront/carts/$AGAIN_CART/shipping-address" -H "$JSON" \
-    -d '{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","country":"HR"}}'
+    -d '{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR"}}'
 step "standard (free)" 200 - -X PUT "$BASE/storefront/carts/$AGAIN_CART/shipping/$(shgrp)" -H "$JSON" \
     -d "{\"option\":\"$STANDARD\"}"
 step "a lamp broke (4 on hand, 2 reserved)" 200 - -X PUT \
@@ -1609,6 +2161,9 @@ step "the lamp left the warehouse" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM
 contains "3 on hand, 3 reserved" '"on_hand":3,"reserved":3,"available":0'
 step "the order is partly fulfilled" 200 - "$BASE/admin/orders/$SHOP_ORDER"
 contains "one lamp left" '"fulfillment_status":"partially_fulfilled"'
+step "its address can't change once something shipped" 409 order_fulfilled -X PUT \
+    "$BASE/admin/orders/$SHOP_ORDER/shipping-address" -H "$JSON" \
+    -d '{"address":{"last_name":"Horvat","line1":"Ilica 3","city":"Zagreb","postal_code":"10000","country":"HR"}}'
 step "new tracking" 200 - -X PATCH "$BASE/admin/fulfillments/$FULFILLMENT" -H "$JSON" \
     -d '{"tracking":[{"number":"JD2"}],"notify":true}'
 contains "replaces the old" '"tracking":[{"carrier":null,"number":"JD2","url":null}]'
@@ -2201,6 +2756,15 @@ step "same email in another case" 409 customer_exists -X POST "$BASE/admin/custo
 step "invalid customer email" 422 invalid_email -X POST "$BASE/admin/customers" -H "$JSON" -d '{"email":"ana"}'
 step "address without a city" 422 invalid_address -X POST "$BASE/admin/customers/$CUSTOMER/addresses" \
     -H "$JSON" -d '{"last_name":"Horvat","line1":"Ilica 1","city":" ","country":"HR"}'
+contains "every problem by field" '"problems":[{"code":"required","field":"city","message":"Enter a city"},{"code":"required","field":"postal_code","message":"Enter a postal code"}]'
+step "a state and ZIP code that don't fit" 422 invalid_address -X POST \
+    "$BASE/admin/customers/$CUSTOMER/addresses" -H "$JSON" \
+    -d '{"last_name":"Horvat","line1":"1 Main St","city":"Springfield","province":"Kalifornia","postal_code":"1","country":"US"}'
+contains "the state unknown" '"code":"unknown_region","field":"province"'
+contains "the ZIP code in the wrong shape" '"code":"invalid_format","field":"postal_code","message":"Enter a valid ZIP code, like 90210"'
+step "a ZIP code of another state" 422 invalid_address -X POST "$BASE/admin/customers/$CUSTOMER/addresses" \
+    -H "$JSON" -d '{"last_name":"Horvat","line1":"1 Main St","city":"New York","province":"NY","postal_code":"94043","country":"US"}'
+contains "doesn't match" '"code":"region_mismatch","field":"postal_code"'
 step "unknown customer" 404 customer_not_found "$BASE/admin/customers/cus_00000000000000000000000000000063"
 step "remove unknown address" 404 address_not_found -X DELETE \
     "$BASE/admin/customers/$CUSTOMER/addresses/addr_00000000000000000000000000000063"
@@ -2404,7 +2968,7 @@ if [[ -n $CODE ]]; then
     contains "and it took" '"first_name":"Sam"'
     step "save an address" 201 - -X POST "$BASE/storefront/account/addresses" -H "$JSON" \
         -H "authorization: Bearer $CS" \
-        -d '{"last_name":"Shopper","line1":"Ilica 1","city":"Zagreb","country":"HR","default_shipping":true}'
+        -d '{"last_name":"Shopper","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR","default_shipping":true}'
     contains "as the default" '"default_shipping_address":"addr_'
     step "subscribe to email marketing" 200 - -X PUT "$BASE/storefront/account/marketing/email" -H "$JSON" \
         -H "authorization: Bearer $CS" -d '{"state":"subscribed"}'

@@ -1,0 +1,24 @@
+[package]
+name = "hypha-checkout-rules"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+hypha-core.workspace = true
+# A rule's patterns; builds for wasm, matches in linear time.
+regex = "1.13"
+serde.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+utoipa = { version = "6", optional = true }
+
+[features]
+# The rule's parts as OpenAPI schemas, for the HTTP layer's documents.
+openapi = ["dep:utoipa", "hypha-core/openapi"]
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

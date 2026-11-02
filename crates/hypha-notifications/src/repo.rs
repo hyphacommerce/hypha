@@ -1,5 +1,6 @@
 use hypha_core::{
-    Email, EventId, Language, NotificationId, OrderId, Page, PageRequest, RepoError, Timestamp,
+    Email, EventId, Language, NotificationId, OrderId, Page, PageRequest, PurchaseOrderId,
+    RepoError, Timestamp,
 };
 
 use crate::{Notification, NotificationSettings, NotificationStatus, Template, TemplateKey};
@@ -53,6 +54,7 @@ pub trait NotificationSettingsRepo {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NotificationFilter {
     pub order: Option<OrderId>,
+    pub purchase_order: Option<PurchaseOrderId>,
     pub template: Option<TemplateKey>,
     pub status: Option<NotificationStatus>,
 }
@@ -60,6 +62,9 @@ pub struct NotificationFilter {
 impl NotificationFilter {
     pub fn matches(&self, n: &Notification) -> bool {
         self.order.is_none_or(|order| n.order() == Some(order))
+            && self
+                .purchase_order
+                .is_none_or(|po| n.purchase_order() == Some(po))
             && self.template.is_none_or(|t| n.template() == t)
             && self.status.is_none_or(|s| n.status() == s)
     }

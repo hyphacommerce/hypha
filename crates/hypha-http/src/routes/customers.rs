@@ -62,7 +62,9 @@ pub struct UpdateCustomerRequest {
 }
 
 /// An address for the address book. Sending it again (PUT) replaces it whole,
-/// including whether it is a default.
+/// including whether it is a default. Checked against its country's format (`GET
+/// …/address-formats/{country}`); every problem comes back at once as `422
+/// invalid_address` with `details.problems: [{field, code, message}]`.
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AddressRequest {
@@ -173,7 +175,11 @@ pub struct AddressResponse {
     line1: String,
     line2: Option<String>,
     city: String,
+    /// The region's code where the country lists regions (`CA`), else as entered.
     province: Option<String>,
+    /// The region's name beside its code ("California"), where the country lists
+    /// regions.
+    province_name: Option<&'static str>,
     postal_code: Option<String>,
     country: CountryCode,
     phone: Option<String>,
@@ -197,6 +203,7 @@ impl From<&SavedAddress> for AddressResponse {
             line2: p.line2.clone(),
             city: p.city.clone(),
             province: p.province.clone(),
+            province_name: crate::routes::address::province_name(&saved.address),
             postal_code: p.postal_code.clone(),
             country: saved.address.country(),
             phone: p.phone.clone(),
@@ -638,10 +645,10 @@ pub async fn list<S: Storage>(
     }
     match sort {
         CustomerSort::EmailAsc | CustomerSort::EmailDesc => {
-            redact::require_fields(&ctx, &[Scope::CustomerDataEmail])?
+            redact::require_fields(&ctx, &[Scope::CustomerDataEmail])?;
         }
         CustomerSort::NameAsc | CustomerSort::NameDesc => {
-            redact::require_fields(&ctx, &[Scope::CustomerDataName])?
+            redact::require_fields(&ctx, &[Scope::CustomerDataName])?;
         }
         CustomerSort::Newest | CustomerSort::Oldest => {}
     }
@@ -788,7 +795,15 @@ pub async fn add_address_handler<S: Storage>(
 ) -> Result<(StatusCode, Json<Redacted>), ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
-    let customer = add_address(&ctx, ports.customers(), &state.ids, id, req.into()).await?;
+    let customer = add_address(
+        &ctx,
+        ports.customers(),
+        &state.ids,
+        &hypha_addresses::Formats,
+        id,
+        req.into(),
+    )
+    .await?;
     Ok((
         StatusCode::CREATED,
         Json(respond(&ctx, &ports, &state.clock, &customer).await?),
@@ -812,7 +827,15 @@ pub async fn update_address_handler<S: Storage>(
 ) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
-    let customer = update_address(&ctx, ports.customers(), id, address, req.into()).await?;
+    let customer = update_address(
+        &ctx,
+        ports.customers(),
+        &hypha_addresses::Formats,
+        id,
+        address,
+        req.into(),
+    )
+    .await?;
     Ok(Json(respond(&ctx, &ports, &state.clock, &customer).await?))
 }
 

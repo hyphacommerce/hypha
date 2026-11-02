@@ -8,7 +8,7 @@ use hypha_core::{
 use hypha_inventory::{
     InventoryFilter, InventoryItem, InventoryItemRepo, InventoryItemSnapshot, InventoryItemSummary,
     Level, LevelSummary, Location, LocationRepo, LocationSnapshot, Reservation, ReservationRef,
-    stock_by_location,
+    StockMovement, stock_by_location,
 };
 use tokio_postgres::types::{ToSql, Type};
 use uuid::Uuid;
@@ -16,11 +16,12 @@ use uuid::Uuid;
 use crate::{
     columns::{
         address_assignments, address_columns, address_from_row, address_values, col,
-        id_and_address, stamp_columns, stamps_from_row, version_from_db, version_to_db,
-        write_stamps,
+        id_and_address, stamp_columns, stamps_from_row, unit_cost_from_db, unit_cost_to_db,
+        version_from_db, version_to_db, write_stamps,
     },
     error::{corrupt, repo_error},
     outbox::insert_events,
+    stock_movements::insert_movements,
     store::Queries,
     store::{PgConnection, PgStore, consistent_read, in_transaction},
 };
@@ -360,10 +361,12 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
         stamp_insert(item, self.now());
         let s = item.snapshot();
         let events = item.take_events();
+        let movements = item.take_movements();
         let stamp = self.event_stamp();
         let version = Version::NEW.next();
         in_transaction!(self, |tx| {
             insert_item(tx, &s).await?;
+            insert_movements(tx, &movements, &stamp).await?;
             insert_events(tx, &events, Some(version), stamp).await
         })?;
         item.set_version(version);
@@ -373,15 +376,17 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
     async fn delete(&self, item: &mut InventoryItem) -> Result<(), RepoError> {
         let id = item.id().as_uuid();
         let events = item.take_events();
+        let movements = item.take_movements();
         let stamp = self.event_stamp();
         in_transaction!(self, |tx| {
-            // Levels and reservations go with it (ON DELETE CASCADE).
+            // Levels and reservations go with it (ON DELETE CASCADE); its movements stay.
             tx.query_typed(
                 "DELETE FROM inventory_items WHERE id = $1",
                 &[(&id, Type::UUID)],
             )
             .await
             .map_err(repo_error)?;
+            insert_movements(tx, &movements, &stamp).await?;
             insert_events(tx, &events, None, stamp).await
         })
     }
@@ -405,9 +410,12 @@ impl<C: PgConnection> InventoryItemRepo for PgStore<C> {
             .iter_mut()
             .map(|i| (i.id().as_uuid(), i.take_events()))
             .collect();
+        let movements: Vec<StockMovement> =
+            items.iter_mut().flat_map(|i| i.take_movements()).collect();
         let stamp = self.event_stamp();
         let new_versions = in_transaction!(self, |tx| {
             let versions = update_items(tx, snapshots).await?;
+            insert_movements(tx, &movements, &stamp).await?;
             for (id, events) in &events {
                 insert_events(tx, events, versions.get(id).copied(), stamp).await?;
             }
@@ -428,10 +436,11 @@ pub(crate) async fn insert_item(
     tx: &impl Queries,
     s: &InventoryItemSnapshot,
 ) -> Result<(), RepoError> {
+    let (cost, currency) = unit_cost_to_db(s.unit_cost);
     tx.query_typed(
         "INSERT INTO inventory_items (id, version, variant_id, tracked, continue_selling,
-             retired, available)
-         VALUES ($1, 1, $2, $3, $4, $5, $6)",
+             retired, available, unit_cost, unit_cost_currency)
+         VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8)",
         &[
             (&s.id.as_uuid(), Type::UUID),
             (&s.variant.as_uuid(), Type::UUID),
@@ -439,6 +448,8 @@ pub(crate) async fn insert_item(
             (&s.continue_selling, Type::BOOL),
             (&s.retired, Type::BOOL),
             (&total_available(s), Type::INT8),
+            (&cost, Type::INT8),
+            (&currency, Type::TEXT),
         ],
     )
     .await
@@ -527,6 +538,10 @@ pub(crate) async fn update_items(
     let continue_selling: Vec<bool> = snapshots.iter().map(|s| s.continue_selling).collect();
     let retired: Vec<bool> = snapshots.iter().map(|s| s.retired).collect();
     let available: Vec<i64> = snapshots.iter().map(total_available).collect();
+    let (costs, currencies): (Vec<Option<i64>>, Vec<Option<&str>>) = snapshots
+        .iter()
+        .map(|s| unit_cost_to_db(s.unit_cost))
+        .unzip();
 
     // Lock the rows in ID order first. Two checkouts touching overlapping items then
     // queue instead of deadlocking, whatever order their callers listed the items in;
@@ -537,10 +552,12 @@ pub(crate) async fn update_items(
             "UPDATE inventory_items AS i
              SET version = i.version + 1, variant_id = t.variant_id, tracked = t.tracked,
                  continue_selling = t.continue_selling, retired = t.retired,
-                 available = t.available
+                 available = t.available, unit_cost = t.unit_cost,
+                 unit_cost_currency = t.unit_cost_currency
              FROM unnest($1::uuid[], $2::bigint[], $3::uuid[], $4::boolean[], $5::boolean[],
-                         $6::boolean[], $7::bigint[])
-                 AS t (id, version, variant_id, tracked, continue_selling, retired, available)
+                         $6::boolean[], $7::bigint[], $8::bigint[], $9::text[])
+                 AS t (id, version, variant_id, tracked, continue_selling, retired, available,
+                       unit_cost, unit_cost_currency)
              WHERE i.id = t.id AND i.version = t.version
              RETURNING i.id, i.version",
             &[
@@ -551,6 +568,8 @@ pub(crate) async fn update_items(
                 (&continue_selling, Type::BOOL_ARRAY),
                 (&retired, Type::BOOL_ARRAY),
                 (&available, Type::INT8_ARRAY),
+                (&costs, Type::INT8_ARRAY),
+                (&currencies, Type::TEXT_ARRAY),
             ],
         )
         .await
@@ -703,7 +722,8 @@ async fn load_items(
     }
     let param: [(&(dyn ToSql + Sync), Type); 1] = [(&values, Type::UUID_ARRAY)];
     let items_sql = format!(
-        "SELECT i.id, i.version, i.variant_id, i.tracked, i.continue_selling, i.retired, {}
+        "SELECT i.id, i.version, i.variant_id, i.tracked, i.continue_selling, i.retired,
+             i.unit_cost, i.unit_cost_currency, {}
          FROM inventory_items i WHERE i.{column} = ANY($1) ORDER BY i.id",
         stamp_columns("i."),
     );
@@ -764,6 +784,10 @@ async fn load_items(
                 tracked: col(r, "tracked")?,
                 continue_selling: col(r, "continue_selling")?,
                 retired: col(r, "retired")?,
+                unit_cost: unit_cost_from_db(
+                    col(r, "unit_cost")?,
+                    col::<Option<String>>(r, "unit_cost_currency")?.as_deref(),
+                )?,
                 levels: levels.remove(&id).unwrap_or_default(),
                 reservations: reservations.remove(&id).unwrap_or_default(),
             };

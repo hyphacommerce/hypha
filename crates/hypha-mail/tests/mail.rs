@@ -1,17 +1,26 @@
 //! The mailer and the mail commands on the in-memory world.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
 use hypha_core::{
     Actor, Address, AddressParts, ApiKeyId, AssetId, AuthError, CartId, ChannelId, CountryCode,
     Ctx, Currency, CustomerId, Email, EventHandler, EventId, FulfillmentId, LocationId, MarketId,
-    Money, OrderId, OrderLineId, PageLimit, PageRequest, PaymentId, Price, ProductId, Quantity,
-    Scope, ShippingGroupId, ShippingOptionId, StoreId, StoredEvent, Timestamp, Timezone, UserId,
-    VariantId, Versioned,
+    Money, OrderId, OrderLineId, PageLimit, PageRequest, PaymentId, Price, ProductId,
+    PurchaseOrderId, Quantity, Scope, ShippingGroupId, ShippingOptionId, StoreId, StoredEvent,
+    SupplierId, Timestamp, Timezone, UnitCost, UserId, VariantId, Versioned,
 };
 use hypha_fulfillment::{Fulfillment, FulfillmentLine, FulfillmentRepo, NewFulfillment, Tracking};
 use hypha_mail::{
-    CommandError, MailContext, MailEnv, Mailer, Sources, TemplateInput, UpdateSettings,
-    order_context, preview, queue_event, render_for_sending, resend, save_template, send_due,
-    send_staff, send_test, update_settings,
+    CommandError, MailContext, MailEnv, Mailer, Sources, StaffMailer, TemplateInput,
+    UpdateSettings, order_context, preview, queue_event, render_for_sending, resend, save_template,
+    send_customer, send_due, send_staff, send_test, update_settings,
 };
 use hypha_media::{
     Asset, AssetRepo, AssetUsage, AssetUsageRepo, FileFacts, HasAssetUsages, MimeType, NewUpload,
@@ -27,6 +36,10 @@ use hypha_orders::{
     CancelReason, NewOrder, Order, OrderLine, OrderNumber, OrderRepo, OrderShippingLine,
 };
 use hypha_payments::{NewPayment, Payment, PaymentRepo, ProviderKey, newest_payment};
+use hypha_purchasing::{
+    LineDraft, PurchaseOrder, PurchaseOrderDraft, PurchaseOrderNumber, PurchaseOrderRepo, Sending,
+    ShipTo, Supplier, SupplierDraft, SupplierRepo,
+};
 use hypha_stores::{Store, StoreRepo};
 use hypha_testkit::{FixedClock, InMemoryEmailSender, InMemoryPorts, SequentialIds};
 use hypha_users::{StaffEmail, User, UserRepo};
@@ -181,6 +194,7 @@ fn line(n: u128, title: &str, variant: Option<&str>, quantity: u32, unit: i64) -
         fulfilled_quantity: 0,
         compare_at_price: None,
         price_list: None,
+        unit_cost: None,
     }
 }
 
@@ -241,6 +255,7 @@ fn world() -> InMemoryPorts {
         }],
         lines,
         shipping_address: Some(address),
+        address_check: None,
         subtotal: eur(10800),
         shipping_total: eur(490),
         tax_total: eur(0),
@@ -1396,7 +1411,8 @@ fn a_layout_that_breaks_a_message_is_refused() {
         html: "<html>{{ shop.name }}{% block content %}{% endblock %}</html>".to_string(),
         text: None,
     };
-    assert!(save(&ports, TemplateKey::Layout, good, true).is_ok());
+    let saved = save(&ports, TemplateKey::Layout, good, true);
+    assert!(saved.is_ok(), "{saved:?}");
 }
 
 #[test]
@@ -1763,4 +1779,166 @@ fn the_futures_are_send_on_send_ports() {
         hypha_core::NotificationId::from_uuid(uuid(1)),
     ));
     send(send_staff(&env, &ports, invite_email()));
+}
+
+#[test]
+fn a_login_code_email_says_how_many_minutes_it_works() {
+    let ports = world();
+    let env = TestEnv::new();
+    let now = hypha_core::Clock::now(env.clock());
+    let code = hypha_customer_accounts::CustomerEmail::LoginCode {
+        to: email("ana@example.hr"),
+        code: "481516".to_string(),
+        expires_at: now.plus_secs(600),
+    };
+    let record = block_on(send_customer(&env, &ports, code)).unwrap();
+    assert_eq!(record.status(), NotificationStatus::Sent);
+    let text = &env.sender.sent()[0].text;
+    assert!(text.contains("It works for 10 minutes"), "{text}");
+}
+
+#[test]
+fn a_customer_or_staff_email_that_fails_is_an_error() {
+    use hypha_core::Notifier;
+    let ports = world();
+    let env = TestEnv::new();
+    env.sender
+        .fail_next(SendError::Permanent("address refused".to_string()));
+    let erasure = hypha_customer_accounts::CustomerEmail::ErasureRequested {
+        to: email("ana@example.hr"),
+        due_at: hypha_core::Clock::now(env.clock()),
+    };
+    assert_eq!(
+        block_on(send_customer(&env, &ports, erasure)).map(|r| r.status()),
+        Err(hypha_core::NotifyError("address refused".to_string()))
+    );
+    env.sender
+        .fail_next(SendError::Permanent("address refused".to_string()));
+    let staff = StaffMailer {
+        env: &env,
+        ports: &ports,
+    };
+    assert_eq!(
+        block_on(staff.notify(invite_email())),
+        Err(hypha_core::NotifyError("address refused".to_string()))
+    );
+}
+
+/// A supplier and a purchase order to the warehouse, sent to `to` and `cc` with a message:
+/// its `purchase_order.sent` is in the outbox.
+fn sent_purchase_order(ports: &InMemoryPorts, to: &[&str], cc: &[&str]) -> PurchaseOrder {
+    let mut supplier = Supplier::new(
+        SupplierId::from_uuid(uuid(40)),
+        SupplierDraft::new("Spore Labs", Currency::EUR),
+    )
+    .unwrap();
+    block_on(ports.suppliers.insert(&mut supplier)).unwrap();
+    let draft = PurchaseOrderDraft {
+        destination: Some(LocationId::from_uuid(uuid(41))),
+        lines: vec![LineDraft {
+            variant: VariantId::from_uuid(uuid(42)),
+            product_title: "Oyster grow kit".to_string(),
+            variant_title: Some("Large".to_string()),
+            sku: Some("GK-OY-L".to_string()),
+            supplier_sku: Some("SL-4411".to_string()),
+            quantity: 3,
+            unit_cost: UnitCost::parse("0.35", Currency::EUR).unwrap(),
+        }],
+        ..PurchaseOrderDraft::new(Currency::EUR)
+    };
+    let mut po = PurchaseOrder::new(
+        PurchaseOrderId::from_uuid(uuid(43)),
+        PurchaseOrderNumber::new(1001).unwrap(),
+        supplier.id(),
+        draft,
+    )
+    .unwrap();
+    let sending = Sending {
+        to: to.iter().map(|e| email(e)).collect(),
+        cc: cc.iter().map(|e| email(e)).collect(),
+        message: Some("Please ship by Friday.".to_string()),
+        ship_to: Some(ShipTo {
+            name: "Warehouse".to_string(),
+            address: None,
+        }),
+    };
+    po.send(
+        sending,
+        Some(Currency::EUR),
+        supplier.name(),
+        None,
+        FixedClock::DEFAULT,
+    )
+    .unwrap();
+    block_on(ports.purchase_orders.insert(&mut po)).unwrap();
+    po
+}
+
+#[test]
+fn a_sent_purchase_order_is_queued_to_each_address_once() {
+    let ports = world();
+    let po = sent_purchase_order(&ports, &["orders@spore.example"], &["boss@spore.example"]);
+    let mailer = mailer();
+    assert!(EventHandler::<InMemoryPorts>::wants(
+        &mailer,
+        "purchase_order.sent"
+    ));
+    let sent = event(&ports, "purchase_order.sent");
+    assert_eq!(handle(&mailer, &ports, &sent), Ok(()));
+    assert_eq!(mailer.env().woken(), 1);
+    let queued = records(&ports);
+    let to: Vec<&str> = queued.iter().map(|r| r.to().as_str()).collect();
+    assert_eq!(to, ["orders@spore.example", "boss@spore.example"]);
+    for r in &queued {
+        assert_eq!(
+            (r.template(), r.status(), r.purchase_order(), r.order()),
+            (
+                TemplateKey::SupplierPurchaseOrder,
+                NotificationStatus::Queued,
+                Some(po.id()),
+                None
+            )
+        );
+        assert_eq!(r.subject(), "Purchase order PO-1001 from Fern & Field");
+        let text = &r.email().unwrap().text;
+        for expected in [
+            "Hello Spore Labs",
+            "Please ship by Friday.",
+            "3 × Oyster grow kit (Large), your code SL-4411, our SKU GK-OY-L: €0.0035 each, €0.01",
+            "Ship to:\nWarehouse",
+        ] {
+            assert!(text.contains(expected), "{expected:?} in {text}");
+        }
+    }
+    // Run again: the same records, nothing more queued.
+    assert_eq!(handle(&mailer, &ports, &sent), Ok(()));
+    assert_eq!(records(&ports).len(), 2);
+    assert_eq!(mailer.env().woken(), 1);
+}
+
+#[test]
+fn an_email_to_a_supplier_is_resent_as_the_order_is_now() {
+    let ports = world();
+    let po = sent_purchase_order(&ports, &["orders@spore.example"], &[]);
+    let env = TestEnv::new();
+    let first = block_on(queue_event(
+        &env,
+        &ports,
+        &event(&ports, "purchase_order.sent"),
+    ))
+    .unwrap();
+    let again = block_on(resend(&Ctx::system(), &env, &ports, first[0].id())).unwrap();
+    assert_ne!(again.id(), first[0].id());
+    assert_eq!(
+        (again.purchase_order(), again.event(), again.to().as_str()),
+        (Some(po.id()), None, "orders@spore.example")
+    );
+    // The send's message comes along while its event is kept.
+    assert!(
+        again
+            .email()
+            .unwrap()
+            .text
+            .contains("Please ship by Friday.")
+    );
 }

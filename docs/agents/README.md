@@ -63,7 +63,8 @@ A grant lists:
 - Nobody grants more than they hold, and only a staff member's session grants `apply`.
 - Some scopes are never granted to an agent, in any mode: `users:write`,
   `api_keys:write`, `apps:write`, `agents:write` (an agent can't widen its own reach or
-  mint credentials) and `checkout`. `customers:erase` is propose-only.
+  mint credentials) and `checkout`. `customers:erase` and
+  `purchasing:send` (emailing a supplier) are propose-only.
 
 The operator caps every agent in `hypha.config.toml`, whatever the grants say:
 

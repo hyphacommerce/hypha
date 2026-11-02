@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 /// Handles nothing, on any ports.
-pub struct Noop;
+pub(crate) struct Noop;
 
 impl<P> EventHandler<P> for Noop {
     fn name(&self) -> &'static str {
@@ -43,7 +43,7 @@ impl<P> EventHandler<P> for Noop {
 }
 
 /// Collects by asking the buyer to pay the test spore.
-pub struct TestProvider;
+pub(crate) struct TestProvider;
 
 impl PaymentProvider for TestProvider {
     fn key(&self) -> ProviderKey {
@@ -73,13 +73,13 @@ struct TestConfig {
 
 /// Its settings, as the merchant saves them.
 #[derive(Deserialize)]
-pub struct TestSettings {
+pub(crate) struct TestSettings {
     pub mode: String,
     #[serde(default)]
     pub api_key: Option<String>,
 }
 
-pub struct TestSpore {
+pub(crate) struct TestSpore {
     pub greeting: String,
     pub env: SporeEnv,
 }
@@ -237,7 +237,7 @@ impl<P: HasProducts> SporeUi<P> for TestSpore {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub struct Greeting {
+pub(crate) struct Greeting {
     greeting: String,
 }
 
@@ -248,7 +248,7 @@ pub struct Greeting {
     responses((status = 200, description = "OK", body = Greeting)),
     security(()),
 )]
-pub async fn hello<S: Storage>(
+pub(crate) async fn hello<S: Storage>(
     State(state): State<SharedState<S>>,
 ) -> Result<Json<Greeting>, ApiError> {
     let spore = hypha_http::spores::spore::<TestSpore, S>(&state)?;
@@ -258,7 +258,7 @@ pub async fn hello<S: Storage>(
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
-pub struct SettingsSeen {
+pub(crate) struct SettingsSeen {
     mode: Option<String>,
     /// The secret as the spore reads it: opened.
     api_key: Option<String>,
@@ -271,7 +271,7 @@ pub struct SettingsSeen {
     responses((status = 200, description = "OK", body = SettingsSeen)),
     extensions(("x-hypha-scopes" = json!(["apps:read"]))),
 )]
-pub async fn settings<S: Storage>(
+pub(crate) async fn settings<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
 ) -> Result<Json<SettingsSeen>, ApiError> {
@@ -297,7 +297,7 @@ pub async fn settings<S: Storage>(
     responses((status = 200, description = "OK", body = Greeting)),
     extensions(("x-hypha-scopes" = json!([]))),
 )]
-pub async fn storefront_greeting<S: Storage>(
+pub(crate) async fn storefront_greeting<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
 ) -> Result<Json<Greeting>, ApiError> {

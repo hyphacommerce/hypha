@@ -57,7 +57,8 @@ Every admin write can run three ways:
 - Nobody grants more than they hold, and only a staff member's session grants `apply`.
 - Some scopes are never granted to an agent: those that would let it widen its own reach
   or mint credentials (`users:write`, `api_keys:write`, `apps:write`, `agents:write`), and
-  `checkout`. `customers:erase` can only be proposed.
+  `checkout`. `customers:erase` and `purchasing:send` (emailing a purchase order to a
+  supplier) can only be proposed.
 
 The operator caps every agent in `hypha.config.toml`, whatever the grants say:
 

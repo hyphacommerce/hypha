@@ -133,7 +133,7 @@ mod tests {
         assert_eq!(
             limiter.check(Rule::LoginIp, "a", at(0)),
             Decision::Limited {
-                retry_after: Duration::from_secs(every as u64)
+                retry_after: Duration::from_secs(u64::try_from(every).unwrap())
             }
         );
     }

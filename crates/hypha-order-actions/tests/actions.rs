@@ -1,3 +1,13 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
+
 use std::ops::Deref;
 
 use hypha_core::{
@@ -6,7 +16,10 @@ use hypha_core::{
     OrderLineId, Price, ProductId, Quantity, QuantityError, Scope, UserId, VariantId, Versioned,
 };
 use hypha_fulfillment::{FulfillmentError, FulfillmentRepo, FulfillmentState, TrackingInput};
-use hypha_inventory::{InventoryItem, InventoryItemRepo, Location, LocationRepo, ReservationRef};
+use hypha_inventory::{
+    InventoryItem, InventoryItemRepo, Location, LocationRepo, ReservationRef, StockReason,
+    StockSource,
+};
 use hypha_order_actions::{
     CancelOrder, CommandError, Fulfil, FulfilLine, Fulfilled, Interval, MarkPaid, OrderPayments,
     OrderView, ReportError, SalesReport, SalesReportInput, SalesRow, Unfulfilled,
@@ -74,6 +87,7 @@ fn line(id: OrderLineId, variant: u128, quantity: u32) -> OrderLine {
         fulfilled_quantity: 0,
         compare_at_price: None,
         price_list: None,
+        unit_cost: None,
     }
 }
 
@@ -121,6 +135,7 @@ impl World {
             email: Email::new("ana@example.hr").unwrap(),
             lines: vec![line(mugs(), 2001, 3), line(ebook(), 2002, 1)],
             shipping_address: None,
+            address_check: None,
             shipping_lines: vec![],
             subtotal: eur(2000),
             shipping_total: eur(0),
@@ -131,8 +146,8 @@ impl World {
         block_on(world.orders.insert(&mut order)).unwrap();
 
         let mut item = InventoryItem::new(mug_item(), mug_variant(), true, false);
-        item.set_on_hand(warehouse(), 10, None).unwrap();
-        item.set_on_hand(shop(), 5, None).unwrap();
+        item.set_on_hand(warehouse(), 10, None, None).unwrap();
+        item.set_on_hand(shop(), 5, None, None).unwrap();
         let locations = block_on(world.locations.serving(market)).unwrap();
         item.reserve(&reference(mugs()), Quantity::new(3).unwrap(), &locations)
             .unwrap();
@@ -226,6 +241,10 @@ fn user_with(scopes: Vec<Scope>) -> Ctx {
     Ctx::new(Actor::User(UserId::from_uuid(Uuid::from_u128(9))), scopes)
 }
 
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "commands take the key as an `Option`"
+)]
 fn key(key: &str, fingerprint: u8) -> Option<IdempotencyRequest> {
     Some(IdempotencyRequest {
         key: key.to_string(),
@@ -551,6 +570,41 @@ fn cancelling_a_fulfilment_puts_its_units_back() {
 }
 
 #[test]
+fn shipping_and_taking_it_back_are_in_the_stock_history_by_their_fulfilment() {
+    let world = World::new();
+    let before = world.ports.outbox.movements().len();
+    let id = shipped_two(&world);
+    block_on(cancel_fulfillment(
+        &Ctx::system(),
+        &world.ports,
+        &world.clock,
+        id,
+    ))
+    .unwrap();
+    let source = StockSource::Fulfillment {
+        order: order_id(),
+        fulfillment: id,
+    };
+    let moved: Vec<_> = world.ports.outbox.movements()[before..]
+        .iter()
+        .map(|m| (m.location, m.delta, m.after, m.reason, m.source))
+        .collect();
+    assert_eq!(
+        moved,
+        [
+            (Some(warehouse()), -2, Some(8), StockReason::Sold, source),
+            (
+                Some(warehouse()),
+                2,
+                Some(10),
+                StockReason::Restocked,
+                source
+            )
+        ]
+    );
+}
+
+#[test]
 fn cancelling_a_fulfilment_again_changes_nothing() {
     let world = World::new();
     let id = shipped_two(&world);
@@ -723,8 +777,8 @@ fn a_split_reservation_shows_at_each_location() {
     // so the line is split.
     let mut item = world.item().unwrap();
     item.release(&reference(mugs()));
-    item.set_on_hand(warehouse(), 1, None).unwrap();
-    item.set_on_hand(shop(), 2, None).unwrap();
+    item.set_on_hand(warehouse(), 1, None, None).unwrap();
+    item.set_on_hand(shop(), 2, None, None).unwrap();
     let locations = block_on(world.locations.serving(world.order().market())).unwrap();
     item.reserve(&reference(mugs()), Quantity::new(3).unwrap(), &locations)
         .unwrap();
@@ -1335,6 +1389,9 @@ fn a_report_with_its_key_replays() {
     let done = world.report(K::Refunded, None, None).unwrap().value;
     assert_eq!(done.payments[0].refunded(), eur(2000));
     assert_eq!(done.order.financial_status(), FinancialStatus::Refunded);
+    // Refunded wholly, a repeated `refunded` without a reference is nothing.
+    let repeated = world.report(K::Refunded, None, None).unwrap().value;
+    assert_eq!(repeated.payments[0].refunded(), eur(2000));
 }
 
 #[test]

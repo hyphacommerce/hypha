@@ -86,24 +86,30 @@ impl InventoryItemRepo for InMemoryInventoryItemRepo {
     async fn insert(&self, item: &mut InventoryItem) -> Result<(), RepoError> {
         stamp_insert(item, self.outbox.now());
         let events = item.take_events();
+        let movements = item.take_movements();
         self.items
             .insert(item.id(), item, keys::INVENTORY_ITEM_ID, &unique)?;
         self.outbox.write(events, Some(item.version()));
+        self.outbox.write_movements(movements);
         Ok(())
     }
 
     async fn delete(&self, item: &mut InventoryItem) -> Result<(), RepoError> {
         let events = item.take_events();
+        let movements = item.take_movements();
         self.items.remove(&item.id());
         self.outbox.write(events, None);
+        self.outbox.write_movements(movements);
         Ok(())
     }
 
     async fn update(&self, item: &mut InventoryItem) -> Result<(), RepoError> {
         stamp_update(item, self.outbox.now());
         let events = item.take_events();
+        let movements = item.take_movements();
         self.items.update(item.id(), item, &unique)?;
         self.outbox.write(events, Some(item.version()));
+        self.outbox.write_movements(movements);
         Ok(())
     }
 
@@ -113,10 +119,13 @@ impl InventoryItemRepo for InMemoryInventoryItemRepo {
             stamp_update(item, now);
         }
         let events: Vec<_> = items.iter_mut().map(|i| i.take_events()).collect();
+        let movements: Vec<_> = items.iter_mut().map(|i| i.take_movements()).collect();
         self.items.update_many(items, InventoryItem::id, &unique)?;
         for (item, events) in items.iter().zip(events) {
             self.outbox.write(events, Some(item.version()));
         }
+        self.outbox
+            .write_movements(movements.into_iter().flatten().collect());
         Ok(())
     }
 }

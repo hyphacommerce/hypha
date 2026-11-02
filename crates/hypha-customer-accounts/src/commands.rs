@@ -172,9 +172,8 @@ pub async fn request_login_code<S: AccountPorts>(
     }
     let settings = *env.account_settings();
     for _ in 0..ROUNDS {
-        let mut identity = match find_identity(ports, env, &email).await? {
-            Some(identity) => identity,
-            None => continue,
+        let Some(mut identity) = find_identity(ports, env, &email).await? else {
+            continue;
         };
         let now = env.now();
         if let Some(issued) = identity.code_issued_at(settings.login_code_lifetime)
@@ -309,7 +308,7 @@ pub struct LoggedIn {
 }
 
 /// Signs in with the code emailed to `email`: the code is used up (right or wrong, so every
-/// guess counts, AC1) and an active session starts, lasting `session_lifetime`. `cart` (the
+/// guess counts) and an active session starts, lasting `session_lifetime`. `cart` (the
 /// request's, in `channel`) is linked to the customer in the same batch; a cart that isn't
 /// theirs to use is left alone.
 pub async fn login_with_code<S: AccountPorts>(

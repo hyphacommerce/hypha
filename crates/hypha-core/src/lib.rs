@@ -1,6 +1,7 @@
 pub mod address;
 pub mod app_key;
 pub mod callback_url;
+pub mod checks;
 pub mod country;
 pub mod ctx;
 pub mod description;
@@ -30,12 +31,21 @@ mod tables;
 pub mod text;
 pub mod time;
 pub mod timezone;
+pub mod verification;
 pub mod version;
 pub mod weight;
 
-pub use address::{Address, AddressError, AddressParts};
+pub use address::{
+    Address, AddressError, AddressField, AddressFlags, AddressFormats, AddressParts,
+    AddressProblem, AddressProblemCode, AddressVerdict, AddressWarning, AddressWarningCode,
+    CheckedAddress,
+};
 pub use app_key::{AppKey, AppKeyError, AppKind, AppPoints};
 pub use callback_url::{CallbackUrl, CallbackUrlError};
+pub use checks::{
+    AppCheck, Message, MessageCode, MessageError, MessagePath, MessageSource, Severity,
+    ValidationStep,
+};
 pub use country::{CountryCode, CountryError};
 pub use ctx::{Actor, AuthError, Ctx};
 pub use description::{Description, DescriptionError};
@@ -56,15 +66,18 @@ pub use idempotency::{
 };
 pub use ids::{
     AddressId, AgentCallId, AgentId, ApiKeyId, AppId, AssetId, CartId, CatalogId, CategoryId,
-    ChannelId, CustomFieldDefinitionId, CustomerGroupId, CustomerId, DeliveryId, DiscountId,
-    EventId, ExtensionCallId, FulfillmentId, IdError, IdentityId, InventoryItemId, InviteId,
-    LocationId, MarketId, NotificationId, OAuthRequestId, OptionId, OptionValueId, OrderId,
-    OrderLineId, PasswordResetId, PaymentId, PaymentMethodId, PriceListId, ProductId, ProposalId,
-    RoleId, SessionId, ShippingGroupId, ShippingOptionId, ShippingZoneId, StoreId, TaxClassId,
-    TaxRegionId, UploadId, UserId, VariantId,
+    ChannelId, CheckoutRuleId, CustomFieldDefinitionId, CustomerGroupId, CustomerId, DeliveryId,
+    DiscountId, EventId, ExtensionCallId, FulfillmentId, IdError, IdentityId, InventoryItemId,
+    InviteId, LocationId, MarketId, NotificationId, OAuthRequestId, OptionId, OptionValueId,
+    OrderId, OrderLineId, PasswordResetId, PaymentId, PaymentMethodId, PriceListId, ProductId,
+    ProposalId, PurchaseOrderId, ReceiptId, RoleId, SessionId, ShippingGroupId, ShippingOptionId,
+    ShippingZoneId, StoreId, SupplierId, TaxClassId, TaxRegionId, TransferId, UploadId, UserId,
+    VariantId,
 };
 pub use language::{Language, LanguageError};
-pub use money::{BasisPoints, Currency, CurrencyError, Money, MoneyError, Price, TaxRate};
+pub use money::{
+    BasisPoints, Currency, CurrencyError, ExchangeRate, Money, MoneyError, Price, TaxRate, UnitCost,
+};
 pub use operation_id::{OperationId, OperationIdError};
 pub use page::{Direction, Keyset, Page, PageError, PageLimit, PageRequest, SortKey};
 pub use ports::{
@@ -81,5 +94,9 @@ pub use secret::{SealError, Sealed, SecretBox};
 pub use text::{MAX_TEXT_LEN, TextError, optional_text, required_text};
 pub use time::{Stamped, Stamps, Timestamp, stamp_insert, stamp_update};
 pub use timezone::{Timezone, TimezoneError};
+pub use verification::{
+    AddressPrecision, AddressVerification, AddressVerifier, FieldStatus, NoVerification,
+    SuggestedAddress, VerificationFlags, VerifyContext, verify_address,
+};
 pub use version::{Version, Versioned};
 pub use weight::{TotalWeight, Weight};

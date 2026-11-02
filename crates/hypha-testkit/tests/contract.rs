@@ -1,5 +1,14 @@
 //! The in-memory repos must pass the same contract as every storage adapter.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "a failing test panics, and fixtures cast small counters"
+)]
 use hypha_core::Timestamp;
 use hypha_testkit::{
     InMemoryAppRepo, InMemoryAssetRepo, InMemoryBlobStore, InMemoryCartRepo, InMemoryCustomerRepo,
@@ -123,6 +132,11 @@ fn outbox() {
 #[test]
 fn batch() {
     block_on(contract::batch(async || InMemoryPorts::default()));
+}
+
+#[test]
+fn stock_movements() {
+    block_on(contract::stock_movements(async || InMemoryPorts::default()));
 }
 
 #[test]
@@ -413,6 +427,49 @@ fn custom_field_values() {
 #[test]
 fn custom_field_filters() {
     block_on(contract::custom_field_filters(async || {
+        InMemoryPorts::default()
+    }));
+}
+
+#[test]
+fn purchase_order_repo() {
+    block_on(contract::purchase_order_repo(async || {
+        InMemoryPorts::default()
+    }));
+}
+
+#[test]
+fn receipt_repo() {
+    block_on(contract::receipt_repo(async || InMemoryPorts::default()));
+}
+
+#[test]
+fn transfer_repo() {
+    block_on(contract::transfer_repo(async || InMemoryPorts::default()));
+}
+
+#[test]
+fn checkout_rule_repo() {
+    block_on(contract::checkout_rule_repo(async || {
+        InMemoryPorts::default()
+    }));
+}
+
+#[test]
+fn checkout_settings_repo() {
+    block_on(contract::checkout_settings_repo(async || {
+        InMemoryPorts::default()
+    }));
+}
+
+#[test]
+fn supplier_repo() {
+    block_on(contract::supplier_repo(async || InMemoryPorts::default()));
+}
+
+#[test]
+fn supplier_variants() {
+    block_on(contract::supplier_variants(async || {
         InMemoryPorts::default()
     }));
 }

@@ -658,6 +658,7 @@ impl Validations {
             ..Validations::default()
         };
 
+        #[expect(clippy::cast_possible_truncation, reason = "small constants")]
         let length_cap = match base {
             BaseType::Text => MAX_TEXT_CHARS,
             _ => MAX_LONG_BYTES,
@@ -776,6 +777,7 @@ impl Validations {
                 )
             })?);
         }
+        #[expect(clippy::cast_possible_truncation, reason = "a small constant")]
         let cap = MAX_LIST_ITEMS as u32;
         if v.max_items.is_some_and(|m| m == 0 || m > cap) {
             return Err(invalid("max_items", format!("is 1 to {cap}")));

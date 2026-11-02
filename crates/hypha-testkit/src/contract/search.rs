@@ -166,7 +166,7 @@ async fn battery<I: SearchIndex>(index: &I) {
         q.filters = vec![
             filter(FacetKey::Vendor, &["Acme"]),
             filter(FacetKey::Option("size".into()), &["S"]),
-        ]
+        ];
     });
     base(&|q| q.filters = vec![filter(FacetKey::Tag, &["Summer"])]);
     base(&|q| q.filters = vec![filter(FacetKey::ProductType, &["Nothing"])]);
@@ -176,7 +176,7 @@ async fn battery<I: SearchIndex>(index: &I) {
         q.filters = vec![
             filter(FacetKey::OnSale, &["false"]),
             filter(FacetKey::Vendor, &["Acme"]),
-        ]
+        ];
     });
     base(&|q| {
         q.price = PriceBounds {
@@ -195,7 +195,7 @@ async fn battery<I: SearchIndex>(index: &I) {
         q.filters = vec![
             filter(field("custom.material"), &["linen"]),
             filter(FacetKey::Option("color".into()), &["Blue"]),
-        ]
+        ];
     });
     base(&|q| q.price.min = Some(3001));
     base(&|q| q.available = Some(true));

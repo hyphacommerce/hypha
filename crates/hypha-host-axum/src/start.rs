@@ -272,7 +272,7 @@ async fn ensure_owner<S: Storage>(state: &AppState<S>) -> Result<(), String> {
     };
     match bootstrap_owner(&Ctx::system(), &ports, &state.env, input).await {
         Ok(Some(owner)) => {
-            tracing::info!(user = %owner.id(), email = %owner.email(), "created the owner")
+            tracing::info!(user = %owner.id(), email = %owner.email(), "created the owner");
         }
         Ok(None) => {}
         Err(e) => return Err(e.to_string()),
@@ -289,7 +289,7 @@ async fn ensure_location<S: Storage>(state: &AppState<S>) -> Result<(), String> 
         .map_err(|_| "cannot reach storage")?;
     match ensure_default_location(&Ctx::system(), ports.locations(), &state.ids).await {
         Ok(Some(location)) => {
-            tracing::info!(location = %location.id(), "created the default location")
+            tracing::info!(location = %location.id(), "created the default location");
         }
         Ok(None) => {}
         Err(e) => return Err(e.to_string()),

@@ -409,7 +409,7 @@ fn spend_tiers_name_the_same_markets() {
 
 #[test]
 fn more_tiers_than_the_most_are_refused() {
-    let tiers = (1..=MAX_TIERS as u32 + 1)
+    let tiers = (1..=u32::try_from(MAX_TIERS).unwrap() + 1)
         .map(|n| tier(Threshold::Quantity(n), 100))
         .collect();
     assert_eq!(

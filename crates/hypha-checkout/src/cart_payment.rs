@@ -9,7 +9,8 @@ use hypha_payments::{
 };
 use hypha_shipping::RateProvider;
 
-use crate::commands::{Ready, ready};
+use crate::commands::{Ready, ready, refuse_errors};
+use crate::messages::CartChecks;
 use crate::start::{Payer, refresh, start};
 use crate::{CheckoutPorts, CommandError};
 
@@ -38,7 +39,8 @@ pub struct CartPaymentStarted {
 /// `total_changed`, `payment_method_required`, `payment_method_unavailable`). Refused
 /// for a manual method (`payment_method_offline`: place the order), a zero total
 /// (`cart_nothing_to_pay`) and a cart whose money is committed already
-/// (`cart_payment_committed`: check out). A pending payment of the same method and
+/// (`cart_payment_committed`: check out), then a cart with an error among its messages
+/// (`checkout_blocked`). A pending payment of the same method and
 /// amount is started again (its provider resumes the attempt it made); otherwise a new
 /// payment of the cart's total is made, any other pending ones voided in the same batch
 /// and released at their provider (best effort: money one of them takes later is a
@@ -51,6 +53,7 @@ pub async fn start_cart_payment<
     C: Clock,
     P: RateProvider,
     Q: PaymentProviders,
+    K: CartChecks,
 >(
     ctx: &Ctx,
     ports: &S,
@@ -58,13 +61,18 @@ pub async fn start_cart_payment<
     clock: &C,
     rates: &P,
     providers: &Q,
+    checks: &K,
     input: StartCartPayment,
 ) -> Result<CartPaymentStarted, CommandError> {
     ctx.require(Scope::Checkout)?;
     let mut attempts = Attempts::first();
     let mut fresh = false;
     loop {
-        let e = match start_once(ctx, ports, ids, clock, rates, providers, &input, fresh).await {
+        let e = match start_once(
+            ctx, ports, ids, clock, rates, providers, checks, &input, fresh,
+        )
+        .await
+        {
             Ok(Started::Done(started)) => return Ok(*started),
             // Only a reused payment answers this, so the next round makes a new one.
             Ok(Started::Again) => {
@@ -93,6 +101,7 @@ async fn start_once<
     C: Clock,
     P: RateProvider,
     Q: PaymentProviders,
+    K: CartChecks,
 >(
     ctx: &Ctx,
     ports: &S,
@@ -100,6 +109,7 @@ async fn start_once<
     clock: &C,
     rates: &P,
     providers: &Q,
+    checks: &K,
     input: &StartCartPayment,
     fresh: bool,
 ) -> Result<Started, CommandError> {
@@ -108,12 +118,14 @@ async fn start_once<
         mut cart,
         reading,
         method,
+        messages,
     } = ready(
         ctx,
         ports,
         clock,
         rates,
         providers,
+        checks,
         input.cart,
         input.expected_total,
         &mut renewed,
@@ -142,6 +154,8 @@ async fn start_once<
             payment: done.id(),
         });
     }
+    // No money is taken for a cart checkout would refuse.
+    refuse_errors(cart.id(), messages)?;
     let payer = Payer {
         cart: cart.id(),
         order: None,

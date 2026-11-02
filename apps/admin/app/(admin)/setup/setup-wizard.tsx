@@ -340,6 +340,8 @@ function StoreStep({ store, onSaved }: { store: WizardData["store"]; onSaved: ()
     () => store.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
   );
   const [language, setLanguage] = useState(store.default_language);
+  const [currency, setCurrency] = useState(store.currency ?? "");
+  const currencies = useCurrencies();
   const { error, isPending, run } = useSave(onSaved);
   const canSave = name.trim() !== "" && email.trim() !== "" && language.trim() !== "";
 
@@ -368,6 +370,17 @@ function StoreStep({ store, onSaved }: { store: WizardData["store"]; onSaved: ()
           value={language}
           onChange={setLanguage}
         />
+        <Selector
+          label="Base currency"
+          description="What you pay suppliers and your stock's value are kept in. Needed before you record a cost."
+          options={[
+            { value: "", label: "Choose later" },
+            ...currencyOptions(currencyCodes(currencies)),
+          ]}
+          value={currency}
+          onChange={setCurrency}
+          hasSearch
+        />
         <Text type="supporting" color="secondary">
           Legal details and a description are in Settings → Store.
         </Text>
@@ -377,7 +390,9 @@ function StoreStep({ store, onSaved }: { store: WizardData["store"]; onSaved: ()
             variant="primary"
             isLoading={isPending}
             isDisabled={!canSave}
-            onClick={() => run(() => saveStore({ name, contactEmail: email, timezone, language }))}
+            onClick={() =>
+              run(() => saveStore({ name, contactEmail: email, timezone, language, currency }))
+            }
           />
         </HStack>
       </VStack>

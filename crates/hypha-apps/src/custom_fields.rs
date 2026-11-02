@@ -859,7 +859,7 @@ mod tests {
         let f = json!({ "owner_type": "order", "key": "gift_message", "type": "multiline_text",
                         "name": "Gift message", "personal": true });
         assert_eq!(
-            paths(manifest(json!([member_id(), f.clone()]))),
+            paths(manifest(json!([member_id(), f]))),
             one(
                 "scopes",
                 "lists customer_data:profile: custom_fields[1] is personal"

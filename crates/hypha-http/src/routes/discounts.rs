@@ -1428,6 +1428,10 @@ pub struct GenerateCodesRequest {
     batch: Option<String>,
 }
 
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "serde's default for an `Option` field"
+)]
 fn single_use() -> Option<u32> {
     Some(1)
 }
@@ -1733,7 +1737,7 @@ async fn customers_by_id<P: HasCustomers>(
     let filter = CustomerFilter::default()
         .only(ids)
         .map_err(ApiError::internal)?;
-    let Ok(limit) = PageLimit::new(filter.ids().len() as u32) else {
+    let Ok(limit) = PageLimit::new(u32::try_from(filter.ids().len()).unwrap_or(u32::MAX)) else {
         return Ok(HashMap::new());
     };
     let found = ports

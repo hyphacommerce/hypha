@@ -1,14 +1,21 @@
 use hypha_core::{
-    InventoryItemId, Keyset, LocationId, MarketId, Page, PageRequest, RepoError, VariantId,
+    InventoryItemId, Keyset, LocationId, MarketId, Page, PageRequest, RepoError, TransferId,
+    VariantId,
 };
 
-use crate::{InventoryFilter, InventoryItem, InventoryItemSummary, Location};
+use crate::{
+    IncomingTransfer, InventoryFilter, InventoryItem, InventoryItemSummary, Location,
+    MovementFilter, StockMovementEntry, Transfer, TransferFilter, TransferNumber, TransferSummary,
+};
 
 pub mod keys {
     pub const LOCATION_ID: &str = "location_id";
     pub const INVENTORY_ITEM_ID: &str = "inventory_item_id";
     /// One inventory item per variant.
     pub const INVENTORY_ITEM_VARIANT: &str = "inventory_item_variant";
+    pub const TRANSFER_ID: &str = "transfer_id";
+    /// One transfer per number.
+    pub const TRANSFER_NUMBER: &str = "transfer_number";
 }
 
 #[allow(async_fn_in_trait)]
@@ -52,9 +59,61 @@ pub trait InventoryItemRepo {
     async fn delete(&self, item: &mut InventoryItem) -> Result<(), RepoError>;
 }
 
+/// The stock ledger, read back. Rows are written only by the adapter as it writes items
+/// (`InventoryItem::take_movements`), never through this port.
+#[allow(async_fn_in_trait)]
+pub trait StockMovementRepo {
+    /// A page of `item`'s rows that `filter` matches (`MovementFilter::matches`), newest
+    /// first: descending `position`, those below `page.after`.
+    async fn list(
+        &self,
+        item: InventoryItemId,
+        filter: &MovementFilter,
+        page: PageRequest<i64>,
+    ) -> Result<Page<StockMovementEntry>, RepoError>;
+    /// Whether any row ever carried a cost (`unit_cost` or `average_after`): from then
+    /// on, the store's base currency is fixed.
+    async fn cost_recorded(&self) -> Result<bool, RepoError>;
+}
+
+/// Transfers between the store's locations.
+#[allow(async_fn_in_trait)]
+pub trait TransferRepo {
+    async fn get(&self, id: TransferId) -> Result<Option<Transfer>, RepoError>;
+    /// A page of the transfers `filter` matches (`TransferFilter::matches`), newest
+    /// first by ID, those below `page.after`.
+    async fn list(
+        &self,
+        filter: &TransferFilter,
+        page: PageRequest<TransferId>,
+    ) -> Result<Page<TransferSummary>, RepoError>;
+    /// The next number, never handed out twice (a failed insert leaves a gap).
+    async fn next_number(&self) -> Result<TransferNumber, RepoError>;
+    /// A new transfer, with the events it recorded. Its number is unique
+    /// (`Duplicate(TRANSFER_NUMBER)`).
+    async fn insert(&self, transfer: &mut Transfer) -> Result<(), RepoError>;
+    async fn update(&self, transfer: &mut Transfer) -> Result<(), RepoError>;
+    /// Removes a draft at its version (`StaleVersion` if it changed or is gone).
+    async fn delete(&self, transfer: &mut Transfer) -> Result<(), RepoError>;
+    /// What transfers in transit still bring of `variants`, per destination: equal to
+    /// `incoming_transfers` over every stored transfer.
+    async fn incoming(&self, variants: &[VariantId]) -> Result<Vec<IncomingTransfer>, RepoError>;
+}
+
+/// Stages a transfer's update in a `hypha_core::HasBatch` batch with the stock it moves.
+pub trait StageTransfers {
+    /// Stages what `TransferRepo::update` would write, and moves `transfer` to the version
+    /// it has once the batch commits.
+    fn update_transfer(&mut self, transfer: &mut Transfer);
+}
+
 /// Stages inventory item writes in a `hypha_core::HasBatch` batch; the adapter's batch
-/// type implements it.
+/// type implements it. Like the repo, it writes the item's movements with it.
 pub trait StageInventoryItems {
+    /// Stages what `InventoryItemRepo::insert` would write (version 1). A second item for
+    /// a variant that has one fails the batch with `Duplicate(INVENTORY_ITEM_VARIANT)`:
+    /// a writer that lost that race loads the other one and tries again.
+    fn insert_inventory_item(&mut self, item: &mut InventoryItem);
     /// Stages what `InventoryItemRepo::update` would write, and moves `item` to the
     /// version it has once the batch commits. If the commit fails, `item` is stale: load
     /// it again.
@@ -67,7 +126,7 @@ pub trait StageInventoryItems {
 }
 
 /// Whatever holds the `LocationRepo`: a host's per-request ports, a test world. Commands
-/// bind just the accessors they use (review plan D1); `hypha_cart::CartPorts` is
+/// bind just the accessors they use; `hypha_cart::CartPorts` is
 /// the union of all of them.
 pub trait HasLocations {
     type Locations: LocationRepo;
@@ -83,7 +142,7 @@ impl<T: HasLocations + ?Sized> HasLocations for &T {
 }
 
 /// Whatever holds the `InventoryItemRepo`: a host's per-request ports, a test world. Commands
-/// bind just the accessors they use (review plan D1); `hypha_cart::CartPorts` is
+/// bind just the accessors they use; `hypha_cart::CartPorts` is
 /// the union of all of them.
 pub trait HasInventoryItems {
     type InventoryItems: InventoryItemRepo;
@@ -95,5 +154,33 @@ impl<T: HasInventoryItems + ?Sized> HasInventoryItems for &T {
     type InventoryItems = T::InventoryItems;
     fn inventory_items(&self) -> &Self::InventoryItems {
         (**self).inventory_items()
+    }
+}
+
+/// Whatever holds the `StockMovementRepo`.
+pub trait HasStockMovements {
+    type StockMovements: StockMovementRepo;
+    fn stock_movements(&self) -> &Self::StockMovements;
+}
+
+/// Borrowed ports are ports too, so a host can lend them out per request.
+impl<T: HasStockMovements + ?Sized> HasStockMovements for &T {
+    type StockMovements = T::StockMovements;
+    fn stock_movements(&self) -> &Self::StockMovements {
+        (**self).stock_movements()
+    }
+}
+
+/// Whatever holds the `TransferRepo`.
+pub trait HasTransfers {
+    type Transfers: TransferRepo;
+    fn transfers(&self) -> &Self::Transfers;
+}
+
+/// Borrowed ports are ports too, so a host can lend them out per request.
+impl<T: HasTransfers + ?Sized> HasTransfers for &T {
+    type Transfers = T::Transfers;
+    fn transfers(&self) -> &Self::Transfers {
+        (**self).transfers()
     }
 }

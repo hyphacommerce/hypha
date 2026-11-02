@@ -1,5 +1,6 @@
 use hypha_core::{
-    Email, Language, RepoError, StoreId, Timezone, Version, Versioned, stamp_insert, stamp_update,
+    Currency, Email, Language, RepoError, StoreId, Timezone, Version, Versioned, stamp_insert,
+    stamp_update,
 };
 use hypha_stores::{Store, StoreRepo, StoreSnapshot};
 use tokio_postgres::{
@@ -22,7 +23,7 @@ use crate::{
 fn store_columns() -> String {
     format!(
         "id, version, name, contact_email, description, legal_name, timezone, \
-         default_language, setup_step, {}, {}, {}",
+         default_language, currency, setup_step, {}, {}, {}",
         micros("setup_finished_at"),
         address_columns("legal_address_"),
         stamp_columns(""),
@@ -35,6 +36,7 @@ fn store_from_row(row: &Row) -> Result<Store, RepoError> {
     let email: Option<String> = col(row, "contact_email")?;
     let timezone: Option<String> = col(row, "timezone")?;
     let language: String = col(row, "default_language")?;
+    let currency: Option<String> = col(row, "currency")?;
     Store::restore(StoreSnapshot {
         id,
         version: version_from_db(col(row, "version")?)?,
@@ -54,6 +56,11 @@ fn store_from_row(row: &Row) -> Result<Store, RepoError> {
             .transpose()
             .map_err(|e| bad(&e))?,
         default_language: Language::new(&language).map_err(|e| bad(&e))?,
+        currency: currency
+            .as_deref()
+            .map(Currency::new)
+            .transpose()
+            .map_err(|e| bad(&e))?,
         setup_step: col(row, "setup_step")?,
         setup_finished_at: opt_ts(col(row, "setup_finished_at")?),
     })
@@ -67,9 +74,10 @@ async fn write_details(tx: &impl Queries, s: &StoreSnapshot) -> Result<(), RepoE
     let email = s.contact_email.as_ref().map(|e| e.as_str());
     let timezone = s.timezone.map(|t| t.as_str());
     let language = s.default_language.as_str();
+    let currency = s.currency.map(|c| c.as_str());
     let finished = opt_micros(s.setup_finished_at);
     let mut params = id_and_address(&id, &address);
-    let details: [(&(dyn ToSql + Sync), Type); 7] = [
+    let details: [(&(dyn ToSql + Sync), Type); 8] = [
         (&email, Type::TEXT),
         (&s.description, Type::TEXT),
         (&s.legal_name, Type::TEXT),
@@ -77,6 +85,7 @@ async fn write_details(tx: &impl Queries, s: &StoreSnapshot) -> Result<(), RepoE
         (&language, Type::TEXT),
         (&s.setup_step, Type::TEXT),
         (&finished, Type::INT8),
+        (&currency, Type::TEXT),
     ];
     params.extend(details);
     let first = 2 + ADDRESS_LEN;
@@ -84,7 +93,8 @@ async fn write_details(tx: &impl Queries, s: &StoreSnapshot) -> Result<(), RepoE
         &format!(
             "UPDATE stores SET {}, contact_email = ${}, description = ${}, legal_name = ${},
                  timezone = ${}, default_language = ${}, setup_step = ${},
-                 setup_finished_at = 'epoch'::timestamptz + ${}::bigint * interval '1 microsecond'
+                 setup_finished_at = 'epoch'::timestamptz + ${}::bigint * interval '1 microsecond',
+                 currency = ${}
              WHERE id = $1",
             address_assignments("legal_address_", 2),
             first,
@@ -94,6 +104,7 @@ async fn write_details(tx: &impl Queries, s: &StoreSnapshot) -> Result<(), RepoE
             first + 4,
             first + 5,
             first + 6,
+            first + 7,
         ),
         &params,
     )

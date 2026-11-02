@@ -932,3 +932,92 @@ html[data-theme="dark"] .hypha-wordmark-dark {
     order: -1;
   }
 }
+
+/* A purchase order's print view (purchase-orders/[id]/print): on paper only the document
+   itself, wherever the admin's shell puts it, and none of the page's own buttons. */
+.po-print table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.po-print th,
+.po-print td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--color-border, #e4e4e7);
+  text-align: left;
+  vertical-align: top;
+}
+
+.po-print .amount {
+  text-align: right;
+  white-space: nowrap;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  .po-print,
+  .po-print * {
+    visibility: visible;
+  }
+
+  .po-print {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+  }
+
+  .po-print .no-print {
+    display: none;
+  }
+}
+
+/* Address autocomplete: the suggestions under line 1 (`components/address-line.tsx`). */
+.admin-address-line {
+  position: relative;
+}
+
+.admin-address-options {
+  position: absolute;
+  z-index: 20;
+  inset-inline: 0;
+  top: calc(100% + var(--spacing-1, 4px));
+  margin: 0;
+  padding: var(--spacing-1, 4px);
+  list-style: none;
+  background: var(--color-background-body);
+  border: 1px solid var(--color-border-emphasized);
+  border-radius: var(--radius-container);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+}
+
+.admin-address-options > button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: var(--spacing-2, 8px) var(--spacing-3, 12px);
+  border: 0;
+  border-radius: var(--radius-inner);
+  background: none;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.admin-address-options > button:focus-visible,
+.admin-address-options > button:hover {
+  background: var(--color-background-muted);
+  outline: none;
+}
+
+.admin-address-option-label {
+  color: var(--color-text-primary);
+}
+
+.admin-address-option-description {
+  color: var(--color-text-secondary);
+  font-size: 0.875em;
+}

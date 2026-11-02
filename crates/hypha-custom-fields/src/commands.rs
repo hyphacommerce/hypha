@@ -303,7 +303,7 @@ pub async fn create_definition<S: HasCustomFieldDefinitions>(
         CustomFieldDefinitionId::from_uuid(ids.new_uuid()),
         Namespace::Custom,
         spec,
-        siblings.len() as u32,
+        u32::try_from(siblings.len()).unwrap_or(u32::MAX),
     )?;
     if siblings
         .iter()
@@ -501,12 +501,12 @@ where
     }
     siblings.insert(to, definition.clone());
     let mut batch = ports.batch();
-    for (i, sibling) in siblings.iter_mut().enumerate() {
+    for (i, sibling) in (0u32..).zip(siblings.iter_mut()) {
         if sibling.id() == id {
-            definition.move_to(i as u32);
+            definition.move_to(i);
             batch.update_custom_field_definition(&mut definition);
-        } else if sibling.position() != i as u32 {
-            sibling.shift_to(i as u32);
+        } else if sibling.position() != i {
+            sibling.shift_to(i);
             batch.update_custom_field_definition(sibling);
         }
     }
@@ -560,9 +560,9 @@ where
             .filter(|d| !gone_ids.contains(&d.id()))
             .collect();
         left.sort_by_key(|d| (d.position(), d.id()));
-        for (i, sibling) in left.iter_mut().enumerate() {
-            if sibling.position() != i as u32 {
-                sibling.shift_to(i as u32);
+        for (i, sibling) in (0u32..).zip(left.iter_mut()) {
+            if sibling.position() != i {
+                sibling.shift_to(i);
                 batch.update_custom_field_definition(sibling);
             }
         }
@@ -776,7 +776,7 @@ where
                     CustomFieldDefinitionId::from_uuid(ids.new_uuid()),
                     namespace.clone(),
                     spec,
-                    form.len() as u32,
+                    u32::try_from(form.len()).unwrap_or(u32::MAX),
                 )?;
                 check_limits(form, &definition, true)?;
                 created.insert(definition.id());
@@ -792,8 +792,7 @@ where
     // Every form densely numbered: created definitions inserted at their place, changed
     // ones updated, and any other one whose position moved (after a deletion) shifted.
     for form in forms.values_mut() {
-        for (i, definition) in form.iter_mut().enumerate() {
-            let position = i as u32;
+        for (position, definition) in (0u32..).zip(form.iter_mut()) {
             if created.contains(&definition.id()) {
                 definition.shift_to(position);
                 batch.insert_custom_field_definition(definition);
@@ -1234,7 +1233,7 @@ where
                 value: Some(value),
             }),
             Err(found) => {
-                problems.extend(found.into_iter().map(|p| FieldProblem::of_value(key, p)))
+                problems.extend(found.into_iter().map(|p| FieldProblem::of_value(key, p)));
             }
         }
     }
@@ -1488,7 +1487,9 @@ where
         case_insensitive: validations.unique_items()
             && definition.field_type().base() == BaseType::Text,
         min_items: validations.min_items(),
-        max_items: validations.max_items().unwrap_or(MAX_LIST_ITEMS as u32),
+        max_items: validations
+            .max_items()
+            .unwrap_or(u32::try_from(MAX_LIST_ITEMS).unwrap_or(u32::MAX)),
     };
     match ports.custom_field_values().change_items(&change).await? {
         ItemsResult::Applied(outcomes) => Ok(outcomes),

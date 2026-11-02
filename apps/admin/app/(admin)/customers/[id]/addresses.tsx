@@ -15,12 +15,19 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
-import { TextInput } from "@astryxdesign/core/TextInput";
 import { PencilSquareIcon, PlusIcon, TrashIcon } from "@heroicons/react/24/outline";
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
+import { loadAddressFormat } from "@/app/(admin)/address-actions";
+import { AddressFields } from "@/components/address-fields";
+import {
+  type AddressFormat,
+  type AddressValues,
+  type FieldProblems,
+  missingIn,
+} from "@/lib/address";
 import { type Country, countryName, countryOptions } from "@/lib/regions";
 
 import { type AddressRequest, removeAddress, saveAddress } from "../actions";
@@ -36,7 +43,7 @@ export function AddressLines({ address, country }: { address: Address; country: 
     line1: address.line1,
     line2: address.line2,
     city: [address.postal_code, address.city].filter(Boolean).join(" "),
-    province: address.province,
+    province: address.province_name ?? address.province,
     country,
     phone: address.phone,
   }).filter(([, line]) => line);
@@ -57,6 +64,7 @@ export function AddressesCard({
   defaultShipping,
   defaultBilling,
   countries,
+  formats,
   canWrite,
 }: {
   customer: string;
@@ -64,6 +72,8 @@ export function AddressesCard({
   defaultShipping: string | null | undefined;
   defaultBilling: string | null | undefined;
   countries: Country[];
+  /** The address forms of the countries in the book, by country. */
+  formats: Record<string, AddressFormat>;
   /** `customers:write`. */
   canWrite: boolean;
 }) {
@@ -136,6 +146,7 @@ export function AddressesCard({
           isDefaultShipping={editing !== "new" && defaultShipping === editing.id}
           isDefaultBilling={editing !== "new" && defaultBilling === editing.id}
           countries={countries}
+          initialFormat={editing === "new" ? undefined : formats[editing.country]}
           onClose={() => setEditing(undefined)}
         />
       )}
@@ -151,30 +162,7 @@ export function AddressesCard({
 }
 
 /** The address as typed: every field a string, blank for none. */
-type Draft = {
-  first_name: string;
-  last_name: string;
-  company: string;
-  line1: string;
-  line2: string;
-  city: string;
-  province: string;
-  postal_code: string;
-  country: string;
-  phone: string;
-};
-
-const FIELDS: { key: Exclude<keyof Draft, "country">; label: string; isRequired?: boolean }[] = [
-  { key: "first_name", label: "First name" },
-  { key: "last_name", label: "Last name", isRequired: true },
-  { key: "company", label: "Company" },
-  { key: "phone", label: "Phone" },
-  { key: "line1", label: "Address", isRequired: true },
-  { key: "line2", label: "Address line 2" },
-  { key: "postal_code", label: "Postal code" },
-  { key: "city", label: "City", isRequired: true },
-  { key: "province", label: "Region or province" },
-];
+type Draft = AddressValues & { country: string };
 
 function draftOf(a: Address | undefined, country: string): Draft {
   return {
@@ -202,6 +190,7 @@ function AddressDialog({
   isDefaultShipping,
   isDefaultBilling,
   countries,
+  initialFormat,
   onClose,
 }: {
   customer: string;
@@ -210,25 +199,40 @@ function AddressDialog({
   isDefaultShipping: boolean;
   isDefaultBilling: boolean;
   countries: Country[];
+  /** The address's country's form, when editing one. */
+  initialFormat?: AddressFormat;
   onClose: () => void;
 }) {
   const router = useRouter();
   // No country until chosen: the first of the list is nobody's default.
   const [draft, setDraft] = useState(() => draftOf(address, ""));
+  // The chosen country's form: its fields, labels and regions.
+  const [format, setFormat] = useState<AddressFormat | null>(initialFormat ?? null);
   const [defaultShipping, setDefaultShipping] = useState(isDefaultShipping);
   const [defaultBilling, setDefaultBilling] = useState(isDefaultBilling);
   const [error, setError] = useState<string>();
+  const [problems, setProblems] = useState<FieldProblems>();
+  const [tried, setTried] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const field = (key: keyof Draft) => (value: string) => setDraft((d) => ({ ...d, [key]: value }));
+  const [isLoadingFormat, startLoading] = useTransition();
+
+  const chooseCountry = (country: string) => {
+    setDraft((d) => ({ ...d, country }));
+    startLoading(async () => setFormat(await loadAddressFormat(country)));
+  };
+  const setField = (key: keyof AddressValues, value: string) => {
+    setDraft((d) => ({ ...d, [key]: value }));
+    // A field changed since the save no longer has the problem it reported.
+    setProblems((p) => (p?.[key] ? { ...p, [key]: undefined } : p));
+  };
 
   const submit = () => {
-    const missing = FIELDS.filter((f) => f.isRequired && draft[f.key].trim() === "");
-    if (missing.length > 0 || draft.country === "") {
-      setError(
-        `Needed: ${[...missing.map((f) => f.label.toLowerCase()), ...(draft.country === "" ? ["country"] : [])].join(", ")}.`,
-      );
+    setTried(true);
+    if (draft.country === "" || !format) {
+      setError("Choose a country first.");
       return;
     }
+    if (missingIn(format, draft).length > 0) return;
     const body: AddressRequest = {
       first_name: optional(draft.first_name),
       last_name: draft.last_name.trim(),
@@ -247,6 +251,7 @@ function AddressDialog({
       const result = await saveAddress(customer, address?.id ?? null, body);
       if (result.error) {
         setError(result.error);
+        setProblems(result.problems);
         return;
       }
       router.refresh();
@@ -263,25 +268,30 @@ function AddressDialog({
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
-        <div className="form-grid">
-          {FIELDS.map((f) => (
-            <TextInput
-              key={f.key}
-              label={f.label}
-              isOptional={!f.isRequired}
-              value={draft[f.key]}
-              onChange={field(f.key)}
-            />
-          ))}
-        </div>
         <Selector
           label="Country"
           options={countryOptions(countries)}
           value={draft.country || undefined}
-          onChange={field("country")}
+          onChange={chooseCountry}
           hasSearch
           placeholder="Choose a country"
+          isRequired
         />
+        {format && !isLoadingFormat ? (
+          <AddressFields
+            format={format}
+            values={draft}
+            onChange={setField}
+            problems={problems}
+            tried={tried}
+            onFill={(filled, found) => {
+              setDraft((d) => ({ ...d, ...filled }));
+              setProblems(found);
+            }}
+          />
+        ) : (
+          draft.country !== "" && <Text color="secondary">Loading the country&apos;s form…</Text>
+        )}
         <VStack gap={2}>
           <CheckboxInput
             label="Default shipping address"

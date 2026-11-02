@@ -209,7 +209,7 @@ mod tests {
                     for (key, v) in map {
                         match (key.as_str(), v) {
                             ("operationId", serde_json::Value::String(id)) => {
-                                found.push(id.clone())
+                                found.push(id.clone());
                             }
                             _ => collect(v, found),
                         }
