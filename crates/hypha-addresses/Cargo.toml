@@ -1,0 +1,13 @@
+[package]
+name = "hypha-addresses"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+hypha-core.workspace = true
+# Postal code patterns and flag patterns; builds for wasm, no backtracking.
+regex = "1.13"
+
+[lints]
+workspace = true
