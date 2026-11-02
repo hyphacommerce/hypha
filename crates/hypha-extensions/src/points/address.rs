@@ -1,15 +1,20 @@
-//! `address.verify` v1: the store's verification app says whether mail reaches an
-//! address, what it would correct and what the address is. Asked when a cart's address is
-//! set and when staff edit an order's; its answer is kept, so the same address is never
-//! looked up twice.
+//! The address points.
+//!
+//! - `address.verify` v1: the store's verification app says whether mail reaches an
+//!   address, what it would correct and what the address is. Asked when a cart's address
+//!   is set and when staff edit an order's; its answer is kept, so the same address is
+//!   never looked up twice.
+//! - `address.suggest` v1 and `address.resolve` v1: the store's autocomplete app offers
+//!   addresses while someone types one, then turns the one picked into its parts. Called
+//!   through the API, so the provider's keys stay with the app.
 
 use std::collections::BTreeMap;
 
 use core::time::Duration;
 
 use hypha_core::{
-    AddressField, AddressPrecision, AddressVerdict, FieldStatus, Scope, SuggestedAddress,
-    VerificationFlags, VerifyContext,
+    AddressField, AddressPrecision, AddressVerdict, CountryCode, FieldStatus, Scope,
+    SuggestedAddress, VerificationFlags, VerifyContext,
 };
 use serde::{Deserialize, Serialize};
 
@@ -116,6 +121,159 @@ pub struct AddressVerifyResponse {
     pub reference: Option<String>,
 }
 
+/// At most this many suggestions per answer (as many as a dropdown shows at once).
+pub const MAX_SUGGESTIONS: u8 = 5;
+
+/// The longest suggestion ID or session an app or a client may send: providers' place IDs
+/// are opaque and some are long.
+pub const MAX_SUGGESTION_ID: usize = 512;
+
+/// The longest label or description of a suggestion, in characters.
+pub const MAX_SUGGESTION_TEXT: usize = 300;
+
+/// Offers addresses for what someone has typed so far.
+pub struct AddressSuggest;
+
+impl ExtensionPoint for AddressSuggest {
+    const NAME: &'static str = "address.suggest";
+    const VERSION: u16 = 1;
+    /// Asked on keystrokes: a slow answer is worse than none.
+    const TIMEOUT: Duration = Duration::from_secs(1);
+    /// No suggestions: the person types the address.
+    const ON_FAILURE: OnFailure = OnFailure::Fallback;
+    /// The app reads the street being typed.
+    const SCOPE: Scope = Scope::CustomerDataAddress;
+    const READ_ONLY: bool = true;
+    type Request = AddressSuggestRequest;
+    type Response = AddressSuggestResponse;
+
+    /// No more suggestions than asked for, each with an ID and a label of sensible size.
+    fn check(
+        request: &AddressSuggestRequest,
+        response: &AddressSuggestResponse,
+    ) -> Result<(), String> {
+        if response.suggestions.len() > usize::from(request.limit.min(MAX_SUGGESTIONS)) {
+            return Err(format!(
+                "{} suggestions, more than the {} asked for",
+                response.suggestions.len(),
+                request.limit.min(MAX_SUGGESTIONS)
+            ));
+        }
+        for s in &response.suggestions {
+            if s.id.is_empty() || s.id.len() > MAX_SUGGESTION_ID {
+                return Err(format!(
+                    "a suggestion's id is empty or over {MAX_SUGGESTION_ID} bytes"
+                ));
+            }
+            if s.label.trim().is_empty() {
+                return Err("a suggestion has no label".to_string());
+            }
+            let long = |t: &str| t.chars().count() > MAX_SUGGESTION_TEXT;
+            if long(&s.label) || s.description.as_deref().is_some_and(long) {
+                return Err(format!(
+                    "a suggestion's label or description is over {MAX_SUGGESTION_TEXT} characters"
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// What Hypha sends while someone types.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AddressSuggestRequest {
+    /// What's typed so far (3 to 200 characters).
+    pub query: String,
+    /// The country the form is for: suggestions stay in it.
+    #[cfg_attr(feature = "openapi", schema(value_type = String, example = "HR"))]
+    pub country: CountryCode,
+    /// The client's token for one address being typed, the same until one is picked, for
+    /// providers that bill per session.
+    pub session: String,
+    /// How many suggestions to answer at most (1 to 5).
+    pub limit: u8,
+}
+
+/// The app's answer: what to show in the dropdown.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AddressSuggestResponse {
+    #[serde(default)]
+    pub suggestions: Vec<AddressSuggestion>,
+}
+
+/// One address offered.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AddressSuggestion {
+    /// The app's own ID for it, sent back to `address.resolve` when it's picked.
+    pub id: String,
+    /// The main line shown ("Ilica 1").
+    pub label: String,
+    /// The rest, shown smaller ("10000 Zagreb, Croatia").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(required = false))]
+    pub description: Option<String>,
+}
+
+/// Turns a picked suggestion into an address.
+pub struct AddressResolve;
+
+impl ExtensionPoint for AddressResolve {
+    const NAME: &'static str = "address.resolve";
+    const VERSION: u16 = 1;
+    const TIMEOUT: Duration = Duration::from_secs(1);
+    /// The person types the address instead.
+    const ON_FAILURE: OnFailure = OnFailure::Fallback;
+    const SCOPE: Scope = Scope::CustomerDataAddress;
+    const READ_ONLY: bool = true;
+    type Request = AddressResolveRequest;
+    type Response = AddressResolveResponse;
+
+    /// The address is in the form's country and has its street and city.
+    fn check(
+        request: &AddressResolveRequest,
+        response: &AddressResolveResponse,
+    ) -> Result<(), String> {
+        let address = &response.address;
+        if !address
+            .country
+            .eq_ignore_ascii_case(request.country.as_str())
+        {
+            return Err(format!(
+                "the address is in {:?}, not {}",
+                address.country, request.country
+            ));
+        }
+        if address.line1.trim().is_empty() || address.city.trim().is_empty() {
+            return Err("the address has no street or city".to_string());
+        }
+        Ok(())
+    }
+}
+
+/// What Hypha sends when a suggestion is picked.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AddressResolveRequest {
+    /// The suggestion's `id`, as `address.suggest` answered it.
+    pub id: String,
+    /// The country the form is for: the address must be in it.
+    #[cfg_attr(feature = "openapi", schema(value_type = String, example = "HR"))]
+    pub country: CountryCode,
+    /// The same session the suggestions were asked in.
+    pub session: String,
+}
+
+/// The app's answer: the address's parts, which then go through the country's format
+/// check like any typed address.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AddressResolveResponse {
+    pub address: SuggestedAddress,
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -201,5 +359,111 @@ mod tests {
         assert_eq!(sent["context"], "cart");
         assert_eq!(sent["address"]["province"], "CA");
         assert_eq!(sent["address"].get("last_name"), None);
+    }
+
+    fn suggest_request(limit: u8) -> AddressSuggestRequest {
+        AddressSuggestRequest {
+            query: "Ilica".to_string(),
+            country: CountryCode::new("HR").unwrap(),
+            session: "s1".to_string(),
+            limit,
+        }
+    }
+
+    fn suggestions(n: usize) -> AddressSuggestResponse {
+        AddressSuggestResponse {
+            suggestions: (0..n)
+                .map(|i| AddressSuggestion {
+                    id: format!("p{i}"),
+                    label: format!("Ilica {i}"),
+                    description: Some("10000 Zagreb".to_string()),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn as_many_suggestions_as_asked_for_pass() {
+        assert_eq!(
+            AddressSuggest::check(&suggest_request(3), &suggestions(3)),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn more_suggestions_than_asked_for_are_refused() {
+        assert_eq!(
+            AddressSuggest::check(&suggest_request(3), &suggestions(4)),
+            Err("4 suggestions, more than the 3 asked for".to_string())
+        );
+    }
+
+    #[test]
+    fn no_more_than_five_whatever_is_asked() {
+        assert_eq!(
+            AddressSuggest::check(&suggest_request(9), &suggestions(6)),
+            Err("6 suggestions, more than the 5 asked for".to_string())
+        );
+    }
+
+    #[test]
+    fn a_suggestion_without_a_label_is_refused() {
+        let mut answer = suggestions(1);
+        answer.suggestions[0].label = " ".to_string();
+        assert_eq!(
+            AddressSuggest::check(&suggest_request(5), &answer),
+            Err("a suggestion has no label".to_string())
+        );
+    }
+
+    #[test]
+    fn a_suggestion_without_an_id_is_refused() {
+        let mut answer = suggestions(1);
+        answer.suggestions[0].id = String::new();
+        assert!(AddressSuggest::check(&suggest_request(5), &answer).is_err());
+    }
+
+    #[test]
+    fn no_suggestions_is_an_answer() {
+        let parsed: AddressSuggestResponse = serde_json::from_value(json!({})).unwrap();
+        assert_eq!(AddressSuggest::check(&suggest_request(5), &parsed), Ok(()));
+    }
+
+    fn resolve_request() -> AddressResolveRequest {
+        AddressResolveRequest {
+            id: "p1".to_string(),
+            country: CountryCode::new("HR").unwrap(),
+            session: "s1".to_string(),
+        }
+    }
+
+    #[test]
+    fn a_resolved_address_in_the_forms_country_passes() {
+        let parsed: AddressResolveResponse = serde_json::from_value(json!({"address":
+            {"line1": "Ilica 1", "city": "Zagreb", "postal_code": "10000", "country": "hr"}}))
+        .unwrap();
+        assert_eq!(AddressResolve::check(&resolve_request(), &parsed), Ok(()));
+    }
+
+    #[test]
+    fn a_resolved_address_in_another_country_is_refused() {
+        let parsed: AddressResolveResponse = serde_json::from_value(json!({"address":
+            {"line1": "Slovenska 1", "city": "Ljubljana", "country": "SI"}}))
+        .unwrap();
+        assert_eq!(
+            AddressResolve::check(&resolve_request(), &parsed),
+            Err("the address is in \"SI\", not HR".to_string())
+        );
+    }
+
+    #[test]
+    fn a_resolved_address_without_a_city_is_refused() {
+        let parsed: AddressResolveResponse = serde_json::from_value(json!({"address":
+            {"line1": "Ilica 1", "city": "", "country": "HR"}}))
+        .unwrap();
+        assert_eq!(
+            AddressResolve::check(&resolve_request(), &parsed),
+            Err("the address has no street or city".to_string())
+        );
     }
 }

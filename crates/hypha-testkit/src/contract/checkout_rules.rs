@@ -236,6 +236,7 @@ where
 fn verifying() -> CheckoutSettings {
     let mut s = CheckoutSettings::default();
     s.set_verification_app(Some(hypha_core::AppKey::new("app_verify").unwrap()));
+    s.set_autocomplete_app(Some(hypha_core::AppKey::new("app_places").unwrap()));
     s
 }
 
@@ -269,6 +270,7 @@ async fn settings_versions<S: HasCheckoutSettings>(ports: &S) {
     );
     let mut stale = repo.get().await.unwrap().unwrap();
     s.set_verification_app(None);
+    s.set_autocomplete_app(None);
     repo.update(&mut s).await.unwrap();
     assert_eq!(s.version(), Version::new(2));
     assert_eq!(repo.get().await, Ok(Some(s.clone())));

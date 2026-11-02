@@ -7,7 +7,7 @@ use crate::{
     error::CheckoutRuleError,
     repo::{CheckoutRuleRepo, CheckoutSettingsRepo, HasCheckoutRules, HasCheckoutSettings},
     rule::{CheckoutRule, MAX_RULES, RuleAppliesTo, RuleCondition, RuleDraft, RuleOutcome},
-    settings::{CheckoutSettings, VERIFY_POINT},
+    settings::{AUTOCOMPLETE_POINTS, CheckoutSettings, VERIFY_POINT},
 };
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -26,6 +26,10 @@ pub enum CommandError {
     AppKey(#[from] AppKeyError),
     #[error("{0} isn't installed, enabled and granted to answer address.verify")]
     VerificationAppUnavailable(AppKey),
+    #[error(
+        "{0} isn't installed, enabled and granted to answer address.suggest and address.resolve"
+    )]
+    AutocompleteAppUnavailable(AppKey),
 }
 
 impl ErrorCode for CommandError {
@@ -38,6 +42,7 @@ impl ErrorCode for CommandError {
             CommandError::TooMany { .. } => "too_many_checkout_rules",
             CommandError::AppKey(e) => e.code(),
             CommandError::VerificationAppUnavailable(_) => "verification_app_unavailable",
+            CommandError::AutocompleteAppUnavailable(_) => "autocomplete_app_unavailable",
         }
     }
 }
@@ -172,11 +177,14 @@ pub async fn get_checkout_settings<S: HasCheckoutSettings>(
 pub struct UpdateCheckoutSettings {
     /// The app verifying addresses (`Some(None)`: none).
     pub verification_app: Option<Option<String>>,
+    /// The app suggesting addresses (`Some(None)`: none).
+    pub autocomplete_app: Option<Option<String>>,
 }
 
 /// Changes the settings. A verification app must be installed, enabled and granted what
-/// `address.verify` needs, as `apps` says (`verification_app_unavailable`); an app named
-/// already stays named while it's checked, so an outage doesn't block other changes.
+/// `address.verify` needs, as `apps` says (`verification_app_unavailable`), and an
+/// autocomplete app both autocomplete points (`autocomplete_app_unavailable`); an app
+/// named already isn't checked again, so its outage doesn't block other changes.
 pub async fn update_checkout_settings<S: HasCheckoutSettings>(
     ctx: &Ctx,
     ports: &S,
@@ -196,6 +204,19 @@ pub async fn update_checkout_settings<S: HasCheckoutSettings>(
             return Err(CommandError::VerificationAppUnavailable(key.clone()));
         }
         settings.set_verification_app(app);
+    }
+    if let Some(app) = input.autocomplete_app {
+        let app = app.map(|key| AppKey::new(&key)).transpose()?;
+        if let Some(key) = &app
+            && settings.autocomplete_app() != Some(key)
+        {
+            for point in AUTOCOMPLETE_POINTS {
+                if !apps.answers(key, point).await? {
+                    return Err(CommandError::AutocompleteAppUnavailable(key.clone()));
+                }
+            }
+        }
+        settings.set_autocomplete_app(app);
     }
     if is_new {
         ports.checkout_settings().insert(&mut settings).await?;

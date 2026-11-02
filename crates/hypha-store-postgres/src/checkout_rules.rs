@@ -240,7 +240,7 @@ impl<C: PgConnection> CheckoutSettingsRepo for PgStore<C> {
             .db()
             .query_typed_opt(
                 &format!(
-                    "SELECT version, verification_app, {} FROM checkout_settings",
+                    "SELECT version, verification_app, autocomplete_app, {} FROM checkout_settings",
                     stamp_columns("")
                 ),
                 &[],
@@ -248,14 +248,17 @@ impl<C: PgConnection> CheckoutSettingsRepo for PgStore<C> {
             .await
             .map_err(repo_error)?;
         let Some(row) = row else { return Ok(None) };
-        let app: Option<String> = col(&row, "verification_app")?;
+        let app = |column: &str| -> Result<Option<AppKey>, RepoError> {
+            let key: Option<String> = col(&row, column)?;
+            key.map(|a| AppKey::new(&a))
+                .transpose()
+                .map_err(|e| corrupt(format!("checkout settings' {column}: {e}")))
+        };
         Ok(Some(CheckoutSettings::restore(CheckoutSettingsSnapshot {
             version: version_from_db(col(&row, "version")?)?,
             stamps: stamps_from_row(&row)?,
-            verification_app: app
-                .map(|a| AppKey::new(&a))
-                .transpose()
-                .map_err(|e| corrupt(format!("checkout settings: {e}")))?,
+            verification_app: app("verification_app")?,
+            autocomplete_app: app("autocomplete_app")?,
         })))
     }
 
@@ -266,10 +269,12 @@ impl<C: PgConnection> CheckoutSettingsRepo for PgStore<C> {
         let stamp = self.event_stamp();
         let version = Version::NEW.next();
         let app = s.verification_app.as_ref().map(|a| a.as_str().to_string());
+        let autocomplete = s.autocomplete_app.as_ref().map(|a| a.as_str().to_string());
         in_transaction!(self, |tx| {
             tx.query_typed(
-                "INSERT INTO checkout_settings (version, verification_app) VALUES (1, $1)",
-                &[(&app, Type::TEXT)],
+                "INSERT INTO checkout_settings (version, verification_app, autocomplete_app)
+                 VALUES (1, $1, $2)",
+                &[(&app, Type::TEXT), (&autocomplete, Type::TEXT)],
             )
             .await
             .map_err(repo_error)?;
@@ -286,13 +291,19 @@ impl<C: PgConnection> CheckoutSettingsRepo for PgStore<C> {
         let events = settings.take_events();
         let stamp = self.event_stamp();
         let app = s.verification_app.as_ref().map(|a| a.as_str().to_string());
+        let autocomplete = s.autocomplete_app.as_ref().map(|a| a.as_str().to_string());
         let current = version_to_db(s.version)?;
         let version = in_transaction!(self, |tx| {
             let row = tx
                 .query_typed_opt(
-                    "UPDATE checkout_settings SET version = version + 1, verification_app = $2
+                    "UPDATE checkout_settings SET version = version + 1, verification_app = $2,
+                         autocomplete_app = $3
                      WHERE version = $1 RETURNING version",
-                    &[(&current, Type::INT8), (&app, Type::TEXT)],
+                    &[
+                        (&current, Type::INT8),
+                        (&app, Type::TEXT),
+                        (&autocomplete, Type::TEXT),
+                    ],
                 )
                 .await
                 .map_err(repo_error)?

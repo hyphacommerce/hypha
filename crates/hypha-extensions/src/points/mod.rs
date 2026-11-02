@@ -9,7 +9,10 @@ pub mod search;
 pub mod shipping;
 
 pub use address::{
-    AddressVerify, AddressVerifyRequest, AddressVerifyResponse, FieldVerification, VerifiedAddress,
+    AddressResolve, AddressResolveRequest, AddressResolveResponse, AddressSuggest,
+    AddressSuggestRequest, AddressSuggestResponse, AddressSuggestion, AddressVerify,
+    AddressVerifyRequest, AddressVerifyResponse, FieldVerification, MAX_SUGGESTION_ID,
+    MAX_SUGGESTION_TEXT, MAX_SUGGESTIONS, VerifiedAddress,
 };
 pub use admin::{
     ActionContext, AdminActionRequest, AdminActionResponse, MAX_ACTION_MESSAGE, RunAdminAction,
@@ -59,6 +62,8 @@ pub const KNOWN: &[Known] = &[
     known::<PaymentsRefund>(),
     known::<SearchQuery>(),
     known::<AddressVerify>(),
+    known::<AddressSuggest>(),
+    known::<AddressResolve>(),
 ];
 
 /// The point named `name`, when this build knows it.

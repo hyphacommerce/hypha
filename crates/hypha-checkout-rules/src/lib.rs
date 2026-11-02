@@ -28,6 +28,6 @@ pub use rule::{
     PostalRange, RuleAppliesTo, RuleCondition, RuleCountries, RuleDraft, RuleField, RuleOutcome,
 };
 pub use settings::{
-    CHECKOUT_SETTINGS, CheckoutSettings, CheckoutSettingsSnapshot, CheckoutSettingsUpdated,
-    VERIFY_POINT,
+    AUTOCOMPLETE_POINTS, CHECKOUT_SETTINGS, CheckoutSettings, CheckoutSettingsSnapshot,
+    CheckoutSettingsUpdated, VERIFY_POINT,
 };
