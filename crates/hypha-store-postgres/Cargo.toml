@@ -24,6 +24,7 @@ hypha-shipping = { path = "../hypha-shipping" }
 hypha-search-index = { path = "../hypha-search-index" }
 hypha-channels = { path = "../hypha-channels" }
 hypha-categories = { path = "../hypha-categories" }
+hypha-checkout-rules = { path = "../hypha-checkout-rules" }
 hypha-payments = { path = "../hypha-payments" }
 hypha-notifications = { path = "../hypha-notifications" }
 hypha-extensions = { path = "../hypha-extensions" }
