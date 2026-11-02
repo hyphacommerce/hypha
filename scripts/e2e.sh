@@ -274,7 +274,7 @@ step "remember the setup guide's step" 200 - -X PATCH "$BASE/admin/store" -H "$J
 contains "the step is kept" '"step":"market"'
 step "a setup step that isn't one" 422 invalid_setup_step -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"setup_step":"Market!"}'
 step "store details" 200 - -X PATCH "$BASE/admin/store" -H "$JSON" \
-    -d '{"contact_email":"Hello@E2E.example","description":"Mugs and cups.","timezone":"Europe/Zagreb","legal_address":{"last_name":"E2E","line1":"Ilica 1","city":"Zagreb","country":"HR"}}'
+    -d '{"contact_email":"Hello@E2E.example","description":"Mugs and cups.","timezone":"Europe/Zagreb","legal_address":{"last_name":"E2E","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR"}}'
 contains "the email is lowercased" '"contact_email":"hello@e2e.example"'
 contains "the address is kept" '"city":"Zagreb"'
 step "an unknown time zone" 422 unknown_timezone -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"timezone":"Mars/Base"}'
@@ -676,6 +676,17 @@ step "an unknown handle" 404 product_not_found "$BASE/storefront/products/by-han
 step "an unknown parameter" 400 invalid_query "$BASE/storefront/products/by-handle/mug?currency=EUR"
 step "where the store sells" 200 - "$BASE/storefront/countries"
 contains "Croatia, in euros" "{\"country\":\"HR\",\"name\":\"Croatia\",\"market\":\"$MARKET\",\"currency\":\"EUR\",\"minor_units\":2"
+step "the US address form" 200 - "$BASE/storefront/address-formats/US"
+contains "city, state and ZIP code on one row" '["city","province","postal_code"]'
+contains "its labels" '"postal_code":"ZIP code","province":"State"'
+contains "states to choose from" '{"code":"CA","name":"California"}'
+contains "a ZIP code is required" '"postal_code":"required","postal_code_example":"90210"'
+step "cached for a day" 200 - -i "$BASE/storefront/address-formats/US"
+contains "public, a day" 'public, max-age=86400'
+step "Croatia's form, for staff" 200 - "$BASE/admin/address-formats/HR"
+contains "a postal code, no regions" '"required":["last_name","line1","postal_code","city"]'
+contains "no region list" '"regions":[]'
+step "no form for an unknown country" 404 unknown_country_code "$BASE/admin/address-formats/ZZ"
 step "create an Outlet channel" 201 - -X POST "$BASE/admin/channels" -H "$JSON" \
     -d '{"name":"Outlet","kind":"custom"}'
 OUTLET=$(id)
@@ -790,7 +801,7 @@ contains "it ships in one group, not chosen yet" '"selected":null,"problem":null
 SHGRP=$(shgrp)
 step "offers need an address" 409 shipping_address_required "$SHIP/shipping-options"
 step "an address in Slovenia" 422 address_country_mismatch -X PUT "$SHIP/shipping-address" -H "$JSON" \
-    -d '{"address":{"last_name":"Novak","line1":"Slovenska 1","city":"Ljubljana","country":"SI"}}'
+    -d '{"address":{"last_name":"Novak","line1":"Slovenska 1","city":"Ljubljana","postal_code":"1000","country":"SI"}}'
 step "ship to Zagreb" 200 - -X PUT "$SHIP/shipping-address" -H "$JSON" \
     -d '{"address":{"first_name":"Ana","last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR"}}'
 contains "the cart has the address" '"city":"Zagreb"'
@@ -892,7 +903,7 @@ step "checkout an unknown cart" 404 cart_not_found -X POST \
 step "checkout with an unknown field" 422 invalid_body -X POST "$CHECKOUT" -H "$JSON" \
     -d '{"total":1}'
 step "ship the keyed cart to Zagreb" 200 - -X PUT "$BASE/storefront/carts/$KEYED/shipping-address" -H "$JSON" \
-    -d '{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","country":"HR"}}'
+    -d '{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR"}}'
 step "standard, free from 10 EUR" 200 - -X PUT "$BASE/storefront/carts/$KEYED/shipping/$(shgrp)" -H "$JSON" \
     -d "{\"option\":\"$STANDARD\"}"
 step "checkout without an email" 409 cart_email_missing -X POST "$CHECKOUT" -H "$JSON" -d '{}'
@@ -1049,7 +1060,7 @@ PY
     CARD_CART="$BASE/storefront/carts/$(id)"
     step "a mug in it" 200 - -X POST "$CARD_CART/lines" -H "$JSON" -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
     step "shipped to Zagreb" 200 - -X PUT "$CARD_CART/shipping-address" -H "$JSON" \
-        -d '{"address":{"first_name":"Ana","last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","country":"HR"}}'
+        -d '{"address":{"first_name":"Ana","last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR"}}'
     step "by standard" 200 - -X PUT "$CARD_CART/shipping/$(shgrp)" -H "$JSON" -d "{\"option\":\"$STANDARD\"}"
     step "with an email" 200 - -X PUT "$CARD_CART/email" -H "$JSON" -d '{"email":"card@example.hr"}'
     step "the card is offered" 200 - "$CARD_CART/payment-methods"
@@ -1438,12 +1449,16 @@ step "customers by text, by name" 200 - "$BASE/admin/customers?q=horvat&sort=nam
 contains "finds her" "\"items\":[{\"id\":\"$CUSTOMER\""
 step "customers by their IDs" 200 - "$BASE/admin/customers?ids=$CUSTOMER,cus_00000000000000000000000000000063"
 contains "only her" "\"items\":[{\"id\":\"$CUSTOMER\""
+step "a US address, its state by name" 201 - -X POST "$BASE/admin/customers/$CUSTOMER/addresses" -H "$JSON" \
+    -d '{"last_name":"Horvat","line1":"1600 Amphitheatre Pkwy","city":"Mountain View","province":"california","postal_code":"94043","country":"US"}'
+contains "stored as its code, named beside it" '"province":"CA","province_name":"California"'
+step "and removed again" 200 - -X DELETE "$BASE/admin/customers/$CUSTOMER/addresses/$(address)"
 step "add shipping address" 201 - -X POST "$BASE/admin/customers/$CUSTOMER/addresses" -H "$JSON" \
     -d '{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR","default_shipping":true}'
 ADDRESS=$(address)
 contains "it is the default shipping address" "\"default_shipping_address\":\"$ADDRESS\",\"default_billing_address\":null"
 step "move it to Split, billing only" 200 - -X PUT "$BASE/admin/customers/$CUSTOMER/addresses/$ADDRESS" -H "$JSON" \
-    -d '{"last_name":"Horvat","line1":"Riva 2","city":"Split","country":"HR","default_billing":true}'
+    -d '{"last_name":"Horvat","line1":"Riva 2","city":"Split","postal_code":"21000","country":"HR","default_billing":true}'
 contains "defaults follow the request" "\"default_shipping_address\":null,\"default_billing_address\":\"$ADDRESS\""
 contains "address is replaced" '"city":"Split"'
 step "get customer" 200 - "$BASE/admin/customers/$CUSTOMER"
@@ -1519,7 +1534,7 @@ contains "ticked" '"marketing_opt_in":true'
 step "a guest's email" 200 - -X PUT "$BASE/storefront/carts/$SHOP_CART/email" -H "$JSON" \
     -d '{"email":"guest@example.hr"}'
 step "ship to Zagreb" 200 - -X PUT "$BASE/storefront/carts/$SHOP_CART/shipping-address" -H "$JSON" \
-    -d '{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","country":"HR"}}'
+    -d '{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR"}}'
 step "standard (free)" 200 - -X PUT "$BASE/storefront/carts/$SHOP_CART/shipping/$(shgrp)" -H "$JSON" \
     -d "{\"option\":\"$STANDARD\"}"
 # (Checkout counts against the cart's quote limit, so this is a cart that's barely used.)
@@ -1569,7 +1584,7 @@ step "add 3 lamps" 200 - -X POST "$BASE/storefront/carts/$AGAIN_CART/lines" -H "
 step "same email" 200 - -X PUT "$BASE/storefront/carts/$AGAIN_CART/email" -H "$JSON" \
     -d '{"email":"guest@example.hr"}'
 step "ship to Zagreb" 200 - -X PUT "$BASE/storefront/carts/$AGAIN_CART/shipping-address" -H "$JSON" \
-    -d '{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","country":"HR"}}'
+    -d '{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR"}}'
 step "standard (free)" 200 - -X PUT "$BASE/storefront/carts/$AGAIN_CART/shipping/$(shgrp)" -H "$JSON" \
     -d "{\"option\":\"$STANDARD\"}"
 step "a lamp broke (4 on hand, 2 reserved)" 200 - -X PUT \
@@ -2371,6 +2386,15 @@ step "same email in another case" 409 customer_exists -X POST "$BASE/admin/custo
 step "invalid customer email" 422 invalid_email -X POST "$BASE/admin/customers" -H "$JSON" -d '{"email":"ana"}'
 step "address without a city" 422 invalid_address -X POST "$BASE/admin/customers/$CUSTOMER/addresses" \
     -H "$JSON" -d '{"last_name":"Horvat","line1":"Ilica 1","city":" ","country":"HR"}'
+contains "every problem by field" '"problems":[{"code":"required","field":"city","message":"Enter a city"},{"code":"required","field":"postal_code","message":"Enter a postal code"}]'
+step "a state and ZIP code that don't fit" 422 invalid_address -X POST \
+    "$BASE/admin/customers/$CUSTOMER/addresses" -H "$JSON" \
+    -d '{"last_name":"Horvat","line1":"1 Main St","city":"Springfield","province":"Kalifornia","postal_code":"1","country":"US"}'
+contains "the state unknown" '"code":"unknown_region","field":"province"'
+contains "the ZIP code in the wrong shape" '"code":"invalid_format","field":"postal_code","message":"Enter a valid ZIP code, like 90210"'
+step "a ZIP code of another state" 422 invalid_address -X POST "$BASE/admin/customers/$CUSTOMER/addresses" \
+    -H "$JSON" -d '{"last_name":"Horvat","line1":"1 Main St","city":"New York","province":"NY","postal_code":"94043","country":"US"}'
+contains "doesn't match" '"code":"region_mismatch","field":"postal_code"'
 step "unknown customer" 404 customer_not_found "$BASE/admin/customers/cus_00000000000000000000000000000063"
 step "remove unknown address" 404 address_not_found -X DELETE \
     "$BASE/admin/customers/$CUSTOMER/addresses/addr_00000000000000000000000000000063"
@@ -2574,7 +2598,7 @@ if [[ -n $CODE ]]; then
     contains "and it took" '"first_name":"Sam"'
     step "save an address" 201 - -X POST "$BASE/storefront/account/addresses" -H "$JSON" \
         -H "authorization: Bearer $CS" \
-        -d '{"last_name":"Shopper","line1":"Ilica 1","city":"Zagreb","country":"HR","default_shipping":true}'
+        -d '{"last_name":"Shopper","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR","default_shipping":true}'
     contains "as the default" '"default_shipping_address":"addr_'
     step "subscribe to email marketing" 200 - -X PUT "$BASE/storefront/account/marketing/email" -H "$JSON" \
         -H "authorization: Bearer $CS" -d '{"state":"subscribed"}'
