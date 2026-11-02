@@ -917,3 +917,36 @@ One branch per step, stacked with `gh stack` from `feat/address-validation`:
 - **The storefront:** checkout shows "Did you mean this address?" with the suggestion in
   place of the `address_corrections_suggested` message; "Use this address" saves the
   details with it, "Use as entered" hides it.
+
+### Step 5: autocomplete
+
+- **The points:** `address.suggest` v1 and `address.resolve` v1, both `READ_ONLY`, 1 s,
+  `Fallback`, `customer_data:address`. `address.resolve` sends the form's `country` beside
+  §10.1's `{id, session}`, so its `check` refuses an address in another country (and one
+  without street or city); `address.suggest`'s refuses more suggestions than the `limit`
+  sent (at most 5), and an empty ID or label.
+- **The app:** `CheckoutSettings::autocomplete_app` (`checkout_settings.autocomplete_app`,
+  migration 0100), named only when it answers both points (`422
+  autocomplete_app_unavailable`); `checkout_settings.updated` names `autocomplete_app`.
+- **The routes:** `q` 3 to 200 characters, `session` 1 to 512 letters, digits, `-` and
+  `_` (required: the session limit counts it, and providers bill by it), `limit` 1 to 5;
+  a broken parameter is `422 invalid_suggestion_query` with `details.parameter`. The
+  storefront's take `carts:write` (a publishable key's), the admin's `customers:read`.
+  Rate limits `address_suggest_ip` (120, then one a second) and `address_suggest_session`
+  (30, then one every 2 s), on both surfaces, after the scope.
+- **Failures:** suggestions that fail are none (`{suggestions: []}`); a resolve that fails
+  is `502 app_unavailable`, and the person types the address.
+- **The resolved address** comes back normalised by the format (the region as its code,
+  `province_name` beside it) with `problems`: what saving it would refuse (a missing
+  postal code), names and phone left out. It's never refused, since the person still
+  edits it.
+- **The formats route** answers `autocomplete` from the settings, so its cache is now
+  `private, max-age=300`, and the storefront reads it again every five minutes instead of
+  daily.
+- **The forms:** Astryx's Typeahead keeps its query to itself and shows a pick as a
+  token, while line 1 has to stay editable text that a pick fills. So line 1 is the
+  form's `TextInput` with buttons under it (`components/address-line.tsx` in both apps):
+  a 250 ms pause asks through a server action, the down arrow moves into the buttons,
+  Escape back, a session token per address typed. The storefront's checkout and account
+  forms and the admin's customer address dialog and order "Edit address" use it;
+  Settings → Checkout names the app beside the verification one.
