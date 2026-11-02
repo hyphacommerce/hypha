@@ -67,7 +67,7 @@ pub use batch::batch;
 pub use carts::cart_repo;
 pub use categories::category_repo;
 pub use channels::channel_repo;
-pub use checkout_rules::checkout_rule_repo;
+pub use checkout_rules::{checkout_rule_repo, checkout_settings_repo};
 pub use custom_fields::{custom_field_definitions, custom_field_filters, custom_field_values};
 pub use customer_groups::customer_group_repo;
 pub use customers::customer_repo;

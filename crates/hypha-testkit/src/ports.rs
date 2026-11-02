@@ -103,6 +103,8 @@ pub struct InMemoryPorts {
     pub transfers: crate::InMemoryTransfers,
     /// What a cart must meet to be checked out.
     pub checkout_rules: crate::InMemoryCheckoutRules,
+    /// Which apps checkout asks about an address.
+    pub checkout_settings: crate::InMemoryCheckoutSettings,
 }
 
 impl Default for InMemoryPorts {
@@ -185,6 +187,7 @@ impl Default for InMemoryPorts {
             receipts: crate::InMemoryReceipts::default(),
             transfers: crate::InMemoryTransfers::sharing(&outbox),
             checkout_rules: crate::InMemoryCheckoutRules::sharing(&outbox),
+            checkout_settings: crate::InMemoryCheckoutSettings::sharing(&outbox),
             suppliers,
             outbox,
         }
@@ -202,6 +205,13 @@ impl hypha_checkout_rules::HasCheckoutRules for InMemoryPorts {
     type CheckoutRules = crate::InMemoryCheckoutRules;
     fn checkout_rules(&self) -> &crate::InMemoryCheckoutRules {
         &self.checkout_rules
+    }
+}
+
+impl hypha_checkout_rules::HasCheckoutSettings for InMemoryPorts {
+    type CheckoutSettings = crate::InMemoryCheckoutSettings;
+    fn checkout_settings(&self) -> &crate::InMemoryCheckoutSettings {
+        &self.checkout_settings
     }
 }
 

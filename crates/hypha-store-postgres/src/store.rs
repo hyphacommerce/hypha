@@ -735,6 +735,7 @@ accessors! {
     hypha_purchasing::HasReceipts => Receipts, receipts;
     hypha_inventory::HasTransfers => Transfers, transfers;
     hypha_checkout_rules::HasCheckoutRules => CheckoutRules, checkout_rules;
+    hypha_checkout_rules::HasCheckoutSettings => CheckoutSettings, checkout_settings;
     hypha_agents::HasProposals => Proposals, proposals;
     hypha_agents::HasAgentCalls => AgentCalls, agent_calls;
     hypha_core::HasPreviewTokens => PreviewTokens, preview_tokens;

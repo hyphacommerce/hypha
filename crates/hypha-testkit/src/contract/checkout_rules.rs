@@ -2,8 +2,9 @@
 //! their order, moved together.
 
 use hypha_checkout_rules::{
-    AddressFlag, CheckoutRule, CheckoutRuleRepo, HasCheckoutRules, PostalRange, RuleAppliesTo,
-    RuleCondition, RuleCountries, RuleDraft, RuleField, RuleOutcome, keys,
+    AddressFlag, CheckoutRule, CheckoutRuleRepo, CheckoutSettings, CheckoutSettingsRepo,
+    HasCheckoutRules, HasCheckoutSettings, PostalRange, RuleAppliesTo, RuleCondition,
+    RuleCountries, RuleDraft, RuleField, RuleOutcome, keys,
 };
 use hypha_core::{
     AddressVerdict, CategoryId, ChannelId, CheckoutRuleId, CountryCode, Currency, HasOutbox,
@@ -219,4 +220,58 @@ async fn deletes<S: HasCheckoutRules + HasOutbox>(ports: &S) {
         last.last().map(|e| e.event_type.as_str()),
         Some("checkout_rule.deleted")
     );
+}
+
+/// Runs every `CheckoutSettingsRepo` scenario, each on fresh ports from `make`.
+pub async fn checkout_settings_repo<S>(make: impl AsyncFn() -> S)
+where
+    S: HasCheckoutSettings + HasOutbox,
+{
+    scenario("checkout settings: none until stored; every field round trips with its event");
+    settings_round_trip(&make().await).await;
+    scenario("checkout settings: one record, updated from its version only");
+    settings_versions(&make().await).await;
+}
+
+fn verifying() -> CheckoutSettings {
+    let mut s = CheckoutSettings::default();
+    s.set_verification_app(Some(hypha_core::AppKey::new("app_verify").unwrap()));
+    s
+}
+
+async fn settings_round_trip<S: HasCheckoutSettings + HasOutbox>(ports: &S) {
+    let repo = ports.checkout_settings();
+    assert_eq!(repo.get().await, Ok(None));
+    let mut s = verifying();
+    repo.insert(&mut s).await.unwrap();
+    assert_eq!(s.version(), Version::new(1));
+    let stored = repo.get().await.unwrap().unwrap();
+    assert_eq!(stored, s);
+    assert!(stored.stamps().is_some());
+    let events = ports.outbox().events_after(0, 10).await.unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .map(|e| e.event_type.as_str())
+            .collect::<Vec<_>>(),
+        vec!["checkout_settings.updated"]
+    );
+}
+
+async fn settings_versions<S: HasCheckoutSettings>(ports: &S) {
+    let repo = ports.checkout_settings();
+    let mut s = verifying();
+    repo.insert(&mut s).await.unwrap();
+    let mut again = CheckoutSettings::default();
+    assert_eq!(
+        repo.insert(&mut again).await,
+        Err(RepoError::Duplicate(keys::CHECKOUT_SETTINGS))
+    );
+    let mut stale = repo.get().await.unwrap().unwrap();
+    s.set_verification_app(None);
+    repo.update(&mut s).await.unwrap();
+    assert_eq!(s.version(), Version::new(2));
+    assert_eq!(repo.get().await, Ok(Some(s.clone())));
+    stale.set_verification_app(Some(hypha_core::AppKey::new("app_other").unwrap()));
+    assert_eq!(repo.update(&mut stale).await, Err(RepoError::StaleVersion));
 }

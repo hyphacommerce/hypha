@@ -172,6 +172,10 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
     ("transfers_pkey", inventory_keys::TRANSFER_ID),
     ("transfer_number", inventory_keys::TRANSFER_NUMBER),
     ("checkout_rules_pkey", checkout_rule_keys::CHECKOUT_RULE_ID),
+    (
+        "checkout_settings_pkey",
+        checkout_rule_keys::CHECKOUT_SETTINGS,
+    ),
 ];
 
 /// Maps a driver error to the repo error the ports promise. A spore's query error as a

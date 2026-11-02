@@ -2,11 +2,11 @@
 //! API's shape, read back through the rule's constructor rules.
 
 use hypha_checkout_rules::{
-    CheckoutRule, CheckoutRuleRepo, CheckoutRuleSnapshot, RuleAppliesTo, RuleCondition, RuleDraft,
-    RuleOutcome,
+    CheckoutRule, CheckoutRuleRepo, CheckoutRuleSnapshot, CheckoutSettings, CheckoutSettingsRepo,
+    CheckoutSettingsSnapshot, RuleAppliesTo, RuleCondition, RuleDraft, RuleOutcome,
 };
 use hypha_core::{
-    CheckoutRuleId, PendingEvent, Recorded, RepoError, Version, Versioned, stamp_insert,
+    AppKey, CheckoutRuleId, PendingEvent, Recorded, RepoError, Version, Versioned, stamp_insert,
     stamp_update,
 };
 use serde::{Serialize, de::DeserializeOwned};
@@ -230,5 +230,79 @@ impl<C: PgConnection> CheckoutRuleRepo for PgStore<C> {
             }
             insert_events(tx, &events, None, stamp).await
         })
+    }
+}
+
+impl<C: PgConnection> CheckoutSettingsRepo for PgStore<C> {
+    async fn get(&self) -> Result<Option<CheckoutSettings>, RepoError> {
+        let mut conn = self.conn().await;
+        let row = conn
+            .db()
+            .query_typed_opt(
+                &format!(
+                    "SELECT version, verification_app, {} FROM checkout_settings",
+                    stamp_columns("")
+                ),
+                &[],
+            )
+            .await
+            .map_err(repo_error)?;
+        let Some(row) = row else { return Ok(None) };
+        let app: Option<String> = col(&row, "verification_app")?;
+        Ok(Some(CheckoutSettings::restore(CheckoutSettingsSnapshot {
+            version: version_from_db(col(&row, "version")?)?,
+            stamps: stamps_from_row(&row)?,
+            verification_app: app
+                .map(|a| AppKey::new(&a))
+                .transpose()
+                .map_err(|e| corrupt(format!("checkout settings: {e}")))?,
+        })))
+    }
+
+    async fn insert(&self, settings: &mut CheckoutSettings) -> Result<(), RepoError> {
+        stamp_insert(settings, self.now());
+        let s = settings.snapshot();
+        let events = settings.take_events();
+        let stamp = self.event_stamp();
+        let version = Version::NEW.next();
+        let app = s.verification_app.as_ref().map(|a| a.as_str().to_string());
+        in_transaction!(self, |tx| {
+            tx.query_typed(
+                "INSERT INTO checkout_settings (version, verification_app) VALUES (1, $1)",
+                &[(&app, Type::TEXT)],
+            )
+            .await
+            .map_err(repo_error)?;
+            write_stamps(tx, "checkout_settings", "id", &true, Type::BOOL, s.stamps).await?;
+            insert_events(tx, &events, Some(version), stamp).await
+        })?;
+        settings.set_version(version);
+        Ok(())
+    }
+
+    async fn update(&self, settings: &mut CheckoutSettings) -> Result<(), RepoError> {
+        stamp_update(settings, self.now());
+        let s = settings.snapshot();
+        let events = settings.take_events();
+        let stamp = self.event_stamp();
+        let app = s.verification_app.as_ref().map(|a| a.as_str().to_string());
+        let current = version_to_db(s.version)?;
+        let version = in_transaction!(self, |tx| {
+            let row = tx
+                .query_typed_opt(
+                    "UPDATE checkout_settings SET version = version + 1, verification_app = $2
+                     WHERE version = $1 RETURNING version",
+                    &[(&current, Type::INT8), (&app, Type::TEXT)],
+                )
+                .await
+                .map_err(repo_error)?
+                .ok_or(RepoError::StaleVersion)?;
+            write_stamps(tx, "checkout_settings", "id", &true, Type::BOOL, s.stamps).await?;
+            let version = version_from_db(col(&row, "version")?)?;
+            insert_events(tx, &events, Some(version), stamp).await?;
+            Ok(version)
+        })?;
+        settings.set_version(version);
+        Ok(())
     }
 }

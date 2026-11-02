@@ -508,6 +508,15 @@ async fn checkout_rule_repo() {
 }
 
 #[tokio::test]
+async fn checkout_settings_repo() {
+    let Some(url) = database_url() else { return };
+    contract::checkout_settings_repo(async || {
+        fresh_store(&url, "contract_checkout_settings").await
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn supplier_repo() {
     let Some(url) = database_url() else { return };
     contract::supplier_repo(async || fresh_store(&url, "contract_suppliers").await).await;

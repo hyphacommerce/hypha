@@ -113,6 +113,7 @@ async fn shop(url: &str, schema: &str) -> PgStore<Client> {
             unit_cost: None,
         }],
         shipping_address: None,
+        address_check: None,
         shipping_lines: vec![],
         subtotal: eur(3000),
         shipping_total: eur(0),

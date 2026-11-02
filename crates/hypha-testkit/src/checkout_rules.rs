@@ -1,4 +1,6 @@
-use hypha_checkout_rules::{CheckoutRule, CheckoutRuleRepo, keys};
+use hypha_checkout_rules::{
+    CheckoutRule, CheckoutRuleRepo, CheckoutSettings, CheckoutSettingsRepo, keys,
+};
 use hypha_core::{CheckoutRuleId, Recorded, RepoError, Versioned, stamp_insert, stamp_update};
 
 use crate::{
@@ -68,6 +70,46 @@ impl CheckoutRuleRepo for InMemoryCheckoutRules {
         }
         rows.remove(&rule.id());
         self.outbox.write(rule.take_events(), None);
+        Ok(())
+    }
+}
+
+/// The store's checkout settings.
+#[derive(Default)]
+pub struct InMemoryCheckoutSettings {
+    settings: Table<(), CheckoutSettings>,
+    outbox: InMemoryOutbox,
+}
+
+impl InMemoryCheckoutSettings {
+    /// A repo writing its events to `outbox` (`InMemoryPorts` shares one).
+    pub fn sharing(outbox: &InMemoryOutbox) -> Self {
+        Self {
+            outbox: outbox.clone(),
+            ..Self::default()
+        }
+    }
+}
+
+impl CheckoutSettingsRepo for InMemoryCheckoutSettings {
+    async fn get(&self) -> Result<Option<CheckoutSettings>, RepoError> {
+        Ok(self.settings.get(&()))
+    }
+
+    async fn insert(&self, settings: &mut CheckoutSettings) -> Result<(), RepoError> {
+        stamp_insert(settings, self.outbox.now());
+        let events = settings.take_events();
+        self.settings
+            .insert((), settings, keys::CHECKOUT_SETTINGS, &no_unique_keys)?;
+        self.outbox.write(events, Some(settings.version()));
+        Ok(())
+    }
+
+    async fn update(&self, settings: &mut CheckoutSettings) -> Result<(), RepoError> {
+        stamp_update(settings, self.outbox.now());
+        let events = settings.take_events();
+        self.settings.update((), settings, &no_unique_keys)?;
+        self.outbox.write(events, Some(settings.version()));
         Ok(())
     }
 }

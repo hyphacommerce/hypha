@@ -514,6 +514,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "checkout_rules",
             sql: include_str!("../migrations/0098_checkout_rules.sql"),
         },
+        Migration {
+            version: 99,
+            name: "address_verification",
+            sql: include_str!("../migrations/0099_address_verification.sql"),
+        },
     ],
 };
 

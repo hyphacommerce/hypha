@@ -65,7 +65,7 @@ pub use carts::InMemoryCartRepo;
 pub use catalogs::InMemoryCatalogRepo;
 pub use categories::InMemoryCategoryRepo;
 pub use channels::InMemoryChannelRepo;
-pub use checkout_rules::InMemoryCheckoutRules;
+pub use checkout_rules::{InMemoryCheckoutRules, InMemoryCheckoutSettings};
 pub use clock::FixedClock;
 pub use custom_fields::InMemoryCustomFields;
 pub use customer_groups::InMemoryCustomerGroupRepo;
