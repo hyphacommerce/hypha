@@ -3,7 +3,8 @@
 // An address form's fields as the country lays them out (`GET
 // /storefront/address-formats/{country}`): its order, rows, labels and required fields,
 // the region as a select where the country lists regions. Problems come from the API's
-// `invalid_address` (`details.problems`), each under its field.
+// `invalid_address` (`details.problems`), each under its field, and so do the cart's
+// messages about a field (a missing house number), until the field changes.
 
 import { Grid } from "@astryxdesign/core/Grid";
 import { Selector } from "@astryxdesign/core/Selector";
@@ -17,6 +18,7 @@ import {
   type FieldProblems,
   asField,
 } from "@/lib/address";
+import { type PlacedMessages, statusOf } from "@/lib/messages";
 
 /** The fields a form sends, `country` apart (it's the page's). */
 type Field = Exclude<AddressField, "country">;
@@ -26,6 +28,7 @@ export function AddressFields({
   values,
   onChange,
   problems,
+  messages,
   tried,
   size,
 }: {
@@ -34,6 +37,8 @@ export function AddressFields({
   onChange: (field: Field, value: string) => void;
   /** Each field's problem, from the last save. */
   problems?: FieldProblems;
+  /** The cart's messages about each field. */
+  messages?: PlacedMessages["fields"];
   /** Whether a save was tried: empty required fields are marked from then on. */
   tried: boolean;
   size?: "lg";
@@ -45,7 +50,7 @@ export function AddressFields({
     if (tried && required.has(field) && values[field].trim() === "") {
       return { type: "error" as const, message: "Required" };
     }
-    return undefined;
+    return statusOf(messages?.[field]);
   };
   const input = (field: Field) => {
     const label = format.labels[field] ?? field;

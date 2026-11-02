@@ -298,6 +298,8 @@ export function describe(error: { code: string; error: string }): string {
       return "We don't ship to this country yet.";
     case "discount_code_invalid":
       return "That code isn't valid. Check it and try again.";
+    case "checkout_blocked":
+      return "Some things need fixing before you can place your order: see what's marked.";
     case "discounts_changed":
       return "A discount changed since you looked. Check the total and place the order again.";
     case "total_changed":

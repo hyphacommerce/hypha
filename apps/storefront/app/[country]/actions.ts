@@ -313,6 +313,9 @@ export async function placeOrder(input: {
     // A code's last use went to another order meanwhile: the summary re-renders with
     // the code's new state and total, which is what the shopper confirms next.
     if (result.code === "discounts_changed") refresh();
+    // The cart's errors show where they belong once the page re-renders: its messages
+    // are what checkout refused on.
+    if (result.code === "checkout_blocked") refresh();
     if (result.code === "payment_failed" || result.code === "payment_required") {
       return { error: result.error, step: "payment" };
     }
@@ -355,7 +358,13 @@ export async function startCartPayment(input: {
   if (error) {
     if (error.code === "cart_payment_committed") return { ...none, error: null, committed: true };
     // The page re-renders with what changed (the total, the methods).
-    if (error.code === "total_changed" || error.code === "payment_method_unavailable") refresh();
+    if (
+      error.code === "total_changed" ||
+      error.code === "payment_method_unavailable" ||
+      error.code === "checkout_blocked"
+    ) {
+      refresh();
+    }
     return { ...none, error: describe(error) };
   }
   const next = data.next_action ?? null;

@@ -8,6 +8,7 @@ import { Text } from "@astryxdesign/core/Text";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
+import { CartMessages } from "@/components/cart-messages";
 import { CodeStates } from "@/components/discounts";
 import { lineImage } from "@/components/line-image";
 import { SummaryLine, Totals } from "@/components/totals";
@@ -15,6 +16,7 @@ import { loadAccount } from "@/lib/account";
 import { api, countryOf, loadAddressFormat } from "@/lib/api";
 import { Price } from "@/components/price";
 import { linePrice, readCartDiscounts, shippingPrice } from "@/lib/discounts";
+import { placeMessages } from "@/lib/messages";
 import { formatMoney } from "@/lib/money";
 import { cartId, link } from "@/lib/site";
 
@@ -67,6 +69,8 @@ export default async function CheckoutPage({
   if (!cart || cart.order || cart.lines.length === 0) redirect(link(code, "/cart"));
 
   const discounts = readCartDiscounts(cart);
+  // Each under what it's about: errors stop "Place order" (`checkout_blocked`).
+  const messages = placeMessages(cart.messages);
   const address = cart.shipping_address;
   // Their shipping address in this country, or the first one here.
   const here = account?.addresses.filter((a) => a.country === code) ?? [];
@@ -109,6 +113,7 @@ export default async function CheckoutPage({
         <Heading level={1} type="display-2">
           Checkout
         </Heading>
+        <CartMessages messages={messages.top} />
         <Grid columns={{ minWidth: 360, repeat: "fit" }} gap={8}>
           <VStack gap={8}>
             <DetailsForm
@@ -116,6 +121,7 @@ export default async function CheckoutPage({
               countryName={country.name}
               format={format}
               saved={detailsDone}
+              messages={messages}
               initialOptIn={
                 cart.marketing_opt_in || account?.email_marketing.state === "subscribed"
               }
@@ -143,7 +149,8 @@ export default async function CheckoutPage({
                   <Text color="secondary">Enter your address to see the options.</Text>
                 ) : (
                   offers.map((group, index) => {
-                    const chosen = cart.shipping_groups.find((g) => g.id === group.group);
+                    const at = cart.shipping_groups.findIndex((g) => g.id === group.group);
+                    const chosen = cart.shipping_groups[at];
                     return (
                       <ShippingChoice
                         key={group.group}
@@ -152,6 +159,7 @@ export default async function CheckoutPage({
                         heading={offers.length > 1 ? `Shipment ${index + 1}` : undefined}
                         selected={chosen?.selected?.option}
                         problem={Boolean(chosen?.problem)}
+                        messages={messages.groups[at]}
                         offers={group.offers.map((offer) => {
                           // "Free" when a shipping discount takes all of it.
                           const price = shippingPrice(
@@ -220,7 +228,7 @@ export default async function CheckoutPage({
             <Card padding={5}>
               <VStack gap={4}>
                 <Heading level={2}>Order summary</Heading>
-                {cart.lines.map((line) => {
+                {cart.lines.map((line, index) => {
                   const shown =
                     line.status === "priced"
                       ? linePrice(
@@ -231,21 +239,27 @@ export default async function CheckoutPage({
                         )
                       : null;
                   return (
-                    <SummaryLine
-                      key={line.variant}
-                      quantity={line.quantity}
-                      title={line.product_title ?? "A product no longer sold"}
-                      image={lineImage(line.image)}
-                      variant={line.variant_title}
-                      notes={shown?.notes}
-                      total={
-                        shown ? (
-                          <Price price={shown.price} compareAt={shown.compareAt} digits={digits} />
-                        ) : (
-                          "—"
-                        )
-                      }
-                    />
+                    <VStack key={line.variant} gap={2}>
+                      <SummaryLine
+                        quantity={line.quantity}
+                        title={line.product_title ?? "A product no longer sold"}
+                        image={lineImage(line.image)}
+                        variant={line.variant_title}
+                        notes={shown?.notes}
+                        total={
+                          shown ? (
+                            <Price
+                              price={shown.price}
+                              compareAt={shown.compareAt}
+                              digits={digits}
+                            />
+                          ) : (
+                            "—"
+                          )
+                        }
+                      />
+                      <CartMessages messages={messages.lines[index]} />
+                    </VStack>
                   );
                 })}
                 <CodeStates

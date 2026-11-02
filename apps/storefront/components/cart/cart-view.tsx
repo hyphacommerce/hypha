@@ -11,8 +11,10 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { Skeleton } from "@/components/skeletons";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Stack";
 
+import { CartMessages } from "@/components/cart-messages";
 import { Totals } from "@/components/totals";
 import { readCartDiscounts } from "@/lib/discounts";
+import { placeMessages } from "@/lib/messages";
 
 import { CartLines } from "./cart-lines";
 import { useCart } from "./cart-provider";
@@ -45,6 +47,7 @@ export function CartView() {
         <Card padding={5}>
           <VStack gap={2}>
             {error && <Banner status="error" title={error} />}
+            <CartMessages messages={placeMessages(cart.messages).top} />
             <CartLines />
           </VStack>
         </Card>

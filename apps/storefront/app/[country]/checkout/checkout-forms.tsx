@@ -27,8 +27,10 @@ import {
   startCartPayment,
 } from "@/app/[country]/actions";
 import { AddressFields } from "@/components/address-fields";
+import { CartMessages } from "@/components/cart-messages";
 import { Skeleton } from "@/components/skeletons";
-import { type AddressFormat, type FieldProblems, missingIn } from "@/lib/address";
+import { ADDRESS_FIELDS, type AddressFormat, type FieldProblems, missingIn } from "@/lib/address";
+import { type CartMessage, type PlacedMessages, statusOf } from "@/lib/messages";
 import { saleLabel } from "@/lib/prices";
 
 /** Contact and shipping address, saved together; the address laid out as its country
@@ -41,6 +43,7 @@ export function DetailsForm({
   initialOptIn,
   emailFixed = false,
   saved,
+  messages,
 }: {
   country: string;
   countryName: string;
@@ -52,6 +55,8 @@ export function DetailsForm({
   emailFixed?: boolean;
   /** Whether the cart already has them (the button says "Update"). */
   saved: boolean;
+  /** The cart's messages about the email and the address. */
+  messages?: Pick<PlacedMessages, "email" | "address" | "fields">;
 }) {
   const [details, setDetails] = useState(initial);
   const [optIn, setOptIn] = useState(initialOptIn);
@@ -59,9 +64,13 @@ export function DetailsForm({
   const [problems, setProblems] = useState<FieldProblems>();
   const [pending, start] = useTransition();
   const [tried, setTried] = useState(false);
+  // Fields changed since the last save: the cart's messages about them are for what was
+  // saved, so they wait for the next one.
+  const [edited, setEdited] = useState<ReadonlySet<string>>(new Set());
 
   const set = (key: keyof Details) => (value: string) => {
     setDetails((d) => ({ ...d, [key]: value }));
+    setEdited((e) => (e.has(key) ? e : new Set(e).add(key)));
     // A field changed since the save no longer has the problem it reported.
     if (key !== "email") setProblems((p) => (p?.[key] ? { ...p, [key]: undefined } : p));
   };
@@ -69,6 +78,10 @@ export function DetailsForm({
     tried && details[key].trim() === ""
       ? { type: "error" as const, message: "Required" }
       : undefined;
+  const fieldMessages: PlacedMessages["fields"] = {};
+  for (const field of ADDRESS_FIELDS) {
+    if (!edited.has(field)) fieldMessages[field] = messages?.fields[field];
+  }
 
   const submit = () => {
     setTried(true);
@@ -78,6 +91,7 @@ export function DetailsForm({
       const result = await saveDetails(country, details, optIn);
       setError(result?.error);
       setProblems(result?.problems);
+      if (!result) setEdited(new Set());
     });
   };
 
@@ -95,7 +109,10 @@ export function DetailsForm({
       isDisabled={options.disabled}
       value={details[key]}
       onChange={set(key)}
-      status={options.required ? required(key) : undefined}
+      status={
+        (options.required ? required(key) : undefined) ??
+        (key === "email" && !edited.has("email") ? statusOf(messages?.email) : undefined)
+      }
     />
   );
 
@@ -122,11 +139,13 @@ export function DetailsForm({
             Ships to {countryName}. To ship elsewhere, switch the currency at the top.
           </Text>
         </VStack>
+        <CartMessages messages={edited.size === 0 ? messages?.address : undefined} />
         <AddressFields
           format={format}
           values={details}
           onChange={(key, value) => set(key)(value)}
           problems={problems}
+          messages={fieldMessages}
           tried={tried}
           size="lg"
         />
@@ -157,6 +176,7 @@ export function ShippingChoice({
   offers,
   selected,
   problem,
+  messages,
 }: {
   country: string;
   group: string;
@@ -164,6 +184,8 @@ export function ShippingChoice({
   offers: Offer[];
   selected?: string;
   problem?: boolean;
+  /** The cart's messages about this group and its chosen option. */
+  messages?: CartMessage[];
 }) {
   const [value, setValue] = useState(selected ?? "");
   const [error, setError] = useState<string>();
@@ -218,6 +240,7 @@ export function ShippingChoice({
           />
         ))}
       </RadioList>
+      <CartMessages messages={messages} />
       {error && <Banner status="error" title={error} />}
     </VStack>
   );
