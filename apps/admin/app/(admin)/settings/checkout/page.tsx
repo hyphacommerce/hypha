@@ -11,6 +11,7 @@ import { SETTINGS_CRUMB } from "@/lib/navigation";
 import { AppSettingCard } from "./app-setting-card";
 import { loadAnsweringApps, loadRuleOptions } from "./data";
 import { RulesCard } from "./rules-card";
+import { ValidationAppsCard } from "./validation-apps-card";
 
 /**
  * Settings → Checkout: the rules a cart must meet to be checked out, in the order
@@ -23,7 +24,7 @@ export default function CheckoutSettingsPage() {
         <PageHeader
           back={SETTINGS_CRUMB}
           title="Checkout"
-          description="Address verification and autocomplete, and rules on the shipping address and the cart: an error stops checkout with your message under the field, a warning only shows it."
+          description="Address verification and autocomplete, apps that validate carts, and rules on the shipping address and the cart: an error stops checkout with your message under the field, a warning only shows it."
         />
         <Suspense fallback={<CardSkeleton lines={6} />}>
           <AddressApps />
@@ -36,14 +37,15 @@ export default function CheckoutSettingsPage() {
   );
 }
 
-/** The apps checkout asks about addresses: verification and autocomplete. */
+/** The apps checkout asks: verification, autocomplete and validation. */
 async function AddressApps() {
   const client = await sessionClient();
-  const [me, settings, verifying, suggesting] = await Promise.all([
+  const [me, settings, verifying, suggesting, validating] = await Promise.all([
     requireStaff(),
     client.GET("/admin/checkout-settings"),
     loadAnsweringApps(client, ["address.verify"]),
     loadAnsweringApps(client, ["address.suggest", "address.resolve"]),
+    loadAnsweringApps(client, ["checkout.validate"]),
   ]);
   if (isMissingScope(settings)) return null;
   const current = loaded(settings);
@@ -60,6 +62,11 @@ async function AddressApps() {
         setting="autocomplete_app"
         current={current.autocomplete_app ?? null}
         apps={suggesting}
+        canWrite={canWrite}
+      />
+      <ValidationAppsCard
+        apps={current.validation_apps}
+        names={Object.fromEntries(validating.map((a) => [a.value, a.label]))}
         canWrite={canWrite}
       />
     </>

@@ -115,3 +115,17 @@ export async function setCheckoutApp(setting: AppSetting, app: string | null): P
   refresh();
   return {};
 }
+
+/** How checkout treats one validation app. */
+export type ValidationApp = AdminSchemas["ValidationAppDto"];
+
+/** Sets how checkout treats each validation app, the whole list at once. */
+export async function setValidationApps(apps: ValidationApp[]): Promise<Result> {
+  const client = await sessionClient();
+  const { error } = await client.PATCH("/admin/checkout-settings", {
+    body: { validation_apps: apps },
+  });
+  if (error) return { error: describe(error) };
+  refresh();
+  return {};
+}
