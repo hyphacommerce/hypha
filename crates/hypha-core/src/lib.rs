@@ -1,6 +1,7 @@
 pub mod address;
 pub mod app_key;
 pub mod callback_url;
+pub mod checks;
 pub mod country;
 pub mod ctx;
 pub mod description;
@@ -39,6 +40,7 @@ pub use address::{
 };
 pub use app_key::{AppKey, AppKeyError, AppKind, AppPoints};
 pub use callback_url::{CallbackUrl, CallbackUrlError};
+pub use checks::{Message, MessageCode, MessageError, MessagePath, MessageSource, Severity};
 pub use country::{CountryCode, CountryError};
 pub use ctx::{Actor, AuthError, Ctx};
 pub use description::{Description, DescriptionError};
@@ -59,11 +61,11 @@ pub use idempotency::{
 };
 pub use ids::{
     AddressId, AgentCallId, AgentId, ApiKeyId, AppId, AssetId, CartId, CatalogId, CategoryId,
-    ChannelId, CustomFieldDefinitionId, CustomerGroupId, CustomerId, DeliveryId, DiscountId,
-    EventId, ExtensionCallId, FulfillmentId, IdError, IdentityId, InventoryItemId, InviteId,
-    LocationId, MarketId, NotificationId, OAuthRequestId, OptionId, OptionValueId, OrderId,
-    OrderLineId, PasswordResetId, PaymentId, PaymentMethodId, PriceListId, ProductId, ProposalId,
-    PurchaseOrderId, ReceiptId, RoleId, SessionId, ShippingGroupId, ShippingOptionId,
+    ChannelId, CheckoutRuleId, CustomFieldDefinitionId, CustomerGroupId, CustomerId, DeliveryId,
+    DiscountId, EventId, ExtensionCallId, FulfillmentId, IdError, IdentityId, InventoryItemId,
+    InviteId, LocationId, MarketId, NotificationId, OAuthRequestId, OptionId, OptionValueId,
+    OrderId, OrderLineId, PasswordResetId, PaymentId, PaymentMethodId, PriceListId, ProductId,
+    ProposalId, PurchaseOrderId, ReceiptId, RoleId, SessionId, ShippingGroupId, ShippingOptionId,
     ShippingZoneId, StoreId, SupplierId, TaxClassId, TaxRegionId, TransferId, UploadId, UserId,
     VariantId,
 };

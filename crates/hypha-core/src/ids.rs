@@ -113,6 +113,8 @@ define_id!(CatalogId, "cat");
 define_id!(PriceListId, "pl");
 // Discounts: automatic, or by code (codes are keyed by their normalised text).
 define_id!(DiscountId, "disc");
+// The merchant's checkout rules: conditions on a cart that end in a message.
+define_id!(CheckoutRuleId, "crule");
 define_id!(UserId, "user");
 define_id!(AgentId, "agent");
 // A write an agent proposed, waiting for a person.
