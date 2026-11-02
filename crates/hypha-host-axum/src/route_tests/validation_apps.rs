@@ -20,7 +20,13 @@ fn restricted() -> Value {
 /// `app_rules`, made by hand, answering `checkout.validate` with `answer`.
 async fn validating(app: &TestApp, answer: Value) -> (AppAnswers, AppSaw) {
     let (base, answers, saw) = fake_app(&[("/validate", 200, answer)]).await;
-    app_answering(app, "app_rules", &base, &[("checkout.validate", "/validate")]).await;
+    app_answering(
+        app,
+        "app_rules",
+        &base,
+        &[("checkout.validate", "/validate")],
+    )
+    .await;
     (answers, saw)
 }
 
@@ -70,7 +76,10 @@ async fn only_an_app_answering_the_point_is_set_once() {
     let (status, json) = send(&app, "PATCH", "/admin/checkout-settings", Some(&patch)).await;
     assert_eq!(
         (status, code(&json)),
-        (StatusCode::UNPROCESSABLE_ENTITY, "validation_app_unavailable")
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_app_unavailable"
+        )
     );
     assert_eq!(json["details"]["app"], "app_nobody");
     let patch =
@@ -92,7 +101,10 @@ async fn an_apps_messages_are_on_the_cart_and_its_answer_is_kept() {
     assert_eq!(message["code"], "alcohol_restricted", "{cart}");
     assert_eq!(message["severity"], "error");
     assert_eq!(message["path"], "$.shipping_address.postal_code");
-    assert_eq!(message["source"], json!({"type": "app", "app": "app_rules"}));
+    assert_eq!(
+        message["source"],
+        json!({"type": "app", "app": "app_rules"})
+    );
     {
         let saw = saw.lock().unwrap();
         assert_eq!(saw.len(), 1);
@@ -144,7 +156,10 @@ async fn an_apps_error_blocks_checkout_until_the_cart_changes() {
     let (status, cart) = send_as(&app, &pk, "PUT", &line, Some(r#"{"quantity":2}"#)).await;
     assert_eq!(status, StatusCode::OK, "{cart}");
     assert_eq!(saw.lock().unwrap().len(), 1);
-    assert_eq!(cart["messages"][0]["code"], "alcohol_restricted", "stale, still shown");
+    assert_eq!(
+        cart["messages"][0]["code"], "alcohol_restricted",
+        "stale, still shown"
+    );
     let (status, json) = check_out(&app, &pk, &cart_path).await;
     assert_eq!(status, StatusCode::CREATED, "{json}");
     let saw = saw.lock().unwrap();

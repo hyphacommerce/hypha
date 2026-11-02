@@ -1038,6 +1038,7 @@ mod tests {
                 "address.suggest",
                 "address.verify",
                 "admin.action",
+                "checkout.validate",
                 "payments.capture",
                 "payments.refund",
                 "payments.start",
