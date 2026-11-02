@@ -113,7 +113,7 @@ async function PrintView({ id }: { id: string }) {
                   {address.postal_code ? `${address.postal_code} ` : ""}
                   {address.city}
                 </Text>
-                {address.province && <Text>{address.province}</Text>}
+                {address.province && <Text>{address.province_name ?? address.province}</Text>}
                 <Text>{address.country}</Text>
                 {address.phone && <Text>{address.phone}</Text>}
               </>

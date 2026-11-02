@@ -574,7 +574,7 @@ async function Order({ id }: { id: string }) {
                     [order.shipping_address.postal_code, order.shipping_address.city]
                       .filter(Boolean)
                       .join(" "),
-                    order.shipping_address.province,
+                    order.shipping_address.province_name ?? order.shipping_address.province,
                     countryName(order.shipping_address.country),
                   ]
                     .filter(Boolean)

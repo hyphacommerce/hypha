@@ -17,6 +17,7 @@ import { loadExtensions } from "@/lib/app-extensions";
 import { definitionsOf } from "@/lib/custom-fields-server";
 import { loadCountries, loadCurrencies, loaded, requireStaff, sessionClient } from "@/lib/hypha";
 import { hasScope } from "@/lib/navigation";
+import type { AddressFormat } from "@/lib/address";
 import { wellKnownField, withoutWellKnown } from "@/lib/well-known-fields";
 
 import { AccountCard } from "./account";
@@ -49,6 +50,22 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
   );
 }
 
+/** Each country's address form, by country. */
+async function addressFormatsOf(countries: string[]): Promise<Record<string, AddressFormat>> {
+  const client = await sessionClient();
+  const unique = [...new Set(countries)];
+  const formats = await Promise.all(
+    unique.map((country) =>
+      client
+        .GET("/admin/address-formats/{country}", { params: { path: { country } } })
+        .then((r) => r.data),
+    ),
+  );
+  return Object.fromEntries(
+    formats.filter((f): f is AddressFormat => f !== undefined).map((f) => [f.country, f]),
+  );
+}
+
 async function Customer({ id }: { id: string }) {
   const client = await sessionClient();
   const [customer, countries, currencies, extensions, definitions, fields, me, groups] =
@@ -69,6 +86,8 @@ async function Customer({ id }: { id: string }) {
     params: { query: { customer: customer.id, limit: 10 } },
   });
   const orders = recent.data?.items ?? [];
+  // The forms of the countries in the address book, for editing those addresses.
+  const formats = await addressFormatsOf(customer.addresses.map((a) => a.country));
   const stats = customer.orders;
   const name = customerName(customer);
   const isErased = Boolean(customer.erased_at);
@@ -232,6 +251,7 @@ async function Customer({ id }: { id: string }) {
             defaultShipping={customer.default_shipping_address}
             defaultBilling={customer.default_billing_address}
             countries={countries}
+            formats={formats}
             canWrite={canWrite}
           />
           {otherFields.length > 0 && fields.data && (

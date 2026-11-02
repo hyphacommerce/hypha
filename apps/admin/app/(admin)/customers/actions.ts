@@ -6,11 +6,13 @@
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { revalidatePath } from "next/cache";
 
+import { type AddressFormat, type FieldProblems, problemsOf } from "@/lib/address";
 import { describe, sessionClient } from "@/lib/hypha";
 import { WELL_KNOWN, type WellKnown, suggestionBody } from "@/lib/well-known-fields";
 
-/** The outcome of an edit: a message to show, if it failed. */
-export type Result = { error?: string };
+/** The outcome of an edit: a message to show, if it failed, and an address's problems
+ * by field. */
+export type Result = { error?: string; problems?: FieldProblems };
 
 export type UpdateCustomerRequest = AdminSchemas["UpdateCustomerRequest"];
 export type AddressRequest = AdminSchemas["AddressRequest"];
@@ -47,9 +49,24 @@ export async function saveAddress(
         params: { path: { id: customer } },
         body,
       });
-  if (error) return { error: describe(error) };
+  if (error) {
+    const problems = problemsOf(error);
+    if (problems && Object.keys(problems).length > 0) {
+      return { error: "Check the highlighted fields.", problems };
+    }
+    return { error: describe(error) };
+  }
   refresh(customer);
   return {};
+}
+
+/** A country's address form, for the address dialog once a country is chosen. */
+export async function loadAddressFormat(country: string): Promise<AddressFormat | null> {
+  const client = await sessionClient();
+  const { data } = await client.GET("/admin/address-formats/{country}", {
+    params: { path: { country } },
+  });
+  return data ?? null;
 }
 
 /**
