@@ -127,10 +127,6 @@ pub mod serde_micros {
 
     use super::Timestamp;
 
-    #[expect(
-        clippy::trivially_copy_pass_by_ref,
-        reason = "serde's `with` passes the field by reference"
-    )]
     pub fn serialize<S: Serializer>(at: &Timestamp, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_i64(at.unix_micros())
     }

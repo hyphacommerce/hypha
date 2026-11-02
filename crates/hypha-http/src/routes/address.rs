@@ -142,7 +142,7 @@ impl From<&Address> for PostalAddressResponse {
 
 /// An address a verification app suggests: where it is, without who lives there.
 #[derive(Serialize, utoipa::ToSchema)]
-pub struct SuggestedAddressResponse {
+pub(crate) struct SuggestedAddressResponse {
     company: Option<String>,
     line1: String,
     line2: Option<String>,
@@ -183,7 +183,7 @@ impl From<&SuggestedAddress> for SuggestedAddressResponse {
 /// `suggested` as "Did you mean …?": setting it is free (it's known deliverable), and
 /// keeping the address as entered needs nothing recorded.
 #[derive(Serialize, utoipa::ToSchema)]
-pub struct ShippingAddressCheckResponse {
+pub(crate) struct ShippingAddressCheckResponse {
     verdict: AddressVerdict,
     /// The corrected address, when the app is confident of it.
     suggested: Option<SuggestedAddressResponse>,
@@ -205,7 +205,7 @@ impl ShippingAddressCheckResponse {
 
 /// A verification as kept with an order, with what staff need to judge it.
 #[derive(Serialize, utoipa::ToSchema)]
-pub struct AddressVerificationResponse {
+pub(crate) struct AddressVerificationResponse {
     verdict: AddressVerdict,
     precision: Option<AddressPrecision>,
     /// Per field (`postal_code`), how sure the provider is.
