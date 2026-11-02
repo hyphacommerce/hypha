@@ -122,6 +122,9 @@ export default async function CheckoutPage({
               format={format}
               saved={detailsDone}
               messages={messages}
+              suggestion={
+                address ? (cart.shipping_address_check?.suggested ?? undefined) : undefined
+              }
               initialOptIn={
                 cart.marketing_opt_in || account?.email_marketing.state === "subscribed"
               }

@@ -244,6 +244,15 @@ body {
   background: color-mix(in srgb, var(--color-accent-muted) 35%, var(--color-background-card));
 }
 
+/* "Did you mean …?": the verification app's suggestion beside the address form, amber
+   like a warning, which it is. */
+.shop-address-suggestion {
+  padding: 16px;
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-element);
+  background: var(--color-background-surface);
+}
+
 /* A provider's payment form in the shop's look (docs/apps/elements.md, "Styling"): the
    shared `--hypha-*` properties from the theme's tokens. Fields sit on the page's
    background, as the checkout's own inputs do. */

@@ -32,6 +32,7 @@ import { Skeleton } from "@/components/skeletons";
 import { ADDRESS_FIELDS, type AddressFormat, type FieldProblems, missingIn } from "@/lib/address";
 import { type CartMessage, type PlacedMessages, statusOf } from "@/lib/messages";
 import { saleLabel } from "@/lib/prices";
+import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 
 /** Contact and shipping address, saved together; the address laid out as its country
  * does (`format`). */
@@ -44,6 +45,7 @@ export function DetailsForm({
   emailFixed = false,
   saved,
   messages,
+  suggestion,
 }: {
   country: string;
   countryName: string;
@@ -57,6 +59,8 @@ export function DetailsForm({
   saved: boolean;
   /** The cart's messages about the email and the address. */
   messages?: Pick<PlacedMessages, "email" | "address" | "fields">;
+  /** A corrected address the store's verification app is confident of. */
+  suggestion?: Suggestion;
 }) {
   const [details, setDetails] = useState(initial);
   const [optIn, setOptIn] = useState(initialOptIn);
@@ -67,6 +71,9 @@ export function DetailsForm({
   // Fields changed since the last save: the cart's messages about them are for what was
   // saved, so they wait for the next one.
   const [edited, setEdited] = useState<ReadonlySet<string>>(new Set());
+  // "Use as entered": a warning never blocks, so nothing needs recording.
+  const [kept, setKept] = useState(false);
+  const suggesting = suggestion !== undefined && !kept && edited.size === 0;
 
   const set = (key: keyof Details) => (value: string) => {
     setDetails((d) => ({ ...d, [key]: value }));
@@ -83,16 +90,33 @@ export function DetailsForm({
     if (!edited.has(field)) fieldMessages[field] = messages?.fields[field];
   }
 
-  const submit = () => {
-    setTried(true);
-    if (details.email.trim() === "" || missingIn(format, details).length > 0) return;
+  const save = (next: Details) =>
     start(async () => {
       // A save answers with the page re-rendered (`refresh` in the action).
-      const result = await saveDetails(country, details, optIn);
+      const result = await saveDetails(country, next, optIn);
       setError(result?.error);
       setProblems(result?.problems);
       if (!result) setEdited(new Set());
     });
+  const submit = () => {
+    setTried(true);
+    if (details.email.trim() === "" || missingIn(format, details).length > 0) return;
+    save(details);
+  };
+  // The suggestion in place of where the address is, keeping who it's for.
+  const acceptSuggestion = () => {
+    if (!suggestion) return;
+    const next: Details = {
+      ...details,
+      company: suggestion.company ?? details.company,
+      line1: suggestion.line1,
+      line2: suggestion.line2 ?? "",
+      city: suggestion.city,
+      province: suggestion.province ?? "",
+      postal_code: suggestion.postal_code ?? "",
+    };
+    setDetails(next);
+    save(next);
   };
 
   const field = (
@@ -139,7 +163,22 @@ export function DetailsForm({
             Ships to {countryName}. To ship elsewhere, switch the currency at the top.
           </Text>
         </VStack>
-        <CartMessages messages={edited.size === 0 ? messages?.address : undefined} />
+        {suggesting ? (
+          <AddressSuggestion
+            suggestion={suggestion}
+            pending={pending}
+            onAccept={acceptSuggestion}
+            onKeep={() => setKept(true)}
+          />
+        ) : (
+          <CartMessages
+            messages={
+              edited.size === 0
+                ? messages?.address.filter((m) => m.code !== "address_corrections_suggested")
+                : undefined
+            }
+          />
+        )}
         <AddressFields
           format={format}
           values={details}
@@ -161,6 +200,51 @@ export function DetailsForm({
         />
       </div>
     </VStack>
+  );
+}
+
+/** An address the store's verification app suggests. */
+type Suggestion = StorefrontSchemas["SuggestedAddressResponse"];
+
+/** "Did you mean …?": the suggested address, to use or to keep the address as entered. */
+function AddressSuggestion({
+  suggestion,
+  pending,
+  onAccept,
+  onKeep,
+}: {
+  suggestion: Suggestion;
+  pending: boolean;
+  onAccept: () => void;
+  onKeep: () => void;
+}) {
+  const lines = [
+    suggestion.company,
+    suggestion.line1,
+    suggestion.line2,
+    [suggestion.postal_code, suggestion.city].filter(Boolean).join(" "),
+    suggestion.province_name ?? suggestion.province,
+  ].filter(Boolean);
+  return (
+    <div className="shop-address-suggestion">
+      <VStack gap={3}>
+        <VStack gap={1}>
+          <Text weight="bold">Did you mean this address?</Text>
+          {lines.map((line) => (
+            <Text key={line}>{line}</Text>
+          ))}
+        </VStack>
+        <HStack gap={2} wrap="wrap">
+          <Button
+            label="Use this address"
+            variant="primary"
+            isLoading={pending}
+            clickAction={onAccept}
+          />
+          <Button label="Use as entered" variant="ghost" clickAction={onKeep} />
+        </HStack>
+      </VStack>
+    </div>
   );
 }
 
