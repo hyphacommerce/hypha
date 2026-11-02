@@ -756,14 +756,17 @@ departures that change a contract, in one place:
   privately for five minutes (its `autocomplete` follows the settings); `address.resolve`
   sends `country`; the suggestion routes require `session`; a resolved address comes back
   with its `problems` instead of being refused; a rule's message can't point at a line
-  (`path_not_allowed`).
+  (`path_not_allowed`); a built-in warning (format, verification) is left out where an
+  error points at the same place.
 - **Rules as stored JSON:** a rule's parts are the API's shape and the stored JSON at
   once, like discounts', so reshaping one needs a migration.
 - **Orders:** "Needs review" is stored (`orders.address_review`); an order's address may
   change only within its country (`422 address_country_mismatch`); marking valid an order
-  without an address is `409 order_has_no_shipping_address`.
-- **Validation apps:** the five-app limit is checked where endpoints are set by hand and
-  where a grant is approved; an app's answer is keyed by what it may see, without the
+  without an address, or changing the address of one placed without, is
+  `409 order_has_no_shipping_address`.
+- **Validation apps:** the five-app limit is checked where endpoints are set by hand,
+  where a grant is approved, where an app is enabled and where a refresh applies a
+  manifest at once; an app's answer is keyed by what it may see, without the
   step, so an app without `customer_data:address` isn't asked again for a street change.
 - **What isn't checked:** the store's legal address and suppliers' addresses keep
   `Address::new`'s structural rules only.
@@ -902,7 +905,9 @@ departures that change a contract, in one place:
   `AddressVerifier` (`digest`, `verify`), not checkout's: setting a cart's address is
   `hypha-cart`'s command and changing an order's is `hypha-orders`', and both take it, so
   no domain gains an edge. `NoVerification` is the stand-in for tests.
-- **Reuse:** `verify_address` keeps the previous answer for the same digest, and turns it
+- **Reuse:** `verify_address` asks the port for the store's app first (`app`, then `ask`):
+  with none it answers nothing, dropping a kept check; it keeps the previous answer only
+  when that app gave it and for the same digest, and turns it
   into `deliverable` (suggestion cleared) for its suggestion's digest; a failed one is
   asked again, so an outage isn't kept. The host normalises the suggestion with
   `Formats` before taking its digest, so setting it matches. Orders always ask again.
@@ -1028,9 +1033,43 @@ departures that change a contract, in one place:
   them. `pnpm seed --checkout` adds them to a store seeded before, skipped by name, and
   widens the "Demo (read-only)" role (`checkout_rules:read` with every other `:read`
   scope). With both, a Dutch or German line 1 without a number shows the format's
-  `house_number_missing` warning beside the rule's error.
+  `house_number_missing` warning beside the rule's error (until the review fixes below
+  left such a warning out).
 - **e2e:** the test validation app came with step 6; nothing more was needed here.
 - **Docs:** the site's concept page "Addresses and checkout rules"
   (`/docs/concepts/checkout-rules/`), linked from the storefront guide (a new "Addresses
   and messages" section) and the apps guide; the README's checkout row and the site's
   roadmap ("Now") name it.
+
+### Review fixes
+
+A review of the whole stack (2026-11-02) changed:
+
+- **Money kept for a passing failure:** `checkout_blocked` gives back a committed payment
+  unless its only errors are `validation_unavailable`, a blocking app that didn't answer,
+  which may pass on retry (the shopper's money stays, as for a shipping provider that's
+  down).
+- **A verification from another app isn't reused:** `AddressVerifier` answers the store's
+  app (`app`) apart from asking it (`ask`); a kept check is reused only when that app made
+  it, and setting an address with no verification app drops the kept check. A cart read
+  still shows the kept check until the address is set again.
+- **The five-app limit on every way in:** approving a grant counts a request for
+  `carts:write` as `carts:read` (scopes imply as grants do); the approval and the
+  endpoints route require `apps:write` before looking at the limit; enabling an app
+  (`PATCH /admin/apps/{key}`) and a refresh applying a manifest at once are held to it
+  too.
+- **An edited order address keeps the verification's warning:** `OrderAddressCheck::edited`
+  builds the warnings as placement does (format and verification), so the same verdict
+  needs review either way.
+- **An order that ships nothing gets no address:** `PUT …/shipping-address` on an order
+  placed without one is `409 order_has_no_shipping_address`, before any lookup.
+- **One read of the validation apps per request:** `HostValidators` keeps the answering
+  apps and their settings for the request (refreshing a cart's checks and composing its
+  messages share them), and `ExtensionEndpointRepo::list_for_point` reads hand-made apps'
+  endpoints in one query.
+- **No echoed warning:** a format or verification warning is left out where an error
+  (a rule's, an app's) points at the same place, so a house-number rule doesn't show
+  beside the format's `house_number_missing`.
+- **Left as is:** the address form code (`lib/address.ts`, `address-line.tsx`,
+  `address-fields.tsx`) is still copied between the admin and the storefront; sharing it
+  means a workspace UI package, which is its own decision.
