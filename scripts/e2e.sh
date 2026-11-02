@@ -1029,6 +1029,64 @@ step "a German address with its house number" 200 - -X PUT "$DE/shipping-address
     -d '{"address":{"last_name":"Weber","line1":"Torstraße 140","city":"Berlin","postal_code":"10119","country":"DE"}}'
 contains "has nothing to say" '"messages":[]'
 
+echo "## checkout rules"
+RULES="$BASE/admin/checkout-rules"
+step "no checkout rules yet" 200 - "$RULES"
+contains "an empty list" '"items":[]'
+step "a rule needs a working pattern and a message" 422 invalid_checkout_rule -X POST "$RULES" -H "$JSON" \
+    -d '{"name":"Broken","conditions":[{"type":"field_matches","field":"line1","pattern":"(open"}],"outcome":{"severity":"error","message":" "}}'
+contains "every problem by path" '"code":"invalid_pattern","message":"unclosed group","path":"conditions[0].pattern"'
+contains "the empty message too" '"code":"empty","message":"write the message the shopper sees","path":"outcome.message"'
+step "a phone for standard shipping" 201 - -X POST "$RULES" -H "$JSON" \
+    -d "{\"name\":\"Phone for couriers\",\"applies_to\":{\"shipping_options\":[\"$STANDARD\"]},\"conditions\":[{\"type\":\"field_missing\",\"field\":\"phone\"}],\"outcome\":{\"severity\":\"error\",\"message\":\"Add a phone number for the courier.\",\"code\":\"phone_required\"}}"
+PHONE_RULE=$(id)
+contains "first in the list" '"position":0'
+step "no PO boxes, as a warning" 201 - -X POST "$RULES" -H "$JSON" \
+    -d '{"name":"No PO boxes","conditions":[{"type":"address_is","flag":"po_box"}],"outcome":{"severity":"warning","message":"We may not reach a PO box."}}'
+PO_RULE=$(id)
+contains "after it" '"position":1'
+step "move the PO box rule first" 200 - -X PATCH "$RULES/$PO_RULE" -H "$JSON" -d '{"position":0}'
+contains "it's first now" '"position":0'
+step "the rules in order" 200 - "$RULES"
+contains "the PO box rule leads" '"items":[{"id":"'"$PO_RULE"'"'
+step "try an address with standard shipping" 200 - -X POST "$RULES/test" -H "$JSON" \
+    -d "{\"address\":{\"last_name\":\"Weber\",\"line1\":\"Postfach 12\",\"city\":\"Berlin\",\"postal_code\":\"10119\",\"country\":\"DE\"},\"shipping_option\":\"$STANDARD\"}"
+contains "reads as a PO box" '"po_box":true'
+contains "the PO box warning" '"message":"We may not reach a PO box."'
+contains "and the phone, under the options" '"code":"phone_required","path":"$.shipping_groups[0]"'
+step "try a draft before saving it" 200 - -X POST "$RULES/test" -H "$JSON" \
+    -d '{"address":{"last_name":"Weber","line1":"Torstraße 140","city":"Berlin","postal_code":"10119","country":"DE"},"rule":{"name":"Not Berlin","conditions":[{"type":"field_contains","field":"city","values":["berlin"]}],"outcome":{"severity":"error","message":"Not to Berlin."}}}'
+contains "the draft's message, marked" '"message":"Not to Berlin.","source":{"type":"rule","rule":"crule_00000000000000000000000000000000"},"draft":true'
+step "try an address the format refuses" 200 - -X POST "$RULES/test" -H "$JSON" \
+    -d '{"address":{"last_name":"Weber","line1":"Torstraße 140","city":"Berlin","postal_code":"1","country":"DE"}}'
+contains "its problems by field" '"problems":[{"field":"postal_code","code":"invalid_format"'
+# The last German cart, still open: another would go over the carts-per-address limit.
+step "a mug in the open German cart" 200 - -X POST "$DE/lines" -H "$JSON" -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
+DE_GROUP=$(shgrp)
+step "its email" 200 - -X PUT "$DE/email" -H "$JSON" -d '{"email":"lukas@example.de"}'
+step "an address without a phone" 200 - -X PUT "$DE/shipping-address" -H "$JSON" \
+    -d '{"address":{"last_name":"Weber","line1":"Torstraße 140","city":"Berlin","postal_code":"10119","country":"DE"}}'
+contains "no messages before an option is chosen" '"messages":[]'
+step "ship it standard" 200 - -X PUT "$DE/shipping/$DE_GROUP" -H "$JSON" -d "{\"option\":\"$STANDARD\"}"
+contains "the rule's error under the options" '"messages":[{"severity":"error","code":"phone_required","path":"$.shipping_groups[0]","message":"Add a phone number for the courier.","source":{"type":"rule","rule":"'"$PHONE_RULE"'"}}]'
+step "pay it on delivery" 200 - -X PUT "$DE/payment-method" -H "$JSON" -d "{\"payment_method\":\"$COD\"}"
+step "the error blocks checkout" 409 checkout_blocked -X POST "$DE/checkout" -H "$JSON" -d '{}'
+contains "with the rule's message" '"details":{"messages":[{"code":"phone_required","message":"Add a phone number for the courier.","path":"$.shipping_groups[0]","severity":"error"'
+step "the address with a phone" 200 - -X PUT "$DE/shipping-address" -H "$JSON" \
+    -d '{"address":{"last_name":"Weber","line1":"Torstraße 140","city":"Berlin","postal_code":"10119","country":"DE","phone":"+49 30 1234567"}}'
+contains "nothing to fix" '"messages":[]'
+step "a new address clears the option: standard again" 200 - -X PUT "$DE/shipping/$DE_GROUP" -H "$JSON" \
+    -d "{\"option\":\"$STANDARD\"}"
+contains "and still nothing to fix" '"messages":[]'
+step "checkout goes on" 201 - -X POST "$DE/checkout" -H "$JSON" -d '{}'
+step "switch the phone rule off" 200 - -X PATCH "$RULES/$PHONE_RULE" -H "$JSON" -d '{"enabled":false}'
+contains "it's off" '"enabled":false'
+step "one rule" 200 - "$RULES/$PHONE_RULE"
+contains "keeps its outcome" '"outcome":{"severity":"error","message":"Add a phone number for the courier.","path":null,"code":"phone_required"}'
+step "delete the phone rule" 204 - -X DELETE "$RULES/$PHONE_RULE"
+step "a deleted rule" 404 checkout_rule_not_found "$RULES/$PHONE_RULE"
+step "delete the PO box rule" 204 - -X DELETE "$RULES/$PO_RULE"
+
 echo "## payment and search apps"
 step "a payment app that isn't installed" 422 payment_provider_unknown -X POST "$METHODS" -H "$JSON" \
     -d '{"provider":"app_pay","name":"Card"}'
