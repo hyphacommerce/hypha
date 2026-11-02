@@ -1,7 +1,7 @@
 # 0040: Address validation, autocomplete and checkout rules
 
-- **Status:** Accepted (2026-11-02), with §14's hard-to-reverse choices and §15's one new
-  edge (checkout → checkout-rules). Danilo read the research (§1) and the
+- **Status:** Built (2026-11-02; "As built" at the end). Accepted (2026-11-02), with §14's
+  hard-to-reverse choices and §15's one new edge (checkout → checkout-rules). Danilo read the research (§1) and the
   recommendations AV1–AV10 on 2026-11-02 and decided three questions:
   - Autocomplete is in this note (AV11).
   - A PO box and a courier option meet as an error on the chosen option now; hiding
@@ -744,6 +744,30 @@ One branch per step, stacked with `gh stack` from `feat/address-validation`:
 
 ## As built
 
+All of §16 was built on 2026-11-02, one stacked branch per step. Each step below lists
+where the code differs from the sections above, or settles what they left open. The
+departures that change a contract, in one place:
+
+- **Ports and edges:** `AddressVerifier` is core's port, not checkout's (§15), since the
+  cart's and the order's address commands both take it; checkout's one new edge is to
+  `hypha-checkout-rules`, as approved. `CheckoutValidators` is checkout's, as planned.
+- **Wire shapes beyond the draft:** the formats route answers every label, `postal_code`
+  (`none`/`required`/`recommended`/`optional`) and `house_number_required`, and is cached
+  privately for five minutes (its `autocomplete` follows the settings); `address.resolve`
+  sends `country`; the suggestion routes require `session`; a resolved address comes back
+  with its `problems` instead of being refused; a rule's message can't point at a line
+  (`path_not_allowed`).
+- **Rules as stored JSON:** a rule's parts are the API's shape and the stored JSON at
+  once, like discounts', so reshaping one needs a migration.
+- **Orders:** "Needs review" is stored (`orders.address_review`); an order's address may
+  change only within its country (`422 address_country_mismatch`); marking valid an order
+  without an address is `409 order_has_no_shipping_address`.
+- **Validation apps:** the five-app limit is checked where endpoints are set by hand and
+  where a grant is approved; an app's answer is keyed by what it may see, without the
+  step, so an app without `customer_data:address` isn't asked again for a street change.
+- **What isn't checked:** the store's legal address and suppliers' addresses keep
+  `Address::new`'s structural rules only.
+
 ### Step 1: formats
 
 - **The data:** Shopify/worldwide at `15d9289e57cb49f99a4f10e392c4114cd72cc06c`
@@ -994,3 +1018,19 @@ One branch per step, stacked with `gh stack` from `feat/address-validation`:
   worked example (no wine to the Canary Islands).
 - **The admin:** Settings → Checkout's "Validation apps" card: each answering app with
   "Asked" and "Block checkout when this app fails".
+
+### Step 7: seed and docs
+
+- **The demo store** (`scripts/seed.mjs`) gets two rules, both errors so the demo shows
+  checkout refusing: "No PO boxes for express" on every option with the code `express`
+  (Europe's Express, the US's 2-Day), its message under the options, and "House number
+  required" in NL and DE on line 1. They're made before the orders, which are placed under
+  them. `pnpm seed --checkout` adds them to a store seeded before, skipped by name, and
+  widens the "Demo (read-only)" role (`checkout_rules:read` with every other `:read`
+  scope). With both, a Dutch or German line 1 without a number shows the format's
+  `house_number_missing` warning beside the rule's error.
+- **e2e:** the test validation app came with step 6; nothing more was needed here.
+- **Docs:** the site's concept page "Addresses and checkout rules"
+  (`/docs/concepts/checkout-rules/`), linked from the storefront guide (a new "Addresses
+  and messages" section) and the apps guide; the README's checkout row and the site's
+  roadmap ("Now") name it.
