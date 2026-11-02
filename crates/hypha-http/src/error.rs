@@ -1544,7 +1544,8 @@ impl From<hypha_checkout::CommandError> for ApiError {
             | E::CartPaymentCommitted { .. }
             | E::PaymentRequired(_)
             | E::PaymentPending { .. }
-            | E::PaymentFailed { .. } => StatusCode::CONFLICT,
+            | E::PaymentFailed { .. }
+            | E::CheckoutBlocked { .. } => StatusCode::CONFLICT,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
@@ -1571,6 +1572,13 @@ impl From<hypha_checkout::CommandError> for ApiError {
             E::PaymentFailed {
                 payment, status, ..
             } => Some(json!({ "payment": payment, "status": status.as_str() })),
+            E::CheckoutBlocked { messages, .. } => Some(json!({
+                "messages": messages
+                    .iter()
+                    .map(crate::routes::carts::CartMessageResponse::from)
+                    .map(|m| serde_json::to_value(m).unwrap_or(Value::Null))
+                    .collect::<Vec<_>>(),
+            })),
             _ => None,
         };
         Self::domain(status, e).with_details(details)
@@ -2306,6 +2314,37 @@ mod tests {
         ] {
             assert_eq!(ApiError::from(e).status, StatusCode::CONFLICT);
         }
+    }
+
+    #[test]
+    fn a_blocked_checkout_is_a_conflict_listing_its_errors() {
+        let cart = hypha_core::CartId::from_uuid(Uuid::from_u128(1));
+        let message = hypha_core::Message::new(
+            hypha_core::Severity::Error,
+            hypha_core::MessageCode::new("po_box_not_allowed").unwrap(),
+            hypha_core::MessagePath::ShippingGroup(0),
+            "No PO boxes with this option.",
+            hypha_core::MessageSource::Format,
+        )
+        .unwrap();
+        let e = ApiError::from(hypha_checkout::CommandError::CheckoutBlocked {
+            cart,
+            messages: vec![message],
+        });
+        assert_eq!(
+            (e.status, e.code, e.details),
+            (
+                StatusCode::CONFLICT,
+                "checkout_blocked",
+                Some(json!({ "messages": [{
+                    "severity": "error",
+                    "code": "po_box_not_allowed",
+                    "path": "$.shipping_groups[0]",
+                    "message": "No PO boxes with this option.",
+                    "source": { "type": "format" },
+                }] }))
+            )
+        );
     }
 
     #[test]

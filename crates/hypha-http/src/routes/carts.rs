@@ -6,9 +6,9 @@ use hypha_cart::{
     shipping_offers,
 };
 use hypha_core::{
-    AssetId, CartId, CountryCode, Currency, CustomerId, DiscountId, Email, ErrorCode, MarketId,
-    Money, OrderId, PaymentMethodId, ProductId, ShippingGroupId, ShippingOptionId, TaxClassId,
-    TaxRate, VariantId,
+    AssetId, CartId, CheckoutRuleId, CountryCode, Currency, CustomerId, DiscountId, Email,
+    ErrorCode, MarketId, Message, MessageSource, Money, OrderId, PaymentMethodId, ProductId,
+    Severity, ShippingGroupId, ShippingOptionId, TaxClassId, TaxRate, VariantId,
 };
 use hypha_customers::{HasCustomers, get_customer};
 use hypha_media::{AssetRepo, HasAssets};
@@ -117,6 +117,74 @@ pub struct CartResponse {
     /// Each code the cart holds, in the order entered, with where it stands. A code that
     /// doesn't apply now is kept: it applies once the cart qualifies.
     discount_codes: Vec<CartDiscountCodeResponse>,
+    /// What the shopper should know about the cart, each under the field its `path` names:
+    /// errors stop checkout and starting its payment (`409 checkout_blocked`), warnings
+    /// never do. Empty once the cart is checked out.
+    messages: Vec<CartMessageResponse>,
+}
+
+/// Something about the cart for the shopper to see or fix.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct CartMessageResponse {
+    severity: SeverityDto,
+    /// snake_case, for code. Built-in codes (`house_number_missing`) are a contract like
+    /// error codes; a checkout rule's is the merchant's, a validation app's the app's.
+    code: String,
+    /// An RFC 9535 JSONPath into this response, from a closed set: `$` (the cart),
+    /// `$.email`, `$.shipping_address`, `$.shipping_address.<field>`,
+    /// `$.shipping_groups[<i>]` (the group and its chosen option) or `$.lines[<i>]`. Show
+    /// the message by that field; one a client doesn't place goes at the top.
+    #[schema(example = "$.shipping_address.line1")]
+    path: String,
+    /// Plain text for the shopper.
+    message: String,
+    source: MessageSourceDto,
+}
+
+/// Whether a message stops checkout: `error` does, `warning` never.
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SeverityDto {
+    Error,
+    Warning,
+}
+
+/// Who said it: the address's format, the store's verification app, one of the merchant's
+/// checkout rules, or a validation app.
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum MessageSourceDto {
+    Format,
+    Verification,
+    Rule {
+        rule: CheckoutRuleId,
+    },
+    App {
+        /// The app's key.
+        app: String,
+    },
+}
+
+impl From<&Message> for CartMessageResponse {
+    fn from(m: &Message) -> Self {
+        Self {
+            severity: match m.severity() {
+                Severity::Error => SeverityDto::Error,
+                Severity::Warning => SeverityDto::Warning,
+            },
+            code: m.code().to_string(),
+            path: m.path().to_string(),
+            message: m.message().to_string(),
+            source: match m.source() {
+                MessageSource::Format => MessageSourceDto::Format,
+                MessageSource::Verification => MessageSourceDto::Verification,
+                MessageSource::Rule { rule } => MessageSourceDto::Rule { rule: *rule },
+                MessageSource::App { app } => MessageSourceDto::App {
+                    app: app.to_string(),
+                },
+            },
+        }
+    }
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -269,6 +337,10 @@ impl From<&PricedCart> for CartResponse {
                 .discount_codes
                 .iter()
                 .map(CartDiscountCodeResponse::from)
+                .collect(),
+            messages: hypha_checkout::cart_messages(&hypha_addresses::Formats, cart)
+                .iter()
+                .map(CartMessageResponse::from)
                 .collect(),
             tax_total: cart.tax_total,
             total: cart.total,

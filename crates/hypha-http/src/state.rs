@@ -495,6 +495,7 @@ impl<S: Storage> AppState<S> {
             &self.clock,
             &rates,
             &providers,
+            &hypha_addresses::Formats,
             payment.id(),
         )
         .await?;

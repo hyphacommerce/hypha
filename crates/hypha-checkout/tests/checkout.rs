@@ -8,18 +8,24 @@
     reason = "a failing test panics, and fixtures cast small counters"
 )]
 
+use hypha_addresses::Formats;
 use hypha_cart::{
     AddLine, CartRepo, CartStatus, CreateCart, add_line, create_cart, set_cart_customer,
-    set_cart_email,
+    set_cart_email, set_shipping_address,
 };
 use hypha_checkout::{
-    CartPaymentStarted, Checkout, CommandError, Placed, StartCartPayment, cart_payment_methods,
-    checkout, complete_paid_checkout, set_payment_method, start_cart_payment, view_cart,
+    CartPaymentStarted, Checkout, CommandError, Placed, StartCartPayment, cart_messages,
+    cart_payment_methods, checkout, complete_paid_checkout, set_payment_method, start_cart_payment,
+    view_cart,
 };
 use hypha_core::{
     Actor, AuthError, CartId, Clock, CountryCode, Ctx, Currency, CustomerId, Email,
     IdempotencyRequest, Idempotent, InventoryItemId, LocationId, MarketId, Money, Price, ProductId,
     Quantity, Scope, TaxRate, TaxRegionId, UserId, VariantId,
+};
+use hypha_core::{
+    Address, AddressField, AddressFlags, AddressFormats, AddressParts, AddressWarning,
+    AddressWarningCode, CheckedAddress, Message,
 };
 use hypha_core::{PaymentMethodId, Versioned};
 use hypha_customers::{Customer, CustomerRepo};
@@ -217,6 +223,7 @@ impl World {
             &self.clock,
             &NoRateProviders,
             &(ManualProvider,),
+            &Formats,
             input,
         ))
     }
@@ -1323,6 +1330,7 @@ fn start_paying(
         &world.clock,
         &NoRateProviders,
         &(ManualProvider, app),
+        &Formats,
         StartCartPayment {
             cart,
             expected_total: None,
@@ -1349,6 +1357,7 @@ fn check_out_by(
         &world.clock,
         &NoRateProviders,
         &(ManualProvider, app),
+        &Formats,
         input,
     ))
 }
@@ -1545,6 +1554,7 @@ fn a_report_completes_the_checkout_and_the_shopper_then_gets_that_order() {
             &world.clock,
             &NoRateProviders,
             &(ManualProvider, &app),
+            &Formats,
             payment.id(),
         ))
     };
@@ -1575,6 +1585,7 @@ fn completing_a_paid_checkout_needs_payments_write() {
             &world.clock,
             &NoRateProviders,
             &(ManualProvider, &app),
+            &Formats,
             payment.id(),
         ))
         .map(|_| ()),
@@ -1702,6 +1713,7 @@ fn a_committed_payment_of_a_cart_checked_out_with_another_goes_back() {
         &world.clock,
         &NoRateProviders,
         &(ManualProvider, &app),
+        &Formats,
         stray.id(),
     ));
     assert_eq!(done.map(|p| p.is_some()), Ok(false));
@@ -1913,6 +1925,7 @@ fn starting_a_cart_payment_needs_checkout() {
         &world.clock,
         &NoRateProviders,
         &(ManualProvider,),
+        &Formats,
         StartCartPayment {
             cart,
             expected_total: None,
@@ -2177,6 +2190,7 @@ fn a_report_completing_a_cart_that_lost_its_discounts_last_use_gives_the_money_b
             &world.clock,
             &NoRateProviders,
             &(ManualProvider, &app),
+            &Formats,
             payment.id(),
         ))
         .map(|_| ()),
@@ -2218,4 +2232,107 @@ fn a_checked_out_cart_reads_with_its_orders_discounts() {
         (eur(240), 1, eur(2700))
     );
     assert_eq!(viewed.discounts[0].title, "Welcome");
+}
+
+/// Formats that take every address and warn that its first line has no house number.
+struct WarnsOfHouseNumbers;
+
+impl AddressFormats for WarnsOfHouseNumbers {
+    fn check(&self, address: &Address) -> CheckedAddress {
+        CheckedAddress {
+            address: address.clone(),
+            problems: Vec::new(),
+            warnings: vec![house_number_missing()],
+            flags: AddressFlags::default(),
+        }
+    }
+
+    fn region_name(&self, _: CountryCode, _: &str) -> Option<&str> {
+        None
+    }
+}
+
+fn house_number_missing() -> AddressWarning {
+    AddressWarning {
+        field: AddressField::Line1,
+        code: AddressWarningCode::HouseNumberMissing,
+        message: "Add a house number".to_string(),
+    }
+}
+
+/// The world's cart with an address in Zagreb.
+fn cart_with_address(world: &World) -> CartId {
+    let cart = world.cart();
+    let address = AddressParts {
+        first_name: None,
+        last_name: "Horvat".to_string(),
+        company: None,
+        line1: "Ilica".to_string(),
+        line2: None,
+        city: "Zagreb".to_string(),
+        province: None,
+        postal_code: Some("10000".to_string()),
+        country: "HR".to_string(),
+        phone: None,
+    };
+    block_on(set_shipping_address(
+        &world.ports.storefront(),
+        &world.ports,
+        &Formats,
+        cart,
+        Some(address),
+    ))
+    .unwrap();
+    cart
+}
+
+#[test]
+fn a_carts_messages_carry_its_addresss_format_warnings() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let priced = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();
+    assert_eq!(
+        cart_messages(&WarnsOfHouseNumbers, &priced),
+        vec![Message::format_warning(&house_number_missing())]
+    );
+}
+
+#[test]
+fn a_cart_without_an_address_has_no_messages() {
+    let world = World::new();
+    let cart = world.cart();
+    let priced = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();
+    assert_eq!(cart_messages(&WarnsOfHouseNumbers, &priced), Vec::new());
+}
+
+#[test]
+fn a_checked_out_cart_has_no_messages() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    world.checkout(cart).unwrap();
+    let priced = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();
+    assert_eq!(cart_messages(&WarnsOfHouseNumbers, &priced), Vec::new());
+}
+
+#[test]
+fn warnings_dont_stop_checkout() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let input = Checkout {
+        cart,
+        expected_total: None,
+        idempotency: None,
+        return_url: None,
+    };
+    let placed = block_on(checkout(
+        &Ctx::system(),
+        &world.ports,
+        &world.ids,
+        &world.clock,
+        &NoRateProviders,
+        &(ManualProvider,),
+        &WarnsOfHouseNumbers,
+        input,
+    ));
+    assert!(placed.is_ok(), "{placed:?}");
 }

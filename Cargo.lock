@@ -1692,6 +1692,7 @@ name = "hypha-store-postgres"
 version = "0.1.0-beta.2"
 dependencies = [
  "futures-util",
+ "hypha-addresses",
  "hypha-agents",
  "hypha-apps",
  "hypha-auth",

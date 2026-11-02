@@ -351,7 +351,8 @@ export interface paths {
          *     `payment_failed` (start paying again). If the order can't be placed once the money is
          *     committed (a line sold out meanwhile), the money is given back. A cart checked out
          *     already answers with its order for an hour after it was placed (the provider's report
-         *     may have completed it), then `409 cart_completed`.
+         *     may have completed it), then `409 cart_completed`. A cart with an error among its
+         *     `messages` is `409 checkout_blocked`, after the checks above.
          */
         post: operations["storefront.orders.checkout"];
         delete?: never;
@@ -487,7 +488,9 @@ export interface paths {
          *     total is started again (the provider resumes it); otherwise a new one is made and the
          *     old ones released. Refused for a manual method (409 `payment_method_offline`: check out
          *     instead), a total of zero (409 `cart_nothing_to_pay`) and a cart whose money is
-         *     committed already (409 `cart_payment_committed`: check out).
+         *     committed already (409 `cart_payment_committed`: check out), then a cart with an error
+         *     among its `messages` (409 `checkout_blocked`): no money is taken for a cart checkout
+         *     would refuse.
          */
         post: operations["storefront.orders.start_cart_payment"];
         delete?: never;
@@ -972,6 +975,26 @@ export interface components {
          * @example cart_0190f1a2b3c47d8e9f00112233445566
          */
         CartId: string;
+        /** @description Something about the cart for the shopper to see or fix. */
+        CartMessageResponse: {
+            /**
+             * @description snake_case, for code. Built-in codes (`house_number_missing`) are a contract like
+             *     error codes; a checkout rule's is the merchant's, a validation app's the app's.
+             */
+            code: string;
+            /** @description Plain text for the shopper. */
+            message: string;
+            /**
+             * @description An RFC 9535 JSONPath into this response, from a closed set: `$` (the cart),
+             *     `$.email`, `$.shipping_address`, `$.shipping_address.<field>`,
+             *     `$.shipping_groups[<i>]` (the group and its chosen option) or `$.lines[<i>]`. Show
+             *     the message by that field; one a client doesn't place goes at the top.
+             * @example $.shipping_address.line1
+             */
+            path: string;
+            severity: components["schemas"]["SeverityDto"];
+            source: components["schemas"]["MessageSourceDto"];
+        };
         /** @description A payment method as a storefront lists it for a cart. */
         CartPaymentMethodResponse: {
             id: components["schemas"]["PaymentMethodId"];
@@ -1027,6 +1050,12 @@ export interface components {
              *     checkout records the consent then.
              */
             marketing_opt_in: boolean;
+            /**
+             * @description What the shopper should know about the cart, each under the field its `path` names:
+             *     errors stop checkout and starting its payment (`409 checkout_blocked`), warnings
+             *     never do. Empty once the cart is checked out.
+             */
+            messages: components["schemas"]["CartMessageResponse"][];
             order?: components["schemas"]["OrderId"] | null;
             payment_method?: components["schemas"]["PaymentMethodId"] | null;
             /**
@@ -1092,6 +1121,11 @@ export interface components {
             next_action?: components["schemas"]["NextActionResponse"] | null;
             payment_error?: components["schemas"]["Error"] | null;
         };
+        /**
+         * @description A CheckoutRuleId: `crule_` and 32 hex digits.
+         * @example crule_0190f1a2b3c47d8e9f00112233445566
+         */
+        CheckoutRuleId: string;
         /** @description A channel's marketing consent. */
         ConsentResponse: {
             /** @description When the customer last said so, RFC 3339 in UTC; absent while never asked. */
@@ -1407,6 +1441,26 @@ export interface components {
          * @example mkt_0190f1a2b3c47d8e9f00112233445566
          */
         MarketId: string;
+        /**
+         * @description Who said it: the address's format, the store's verification app, one of the merchant's
+         *     checkout rules, or a validation app.
+         */
+        MessageSourceDto: {
+            /** @enum {string} */
+            type: "format";
+        } | {
+            /** @enum {string} */
+            type: "verification";
+        } | {
+            rule: components["schemas"]["CheckoutRuleId"];
+            /** @enum {string} */
+            type: "rule";
+        } | {
+            /** @description The app's key. */
+            app: string;
+            /** @enum {string} */
+            type: "app";
+        };
         /**
          * @description An amount of money in one currency.
          * @example {
@@ -1929,6 +1983,13 @@ export interface components {
         SetShippingAddressRequest: {
             address?: components["schemas"]["PostalAddressRequest"] | null;
         };
+        /**
+         * @description Whether a message stops checkout: `error` does, `warning` never.
+         *
+         *     Known values: `error`, `warning`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        SeverityDto: string;
         /**
          * @description A ShippingGroupId: `shgrp_` and 32 hex digits.
          * @example shgrp_0190f1a2b3c47d8e9f00112233445566
@@ -4252,7 +4313,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            /** @description The cart can't be checked out as it is: `cart_empty`, `cart_email_missing`, `cart_unavailable`, `shipping_address_required`, `shipping_option_required`, `shipping_option_unavailable`, `total_changed`, `discounts_changed`, `payment_method_required`, `payment_method_unavailable`, `payment_required`, `payment_pending`, `payment_failed`, `cart_payment_committed`, `cart_completed`; or, after those, `checkout_blocked`: the cart has error messages, every one in `details.messages` (each as a cart's `messages` item; warnings left out). Also a concurrent change (`concurrent_modification`, safe to retry). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5076,7 +5137,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            /** @description No payment can start for the cart now: checkout's checks (`cart_empty`, `total_changed`, `payment_method_required`, …), `payment_method_offline`, `cart_nothing_to_pay`, `cart_payment_committed`; or, after those, `checkout_blocked`: the cart has error messages, every one in `details.messages` (each as a cart's `messages` item; warnings left out), and no money is taken for it. Also a concurrent change (`concurrent_modification`, safe to retry). */
             409: {
                 headers: {
                     [name: string]: unknown;

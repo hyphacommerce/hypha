@@ -710,13 +710,14 @@ const REPLAY_WINDOW_MICROS: i64 = 60 * 60 * 1_000_000;
 /// `payment_failed` (start paying again). If the order can't be placed once the money is
 /// committed (a line sold out meanwhile), the money is given back. A cart checked out
 /// already answers with its order for an hour after it was placed (the provider's report
-/// may have completed it), then `409 cart_completed`.
+/// may have completed it), then `409 cart_completed`. A cart with an error among its
+/// `messages` is `409 checkout_blocked`, after the checks above.
 #[utoipa::path(
     post,
     path = "/storefront/carts/{id}/checkout",
     params(("id" = CartId, Path), ("Idempotency-Key" = Option<String>, Header, description = "Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`.")),
     request_body = CheckoutRequest,
-    responses((status = 201, description = "Created", body = CheckoutResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`."))), (status = 429, description = "Over the rate limit for this cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
+    responses((status = 201, description = "Created", body = CheckoutResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`."))), (status = 409, description = "The cart can't be checked out as it is: `cart_empty`, `cart_email_missing`, `cart_unavailable`, `shipping_address_required`, `shipping_option_required`, `shipping_option_unavailable`, `total_changed`, `discounts_changed`, `payment_method_required`, `payment_method_unavailable`, `payment_required`, `payment_pending`, `payment_failed`, `cart_payment_committed`, `cart_completed`; or, after those, `checkout_blocked`: the cart has error messages, every one in `details.messages` (each as a cart's `messages` item; warnings left out). Also a concurrent change (`concurrent_modification`, safe to retry).", body = ApiErrorBody), (status = 429, description = "Over the rate limit for this cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     extensions(("x-hypha-scopes" = json!(["checkout"]))),
 )]
 pub async fn checkout_handler<S: Storage>(
@@ -744,6 +745,7 @@ pub async fn checkout_handler<S: Storage>(
         &state.clock,
         &rates,
         &providers,
+        &hypha_addresses::Formats,
         input,
     )
     .await?;
@@ -854,13 +856,15 @@ pub struct CartPaymentResponse {
 /// total is started again (the provider resumes it); otherwise a new one is made and the
 /// old ones released. Refused for a manual method (409 `payment_method_offline`: check out
 /// instead), a total of zero (409 `cart_nothing_to_pay`) and a cart whose money is
-/// committed already (409 `cart_payment_committed`: check out).
+/// committed already (409 `cart_payment_committed`: check out), then a cart with an error
+/// among its `messages` (409 `checkout_blocked`): no money is taken for a cart checkout
+/// would refuse.
 #[utoipa::path(
     post,
     path = "/storefront/carts/{id}/payment",
     params(("id" = CartId, Path)),
     request_body = StartCartPaymentRequest,
-    responses((status = 200, description = "OK", body = CartPaymentResponse), (status = 429, description = "Over the rate limit for this cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
+    responses((status = 200, description = "OK", body = CartPaymentResponse), (status = 409, description = "No payment can start for the cart now: checkout's checks (`cart_empty`, `total_changed`, `payment_method_required`, …), `payment_method_offline`, `cart_nothing_to_pay`, `cart_payment_committed`; or, after those, `checkout_blocked`: the cart has error messages, every one in `details.messages` (each as a cart's `messages` item; warnings left out), and no money is taken for it. Also a concurrent change (`concurrent_modification`, safe to retry).", body = ApiErrorBody), (status = 429, description = "Over the rate limit for this cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     extensions(("x-hypha-scopes" = json!(["checkout"]))),
 )]
 pub async fn start_cart_payment<S: Storage>(
@@ -887,6 +891,7 @@ pub async fn start_cart_payment<S: Storage>(
         &state.clock,
         &rates,
         &providers,
+        &hypha_addresses::Formats,
         input,
     )
     .await?;

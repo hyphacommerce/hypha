@@ -8,6 +8,7 @@
 
 mod cart_payment;
 pub mod commands;
+mod messages;
 mod payment;
 mod start;
 mod view;
@@ -16,5 +17,6 @@ pub use cart_payment::{CartPaymentStarted, StartCartPayment, start_cart_payment}
 pub use commands::{
     CHECKOUT, Checkout, CheckoutPorts, CommandError, Placed, checkout, complete_paid_checkout,
 };
+pub use messages::{CartChecks, cart_messages};
 pub use payment::{cart_payment_methods, set_payment_method};
 pub use view::view_cart;

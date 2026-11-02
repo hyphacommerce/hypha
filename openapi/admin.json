@@ -2063,6 +2063,38 @@
         "pattern": "^cart_[0-9a-f]{32}$",
         "type": "string"
       },
+      "CartMessageResponse": {
+        "description": "Something about the cart for the shopper to see or fix.",
+        "properties": {
+          "code": {
+            "description": "snake_case, for code. Built-in codes (`house_number_missing`) are a contract like\nerror codes; a checkout rule's is the merchant's, a validation app's the app's.",
+            "type": "string"
+          },
+          "message": {
+            "description": "Plain text for the shopper.",
+            "type": "string"
+          },
+          "path": {
+            "description": "An RFC 9535 JSONPath into this response, from a closed set: `$` (the cart),\n`$.email`, `$.shipping_address`, `$.shipping_address.<field>`,\n`$.shipping_groups[<i>]` (the group and its chosen option) or `$.lines[<i>]`. Show\nthe message by that field; one a client doesn't place goes at the top.",
+            "example": "$.shipping_address.line1",
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/SeverityDto"
+          },
+          "source": {
+            "$ref": "#/components/schemas/MessageSourceDto"
+          }
+        },
+        "required": [
+          "severity",
+          "code",
+          "path",
+          "message",
+          "source"
+        ],
+        "type": "object"
+      },
       "CartResponse": {
         "properties": {
           "country": {
@@ -2131,6 +2163,13 @@
           "marketing_opt_in": {
             "description": "Whether the buyer ticked \"Email me with news and offers\" (`PUT …/marketing`):\ncheckout records the consent then.",
             "type": "boolean"
+          },
+          "messages": {
+            "description": "What the shopper should know about the cart, each under the field its `path` names:\nerrors stop checkout and starting its payment (`409 checkout_blocked`), warnings\nnever do. Empty once the cart is checked out.",
+            "items": {
+              "$ref": "#/components/schemas/CartMessageResponse"
+            },
+            "type": "array"
           },
           "order": {
             "oneOf": [
@@ -2224,7 +2263,8 @@
           "marketing_opt_in",
           "discounts",
           "discount_total",
-          "discount_codes"
+          "discount_codes",
+          "messages"
         ],
         "type": "object"
       },
@@ -2731,6 +2771,14 @@
           "updated_at"
         ],
         "type": "object"
+      },
+      "CheckoutRuleId": {
+        "description": "A CheckoutRuleId: `crule_` and 32 hex digits.",
+        "examples": [
+          "crule_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^crule_[0-9a-f]{32}$",
+        "type": "string"
       },
       "ClassRateResponse": {
         "properties": {
@@ -7998,6 +8046,76 @@
           "name"
         ],
         "type": "object"
+      },
+      "MessageSourceDto": {
+        "description": "Who said it: the address's format, the store's verification app, one of the merchant's\ncheckout rules, or a validation app.",
+        "oneOf": [
+          {
+            "properties": {
+              "type": {
+                "enum": [
+                  "format"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "type": {
+                "enum": [
+                  "verification"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "rule": {
+                "$ref": "#/components/schemas/CheckoutRuleId"
+              },
+              "type": {
+                "enum": [
+                  "rule"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "rule",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "app": {
+                "description": "The app's key.",
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "app"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "app",
+              "type"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "Money": {
         "description": "An amount of money in one currency.",
@@ -13427,6 +13545,15 @@
           }
         },
         "type": "object"
+      },
+      "SeverityDto": {
+        "description": "Whether a message stops checkout: `error` does, `warning` never.\n\nKnown values: `error`, `warning`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "error",
+          "warning"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
       },
       "ShipTransferRequest": {
         "additionalProperties": false,

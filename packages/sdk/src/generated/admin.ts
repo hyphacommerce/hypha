@@ -4858,6 +4858,26 @@ export interface components {
          * @example cart_0190f1a2b3c47d8e9f00112233445566
          */
         CartId: string;
+        /** @description Something about the cart for the shopper to see or fix. */
+        CartMessageResponse: {
+            /**
+             * @description snake_case, for code. Built-in codes (`house_number_missing`) are a contract like
+             *     error codes; a checkout rule's is the merchant's, a validation app's the app's.
+             */
+            code: string;
+            /** @description Plain text for the shopper. */
+            message: string;
+            /**
+             * @description An RFC 9535 JSONPath into this response, from a closed set: `$` (the cart),
+             *     `$.email`, `$.shipping_address`, `$.shipping_address.<field>`,
+             *     `$.shipping_groups[<i>]` (the group and its chosen option) or `$.lines[<i>]`. Show
+             *     the message by that field; one a client doesn't place goes at the top.
+             * @example $.shipping_address.line1
+             */
+            path: string;
+            severity: components["schemas"]["SeverityDto"];
+            source: components["schemas"]["MessageSourceDto"];
+        };
         CartResponse: {
             country: components["schemas"]["CountryCode"];
             /** @description The currency of every amount in the cart. */
@@ -4887,6 +4907,12 @@ export interface components {
              *     checkout records the consent then.
              */
             marketing_opt_in: boolean;
+            /**
+             * @description What the shopper should know about the cart, each under the field its `path` names:
+             *     errors stop checkout and starting its payment (`409 checkout_blocked`), warnings
+             *     never do. Empty once the cart is checked out.
+             */
+            messages: components["schemas"]["CartMessageResponse"][];
             order?: components["schemas"]["OrderId"] | null;
             payment_method?: components["schemas"]["PaymentMethodId"] | null;
             /**
@@ -5085,6 +5111,11 @@ export interface components {
             /** @description When it last changed, RFC 3339 in UTC. */
             updated_at: string;
         };
+        /**
+         * @description A CheckoutRuleId: `crule_` and 32 hex digits.
+         * @example crule_0190f1a2b3c47d8e9f00112233445566
+         */
+        CheckoutRuleId: string;
         ClassRateResponse: {
             rate_ppm: components["schemas"]["TaxRate"];
             tax_class: components["schemas"]["TaxClassId"];
@@ -6956,6 +6987,26 @@ export interface components {
         MeRole: {
             id: components["schemas"]["RoleId"];
             name: string;
+        };
+        /**
+         * @description Who said it: the address's format, the store's verification app, one of the merchant's
+         *     checkout rules, or a validation app.
+         */
+        MessageSourceDto: {
+            /** @enum {string} */
+            type: "format";
+        } | {
+            /** @enum {string} */
+            type: "verification";
+        } | {
+            rule: components["schemas"]["CheckoutRuleId"];
+            /** @enum {string} */
+            type: "rule";
+        } | {
+            /** @description The app's key. */
+            app: string;
+            /** @enum {string} */
+            type: "app";
         };
         /**
          * @description An amount of money in one currency.
@@ -8909,6 +8960,13 @@ export interface components {
              */
             step?: string | null;
         };
+        /**
+         * @description Whether a message stops checkout: `error` does, `warning` never.
+         *
+         *     Known values: `error`, `warning`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        SeverityDto: string;
         /** @description Nothing to say yet: shipping sends every line whole. */
         ShipTransferRequest: Record<string, never>;
         /**

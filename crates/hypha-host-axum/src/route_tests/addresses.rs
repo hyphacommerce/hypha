@@ -135,3 +135,94 @@ async fn a_location_address_is_checked() {
         json!([{"field": "postal_code", "code": "required", "message": "Enter a postal code"}])
     );
 }
+
+/// The cart's market also sells to the Netherlands, where addresses have house numbers: a
+/// Dutch cart for one mug, with an email and a way to pay. Returns (the publishable key,
+/// the cart's path).
+async fn dutch_cart(app: &TestApp) -> (String, String) {
+    let (pk, _, _) = cart_for_three_mugs(app).await;
+    let (_, markets) = send(app, "GET", "/admin/markets", None).await;
+    let market = markets["items"][0]["id"].as_str().unwrap();
+    let (status, json) = send(
+        app,
+        "POST",
+        &format!("/admin/markets/{market}/countries"),
+        Some(r#"{"country":"NL"}"#),
+    )
+    .await;
+    assert!(status.is_success(), "{status}: {json}");
+    let (status, cart) = send_as(
+        app,
+        &pk,
+        "POST",
+        "/storefront/carts",
+        Some(r#"{"country":"NL"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{cart}");
+    let cart_path = format!("/storefront/carts/{}", cart["id"].as_str().unwrap());
+    let line = json!({"variant": only_variant(app).await, "quantity": 1}).to_string();
+    let (status, json) =
+        send_as(app, &pk, "POST", &format!("{cart_path}/lines"), Some(&line)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let email = r#"{"email":"jan@example.nl"}"#;
+    send_as(app, &pk, "PUT", &format!("{cart_path}/email"), Some(email)).await;
+    pay_on_delivery(app, &pk, &cart_path).await;
+    (pk, cart_path)
+}
+
+#[tokio::test]
+async fn a_missing_house_number_is_a_warning_on_the_cart() {
+    let app = app().await;
+    let (pk, cart) = dutch_cart(&app).await;
+    let body = json!({"address": {"last_name": "de Vries", "line1": "Prinsengracht",
+        "city": "Amsterdam", "postal_code": "1016 GV", "country": "NL"}})
+    .to_string();
+    let path = format!("{cart}/shipping-address");
+    let (status, json) = send_as(&app, &pk, "PUT", &path, Some(&body)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let warning = json!([{
+        "severity": "warning",
+        "code": "house_number_missing",
+        "path": "$.shipping_address.line1",
+        "message": "Add a house number",
+        "source": {"type": "format"},
+    }]);
+    assert_eq!(json["messages"], warning);
+    let (_, read) = send_as(&app, &pk, "GET", &cart, None).await;
+    assert_eq!(read["messages"], warning, "recomputed on every read");
+}
+
+#[tokio::test]
+async fn warnings_dont_stop_checkout() {
+    let app = app().await;
+    let (pk, cart) = dutch_cart(&app).await;
+    let body = json!({"address": {"last_name": "de Vries", "line1": "Prinsengracht",
+        "city": "Amsterdam", "postal_code": "1016 GV", "country": "NL"}})
+    .to_string();
+    send_as(
+        &app,
+        &pk,
+        "PUT",
+        &format!("{cart}/shipping-address"),
+        Some(&body),
+    )
+    .await;
+    let (status, json) = send_as(&app, &pk, "POST", &format!("{cart}/checkout"), Some("{}")).await;
+    assert_eq!(status, StatusCode::CREATED, "{json}");
+    let (_, read) = send_as(&app, &pk, "GET", &cart, None).await;
+    assert_eq!(read["messages"], json!([]), "a checked-out cart has none");
+}
+
+#[tokio::test]
+async fn an_address_with_a_house_number_has_no_messages() {
+    let app = app().await;
+    let (pk, cart) = dutch_cart(&app).await;
+    let body = json!({"address": {"last_name": "de Vries", "line1": "Prinsengracht 263",
+        "city": "Amsterdam", "postal_code": "1016 GV", "country": "NL"}})
+    .to_string();
+    let path = format!("{cart}/shipping-address");
+    let (status, json) = send_as(&app, &pk, "PUT", &path, Some(&body)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["messages"], json!([]));
+}

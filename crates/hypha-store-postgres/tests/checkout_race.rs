@@ -244,6 +244,7 @@ async fn carts_racing_for_the_last_units_never_oversell() {
             &clock,
             &NoRateProviders,
             &(ManualProvider,),
+            &hypha_addresses::Formats,
             input,
         )
     }))
@@ -326,6 +327,7 @@ async fn one_cart_checked_out_at_once_becomes_one_order() {
             &clock,
             &NoRateProviders,
             &(ManualProvider,),
+            &hypha_addresses::Formats,
             input,
         )
     }))
@@ -386,6 +388,7 @@ async fn retries_with_the_same_key_all_get_the_one_order() {
             &clock,
             &NoRateProviders,
             &(ManualProvider,),
+            &hypha_addresses::Formats,
             input,
         )
     }))

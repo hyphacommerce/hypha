@@ -266,6 +266,7 @@ impl World {
             &self.clock,
             &self.dhl,
             &(hypha_payments::ManualProvider,),
+            &Formats,
             input,
         ))
         .map(|o| o.value.order)
@@ -529,6 +530,7 @@ impl World {
             &self.clock,
             &rates,
             &(hypha_payments::ManualProvider,),
+            &Formats,
             input,
         ))
         .map(|o| o.value.order);

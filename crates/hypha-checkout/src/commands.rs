@@ -7,9 +7,9 @@ use hypha_cart::{
 };
 use hypha_core::{
     Attempts, AuthError, CartId, Clock, Ctx, CustomerId, ErrorCode, HasBatch, HasIdempotency,
-    IdGenerator, IdempotencyError, IdempotencyRecord, IdempotencyRequest, Idempotent, Money,
-    OrderId, OrderLineId, PaymentId, PaymentMethodId, RepoError, Scope, StageIdempotency, UnitCost,
-    VariantId, Version, Versioned, earlier_id,
+    IdGenerator, IdempotencyError, IdempotencyRecord, IdempotencyRequest, Idempotent, Message,
+    Money, OrderId, OrderLineId, PaymentId, PaymentMethodId, RepoError, Scope, StageIdempotency,
+    UnitCost, VariantId, Version, Versioned, earlier_id,
 };
 use hypha_customers::{
     Channel, ConsentChange, ConsentSource, ConsentState, Customer, CustomerRepo, OptInLevel,
@@ -31,6 +31,8 @@ use hypha_shipping::{OfferOutcome, RateProvider};
 use hypha_tax::{TaxLine, TaxSource};
 use thiserror::Error;
 
+pub(crate) use crate::messages::refuse_errors;
+use crate::messages::{CartChecks, cart_messages};
 use crate::start::{Payer, refresh, release, restart, start};
 
 /// The operation name checkout's idempotency records carry.
@@ -117,6 +119,13 @@ pub enum CommandError {
         total: Money,
         codes: Vec<CodeOutcome>,
     },
+    /// The cart has error messages (`cart_messages`): an address its shipping can't take, a
+    /// rule of the merchant's. `messages` holds every error, warnings left out.
+    #[error("cart {cart} can't be checked out: {} problem(s) to fix", .messages.len())]
+    CheckoutBlocked {
+        cart: CartId,
+        messages: Vec<Message>,
+    },
     /// The cart's payment was declined or released: start paying again.
     #[error("cart {cart}'s payment {payment} is {status}: start paying again")]
     PaymentFailed {
@@ -156,6 +165,7 @@ impl ErrorCode for CommandError {
             CommandError::PaymentPending { .. } => "payment_pending",
             CommandError::PaymentFailed { .. } => "payment_failed",
             CommandError::DiscountsChanged { .. } => "discounts_changed",
+            CommandError::CheckoutBlocked { .. } => "checkout_blocked",
         }
     }
 }
@@ -225,7 +235,8 @@ pub struct Checkout {
 ///
 /// Refuses a cart that's empty, without an email, with any line that can't be bought now,
 /// whose total isn't `expected_total`, or with something to pay and no payment method
-/// offered to it (`payment_method_required`, `payment_method_unavailable`). An online
+/// offered to it (`payment_method_required`, `payment_method_unavailable`), or with an
+/// error among its messages (`checkout_blocked`, from `checks`). An online
 /// method's money must be committed first: the cart's payment started with it
 /// (`start_cart_payment`; none is `payment_required`) is `authorized`, `processing` or
 /// `paid`, its provider asked first while it's `pending` (still pending: `payment_pending`;
@@ -246,12 +257,14 @@ pub struct Checkout {
 /// When another request changed something in between (stock, the cart, a customer with
 /// the same email), the commit fails and checkout runs again on fresh data, up to
 /// `MAX_ATTEMPTS` times; a real shortage or change then shows up as its own error.
+#[allow(clippy::too_many_arguments)]
 pub async fn checkout<
     S: CheckoutPorts,
     I: IdGenerator,
     C: Clock,
     P: RateProvider,
     Q: PaymentProviders,
+    K: CartChecks,
 >(
     ctx: &Ctx,
     ports: &S,
@@ -259,10 +272,11 @@ pub async fn checkout<
     clock: &C,
     rates: &P,
     payments: &Q,
+    checks: &K,
     input: Checkout,
 ) -> Result<Idempotent<Placed>, CommandError> {
     ctx.require(Scope::Checkout)?;
-    run_checkout(ctx, ports, ids, clock, rates, payments, input).await
+    run_checkout(ctx, ports, ids, clock, rates, payments, checks, input).await
 }
 
 /// Completes the checkout a committed cart payment is for: what the host runs after a
@@ -278,6 +292,7 @@ pub async fn complete_paid_checkout<
     C: Clock,
     P: RateProvider,
     Q: PaymentProviders,
+    K: CartChecks,
 >(
     ctx: &Ctx,
     ports: &S,
@@ -285,6 +300,7 @@ pub async fn complete_paid_checkout<
     clock: &C,
     rates: &P,
     payments: &Q,
+    checks: &K,
     payment: PaymentId,
 ) -> Result<Option<Placed>, CommandError> {
     ctx.require(Scope::PaymentsWrite)?;
@@ -303,7 +319,7 @@ pub async fn complete_paid_checkout<
         idempotency: None,
         return_url: None,
     };
-    let placed = run_checkout(ctx, ports, ids, clock, rates, payments, input).await?;
+    let placed = run_checkout(ctx, ports, ids, clock, rates, payments, checks, input).await?;
     // The cart was checked out with another payment (another method, another tab): this
     // one's money is a second collection, and goes back.
     if placed.value.payment.as_ref().map(Payment::id) != Some(payment) {
@@ -318,12 +334,14 @@ pub async fn complete_paid_checkout<
     Ok(Some(placed.value))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_checkout<
     S: CheckoutPorts,
     I: IdGenerator,
     C: Clock,
     P: RateProvider,
     Q: PaymentProviders,
+    K: CartChecks,
 >(
     ctx: &Ctx,
     ports: &S,
@@ -331,6 +349,7 @@ async fn run_checkout<
     clock: &C,
     rates: &P,
     payments: &Q,
+    checks: &K,
     input: Checkout,
 ) -> Result<Idempotent<Placed>, CommandError> {
     if let Some(order) = replay_of(ctx, ports, input.idempotency.as_ref()).await? {
@@ -349,6 +368,7 @@ async fn run_checkout<
             clock,
             rates,
             payments,
+            checks,
             &input,
             &mut renewed,
         )
@@ -452,6 +472,7 @@ impl CommandError {
             | CommandError::Unavailable { .. }
             | CommandError::TotalChanged { .. }
             | CommandError::DiscountsChanged { .. }
+            | CommandError::CheckoutBlocked { .. }
             | CommandError::ShippingAddressRequired(_)
             | CommandError::ShippingOptionRequired(_)
             | CommandError::PaymentMethodRequired(_)
@@ -520,11 +541,14 @@ fn payer_of(order: &Order) -> Payer {
 }
 
 /// A cart ready to be checked out: every check passed, priced now, with the method that
-/// pays for it (`None`: nothing to pay).
+/// pays for it (`None`: nothing to pay) and its messages, which the caller refuses on
+/// (`refuse_errors`) after its own checks, so theirs keep their codes, and before anything
+/// is reserved or any money moves.
 pub(crate) struct Ready<R> {
     pub cart: Cart,
     pub reading: CartReading<R>,
     pub method: Option<PaymentMethod>,
+    pub messages: Vec<Message>,
 }
 
 /// Checkout's checks (the cart's lines, email, shipping, total and method), shared with
@@ -532,12 +556,19 @@ pub(crate) struct Ready<R> {
 /// quote renewed by an earlier attempt; a renewal changes `cart`, which the caller
 /// writes.
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn ready<S: CheckoutPorts, C: Clock, P: RateProvider, Q: PaymentProviders>(
+pub(crate) async fn ready<
+    S: CheckoutPorts,
+    C: Clock,
+    P: RateProvider,
+    Q: PaymentProviders,
+    K: CartChecks,
+>(
     ctx: &Ctx,
     ports: &S,
     clock: &C,
     rates: &P,
     payments: &Q,
+    checks: &K,
     id: CartId,
     expected_total: Option<Money>,
     renewed: &mut Option<Renewal>,
@@ -590,10 +621,12 @@ pub(crate) async fn ready<S: CheckoutPorts, C: Clock, P: RateProvider, Q: Paymen
         });
     }
     let method = crate::payment::checkout_method(ports, payments, &cart, &reading.priced).await?;
+    let messages = cart_messages(checks, &reading.priced);
     Ok(Ready {
         cart,
         reading,
         method,
+        messages,
     })
 }
 
@@ -656,6 +689,7 @@ async fn attempt<
     C: Clock,
     P: RateProvider,
     Q: PaymentProviders,
+    K: CartChecks,
 >(
     ctx: &Ctx,
     ports: &S,
@@ -663,6 +697,7 @@ async fn attempt<
     clock: &C,
     rates: &P,
     payments: &Q,
+    checks: &K,
     input: &Checkout,
     renewed: &mut Option<Renewal>,
 ) -> Result<Idempotent<Attempted>, CommandError> {
@@ -670,12 +705,14 @@ async fn attempt<
         mut cart,
         reading,
         method,
+        messages,
     } = ready(
         ctx,
         ports,
         clock,
         rates,
         payments,
+        checks,
         input.cart,
         input.expected_total,
         renewed,
@@ -707,6 +744,7 @@ async fn attempt<
             None
         }
     };
+    refuse_errors(cart.id(), messages)?;
 
     let lines = priced
         .lines

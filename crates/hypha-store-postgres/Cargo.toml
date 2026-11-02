@@ -55,6 +55,8 @@ tokio-postgres = { version = "0.7.18", default-features = false, features = ["js
 hypha-store-postgres = { path = ".", features = ["testing"] }
 # Workflows sit above this adapter; only the race tests drive one.
 hypha-checkout = { path = "../hypha-checkout" }
+# Checkout takes the address formats its cart messages come from.
+hypha-addresses = { path = "../hypha-addresses" }
 hypha-order-actions = { path = "../hypha-order-actions" }
 hypha-receiving = { path = "../hypha-receiving" }
 hypha-testkit = { path = "../hypha-testkit", features = ["contract"] }
