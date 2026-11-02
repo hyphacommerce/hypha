@@ -15,6 +15,8 @@ pub async fn extension_endpoint_repo<S: HasApps + HasExtensionEndpoints>(
 ) {
     scenario("extension endpoints: replace stores every field, by point; get finds one");
     round_trips(&make().await).await;
+    scenario("extension endpoints: listed by point, every app's, by app key");
+    lists_for_a_point(&make().await).await;
     scenario("extension endpoints: a replace replaces all; empty removes all");
     replaces(&make().await).await;
     scenario("extension endpoints: need their app, and go when it does");
@@ -72,6 +74,32 @@ async fn round_trips<S: HasApps + HasExtensionEndpoints>(ports: &S) {
         repo.get(&key("app_other"), "payments.start").await,
         Ok(None)
     );
+}
+
+async fn lists_for_a_point<S: HasApps + HasExtensionEndpoints>(ports: &S) {
+    add_app(ports, "app_pay").await;
+    add_app(ports, "app_check").await;
+    add_app(ports, "app_find").await;
+    let repo = ports.extension_endpoints();
+    let check = endpoint("checkout.validate", 1, "https://check.example/validate");
+    let pay = endpoint("checkout.validate", 1, "https://pay.example/validate");
+    repo.replace_for_app(&key("app_pay"), std::slice::from_ref(&pay))
+        .await
+        .unwrap();
+    repo.replace_for_app(&key("app_check"), std::slice::from_ref(&check))
+        .await
+        .unwrap();
+    repo.replace_for_app(
+        &key("app_find"),
+        &[endpoint("search.query", 1, "https://find.example/q")],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        repo.list_for_point("checkout.validate").await,
+        Ok(vec![(key("app_check"), check), (key("app_pay"), pay)])
+    );
+    assert_eq!(repo.list_for_point("payments.start").await, Ok(vec![]));
 }
 
 async fn replaces<S: HasApps + HasExtensionEndpoints>(ports: &S) {

@@ -47,6 +47,12 @@ pub trait ExtensionEndpointRepo {
     async fn list_for_app(&self, app: &AppKey) -> Result<Vec<ExtensionEndpoint>, RepoError>;
     /// Where `app` answers `point`, if it does.
     async fn get(&self, app: &AppKey, point: &str) -> Result<Option<ExtensionEndpoint>, RepoError>;
+    /// Every app's endpoint for `point`, by app key: one read for a flow asking every app
+    /// that answers a point.
+    async fn list_for_point(
+        &self,
+        point: &str,
+    ) -> Result<Vec<(AppKey, ExtensionEndpoint)>, RepoError>;
     /// Makes `endpoints` `app`'s endpoints, all at once (none removes them all). The
     /// caller makes sure each point appears once. Refused with
     /// `Reference(keys::ENDPOINT_APP)` when the app doesn't exist; an app's endpoints

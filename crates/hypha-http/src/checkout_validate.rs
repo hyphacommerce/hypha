@@ -4,7 +4,11 @@
 //! app is sent is redacted for its grant, and the digest of that is what its kept answer
 //! is matched by.
 
-use hypha_apps::{App, AppKey, AppRepo, HasApps, HasExtensionEndpoints, endpoint_of};
+use std::sync::OnceLock;
+
+use hypha_apps::{
+    App, AppKey, AppRepo, ExtensionEndpointRepo, HasApps, HasExtensionEndpoints, endpoint_of,
+};
 use hypha_cart::{LineStatus, PricedCart};
 use hypha_checkout::{CheckoutValidators, Validator};
 use hypha_checkout_rules::{
@@ -33,6 +37,39 @@ pub struct HostValidators<'a, P> {
     pub endpoints: HostAppEndpoints<'a, P>,
     pub caller: HostExtensions<'a>,
     pub env: &'a HostEnv,
+    /// The apps answering the point, with their settings: read once per request, though
+    /// a request asks for its cart's validators more than once (refreshing them, then the
+    /// response's messages).
+    pub asked: OnceLock<Vec<(App, ValidationAppSetting)>>,
+}
+
+impl<P> HostValidators<'_, P>
+where
+    P: HasCheckoutSettings + HasApps + HasExtensionEndpoints,
+{
+    async fn asked(&self) -> Result<&[(App, ValidationAppSetting)], RepoError> {
+        if let Some(found) = self.asked.get() {
+            return Ok(found);
+        }
+        let apps = answering(self.ports).await?;
+        let settings = if apps.is_empty() {
+            CheckoutSettings::default()
+        } else {
+            self.ports
+                .checkout_settings()
+                .get()
+                .await?
+                .unwrap_or_default()
+        };
+        let found = apps
+            .into_iter()
+            .map(|app| {
+                let setting = settings.validation_app(app.key());
+                (app, setting)
+            })
+            .collect();
+        Ok(self.asked.get_or_init(|| found))
+    }
 }
 
 impl<P> CheckoutValidators for HostValidators<'_, P>
@@ -45,30 +82,19 @@ where
         &self,
         cart: &PricedCart,
     ) -> Result<Vec<Validator<ValidatedCart>>, RepoError> {
-        let apps = answering(self.ports).await?;
-        if apps.is_empty() {
-            return Ok(Vec::new());
-        }
-        let settings = self
-            .ports
-            .checkout_settings()
-            .get()
+        Ok(self
+            .asked()
             .await?
-            .unwrap_or_default();
-        Ok(apps
             .iter()
-            .filter_map(|app| {
-                let setting = settings.validation_app(app.key());
-                if !setting.enabled {
-                    return None;
-                }
+            .filter(|(_, setting)| setting.enabled)
+            .map(|(app, setting)| {
                 let body = validated_cart(cart, Redaction::for_app(app));
-                Some(Validator {
+                Validator {
                     app: app.key().clone(),
                     block_on_failure: setting.block_on_failure,
                     digest: digest(&body),
                     body,
-                })
+                }
             })
             .collect())
     }
@@ -136,17 +162,33 @@ where
     }
 }
 
-/// The apps answering `checkout.validate` now, by key.
+/// The apps answering `checkout.validate` now, by key: `endpoint_of`'s rule, with the
+/// hand-made apps' endpoints read in one query rather than one per app.
 async fn answering<P: HasApps + HasExtensionEndpoints>(ports: &P) -> Result<Vec<App>, RepoError> {
     let Some(point) = known(CheckoutValidate::NAME) else {
         return Ok(Vec::new());
     };
-    let mut found = Vec::new();
-    for app in ports.apps().list().await? {
-        if endpoint_of(ports, &app, point).await?.is_some() {
-            found.push(app);
-        }
-    }
+    let apps = ports.apps().list().await?;
+    let set = ports
+        .extension_endpoints()
+        .list_for_point(point.name)
+        .await?;
+    let mut found: Vec<App> = apps
+        .into_iter()
+        .filter(|app| {
+            if !app.may_answer(point.scope) {
+                return false;
+            }
+            match app.manifest_endpoints() {
+                Some(registered) => registered
+                    .iter()
+                    .any(|e| e.point == point.name && e.version == point.version),
+                None => set
+                    .iter()
+                    .any(|(key, e)| key == app.key() && e.version == point.version),
+            }
+        })
+        .collect();
     found.sort_by(|a, b| a.key().as_str().cmp(b.key().as_str()));
     Ok(found)
 }

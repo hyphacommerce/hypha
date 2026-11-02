@@ -472,6 +472,7 @@ impl<S> AppState<S> {
             endpoints: self.app_endpoints(ports),
             caller: self.extensions(),
             env: &self.env,
+            asked: std::sync::OnceLock::new(),
         }
     }
 
