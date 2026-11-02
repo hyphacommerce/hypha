@@ -741,3 +741,44 @@ One branch per step, stacked with `gh stack` from `feat/address-validation`:
    `@hyphacommerce/app`'s types and the guide's example.
 7. **Seed and docs:** the demo store gets rules (no PO boxes for express, house number in
    NL/DE), a test validation app in e2e, the site's docs page.
+
+## As built
+
+### Step 1: formats
+
+- **The data:** Shopify/worldwide at `15d9289e57cb49f99a4f10e392c4114cd72cc06c`
+  (2026-10-28), MIT with CLDR's Unicode licence (`crates/hypha-addresses/src/generated/LICENSE.md`).
+  `scripts/address-data.mjs` reads only its YAML: 244 countries, 19 distinct form layouts,
+  1,124 regions. Labels come from each country's `en.yml`, over `_default/en.yml`'s.
+  Only one table is generated (`countries.rs`, about 200 KB of source); the release
+  Worker grew by 134,895 bytes raw (32,319,572 → 32,454,467) and 673 bytes gzipped.
+- **Worldwide's own rules, followed:** a postal code is required when `zip_requirement`
+  is `required`, or absent with a `zip_regex`; `recommended` and `optional` aren't. The
+  region is shown when the country's `format.edit` has it, listed when it has zones, and
+  required unless `province_optional`. Countries with one postal code filled in
+  (`zip_autofill_enabled`) don't show it, so `PostalCode` has no "filled" case.
+- **Patterns:** `\d` becomes `[0-9]` (Ruby's is ASCII), runs of spaces collapse like the
+  codes compared against them, unanchored patterns are anchored, and a negative
+  lookahead (Denmark's and five others') becomes a separate pattern a code must not match
+  at its start. A test holds every country's example to its pattern.
+- **Region against postal code:** compared on the code without spaces and hyphens, also
+  without a leading country prefix (`ES-28039`); a code no region's prefixes place is
+  never a mismatch, since the data isn't complete everywhere.
+- **Where the check runs:** carts' shipping address, customers' address books (admin and
+  account) and locations, through core's `AddressFormats::validate`, which reports
+  `Address::new`'s problems and the country's together. The store's legal address and
+  suppliers' addresses keep `Address::new`'s structural rules only: neither is shipped
+  to. Format warnings (`house_number_missing`) are computed by `check` and reach carts as
+  messages in step 2.
+- **Problems on the wire:** `code` is `required`, `too_long`, `invalid_format`,
+  `unknown_region` or `region_mismatch`; a wrong country is still `invalid_country_code`
+  / `unknown_country_code` alone. Messages use the country's labels ("Enter a valid ZIP
+  code, like 90210").
+- **Forms:** `GET …/address-formats/{country}` answers every shown field's label (not
+  only the overrides), `postal_code` (`none`, `required`, `recommended`, `optional`) and
+  `house_number_required` beside §3.5's fields; an unknown country is `404`. The
+  storefront's checkout and account forms load the page's country's form on the server;
+  the admin's customer address dialog gets the forms of the book's countries from its
+  page and asks for a newly chosen country's through a server action.
+- **Test data:** Croatian and Slovenian postal codes are now required, so e2e's and the
+  route tests' addresses gained them; the seed's Milan shopper gained `MI`.
