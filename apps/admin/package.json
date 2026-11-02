@@ -20,9 +20,9 @@
     "theme:check": "astryx theme build theme/hyphaTheme.ts --out theme/hypha.css --check"
   },
   "dependencies": {
-    "@astryxdesign/core": "0.7.1",
-    "@astryxdesign/richtext": "0.7.1",
-    "@astryxdesign/theme-neutral": "0.7.1",
+    "@astryxdesign/core": "0.7.3",
+    "@astryxdesign/richtext": "0.7.3",
+    "@astryxdesign/theme-neutral": "0.7.3",
     "@codemirror/lang-html": "6.4.12",
     "@codemirror/language": "6.13.1",
     "@codemirror/state": "6.7.6",
@@ -56,7 +56,7 @@
     "vinext": "1.2.1"
   },
   "devDependencies": {
-    "@astryxdesign/cli": "0.7.1",
+    "@astryxdesign/cli": "0.7.3",
     "@cloudflare/vite-plugin": "2.0.0-beta.sha-67fa336fd",
     "@types/node": "26.6.5",
     "@types/react": "19.3.0",
