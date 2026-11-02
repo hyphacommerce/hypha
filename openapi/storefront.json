@@ -4560,7 +4560,7 @@
       "name": "MIT OR Apache-2.0"
     },
     "title": "Hypha Storefront API",
-    "version": "0.1.0-beta.3"
+    "version": "0.1.0-beta.4"
   },
   "openapi": "3.1.0",
   "paths": {
