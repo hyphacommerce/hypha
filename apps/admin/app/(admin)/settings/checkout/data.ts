@@ -2,7 +2,8 @@
 // pickers and the list's sentences.
 
 import { flatten } from "@/lib/categories";
-import type { RuleOptions } from "@/lib/checkout-rules";
+import type { AddressFormat } from "@/lib/address";
+import type { RuleForm, RuleOptions } from "@/lib/checkout-rules";
 import { loadCountries, type sessionClient } from "@/lib/hypha";
 import { countryOptions } from "@/lib/regions";
 
@@ -22,6 +23,7 @@ export async function loadRuleOptions(client: Client): Promise<RuleOptions> {
   ]);
   return {
     countries: countryOptions(countries),
+    defaultCountry: markets.data?.items?.[0]?.countries?.[0],
     markets: (markets.data?.items ?? []).map((m) => ({
       value: m.id,
       label: m.name,
@@ -59,4 +61,24 @@ export async function loadAnsweringApps(
     }),
   );
   return answering.filter((a) => a !== null);
+}
+
+/**
+ * The address form "Try an address" starts with: the first country the rule names, else
+ * the first market's, as the store's shoppers most likely are.
+ */
+export async function loadTryFormat(
+  client: Client,
+  rule: RuleForm,
+  options: RuleOptions,
+): Promise<AddressFormat | null> {
+  const country =
+    (rule.countriesMode === "include" ? rule.countries[0] : undefined) ??
+    options.defaultCountry ??
+    options.countries[0]?.value;
+  if (!country) return null;
+  const { data } = await client.GET("/admin/address-formats/{country}", {
+    params: { path: { country } },
+  });
+  return data ?? null;
 }

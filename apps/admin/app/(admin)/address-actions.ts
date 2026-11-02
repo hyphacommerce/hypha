@@ -1,10 +1,10 @@
 "use server";
 
-// Address autocomplete for the admin's address forms (customers' address books, an
+// Countries' address forms, and address autocomplete for the admin's address forms (customers' address books, an
 // order's shipping address): the store's autocomplete app, through the API, so its
 // provider's keys stay with the app.
 
-import { type AddressValues, type FieldProblems, asField } from "@/lib/address";
+import { type AddressFormat, type AddressValues, type FieldProblems, asField } from "@/lib/address";
 import { sessionClient } from "@/lib/hypha";
 
 /** An address the autocomplete app offers for what staff typed into line 1. */
@@ -65,4 +65,13 @@ export async function resolveAddress(input: {
     },
     problems,
   };
+}
+
+/** A country's address form, for a form once a country is chosen. */
+export async function loadAddressFormat(country: string): Promise<AddressFormat | null> {
+  const client = await sessionClient();
+  const { data } = await client.GET("/admin/address-formats/{country}", {
+    params: { path: { country } },
+  });
+  return data ?? null;
 }

@@ -20,6 +20,7 @@ import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
+import { loadAddressFormat } from "@/app/(admin)/address-actions";
 import { AddressFields } from "@/components/address-fields";
 import {
   type AddressFormat,
@@ -29,7 +30,7 @@ import {
 } from "@/lib/address";
 import { type Country, countryName, countryOptions } from "@/lib/regions";
 
-import { type AddressRequest, loadAddressFormat, removeAddress, saveAddress } from "../actions";
+import { type AddressRequest, removeAddress, saveAddress } from "../actions";
 
 type Address = AdminSchemas["AddressResponse"];
 

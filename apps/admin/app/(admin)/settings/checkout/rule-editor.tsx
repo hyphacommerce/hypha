@@ -22,6 +22,8 @@ import { TrashIcon } from "@heroicons/react/24/outline";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
+import { loadAddressFormat } from "@/app/(admin)/address-actions";
+import { AddressFields } from "@/components/address-fields";
 import { useCurrencies } from "@/components/currencies";
 import { ProductPicker } from "@/components/product-picker";
 import {
@@ -38,6 +40,13 @@ import {
   marketCurrencies,
   toBody,
 } from "@/lib/checkout-rules";
+import {
+  ADDRESS_FIELDS,
+  type AddressFormat,
+  type AddressValues,
+  type FieldProblems,
+  asField,
+} from "@/lib/address";
 
 import { type RuleProblems, createRule, tryAddress, updateRule } from "./actions";
 
@@ -51,11 +60,14 @@ export function RuleEditor({
   options,
   productNames,
   canWrite,
+  tryFormat,
 }: {
   /** The saved rule's ID; none for a new one. */
   id?: string;
   initial: RuleForm;
   options: RuleOptions;
+  /** The address form "Try an address" starts with. */
+  tryFormat: AddressFormat | null;
   /** Titles of the products the rule names, by ID. */
   productNames: Record<string, string>;
   canWrite: boolean;
@@ -282,7 +294,7 @@ export function RuleEditor({
         )}
       </VStack>
 
-      <TryPanel id={id} form={form} options={options} />
+      <TryPanel id={id} form={form} options={options} initialFormat={tryFormat} />
     </Grid>
   );
 }
@@ -550,8 +562,12 @@ function ConditionRow({
   );
 }
 
-const EMPTY_ADDRESS = {
+// Names never decide a rule, so the panel doesn't ask for them: the last name is there
+// for the format's required field.
+const EMPTY_ADDRESS: AddressValues = {
+  first_name: "",
   last_name: "Test",
+  company: "",
   line1: "",
   line2: "",
   city: "",
@@ -560,15 +576,39 @@ const EMPTY_ADDRESS = {
   phone: "",
 };
 
+/** The fields the panel asks for. */
+const TRIED = new Set<string>(
+  ADDRESS_FIELDS.filter((f) => f !== "first_name" && f !== "last_name" && f !== "company"),
+);
+
+/** `format` without the names, and with the phone (a rule may ask for one) where it has none. */
+function tryLayout(format: AddressFormat): AddressFormat {
+  const rows = format.rows.map((row) => row.filter((f) => TRIED.has(f))).filter((r) => r.length);
+  if (!rows.some((row) => row.includes("phone"))) rows.push(["phone"]);
+  return { ...format, rows };
+}
+
 /** An empty input as `null`, as the API takes an absent field. */
 function blank(value: string): string | null {
   return value.trim() === "" ? null : value;
 }
 
 /** "Try an address": what a cart would show for it, with the rule as it stands. */
-function TryPanel({ id, form, options }: { id?: string; form: RuleForm; options: RuleOptions }) {
+function TryPanel({
+  id,
+  form,
+  options,
+  initialFormat,
+}: {
+  id?: string;
+  form: RuleForm;
+  options: RuleOptions;
+  initialFormat: AddressFormat | null;
+}) {
   const currencies = useCurrencies();
-  const [country, setCountry] = useState(form.countries[0] ?? options.countries[0]?.value ?? "");
+  const [country, setCountry] = useState(initialFormat?.country ?? "");
+  // The country's form: its fields, labels, required fields and regions.
+  const [format, setFormat] = useState(initialFormat);
   const [address, setAddress] = useState(EMPTY_ADDRESS);
   const [email, setEmail] = useState("");
   const [market, setMarket] = useState<string>();
@@ -576,14 +616,22 @@ function TryPanel({ id, form, options }: { id?: string; form: RuleForm; options:
   const [result, setResult] = useState<TestResult>();
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
-  const field = (key: keyof typeof EMPTY_ADDRESS, label: string) => (
-    <TextInput
-      label={label}
-      isOptional={key !== "line1" && key !== "city"}
-      value={address[key]}
-      onChange={(value) => setAddress((a) => ({ ...a, [key]: value }))}
-    />
+  const [isLoadingFormat, startLoading] = useTransition();
+  // A format problem from the last try, under its field.
+  const problems: FieldProblems = Object.fromEntries(
+    (result?.problems ?? []).flatMap((p) => {
+      const field = asField(p.field);
+      return field ? [[field, p.message]] : [];
+    }),
   );
+
+  const chooseCountry = (next: string) => {
+    setCountry(next);
+    // Another country's region and postal code mean nothing here.
+    setAddress((a) => ({ ...a, province: "", postal_code: "" }));
+    setResult(undefined);
+    startLoading(async () => setFormat(await loadAddressFormat(next)));
+  };
 
   const run = () =>
     startTransition(async () => {
@@ -623,18 +671,22 @@ function TryPanel({ id, form, options }: { id?: string; form: RuleForm; options:
         <Selector
           label="Country"
           options={options.countries}
-          value={country}
-          onChange={setCountry}
+          value={country || undefined}
+          onChange={chooseCountry}
           hasSearch
         />
-        {field("line1", "Address")}
-        {field("line2", "Apartment, suite, etc.")}
-        <Grid columns={{ minWidth: 140, repeat: "fit" }} gap={3}>
-          {field("city", "City")}
-          {field("postal_code", "Postal code")}
-          {field("province", "Region code")}
-        </Grid>
-        {field("phone", "Phone")}
+        {format && (
+          <div style={{ opacity: isLoadingFormat ? 0.6 : 1 }}>
+            <AddressFields
+              format={tryLayout(format)}
+              values={address}
+              onChange={(field, value) => setAddress((a) => ({ ...a, [field]: value }))}
+              problems={problems}
+              tried={false}
+              onFill={(values) => setAddress((a) => ({ ...a, ...values }))}
+            />
+          </div>
+        )}
         <TextInput label="Email" isOptional value={email} onChange={setEmail} />
         {options.markets.length > 0 && (
           <Selector

@@ -8,7 +8,7 @@ import { formOf } from "@/lib/checkout-rules";
 import { loadCurrencies, loaded, requireStaff, sessionClient } from "@/lib/hypha";
 
 import { productSummaries } from "../../../../markets/price-lists/grid-data";
-import { loadRuleOptions } from "../../data";
+import { loadRuleOptions, loadTryFormat } from "../../data";
 import { RuleEditor } from "../../rule-editor";
 
 const BACK = [
@@ -45,13 +45,16 @@ async function Rule({ id }: { id: string }) {
     (found) => Object.fromEntries(found.map((p) => [p.id, p.title])),
     () => ({}),
   );
+  const initial = formOf(rule, currencies);
+  const tryFormat = await loadTryFormat(client, initial, options);
   return (
     <>
       <PageHeader title={rule.name} back={BACK} />
       <RuleEditor
         id={rule.id}
-        initial={formOf(rule, currencies)}
+        initial={initial}
         options={options}
+        tryFormat={tryFormat}
         productNames={names}
         canWrite={me.scopes.includes("checkout_rules:write")}
       />

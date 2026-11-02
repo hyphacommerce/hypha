@@ -18,6 +18,8 @@ export type Option = { value: string; label: string };
 /** What the editor's pickers offer. A list the role can't read is empty. */
 export type RuleOptions = {
   countries: Option[];
+  /** The first market's first country, where "Try an address" starts. */
+  defaultCountry?: string;
   markets: (Option & { currency: string })[];
   channels: Option[];
   /** Every zone's options, labelled "Zone › Option". */

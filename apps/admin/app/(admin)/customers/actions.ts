@@ -6,7 +6,7 @@
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { revalidatePath } from "next/cache";
 
-import { type AddressFormat, type FieldProblems, problemsOf } from "@/lib/address";
+import { type FieldProblems, problemsOf } from "@/lib/address";
 import { describe, sessionClient } from "@/lib/hypha";
 import { WELL_KNOWN, type WellKnown, suggestionBody } from "@/lib/well-known-fields";
 
@@ -58,15 +58,6 @@ export async function saveAddress(
   }
   refresh(customer);
   return {};
-}
-
-/** A country's address form, for the address dialog once a country is chosen. */
-export async function loadAddressFormat(country: string): Promise<AddressFormat | null> {
-  const client = await sessionClient();
-  const { data } = await client.GET("/admin/address-formats/{country}", {
-    params: { path: { country } },
-  });
-  return data ?? null;
 }
 
 /**
