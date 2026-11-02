@@ -136,7 +136,8 @@ checkout, and keeps the answer with the cart: your app is asked again only when 
 would be sent changes (the address and email are sent only if your grant has
 `customer_data:address` and `customer_data:email`). It needs `carts:read`. Answer within 2
 seconds with at most 20 messages; by default a failing app is skipped, and the merchant
-can make its failure block checkout instead.
+can make its failure block checkout instead. How messages, rules and the address points fit
+together is in [addresses and checkout rules](/docs/concepts/checkout-rules/).
 
 No wine to the Canary Islands, whose postal codes start with 35 and 38:
 

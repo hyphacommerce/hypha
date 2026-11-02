@@ -83,6 +83,23 @@ message beside the code. If a code's last use goes to someone else first, checko
 `409 discounts_changed` with the new total, and nothing is charged. The [storefront API
 reference](/docs/api/storefront/) lists every route.
 
+## Addresses and messages
+
+Render the address form from the country's format
+(`GET /storefront/address-formats/{country}`): its fields in rows and in order, which are
+required, the labels ("State", "Postcode", "Prefecture"), and the regions as a select
+where the country has a list. A shipping address that breaks the format is refused with
+`422 invalid_address` and `details.problems`, one per field, to show under each input.
+When `autocomplete` is true, `GET /storefront/address-suggestions` offers addresses as the
+shopper types line 1.
+
+Every cart carries `messages`, each with a `path` into the cart (`$.shipping_address.line1`,
+`$.shipping_groups[0]`, `$`): show each under what it names, errors and warnings apart.
+Errors are the merchant's checkout rules or an app saying the cart can't go yet; checkout
+then answers `409 checkout_blocked` with them, and so does starting the payment. When the
+store verifies addresses, `shipping_address_check.suggested` is the address to offer as
+"Did you mean …?". See [addresses and checkout rules](/docs/concepts/checkout-rules/).
+
 ## Prices, sales and promotions
 
 Product reads with a `country` give each variant its `price`, its `compare_at_price` (show
