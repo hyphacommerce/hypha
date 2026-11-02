@@ -29,7 +29,13 @@ import {
 import { AddressFields } from "@/components/address-fields";
 import { CartMessages } from "@/components/cart-messages";
 import { Skeleton } from "@/components/skeletons";
-import { ADDRESS_FIELDS, type AddressFormat, type FieldProblems, missingIn } from "@/lib/address";
+import {
+  ADDRESS_FIELDS,
+  type AddressFormat,
+  type AddressValues,
+  type FieldProblems,
+  missingIn,
+} from "@/lib/address";
 import { type CartMessage, type PlacedMessages, statusOf } from "@/lib/messages";
 import { saleLabel } from "@/lib/prices";
 import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
@@ -80,6 +86,13 @@ export function DetailsForm({
     setEdited((e) => (e.has(key) ? e : new Set(e).add(key)));
     // A field changed since the save no longer has the problem it reported.
     if (key !== "email") setProblems((p) => (p?.[key] ? { ...p, [key]: undefined } : p));
+  };
+  // A picked autocomplete suggestion: its fields replace what's typed, and what saving
+  // them would refuse shows under each.
+  const fill = (values: Partial<AddressValues>, found: FieldProblems) => {
+    setDetails((d) => ({ ...d, ...values }));
+    setEdited((e) => new Set([...e, ...Object.keys(values)]));
+    setProblems(found);
   };
   const required = (key: keyof Details) =>
     tried && details[key].trim() === ""
@@ -187,6 +200,7 @@ export function DetailsForm({
           messages={fieldMessages}
           tried={tried}
           size="lg"
+          onFill={fill}
         />
       </VStack>
       {error && <Banner status="error" title={error} />}

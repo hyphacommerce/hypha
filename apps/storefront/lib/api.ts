@@ -97,7 +97,8 @@ export async function countryOf(folder: string): Promise<Country> {
   return country;
 }
 
-/** A country's address form: the same for every store until a release changes it. */
+/** A country's address form: its fields change only with a release, its `autocomplete`
+ * with the store's settings, so it's read again as often as other cached reads. */
 export const loadAddressFormat = cache((country: string) =>
   unstable_cache(
     async (): Promise<AddressFormat> =>
@@ -107,7 +108,7 @@ export const loadAddressFormat = cache((country: string) =>
         }),
       ),
     ["address-format", country],
-    { revalidate: 86_400 },
+    { revalidate: FRESH_SECONDS },
   )(),
 );
 

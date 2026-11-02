@@ -180,6 +180,10 @@ function AddressForm({
           onChange={set}
           problems={problems}
           tried={tried}
+          onFill={(filled, found) => {
+            setValues((v) => ({ ...v, ...filled }));
+            setProblems(found);
+          }}
         />
         <CheckboxInput
           label="Use as my shipping address"

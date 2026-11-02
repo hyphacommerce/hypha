@@ -4,13 +4,17 @@
 // /storefront/address-formats/{country}`): its order, rows, labels and required fields,
 // the region as a select where the country lists regions. Problems come from the API's
 // `invalid_address` (`details.problems`), each under its field, and so do the cart's
-// messages about a field (a missing house number), until the field changes.
+// messages about a field (a missing house number), until the field changes. Where the
+// store has an autocomplete app, line 1 offers addresses as the shopper types, and
+// picking one fills the form (`onFill`).
 
 import { Grid } from "@astryxdesign/core/Grid";
 import { Selector } from "@astryxdesign/core/Selector";
 import { VStack } from "@astryxdesign/core/Stack";
 import { TextInput } from "@astryxdesign/core/TextInput";
 
+import { resolveAddress, suggestAddresses } from "@/app/[country]/actions";
+import { AddressLineInput } from "@/components/address-line";
 import {
   type AddressField,
   type AddressFormat,
@@ -31,6 +35,7 @@ export function AddressFields({
   messages,
   tried,
   size,
+  onFill,
 }: {
   format: AddressFormat;
   values: AddressValues;
@@ -42,6 +47,9 @@ export function AddressFields({
   /** Whether a save was tried: empty required fields are marked from then on. */
   tried: boolean;
   size?: "lg";
+  /** A picked suggestion's fields, with what saving them would refuse. Without it, line 1
+   * offers no suggestions. */
+  onFill?: (values: Partial<AddressValues>, problems: FieldProblems) => void;
 }) {
   const required = new Set(format.required);
   const status = (field: Field) => {
@@ -55,6 +63,29 @@ export function AddressFields({
   const input = (field: Field) => {
     const label = format.labels[field] ?? field;
     const isRequired = required.has(field);
+    if (field === "line1" && format.autocomplete && onFill) {
+      return (
+        <AddressLineInput
+          key={field}
+          size={size}
+          label={label}
+          isRequired={isRequired}
+          value={values.line1}
+          onChange={(value) => onChange("line1", value)}
+          suggest={(q, session) => suggestAddresses({ country: format.country, q, session })}
+          onPick={async (suggestion, session) => {
+            const resolved = await resolveAddress({
+              country: format.country,
+              id: suggestion.id,
+              session,
+            });
+            // The app couldn't give it: the shopper finishes the line by hand.
+            if (resolved) onFill(resolved.values, resolved.problems);
+          }}
+          status={status(field)}
+        />
+      );
+    }
     if (field === "province" && format.regions.length > 0) {
       return (
         <Selector

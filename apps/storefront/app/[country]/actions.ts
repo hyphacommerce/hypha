@@ -13,7 +13,7 @@ import { redirect } from "next/navigation";
 
 import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 
-import { type AddressValues, type FieldProblems } from "@/lib/address";
+import { type AddressValues, type FieldProblems, asField } from "@/lib/address";
 import { api, describe, loadCountries, refusedWith, shopperApi } from "@/lib/api";
 import { type ListingPage, readListingPage } from "@/lib/listing-data";
 import { formatRange } from "@/lib/money";
@@ -422,6 +422,71 @@ export async function suggest(country: string, q: string): Promise<Suggestion[]>
     href: link(country, `/p/${hit.handle}`),
     image: hit.image?.kind === "image" ? (hit.image.thumbnail_url ?? hit.image.url) : null,
   }));
+}
+
+/** An address the store's autocomplete app offers while the shopper types line 1. */
+export type AddressSuggestion = { id: string; label: string; description: string | null };
+
+/**
+ * Addresses for what the shopper typed into line 1, from the store's autocomplete app
+ * (none when it has no app, it fails, or the shopper typed too little). `session` is the
+ * form's token for this address, the same until one is picked.
+ */
+export async function suggestAddresses(input: {
+  country: string;
+  q: string;
+  session: string;
+}): Promise<AddressSuggestion[]> {
+  const q = input.q.trim();
+  if (q.length < 3 || q.length > 200) return [];
+  const { data } = await (
+    await shopperApi()
+  ).GET("/storefront/address-suggestions", {
+    params: { query: { q, country: input.country, session: input.session } },
+  });
+  return (data?.suggestions ?? []).map((s) => ({
+    id: s.id,
+    label: s.label,
+    description: s.description ?? null,
+  }));
+}
+
+/** A picked suggestion as the form's values, with what saving it would refuse. */
+export type ResolvedAddress = {
+  values: Partial<AddressValues>;
+  problems: FieldProblems;
+};
+
+/** The picked suggestion's address, or `null` when the app couldn't give it (the shopper
+ * types it then). */
+export async function resolveAddress(input: {
+  country: string;
+  id: string;
+  session: string;
+}): Promise<ResolvedAddress | null> {
+  const { data } = await (
+    await shopperApi()
+  ).GET("/storefront/address-suggestions/{id}", {
+    params: { path: { id: input.id }, query: { country: input.country, session: input.session } },
+  });
+  if (!data) return null;
+  const a = data.address;
+  const problems: FieldProblems = {};
+  for (const p of data.problems) {
+    const field = asField(p.field);
+    if (field) problems[field] ??= p.message;
+  }
+  return {
+    values: {
+      company: a.company ?? "",
+      line1: a.line1,
+      line2: a.line2 ?? "",
+      city: a.city,
+      province: a.province ?? "",
+      postal_code: a.postal_code ?? "",
+    },
+    problems,
+  };
 }
 
 /**

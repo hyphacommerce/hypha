@@ -601,3 +601,51 @@ body {
 .shop-sign-in-note * {
   text-align: center;
 }
+
+/* Address autocomplete: the suggestions under line 1 (`components/address-line.tsx`). */
+.shop-address-line {
+  position: relative;
+}
+
+.shop-address-options {
+  position: absolute;
+  z-index: 20;
+  inset-inline: 0;
+  top: calc(100% + var(--spacing-1, 4px));
+  margin: 0;
+  padding: var(--spacing-1, 4px);
+  list-style: none;
+  background: var(--color-background-body);
+  border: 1px solid var(--color-border-emphasized);
+  border-radius: var(--radius-container);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+}
+
+.shop-address-options > button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: var(--spacing-2, 8px) var(--spacing-3, 12px);
+  border: 0;
+  border-radius: var(--radius-inner);
+  background: none;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.shop-address-options > button:focus-visible,
+.shop-address-options > button:hover {
+  background: var(--color-background-muted);
+  outline: none;
+}
+
+.shop-address-option-label {
+  color: var(--color-text-primary);
+}
+
+.shop-address-option-description {
+  color: var(--color-text-secondary);
+  font-size: 0.875em;
+}
