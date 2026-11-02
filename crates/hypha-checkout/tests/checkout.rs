@@ -2532,3 +2532,257 @@ fn a_rule_about_a_category_reads_the_lines_categories_with_their_ancestors() {
         )]
     );
 }
+
+// ---- validation apps ----
+
+/// One validation app: its digest is the cart's total, so a changed cart is a new question.
+struct OneApp {
+    blocks: bool,
+    answer: Result<Vec<Message>, String>,
+    asked: std::cell::Cell<u32>,
+}
+
+fn validating_app() -> hypha_core::AppKey {
+    hypha_core::AppKey::new("app_rules").unwrap()
+}
+
+impl OneApp {
+    fn saying(answer: Result<Vec<Message>, String>, blocks: bool) -> Self {
+        Self {
+            blocks,
+            answer,
+            asked: std::cell::Cell::new(0),
+        }
+    }
+}
+
+impl hypha_checkout::CheckoutValidators for OneApp {
+    type Body = ();
+
+    async fn validators(
+        &self,
+        cart: &hypha_cart::PricedCart,
+    ) -> Result<Vec<hypha_checkout::Validator<()>>, hypha_core::RepoError> {
+        Ok(vec![hypha_checkout::Validator {
+            app: validating_app(),
+            block_on_failure: self.blocks,
+            digest: cart.total.amount().to_string(),
+            body: (),
+        }])
+    }
+
+    async fn ask(
+        &self,
+        _validator: &hypha_checkout::Validator<()>,
+        _step: hypha_core::ValidationStep,
+    ) -> Result<Vec<Message>, String> {
+        self.asked.set(self.asked.get() + 1);
+        self.answer.clone()
+    }
+}
+
+fn app_says(severity: Severity) -> Message {
+    Message::new(
+        severity,
+        MessageCode::new("alcohol_restricted").unwrap(),
+        MessagePath::ShippingAddressField(AddressField::PostalCode),
+        "We can't ship alcohol to this postal code.",
+        MessageSource::App {
+            app: validating_app(),
+        },
+    )
+    .unwrap()
+}
+
+fn checkout_checked(world: &World, cart: CartId, app: &OneApp) -> Result<Placed, CommandError> {
+    let input = Checkout {
+        cart,
+        expected_total: None,
+        idempotency: None,
+        return_url: None,
+    };
+    block_on(checkout(
+        &Ctx::system(),
+        &world.ports,
+        &world.ids,
+        &world.clock,
+        &NoRateProviders,
+        &(ManualProvider,),
+        &hypha_checkout::Checks {
+            formats: Formats,
+            validators: app,
+        },
+        input,
+    ))
+    .map(|placed| placed.value)
+}
+
+fn validate(world: &World, cart: CartId, app: &OneApp, step: hypha_core::ValidationStep) {
+    let mut priced = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();
+    block_on(hypha_checkout::validate_cart(
+        &Ctx::system(),
+        &world.ports,
+        &hypha_checkout::Checks {
+            formats: Formats,
+            validators: app,
+        },
+        &world.clock,
+        &mut priced,
+        step,
+    ))
+    .unwrap();
+}
+
+fn kept_checks(world: &World, cart: CartId) -> Vec<hypha_core::AppCheck> {
+    block_on(world.carts.get(cart))
+        .unwrap()
+        .unwrap()
+        .app_checks()
+        .to_vec()
+}
+
+#[test]
+fn an_apps_error_blocks_checkout_before_anything_is_reserved() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let app = OneApp::saying(Ok(vec![app_says(Severity::Error)]), false);
+    assert_eq!(
+        checkout_checked(&world, cart, &app),
+        Err(CommandError::CheckoutBlocked {
+            cart,
+            messages: vec![app_says(Severity::Error)],
+        })
+    );
+    assert_eq!(world.mug_reserved(), 0);
+}
+
+#[test]
+fn a_refused_checkout_keeps_the_apps_answer() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let app = OneApp::saying(Ok(vec![app_says(Severity::Error)]), false);
+    checkout_checked(&world, cart, &app).unwrap_err();
+    checkout_checked(&world, cart, &app).unwrap_err();
+    assert_eq!(app.asked.get(), 1);
+    assert_eq!(
+        kept_checks(&world, cart)[0].messages,
+        vec![app_says(Severity::Error)]
+    );
+}
+
+#[test]
+fn an_apps_warning_lets_checkout_go_on() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let app = OneApp::saying(Ok(vec![app_says(Severity::Warning)]), false);
+    assert!(checkout_checked(&world, cart, &app).is_ok());
+}
+
+#[test]
+fn an_answer_for_the_same_cart_isnt_asked_again_at_checkout() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let app = OneApp::saying(Ok(Vec::new()), false);
+    validate(&world, cart, &app, hypha_core::ValidationStep::Address);
+    checkout_checked(&world, cart, &app).unwrap();
+    assert_eq!(app.asked.get(), 1);
+}
+
+#[test]
+fn a_cart_changed_since_is_asked_again_at_checkout() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let app = OneApp::saying(Ok(Vec::new()), false);
+    validate(&world, cart, &app, hypha_core::ValidationStep::Address);
+    world.add(cart, "cup", 1);
+    checkout_checked(&world, cart, &app).unwrap();
+    assert_eq!(app.asked.get(), 2);
+}
+
+#[test]
+fn a_kept_answer_shows_on_the_cart() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let app = OneApp::saying(Ok(vec![app_says(Severity::Warning)]), false);
+    validate(&world, cart, &app, hypha_core::ValidationStep::Address);
+    let priced = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();
+    let checks = hypha_checkout::Checks {
+        formats: Formats,
+        validators: &app,
+    };
+    assert_eq!(
+        block_on(cart_messages(&world.ports, &checks, &priced)).unwrap(),
+        vec![app_says(Severity::Warning)]
+    );
+}
+
+#[test]
+fn a_failing_app_that_doesnt_block_lets_checkout_go_on() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let app = OneApp::saying(Err("no answer within 2 s".to_string()), false);
+    assert!(checkout_checked(&world, cart, &app).is_ok());
+}
+
+#[test]
+fn a_failing_app_that_blocks_stops_checkout() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let app = OneApp::saying(Err("no answer within 2 s".to_string()), true);
+    assert_eq!(
+        checkout_checked(&world, cart, &app),
+        Err(CommandError::CheckoutBlocked {
+            cart,
+            messages: vec![Message::validation_unavailable(&validating_app())],
+        })
+    );
+}
+
+#[test]
+fn a_failed_answer_is_asked_again_at_checkout() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let failing = OneApp::saying(Err("no answer within 2 s".to_string()), true);
+    validate(&world, cart, &failing, hypha_core::ValidationStep::Address);
+    let back = OneApp::saying(Ok(Vec::new()), true);
+    assert!(checkout_checked(&world, cart, &back).is_ok());
+    assert_eq!(back.asked.get(), 1);
+}
+
+#[test]
+fn an_apps_error_stops_its_payment_from_starting() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    pay_by_card(&world, cart);
+    let card = CardApp::default();
+    let app = OneApp::saying(Ok(vec![app_says(Severity::Error)]), false);
+    let started = block_on(start_cart_payment(
+        &world.ports.storefront(),
+        &world.ports,
+        &world.ids,
+        &world.clock,
+        &NoRateProviders,
+        &(ManualProvider, &card),
+        &hypha_checkout::Checks {
+            formats: Formats,
+            validators: &app,
+        },
+        StartCartPayment {
+            cart,
+            expected_total: None,
+            return_url: None,
+        },
+    ));
+    assert_eq!(
+        started.map(|_| ()),
+        Err(CommandError::CheckoutBlocked {
+            cart,
+            messages: vec![app_says(Severity::Error)],
+        })
+    );
+    assert!(
+        block_on(world.payments.list_for_cart(cart))
+            .unwrap()
+            .is_empty()
+    );
+}

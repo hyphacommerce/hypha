@@ -336,6 +336,7 @@ fn empty_in_croatia(
         subtotal: eur(0),
         shipping_address: None,
         address_check: None,
+        app_checks: Vec::new(),
         shipping_groups: vec![],
         shipping_total: eur(0),
         discounts: vec![],

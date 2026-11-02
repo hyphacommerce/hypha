@@ -1033,6 +1033,7 @@ dependencies = [
 name = "hypha-checkout"
 version = "0.1.0-beta.2"
 dependencies = [
+ "futures-util",
  "hypha-addresses",
  "hypha-cart",
  "hypha-categories",

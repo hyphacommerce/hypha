@@ -10,7 +10,7 @@ use hypha_core::{
     Attempts, AuthError, CartId, Clock, Ctx, CustomerId, ErrorCode, HasBatch, HasIdempotency,
     IdGenerator, IdempotencyError, IdempotencyRecord, IdempotencyRequest, Idempotent, Message,
     Money, OrderId, OrderLineId, PaymentId, PaymentMethodId, RepoError, Scope, StageIdempotency,
-    UnitCost, VariantId, Version, Versioned, earlier_id,
+    UnitCost, ValidationStep, VariantId, Version, Versioned, earlier_id,
 };
 use hypha_customers::{
     Channel, ConsentChange, ConsentSource, ConsentState, Customer, CustomerRepo, OptInLevel,
@@ -36,6 +36,7 @@ use thiserror::Error;
 pub(crate) use crate::messages::refuse_errors;
 use crate::messages::{CartChecks, cart_messages};
 use crate::start::{Payer, refresh, release, restart, start};
+use crate::validation::refreshed_checks;
 
 /// The operation name checkout's idempotency records carry.
 pub const CHECKOUT: &str = "checkout";
@@ -605,7 +606,7 @@ pub(crate) async fn ready<
     if !unavailable.is_empty() {
         return Err(CommandError::Unavailable { lines: unavailable });
     }
-    let reading = renew_expired_quote(
+    let mut reading = renew_expired_quote(
         ports,
         rates,
         clock,
@@ -625,6 +626,21 @@ pub(crate) async fn ready<
         });
     }
     let method = crate::payment::checkout_method(ports, payments, &cart, &reading.priced).await?;
+    // The validation apps' stale answers are asked again, and the fresh ones decide. They're
+    // kept at once, so a refused checkout or a retry doesn't ask again for the same cart.
+    if let Some(fresh) = refreshed_checks(
+        checks.validators(),
+        clock,
+        &reading.priced,
+        ValidationStep::Checkout,
+    )
+    .await?
+    {
+        cart.set_app_checks(fresh.clone())
+            .map_err(hypha_cart::CommandError::from)?;
+        ports.carts().update(&mut cart).await?;
+        reading.priced.app_checks = fresh;
+    }
     let messages = cart_messages(ports, checks, &reading.priced).await?;
     Ok(Ready {
         cart,

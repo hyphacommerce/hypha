@@ -7,7 +7,10 @@ use crate::{
     error::CheckoutRuleError,
     repo::{CheckoutRuleRepo, CheckoutSettingsRepo, HasCheckoutRules, HasCheckoutSettings},
     rule::{CheckoutRule, MAX_RULES, RuleAppliesTo, RuleCondition, RuleDraft, RuleOutcome},
-    settings::{AUTOCOMPLETE_POINTS, CheckoutSettings, VERIFY_POINT},
+    settings::{
+        AUTOCOMPLETE_POINTS, CheckoutSettings, MAX_VALIDATION_APPS, VALIDATE_POINT, VERIFY_POINT,
+        ValidationAppSetting,
+    },
 };
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -30,6 +33,12 @@ pub enum CommandError {
         "{0} isn't installed, enabled and granted to answer address.suggest and address.resolve"
     )]
     AutocompleteAppUnavailable(AppKey),
+    #[error("{0} isn't installed, enabled and granted to answer checkout.validate")]
+    ValidationAppUnavailable(AppKey),
+    #[error("{0} is named twice among the validation apps")]
+    DuplicateValidationApp(AppKey),
+    #[error("at most {max} apps validate checkouts; remove one first")]
+    TooManyValidationApps { max: usize },
 }
 
 impl ErrorCode for CommandError {
@@ -43,6 +52,9 @@ impl ErrorCode for CommandError {
             CommandError::AppKey(e) => e.code(),
             CommandError::VerificationAppUnavailable(_) => "verification_app_unavailable",
             CommandError::AutocompleteAppUnavailable(_) => "autocomplete_app_unavailable",
+            CommandError::ValidationAppUnavailable(_) => "validation_app_unavailable",
+            CommandError::DuplicateValidationApp(_) => "duplicate_validation_app",
+            CommandError::TooManyValidationApps { .. } => "too_many_validation_apps",
         }
     }
 }
@@ -172,6 +184,19 @@ pub async fn get_checkout_settings<S: HasCheckoutSettings>(
     Ok(ports.checkout_settings().get().await?.unwrap_or_default())
 }
 
+/// Whether one more app may start answering `checkout.validate`, with `others` answering it
+/// already (`too_many_validation_apps` past `MAX_VALIDATION_APPS`). Asked where an app
+/// gains the point: a grant approved, endpoints set by hand.
+pub fn room_for_validation_app(others: usize) -> Result<(), CommandError> {
+    if others >= MAX_VALIDATION_APPS {
+        Err(CommandError::TooManyValidationApps {
+            max: MAX_VALIDATION_APPS,
+        })
+    } else {
+        Ok(())
+    }
+}
+
 /// Changes only what's `Some`, like a JSON Merge Patch.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UpdateCheckoutSettings {
@@ -179,12 +204,25 @@ pub struct UpdateCheckoutSettings {
     pub verification_app: Option<Option<String>>,
     /// The app suggesting addresses (`Some(None)`: none).
     pub autocomplete_app: Option<Option<String>>,
+    /// How checkout treats each validation app named, replacing what was set; an app left
+    /// out goes back to the default (asked, not blocking).
+    pub validation_apps: Option<Vec<ValidationAppInput>>,
+}
+
+/// One validation app's setting as given.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidationAppInput {
+    pub app: String,
+    pub enabled: bool,
+    pub block_on_failure: bool,
 }
 
 /// Changes the settings. A verification app must be installed, enabled and granted what
 /// `address.verify` needs, as `apps` says (`verification_app_unavailable`), and an
 /// autocomplete app both autocomplete points (`autocomplete_app_unavailable`); an app
-/// named already isn't checked again, so its outage doesn't block other changes.
+/// named already isn't checked again, so its outage doesn't block other changes. Each
+/// validation app named must answer `checkout.validate` (`validation_app_unavailable`),
+/// once (`duplicate_validation_app`), unless its setting is kept as it was.
 pub async fn update_checkout_settings<S: HasCheckoutSettings>(
     ctx: &Ctx,
     ports: &S,
@@ -217,6 +255,27 @@ pub async fn update_checkout_settings<S: HasCheckoutSettings>(
             }
         }
         settings.set_autocomplete_app(app);
+    }
+    if let Some(given) = input.validation_apps {
+        let mut apps_set: Vec<ValidationAppSetting> = Vec::with_capacity(given.len());
+        for entry in given {
+            let key = AppKey::new(&entry.app)?;
+            if apps_set.iter().any(|s| s.app == key) {
+                return Err(CommandError::DuplicateValidationApp(key));
+            }
+            let setting = ValidationAppSetting {
+                app: key,
+                enabled: entry.enabled,
+                block_on_failure: entry.block_on_failure,
+            };
+            if !settings.validation_apps().contains(&setting)
+                && !apps.answers(&setting.app, VALIDATE_POINT).await?
+            {
+                return Err(CommandError::ValidationAppUnavailable(setting.app));
+            }
+            apps_set.push(setting);
+        }
+        settings.set_validation_apps(apps_set);
     }
     if is_new {
         ports.checkout_settings().insert(&mut settings).await?;

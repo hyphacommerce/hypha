@@ -42,7 +42,10 @@ pub use address::{
 };
 pub use app_key::{AppKey, AppKeyError, AppKind, AppPoints};
 pub use callback_url::{CallbackUrl, CallbackUrlError};
-pub use checks::{Message, MessageCode, MessageError, MessagePath, MessageSource, Severity};
+pub use checks::{
+    AppCheck, Message, MessageCode, MessageError, MessagePath, MessageSource, Severity,
+    ValidationStep,
+};
 pub use country::{CountryCode, CountryError};
 pub use ctx::{Actor, AuthError, Ctx};
 pub use description::{Description, DescriptionError};

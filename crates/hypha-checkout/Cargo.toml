@@ -8,6 +8,7 @@ license.workspace = true
 hypha-core.workspace = true
 hypha-cart = { path = "../hypha-cart" }
 hypha-checkout-rules = { path = "../hypha-checkout-rules" }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hypha-customers = { path = "../hypha-customers" }
 hypha-discounts = { path = "../hypha-discounts" }
 hypha-inventory = { path = "../hypha-inventory" }

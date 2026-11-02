@@ -11,30 +11,62 @@ use hypha_checkout_rules::{
 };
 use hypha_core::{AddressFlags, AddressFormats, CartId, Message, ProductId, RepoError};
 
-use crate::CommandError;
+use crate::{
+    CommandError,
+    validation::{CheckoutValidators, NoValidators, app_messages},
+};
 
 /// What a cart's messages come from beside the cart and the store's own data: the host's
-/// address formats. One parameter for commands to take, so a source joining it doesn't
-/// change their signatures.
+/// address formats and its validation apps. One parameter for commands to take, so a
+/// source joining it doesn't change their signatures.
 pub trait CartChecks {
     type Formats: AddressFormats;
+    type Validators: CheckoutValidators;
 
     fn formats(&self) -> &Self::Formats;
+
+    fn validators(&self) -> &Self::Validators;
 }
 
-/// Address formats alone are enough while nothing else is asked.
+/// Address formats alone: no validation apps are asked.
 impl<F: AddressFormats> CartChecks for F {
     type Formats = F;
+    type Validators = NoValidators;
 
     fn formats(&self) -> &F {
         self
+    }
+
+    fn validators(&self) -> &NoValidators {
+        &NoValidators
+    }
+}
+
+/// The address formats and the validation apps a host gives.
+#[derive(Debug, Clone, Copy)]
+pub struct Checks<F, V> {
+    pub formats: F,
+    pub validators: V,
+}
+
+impl<F: AddressFormats, V: CheckoutValidators> CartChecks for Checks<F, V> {
+    type Formats = F;
+    type Validators = V;
+
+    fn formats(&self) -> &F {
+        &self.formats
+    }
+
+    fn validators(&self) -> &V {
+        &self.validators
     }
 }
 
 /// The cart's messages, in the order a storefront shows them: the address's format
 /// warnings, what its verification found (kept with the cart, never asked again here),
-/// then the merchant's checkout rules in their order. A checked-out cart has
-/// none: nothing about it can change.
+/// the merchant's checkout rules in their order, then what each validation app last said
+/// (kept with the cart: nobody is asked here). A checked-out cart has none: nothing about
+/// it can change.
 ///
 /// The address isn't checked again for its problems: it passed them when it was set, and
 /// an address stored before a format changed still reads.
@@ -103,6 +135,8 @@ pub async fn cart_messages<S: PricingPorts + HasCheckoutRules>(
         };
         messages.extend(evaluate(&input, &rules));
     }
+    let validators = checks.validators().validators(cart).await?;
+    messages.extend(app_messages(&validators, cart));
     Ok(messages)
 }
 

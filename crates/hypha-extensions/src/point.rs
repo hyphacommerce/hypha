@@ -54,6 +54,9 @@ pub enum OnFailure {
     /// Core's default is used instead (search falls back to the built-in engine,
     /// shipping hides the app's options), and the failure is logged.
     Fallback,
+    /// The merchant decides per app (`checkout.validate`'s "block checkout when this app
+    /// fails"): the caller keeps the error and applies that setting itself.
+    Configured,
 }
 
 impl OnFailure {
@@ -62,6 +65,7 @@ impl OnFailure {
         match self {
             OnFailure::FailClosed => "fail_closed",
             OnFailure::Fallback => "fallback",
+            OnFailure::Configured => "configured",
         }
     }
 }
@@ -77,7 +81,8 @@ pub enum Answered<T> {
 }
 
 /// `call`'s result under `P::ON_FAILURE`: a failure of a `Fallback` point becomes
-/// `Answered::Fallback`, one of a `FailClosed` point stays the error. `call` itself
+/// `Answered::Fallback`, one of a `FailClosed` point stays the error, and so does one of a
+/// `Configured` point, for the caller to apply the merchant's setting to. `call` itself
 /// never applies the policy, so a caller that knows better (checkout re-quoting a
 /// rate) can still see the error.
 pub fn apply_policy<P: ExtensionPoint>(
@@ -86,7 +91,7 @@ pub fn apply_policy<P: ExtensionPoint>(
     match (result, P::ON_FAILURE) {
         (Ok(response), _) => Ok(Answered::App(response)),
         (Err(e), OnFailure::Fallback) => Ok(Answered::Fallback(e)),
-        (Err(e), OnFailure::FailClosed) => Err(e),
+        (Err(e), OnFailure::FailClosed | OnFailure::Configured) => Err(e),
     }
 }
 
@@ -114,6 +119,18 @@ mod tests {
         const VERSION: u16 = 1;
         const TIMEOUT: Duration = Duration::from_secs(1);
         const ON_FAILURE: OnFailure = OnFailure::Fallback;
+        const SCOPE: Scope = Scope::OrdersRead;
+        const READ_ONLY: bool = false;
+        type Request = ();
+        type Response = u8;
+    }
+
+    struct Merchants;
+    impl ExtensionPoint for Merchants {
+        const NAME: &'static str = "test.configured";
+        const VERSION: u16 = 1;
+        const TIMEOUT: Duration = Duration::from_secs(1);
+        const ON_FAILURE: OnFailure = OnFailure::Configured;
         const SCOPE: Scope = Scope::OrdersRead;
         const READ_ONLY: bool = false;
         type Request = ();
@@ -150,8 +167,17 @@ mod tests {
     }
 
     #[test]
+    fn a_configured_point_leaves_the_error_to_its_caller() {
+        assert_eq!(
+            apply_policy::<Merchants>(Err(timeout(Merchants::NAME))),
+            Err(timeout(Merchants::NAME))
+        );
+    }
+
+    #[test]
     fn policies_have_stable_names() {
         assert_eq!(OnFailure::FailClosed.as_str(), "fail_closed");
         assert_eq!(OnFailure::Fallback.as_str(), "fallback");
+        assert_eq!(OnFailure::Configured.as_str(), "configured");
     }
 }

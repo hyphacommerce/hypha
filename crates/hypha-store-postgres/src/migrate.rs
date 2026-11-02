@@ -524,6 +524,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "address_autocomplete",
             sql: include_str!("../migrations/0100_address_autocomplete.sql"),
         },
+        Migration {
+            version: 101,
+            name: "validation_apps",
+            sql: include_str!("../migrations/0101_validation_apps.sql"),
+        },
     ],
 };
 

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::address::{AddressField, AddressVerdict, AddressWarning};
-use crate::{AddressVerification, AppKey, CheckoutRuleId};
+use crate::{AddressVerification, AppKey, CheckoutRuleId, Timestamp};
 
 /// Whether a message stops checkout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -253,6 +253,8 @@ impl Message {
     pub const ADDRESS_AMBIGUOUS: MessageCode = MessageCode::builtin("address_ambiguous");
     /// The verification app found no place mail is delivered to.
     pub const ADDRESS_UNDELIVERABLE: MessageCode = MessageCode::builtin("address_undeliverable");
+    /// A validation app whose failure blocks checkout couldn't be asked.
+    pub const VALIDATION_UNAVAILABLE: MessageCode = MessageCode::builtin("validation_unavailable");
 
     /// `message` is plain text for the shopper: trimmed, 1 to `MAX_TEXT_LEN` characters.
     pub fn new(
@@ -328,6 +330,18 @@ impl Message {
         })
     }
 
+    /// What a validation app whose failure blocks checkout adds when it couldn't be asked:
+    /// an error on the whole cart, since nobody knows what it would have said.
+    pub fn validation_unavailable(app: &AppKey) -> Self {
+        Self {
+            severity: Severity::Error,
+            code: Self::VALIDATION_UNAVAILABLE,
+            path: MessagePath::Cart,
+            message: "We can't check your order right now. Try again in a moment.".to_string(),
+            source: MessageSource::App { app: app.clone() },
+        }
+    }
+
     pub fn severity(&self) -> Severity {
         self.severity
     }
@@ -350,6 +364,58 @@ impl Message {
 
     pub fn source(&self) -> &MessageSource {
         &self.source
+    }
+}
+
+/// When a validation app is asked: as the shopper goes through checkout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ValidationStep {
+    /// The shipping address was set.
+    Address,
+    /// A shipping option was chosen.
+    Shipping,
+    /// The shopper is placing the order or starting its payment.
+    Checkout,
+}
+
+impl ValidationStep {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ValidationStep::Address => "address",
+            ValidationStep::Shipping => "shipping",
+            ValidationStep::Checkout => "checkout",
+        }
+    }
+}
+
+/// A validation app's last answer about a cart, kept with it: what it was asked (by the
+/// digest of the request, whatever the step), its messages or why it couldn't answer, and
+/// when. Stored as JSON with the cart, so a field is added, never renamed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppCheck {
+    #[serde(with = "app_key")]
+    pub app: AppKey,
+    /// The digest of the request it answered: a cart it would be sent the same about isn't
+    /// asked again.
+    pub digest: String,
+    /// What it said, each with the app as its source; none when it failed.
+    #[serde(default)]
+    pub messages: Vec<Message>,
+    /// Why it couldn't answer (no answer, an error, an answer the point refuses); the
+    /// extension call log has the details.
+    #[serde(default)]
+    pub failure: Option<String>,
+    #[serde(with = "crate::time::serde_micros")]
+    pub checked_at: Timestamp,
+}
+
+impl AppCheck {
+    /// Whether this answer holds for a request with `digest`: the same question, answered.
+    /// A failure never holds, so the app is asked again next time.
+    pub fn answers(&self, digest: &str) -> bool {
+        self.failure.is_none() && self.digest == digest
     }
 }
 
@@ -550,6 +616,7 @@ mod tests {
             Message::APARTMENT_MISSING,
             Message::ADDRESS_AMBIGUOUS,
             Message::ADDRESS_UNDELIVERABLE,
+            Message::VALIDATION_UNAVAILABLE,
         ] {
             assert!(MessageCode::is_valid(code.as_str()), "{code}");
         }
@@ -721,6 +788,75 @@ mod tests {
         .unwrap();
         let json = serde_json::to_string(&message).unwrap();
         assert_eq!(serde_json::from_str::<Message>(&json).unwrap(), message);
+    }
+
+    fn app() -> AppKey {
+        AppKey::new("app_rules").unwrap()
+    }
+
+    fn check(failure: Option<&str>) -> AppCheck {
+        AppCheck {
+            app: app(),
+            digest: "d1".to_string(),
+            messages: Vec::new(),
+            failure: failure.map(str::to_string),
+            checked_at: crate::Timestamp::from_unix_micros(0),
+        }
+    }
+
+    #[test]
+    fn an_answer_holds_for_the_same_request() {
+        assert!(check(None).answers("d1"));
+    }
+
+    #[test]
+    fn an_answer_doesnt_hold_for_another_request() {
+        assert!(!check(None).answers("d2"));
+    }
+
+    #[test]
+    fn a_failure_never_holds() {
+        assert!(!check(Some("timeout")).answers("d1"));
+    }
+
+    #[test]
+    fn a_kept_answer_reads_back() {
+        let mut kept = check(None);
+        kept.messages.push(
+            Message::new(
+                Severity::Error,
+                MessageCode::new("alcohol_restricted").unwrap(),
+                MessagePath::ShippingAddressField(AddressField::PostalCode),
+                "We can't ship alcohol here.",
+                MessageSource::App { app: app() },
+            )
+            .unwrap(),
+        );
+        let json = serde_json::to_string(&kept).unwrap();
+        assert_eq!(serde_json::from_str::<AppCheck>(&json).unwrap(), kept);
+    }
+
+    #[test]
+    fn an_unavailable_app_blocks_on_the_whole_cart() {
+        let m = Message::validation_unavailable(&app());
+        assert_eq!(
+            (m.severity(), m.path(), m.code().as_str()),
+            (Severity::Error, MessagePath::Cart, "validation_unavailable")
+        );
+        assert_eq!(m.source(), &MessageSource::App { app: app() });
+    }
+
+    #[test]
+    fn steps_have_stable_names() {
+        assert_eq!(
+            [
+                ValidationStep::Address,
+                ValidationStep::Shipping,
+                ValidationStep::Checkout
+            ]
+            .map(ValidationStep::as_str),
+            ["address", "shipping", "checkout"]
+        );
     }
 
     #[test]

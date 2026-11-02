@@ -237,6 +237,16 @@ fn verifying() -> CheckoutSettings {
     let mut s = CheckoutSettings::default();
     s.set_verification_app(Some(hypha_core::AppKey::new("app_verify").unwrap()));
     s.set_autocomplete_app(Some(hypha_core::AppKey::new("app_places").unwrap()));
+    s.set_validation_apps(vec![
+        hypha_checkout_rules::ValidationAppSetting {
+            app: hypha_core::AppKey::new("app_rules").unwrap(),
+            enabled: false,
+            block_on_failure: true,
+        },
+        hypha_checkout_rules::ValidationAppSetting::default_for(
+            hypha_core::AppKey::new("app_alcohol").unwrap(),
+        ),
+    ]);
     s
 }
 
@@ -271,6 +281,7 @@ async fn settings_versions<S: HasCheckoutSettings>(ports: &S) {
     let mut stale = repo.get().await.unwrap().unwrap();
     s.set_verification_app(None);
     s.set_autocomplete_app(None);
+    s.set_validation_apps(Vec::new());
     repo.update(&mut s).await.unwrap();
     assert_eq!(s.version(), Version::new(2));
     assert_eq!(repo.get().await, Ok(Some(s.clone())));

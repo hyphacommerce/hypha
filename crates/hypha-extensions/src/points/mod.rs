@@ -4,6 +4,7 @@
 
 pub mod address;
 pub mod admin;
+pub mod checkout;
 pub mod payments;
 pub mod search;
 pub mod shipping;
@@ -16,6 +17,11 @@ pub use address::{
 };
 pub use admin::{
     ActionContext, AdminActionRequest, AdminActionResponse, MAX_ACTION_MESSAGE, RunAdminAction,
+};
+pub use checkout::{
+    CheckoutValidate, CheckoutValidateRequest, CheckoutValidateResponse, MAX_VALIDATION_MESSAGES,
+    MAX_VALIDATION_TEXT, ValidatedAddressCheck, ValidatedCart, ValidatedLine,
+    ValidatedShippingGroup, ValidationMessage,
 };
 
 pub use payments::{
@@ -64,6 +70,7 @@ pub const KNOWN: &[Known] = &[
     known::<AddressVerify>(),
     known::<AddressSuggest>(),
     known::<AddressResolve>(),
+    known::<CheckoutValidate>(),
 ];
 
 /// The point named `name`, when this build knows it.

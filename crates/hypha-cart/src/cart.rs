@@ -1,7 +1,7 @@
 use hypha_core::{
-    Address, AddressParts, AddressVerification, CartId, ChannelId, CountryCode, CustomerId, Email,
-    MarketId, OrderId, PaymentMethodId, Price, ProductId, Quantity, ShippingGroupId,
-    ShippingOptionId, Stamped, Stamps, Timestamp, VariantId, Version, Versioned,
+    Address, AddressParts, AddressVerification, AppCheck, CartId, ChannelId, CountryCode,
+    CustomerId, Email, MarketId, OrderId, PaymentMethodId, Price, ProductId, Quantity,
+    ShippingGroupId, ShippingOptionId, Stamped, Stamps, Timestamp, VariantId, Version, Versioned,
 };
 use hypha_shipping::ProviderKey;
 
@@ -95,6 +95,8 @@ pub struct Cart {
     shipping_address: Option<Address>,
     /// What the store's verification app said about the address, when one was asked.
     address_check: Option<AddressVerification>,
+    /// Each validation app's last answer about the cart.
+    app_checks: Vec<AppCheck>,
     /// The choice for the cart's one group of shippable lines.
     shipping: Option<SelectedShipping>,
     /// How the buyer will pay: checked when chosen and again at checkout.
@@ -143,6 +145,7 @@ impl Cart {
             status: CartStatus::Open,
             shipping_address: None,
             address_check: None,
+            app_checks: Vec::new(),
             shipping: None,
             payment_method: None,
             marketing_opt_in: false,
@@ -163,6 +166,11 @@ impl Cart {
             self.shipping_address = None;
             self.address_check = None;
             self.shipping = None;
+            changed = true;
+        }
+        // An app's messages may quote what it was sent.
+        if !self.app_checks.is_empty() {
+            self.app_checks.clear();
             changed = true;
         }
         changed
@@ -282,6 +290,13 @@ impl Cart {
         }
         self.address_check = check.filter(|_| address.is_some());
         self.shipping_address = address;
+        Ok(())
+    }
+
+    /// Keeps the validation apps' answers: one per app, replacing what was kept.
+    pub fn set_app_checks(&mut self, checks: Vec<AppCheck>) -> Result<(), CartError> {
+        self.ensure_open()?;
+        self.app_checks = checks;
         Ok(())
     }
 
@@ -414,6 +429,11 @@ impl Cart {
         self.address_check.as_ref()
     }
 
+    /// Each validation app's last answer about the cart.
+    pub fn app_checks(&self) -> &[AppCheck] {
+        &self.app_checks
+    }
+
     pub fn shipping(&self) -> Option<&SelectedShipping> {
         self.shipping.as_ref()
     }
@@ -450,6 +470,7 @@ pub struct CartSnapshot {
     pub shipping_address: Option<AddressParts>,
     /// Only with an address.
     pub address_check: Option<AddressVerification>,
+    pub app_checks: Vec<AppCheck>,
     pub shipping: Option<SelectedShipping>,
     pub payment_method: Option<PaymentMethodId>,
     pub marketing_opt_in: bool,
@@ -490,6 +511,7 @@ impl Cart {
             },
             shipping_address: self.shipping_address.as_ref().map(|a| a.parts().clone()),
             address_check: self.address_check.clone(),
+            app_checks: self.app_checks.clone(),
             shipping: self.shipping.clone(),
             payment_method: self.payment_method,
             marketing_opt_in: self.marketing_opt_in,
@@ -553,6 +575,7 @@ impl Cart {
                 Some(order) => CartStatus::Completed { order },
             },
             address_check: s.address_check.filter(|_| shipping_address.is_some()),
+            app_checks: s.app_checks,
             shipping_address,
             shipping: s.shipping,
             payment_method: s.payment_method,

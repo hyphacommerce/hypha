@@ -93,6 +93,7 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
         subtotal: order.subtotal(),
         shipping_address: order.shipping_address().cloned(),
         address_check: cart.address_check().cloned(),
+        app_checks: Vec::new(),
         shipping_groups: order
             .shipping_lines()
             .iter()

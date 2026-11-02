@@ -27,6 +27,49 @@ pub async fn cart_repo<R: CartRepo>(make: impl AsyncFn() -> R) {
     shipping_round_trips(&make().await).await;
     scenario("cart: the payment method round trips on insert and update, and clears");
     payment_method_round_trips(&make().await).await;
+    scenario("cart: validation apps' answers round trip on insert and update, and clear");
+    app_checks_round_trip(&make().await).await;
+}
+
+async fn app_checks_round_trip<R: CartRepo>(repo: &R) {
+    use hypha_core::{
+        AddressField, AppCheck, AppKey, Message, MessageCode, MessagePath, MessageSource, Severity,
+        Timestamp,
+    };
+    let app = AppKey::new("app_rules").unwrap();
+    let answered = AppCheck {
+        app: app.clone(),
+        digest: "d1".to_string(),
+        messages: vec![
+            Message::new(
+                Severity::Error,
+                MessageCode::new("alcohol_restricted").unwrap(),
+                MessagePath::ShippingAddressField(AddressField::PostalCode),
+                "We can't ship alcohol to this postal code.",
+                MessageSource::App { app: app.clone() },
+            )
+            .unwrap(),
+        ],
+        failure: None,
+        checked_at: Timestamp::from_unix_micros(1_767_225_600_123_456),
+    };
+    let failed = AppCheck {
+        app: AppKey::new("app_other").unwrap(),
+        digest: "d2".to_string(),
+        messages: Vec::new(),
+        failure: Some("no answer within 2 s".to_string()),
+        checked_at: Timestamp::from_unix_micros(1),
+    };
+    let mut c = cart(1);
+    c.set_app_checks(vec![answered.clone()]).unwrap();
+    repo.insert(&mut c).await.unwrap();
+    assert_eq!(repo.get(c.id()).await, Ok(Some(c.clone())));
+    c.set_app_checks(vec![answered, failed]).unwrap();
+    repo.update(&mut c).await.unwrap();
+    assert_eq!(repo.get(c.id()).await, Ok(Some(c.clone())));
+    c.set_app_checks(Vec::new()).unwrap();
+    repo.update(&mut c).await.unwrap();
+    assert_eq!(repo.get(c.id()).await, Ok(Some(c)));
 }
 
 async fn payment_method_round_trips<R: CartRepo>(repo: &R) {

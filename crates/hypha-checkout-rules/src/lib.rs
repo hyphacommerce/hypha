@@ -12,9 +12,9 @@ pub mod rule;
 pub mod settings;
 
 pub use commands::{
-    CommandError, RulePatch, UpdateCheckoutSettings, create_checkout_rule, delete_checkout_rule,
-    get_checkout_rule, get_checkout_settings, list_checkout_rules, update_checkout_rule,
-    update_checkout_settings,
+    CommandError, RulePatch, UpdateCheckoutSettings, ValidationAppInput, create_checkout_rule,
+    delete_checkout_rule, get_checkout_rule, get_checkout_settings, list_checkout_rules,
+    room_for_validation_app, update_checkout_rule, update_checkout_settings,
 };
 pub use engine::{RuleInput, RuleLine, VerifiedFacts, evaluate, names_categories};
 pub use error::{CheckoutRuleError, Problem};
@@ -29,5 +29,6 @@ pub use rule::{
 };
 pub use settings::{
     AUTOCOMPLETE_POINTS, CHECKOUT_SETTINGS, CheckoutSettings, CheckoutSettingsSnapshot,
-    CheckoutSettingsUpdated, VERIFY_POINT,
+    CheckoutSettingsUpdated, MAX_VALIDATION_APPS, VALIDATE_POINT, VERIFY_POINT,
+    ValidationAppSetting,
 };
