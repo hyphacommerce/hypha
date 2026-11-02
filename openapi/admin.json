@@ -42728,7 +42728,7 @@
             "bearer": []
           }
         ],
-        "summary": "Changes where the order ships, before anything has (`409 order_fulfilled` once a line\nis fulfilled, `409 order_cancelled`). The address passes its country's format (`422\ninvalid_address` with `details.problems`) and stays in the order's country (`422\naddress_country_mismatch`); the store's verification app is asked again, and the new\ncheck replaces the old (no longer marked valid). Shipping isn't priced again: the\norder keeps what was charged. Records `order.shipping_address_changed`.",
+        "summary": "Changes where the order ships, before anything has (`409 order_fulfilled` once a line\nis fulfilled, `409 order_cancelled`, `409 order_has_no_shipping_address` for an order\nthat ships nothing). The address passes its country's format (`422\ninvalid_address` with `details.problems`) and stays in the order's country (`422\naddress_country_mismatch`); the store's verification app is asked again, and the new\ncheck replaces the old (no longer marked valid). Shipping isn't priced again: the\norder keeps what was charged. Records `order.shipping_address_changed`.",
         "tags": [
           "orders"
         ],

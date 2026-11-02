@@ -2823,7 +2823,8 @@ export interface paths {
         get?: never;
         /**
          * Changes where the order ships, before anything has (`409 order_fulfilled` once a line
-         *     is fulfilled, `409 order_cancelled`). The address passes its country's format (`422
+         *     is fulfilled, `409 order_cancelled`, `409 order_has_no_shipping_address` for an order
+         *     that ships nothing). The address passes its country's format (`422
          *     invalid_address` with `details.problems`) and stays in the order's country (`422
          *     address_country_mismatch`); the store's verification app is asked again, and the new
          *     check replaces the old (no longer marked valid). Shipping isn't priced again: the
