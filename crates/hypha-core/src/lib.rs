@@ -33,7 +33,10 @@ pub mod timezone;
 pub mod version;
 pub mod weight;
 
-pub use address::{Address, AddressError, AddressParts};
+pub use address::{
+    Address, AddressError, AddressField, AddressFlags, AddressFormats, AddressParts,
+    AddressProblem, AddressProblemCode, AddressWarning, AddressWarningCode, CheckedAddress,
+};
 pub use app_key::{AppKey, AppKeyError, AppKind, AppPoints};
 pub use callback_url::{CallbackUrl, CallbackUrlError};
 pub use country::{CountryCode, CountryError};
