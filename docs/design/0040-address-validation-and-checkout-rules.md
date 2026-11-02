@@ -782,3 +782,43 @@ One branch per step, stacked with `gh stack` from `feat/address-validation`:
   page and asks for a newly chosen country's through a server action.
 - **Test data:** Croatian and Slovenian postal codes are now required, so e2e's and the
   route tests' addresses gained them; the seed's Milan shopper gained `MI`.
+
+### Step 2: messages
+
+- **The shape:** core's `checks.rs` has `Message`, `Severity`, `MessageCode` (snake_case,
+  a letter first, at most 64 characters; built-in codes are associated constants checked
+  by a test), `MessagePath` (§4's closed set, an enum written and read as the JSONPath
+  string; an index is plain digits without a leading zero, within `u32`) and
+  `MessageSource` (`format`, `verification`, `rule {rule}`, `app {app}`). Text is trimmed
+  and 1 to 500 characters (`invalid_message`, `invalid_message_code`,
+  `invalid_message_path`). All of them serialise in the wire shape both ways, so steps 4
+  and 6 store them as they are. `CheckoutRuleId` (`crule_…`) is in core already, for the
+  rule source.
+- **Composing:** `hypha_checkout::cart_messages(checks, &PricedCart)`, over a
+  `CartChecks` parameter (the host's `AddressFormats` for now; any `AddressFormats` is
+  one), so the verification, rules and apps of later steps add a source without changing
+  the commands' signatures again. A checked-out cart has no messages: nothing about it
+  can change, and its address is the order's.
+- **On the wire:** every cart response (storefront, and the admin's `PUT
+  /admin/carts/{id}/customer`) has `messages`, computed in `CartResponse::from`.
+- **Enforcing:** `ready` (checkout's checks, shared with `start_cart_payment`) computes the
+  messages; the caller refuses on them last, so every existing code keeps its place:
+  checkout after the committed-payment checks (`payment_required`, `payment_pending`,
+  `payment_failed`, `cart_payment_committed`), starting a payment after
+  `payment_method_offline`, `cart_nothing_to_pay` and `cart_payment_committed`. Both are
+  before anything is reserved or any payment created. `checkout_blocked` gives committed
+  money back like `total_changed` (§8's rule changed while paying). The checkout and
+  payment routes document their `409`s.
+- **The storefront:** `lib/messages.ts` places a message by its path, and
+  `components/cart-messages.tsx` shows it (errors red, warnings amber):
+  - a field's message is its input's status until the field is edited;
+  - the address's and the email's are shown beside them;
+  - a group's goes under its options, and a line's under the line (checkout summary, cart
+    lines);
+  - `$` and unknown paths go at the top of the checkout and the cart.
+
+  A `checkout_blocked` answer re-renders the checkout, whose cart then shows the errors
+  where they belong.
+- **Tested:** no source makes an error yet, so `refuse_errors` is unit-tested with one
+  injected; checkout's tests use a `CartChecks` that warns and check out anyway, and the
+  route tests and e2e set a Dutch or German address without a house number.
