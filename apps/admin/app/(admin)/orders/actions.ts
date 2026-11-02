@@ -146,9 +146,10 @@ export async function changeOrderAddress(
   });
   if (error) {
     const problems = problemsOf(error);
-    return problems
-      ? { error: "Check the highlighted fields.", problems }
-      : { error: describe(error) };
+    if (problems && Object.keys(problems).length > 0) {
+      return { error: "Check the highlighted fields.", problems };
+    }
+    return { error: describe(error) };
   }
   refresh(id);
   return {};
