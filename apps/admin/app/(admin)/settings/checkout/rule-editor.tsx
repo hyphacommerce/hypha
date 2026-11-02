@@ -294,7 +294,13 @@ export function RuleEditor({
         )}
       </VStack>
 
-      <TryPanel id={id} form={form} options={options} initialFormat={tryFormat} />
+      <TryPanel
+        id={id}
+        form={form}
+        options={options}
+        initialFormat={tryFormat}
+        canVerify={canWrite}
+      />
     </Grid>
   );
 }
@@ -599,11 +605,15 @@ function TryPanel({
   form,
   options,
   initialFormat,
+  canVerify,
 }: {
   id?: string;
   form: RuleForm;
   options: RuleOptions;
   initialFormat: AddressFormat | null;
+  /** Whether the caller may ask the verification app (`checkout_rules:write`: it spends a
+   * lookup). */
+  canVerify: boolean;
 }) {
   const currencies = useCurrencies();
   const [country, setCountry] = useState(initialFormat?.country ?? "");
@@ -613,6 +623,7 @@ function TryPanel({
   const [email, setEmail] = useState("");
   const [market, setMarket] = useState<string>();
   const [option, setOption] = useState<string>();
+  const [verify, setVerify] = useState(false);
   const [result, setResult] = useState<TestResult>();
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -651,6 +662,7 @@ function TryPanel({
         shipping_option: option ?? null,
         rule: toBody(form, currencies),
         rule_id: id ?? null,
+        verify,
       });
       setError(outcome.error);
       setResult(outcome.result);
@@ -706,6 +718,14 @@ function TryPanel({
             onChange={setOption}
           />
         )}
+        {canVerify && (
+          <Switch
+            label="Ask the verification app"
+            description="Its verdict and flags, for rules that read them. Costs a lookup."
+            value={verify}
+            onChange={setVerify}
+          />
+        )}
         <HStack>
           <Button label="Try it" variant="secondary" isLoading={isPending} onClick={run} />
         </HStack>
@@ -729,8 +749,18 @@ function TryResult({ result }: { result: TestResult }) {
   const flags = Object.entries(result.flags ?? {})
     .filter(([, on]) => on)
     .map(([flag]) => FLAGS.find((f) => f.value === flag)?.label ?? flag);
+  const verification = result.verification;
   return (
     <VStack gap={3}>
+      {verification && (
+        <Text type="supporting" color="secondary">
+          Verification:{" "}
+          {(
+            VERDICTS.find((v) => v.value === verification.verdict)?.label ?? verification.verdict
+          ).toLowerCase()}
+          {verification.failure ? ` (${verification.failure})` : ""}.
+        </Text>
+      )}
       {flags.length > 0 && (
         <Text type="supporting" color="secondary">
           The address reads as {flags.join(", ")}.
