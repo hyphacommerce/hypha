@@ -681,12 +681,20 @@ contains "city, state and ZIP code on one row" '["city","province","postal_code"
 contains "its labels" '"postal_code":"ZIP code","province":"State"'
 contains "states to choose from" '{"code":"CA","name":"California"}'
 contains "a ZIP code is required" '"postal_code":"required","postal_code_example":"90210"'
-step "cached for a day" 200 - -i "$BASE/storefront/address-formats/US"
-contains "public, a day" 'public, max-age=86400'
+step "cached for five minutes" 200 - -i "$BASE/storefront/address-formats/US"
+contains "privately: autocomplete is the store's" 'private, max-age=300'
+contains "no autocomplete app yet" '"autocomplete":false'
 step "Croatia's form, for staff" 200 - "$BASE/admin/address-formats/HR"
 contains "a postal code, no regions" '"required":["last_name","line1","postal_code","city"]'
 contains "no region list" '"regions":[]'
 step "no form for an unknown country" 404 unknown_country_code "$BASE/admin/address-formats/ZZ"
+step "no suggestions without an autocomplete app" 404 autocomplete_unavailable \
+    "$BASE/storefront/address-suggestions?q=Ilica&country=HR&session=e2e"
+step "two letters are too few to look up" 422 invalid_suggestion_query \
+    "$BASE/storefront/address-suggestions?q=Il&country=HR&session=e2e"
+contains "names the parameter" '"details":{"parameter":"q"}'
+step "a session is letters, digits, - and _" 422 invalid_suggestion_query \
+    "$BASE/storefront/address-suggestions?q=Ilica&country=HR&session=a%20b"
 step "create an Outlet channel" 201 - -X POST "$BASE/admin/channels" -H "$JSON" \
     -d '{"name":"Outlet","kind":"custom"}'
 OUTLET=$(id)
@@ -1230,7 +1238,8 @@ step "an app that isn't there verifies nothing" 422 verification_app_unavailable
     "$BASE/admin/checkout-settings" -H "$JSON" -d '{"verification_app":"app_verify"}'
 # A verification app when python3 is here (the host must run with
 # HYPHA_ALLOW_PRIVATE_CALLBACKS=true to reach it): "Nowhere" is undeliverable, "Ilica 1a"
-# is Ilica 1 corrected, anything else is deliverable.
+# is Ilica 1 corrected, anything else is deliverable. It suggests addresses too: Ilica 1
+# and Ilica 12 (without its postal code), and "ljubljana" in another country.
 if command -v python3 >/dev/null 2>&1; then
     VERIFY_PORT=${E2E_VERIFY_PORT:-3198}
     python3 - "$VERIFY_PORT" <<'PY' &
@@ -1239,6 +1248,22 @@ import http.server, json, sys
 class App(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         sent = json.loads(self.rfile.read(int(self.headers.get("content-length", 0))))
+        if self.path == "/suggest":
+            answer = {"suggestions": [
+                {"id": "ilica-1", "label": "Ilica 1", "description": "10000 Zagreb, Croatia"},
+                {"id": "ilica-12", "label": "Ilica 12"},
+            ][:sent["limit"]]}
+            return self.answer(answer)
+        if self.path == "/resolve":
+            if sent["id"] == "ilica-1":
+                answer = {"address": {"line1": "Ilica 1", "city": "Zagreb",
+                                      "postal_code": "10000", "country": "HR"}}
+            elif sent["id"] == "ljubljana":
+                answer = {"address": {"line1": "Slovenska 1", "city": "Ljubljana",
+                                      "postal_code": "1000", "country": "SI"}}
+            else:
+                answer = {"address": {"line1": "Ilica 12", "city": "Zagreb", "country": "HR"}}
+            return self.answer(answer)
         line1 = sent["address"]["line1"]
         if "Nowhere" in line1:
             answer = {"verdict": "undeliverable"}
@@ -1250,6 +1275,9 @@ class App(http.server.BaseHTTPRequestHandler):
                       "flags": {"residential": True}}
         else:
             answer = {"verdict": "deliverable"}
+        self.answer(answer)
+
+    def answer(self, answer):
         self.send_response(200)
         self.send_header("content-type", "application/json")
         self.end_headers()
@@ -1342,6 +1370,41 @@ PY
     contains "is recorded for it" "\"correlation\":\"$VERIFY_ORDER\""
     step "no more verification" 200 - -X PATCH "$BASE/admin/checkout-settings" -H "$JSON" \
         -d '{"verification_app":null}'
+
+    echo "## address autocomplete"
+    step "an app that only verifies doesn't suggest" 422 autocomplete_app_unavailable -X PATCH \
+        "$BASE/admin/checkout-settings" -H "$JSON" -d '{"autocomplete_app":"app_verify"}'
+    step "it suggests addresses too" 200 - -X PUT "$BASE/admin/apps/app_verify/extension-points" \
+        -H "$JSON" -d "{\"extension_points\":[{\"point\":\"address.verify\",\"version\":1,\"url\":\"$VERIFY_URL/verify\"},{\"point\":\"address.suggest\",\"version\":1,\"url\":\"$VERIFY_URL/suggest\"},{\"point\":\"address.resolve\",\"version\":1,\"url\":\"$VERIFY_URL/resolve\"}]}"
+    step "addresses are suggested by it" 200 - -X PATCH "$BASE/admin/checkout-settings" \
+        -H "$JSON" -d '{"autocomplete_app":"app_verify"}'
+    contains "the setting is kept" '"autocomplete_app":"app_verify"'
+    step "the form says so" 200 - "$BASE/storefront/address-formats/HR"
+    contains "autocomplete on" '"autocomplete":true'
+    step "suggestions for what's typed" 200 - \
+        "$BASE/storefront/address-suggestions?q=Ilica&country=HR&session=e2e"
+    contains "the app's two" '{"suggestions":[{"id":"ilica-1","label":"Ilica 1","description":"10000 Zagreb, Croatia"},{"id":"ilica-12","label":"Ilica 12","description":null}]}'
+    step "no more than asked for" 200 - \
+        "$BASE/storefront/address-suggestions?q=Ilica&country=HR&session=e2e&limit=1"
+    lacks "one" 'ilica-12'
+    step "the picked one's address" 200 - \
+        "$BASE/storefront/address-suggestions/ilica-1?country=HR&session=e2e"
+    contains "its parts" '"line1":"Ilica 1","line2":null,"city":"Zagreb"'
+    contains "nothing to fix" '"problems":[]'
+    step "one missing its postal code" 200 - \
+        "$BASE/storefront/address-suggestions/ilica-12?country=HR&session=e2e"
+    contains "says so" '"problems":[{"field":"postal_code","code":"required"'
+    step "an address in another country is the app's failure" 502 app_unavailable \
+        "$BASE/storefront/address-suggestions/ljubljana?country=HR&session=e2e"
+    step "staff get suggestions too" 200 - \
+        "$BASE/admin/address-suggestions?q=Ilica&country=HR&session=e2e-staff"
+    contains "the same two" '"id":"ilica-12"'
+    step "the calls are logged" 200 - "$BASE/admin/apps/app_verify/extension-calls"
+    contains "suggestions" '"point":"address.suggest"'
+    contains "and resolving" '"point":"address.resolve"'
+    lacks "without what was typed" '"query":"Ilica"'
+    step "no more autocomplete" 200 - -X PATCH "$BASE/admin/checkout-settings" -H "$JSON" \
+        -d '{"autocomplete_app":null}'
     kill "$VERIFIER" 2>/dev/null
 fi
 
