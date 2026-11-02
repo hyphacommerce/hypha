@@ -308,7 +308,7 @@ pub async fn storefront_suggest<S: Storage>(
 #[utoipa::path(
     get,
     path = "/storefront/address-suggestions/{id}",
-    params(("id" = String, Path, description = "The suggestion's `id`."), ResolveParams),
+    params(("id" = String, Path, example = "ilica-1", description = "The suggestion's `id`."), ResolveParams),
     responses(
         (status = 200, description = "OK", body = ResolvedAddressResponse),
         (status = 404, description = "The store has no autocomplete app (`autocomplete_unavailable`)", body = crate::error::ApiErrorBody),
@@ -356,7 +356,7 @@ pub async fn admin_suggest<S: Storage>(
 #[utoipa::path(
     get,
     path = "/admin/address-suggestions/{id}",
-    params(("id" = String, Path, description = "The suggestion's `id`."), ResolveParams),
+    params(("id" = String, Path, example = "ilica-1", description = "The suggestion's `id`."), ResolveParams),
     responses(
         (status = 200, description = "OK", body = ResolvedAddressResponse),
         (status = 404, description = "The store has no autocomplete app (`autocomplete_unavailable`)", body = crate::error::ApiErrorBody),

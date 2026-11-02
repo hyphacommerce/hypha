@@ -18462,6 +18462,7 @@
         "parameters": [
           {
             "description": "The suggestion's `id`.",
+            "example": "ilica-1",
             "in": "path",
             "name": "id",
             "required": true,

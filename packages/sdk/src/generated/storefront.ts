@@ -3586,7 +3586,10 @@ export interface operations {
             };
             header?: never;
             path: {
-                /** @description The suggestion's `id`. */
+                /**
+                 * @description The suggestion's `id`.
+                 * @example ilica-1
+                 */
                 id: string;
             };
             cookie?: never;

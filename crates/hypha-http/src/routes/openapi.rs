@@ -1027,6 +1027,8 @@ mod tests {
         assert_eq!(
             webhooks.keys().map(String::as_str).collect::<Vec<_>>(),
             [
+                "address.resolve",
+                "address.suggest",
                 "address.verify",
                 "admin.action",
                 "payments.capture",
