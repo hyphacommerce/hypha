@@ -249,7 +249,6 @@ export async function fieldContext(
   };
 }
 
-/** A message for the shopper, by the API's stable error code. */
 /**
  * An action's refusal: the message to show and, for an address, each field's problem
  * (the banner then only points at them).
@@ -265,6 +264,7 @@ export function refusedWith(error: { code: string; error: string; details?: unkn
   return { error: describe(error) };
 }
 
+/** A message for the shopper, by the API's stable error code. */
 export function describe(error: { code: string; error: string }): string {
   switch (error.code) {
     case "out_of_stock":

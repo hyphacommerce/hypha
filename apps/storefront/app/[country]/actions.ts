@@ -23,7 +23,6 @@ import { checkOutCart } from "@/lib/checkout";
 import { accountApi, forgetSession, sessionHeaders } from "@/lib/account";
 import { cartId, forgetCart, link, mode, rememberCart } from "@/lib/site";
 
-/** What a refused action tells its form. */
 /** Why an action was refused; an address's problems by field (`invalid_address`). */
 export type ActionResult = { error: string; problems?: FieldProblems } | undefined;
 
