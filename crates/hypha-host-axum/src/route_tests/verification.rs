@@ -62,7 +62,10 @@ async fn checkout_settings_start_empty() {
     let app = app().await;
     let (status, json) = send(&app, "GET", "/admin/checkout-settings", None).await;
     assert_eq!(status, StatusCode::OK, "{json}");
-    assert_eq!(json, json!({"verification_app": null}));
+    assert_eq!(
+        json,
+        json!({"verification_app": null, "autocomplete_app": null})
+    );
 }
 
 #[tokio::test]

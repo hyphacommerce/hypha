@@ -3,6 +3,46 @@
 
 export type paths = Record<string, never>;
 export interface webhooks {
+    "address.resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Turn the suggestion someone picked into the address's parts.
+         * @description `POST` to the URL the app registered for `address.resolve` v1. Answer within 1000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: Hypha falls back to its own default. Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).
+         */
+        post: operations["address.resolve.v1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "address.suggest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Offer up to five addresses for what someone has typed so far in an address form.
+         * @description `POST` to the URL the app registered for `address.suggest` v1. Answer within 1000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: Hypha falls back to its own default. Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).
+         */
+        post: operations["address.suggest.v1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "address.verify": {
         parameters: {
             query?: never;
@@ -193,6 +233,58 @@ export interface components {
          * @enum {string}
          */
         AddressPrecision: "country" | "locality" | "street" | "premise" | "subpremise";
+        /** @description What Hypha sends when a suggestion is picked. */
+        AddressResolveRequest: {
+            /**
+             * @description The country the form is for: the address must be in it.
+             * @example HR
+             */
+            country: string;
+            /** @description The suggestion's `id`, as `address.suggest` answered it. */
+            id: string;
+            /** @description The same session the suggestions were asked in. */
+            session: string;
+        };
+        /**
+         * @description The app's answer: the address's parts, which then go through the country's format
+         *     check like any typed address.
+         */
+        AddressResolveResponse: {
+            address: components["schemas"]["SuggestedAddress"];
+        };
+        /** @description What Hypha sends while someone types. */
+        AddressSuggestRequest: {
+            /**
+             * @description The country the form is for: suggestions stay in it.
+             * @example HR
+             */
+            country: string;
+            /**
+             * Format: int32
+             * @description How many suggestions to answer at most (1 to 5).
+             */
+            limit: number;
+            /** @description What's typed so far (3 to 200 characters). */
+            query: string;
+            /**
+             * @description The client's token for one address being typed, the same until one is picked, for
+             *     providers that bill per session.
+             */
+            session: string;
+        };
+        /** @description The app's answer: what to show in the dropdown. */
+        AddressSuggestResponse: {
+            suggestions?: components["schemas"]["AddressSuggestion"][];
+        };
+        /** @description One address offered. */
+        AddressSuggestion: {
+            /** @description The rest, shown smaller ("10000 Zagreb, Croatia"). */
+            description?: string | null;
+            /** @description The app's own ID for it, sent back to `address.resolve` when it's picked. */
+            id: string;
+            /** @description The main line shown ("Ilica 1"). */
+            label: string;
+        };
         /**
          * @description What an address verification provider concluded about an address, overall.
          *
@@ -706,6 +798,90 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    "address.resolve.v1": {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description `t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>" under the app's secret>`. Check it, and refuse a `t` more than a few minutes old. */
+                "Hypha-Signature": string;
+                /** @description The point's name, as this operation's. */
+                "Hypha-Extension": string;
+                /** @description The point's version. */
+                "Hypha-Extension-Version": string;
+                /** @description The same for every retry of one piece of work: answer a repeat as the first. */
+                "Idempotency-Key": string;
+                /** @description The store the call is for (`store_…`). */
+                "Hypha-Store": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddressResolveRequest"];
+            };
+        };
+        responses: {
+            /** @description The answer (any 2xx). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddressResolveResponse"];
+                };
+            };
+            /** @description A failure. Apps built on `@hyphacommerce/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "address.suggest.v1": {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description `t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>" under the app's secret>`. Check it, and refuse a `t` more than a few minutes old. */
+                "Hypha-Signature": string;
+                /** @description The point's name, as this operation's. */
+                "Hypha-Extension": string;
+                /** @description The point's version. */
+                "Hypha-Extension-Version": string;
+                /** @description The same for every retry of one piece of work: answer a repeat as the first. */
+                "Idempotency-Key": string;
+                /** @description The store the call is for (`store_…`). */
+                "Hypha-Store": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddressSuggestRequest"];
+            };
+        };
+        responses: {
+            /** @description The answer (any 2xx). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddressSuggestResponse"];
+                };
+            };
+            /** @description A failure. Apps built on `@hyphacommerce/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     "address.verify.v1": {
         parameters: {
             query?: never;
@@ -1088,6 +1264,16 @@ export interface operations {
 
 /** Each point's newest version and bodies. */
 export interface ExtensionPoints {
+  "address.resolve": {
+    version: 1;
+    request: NonNullable<webhooks["address.resolve"]["post"]["requestBody"]>["content"]["application/json"];
+    response: webhooks["address.resolve"]["post"]["responses"][200]["content"]["application/json"];
+  };
+  "address.suggest": {
+    version: 1;
+    request: NonNullable<webhooks["address.suggest"]["post"]["requestBody"]>["content"]["application/json"];
+    response: webhooks["address.suggest"]["post"]["responses"][200]["content"]["application/json"];
+  };
   "address.verify": {
     version: 1;
     request: NonNullable<webhooks["address.verify"]["post"]["requestBody"]>["content"]["application/json"];
@@ -1137,6 +1323,8 @@ export interface ExtensionPoints {
 
 /** The version of each point this build of Hypha calls: what a handler answers by default. */
 export const EXTENSION_POINT_VERSIONS: { [P in keyof ExtensionPoints]: ExtensionPoints[P]["version"] } = {
+  "address.resolve": 1,
+  "address.suggest": 1,
   "address.verify": 1,
   "admin.action": 1,
   "payments.capture": 1,

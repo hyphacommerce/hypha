@@ -91,6 +91,10 @@ export type {
   AdminActionResponse,
   AddressVerifyRequest,
   AddressVerifyResponse,
+  AddressSuggestRequest,
+  AddressSuggestResponse,
+  AddressResolveRequest,
+  AddressResolveResponse,
 } from "./points.ts";
 export {
   verifySessionToken,

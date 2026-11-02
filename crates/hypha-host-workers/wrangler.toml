@@ -142,3 +142,13 @@ simple = { limit = 20, period = 60 }
 name = "RL_DISCOUNT_CODE_CART"
 namespace_id = "1019"
 simple = { limit = 10, period = 60 }
+
+[[ratelimits]]
+name = "RL_ADDRESS_SUGGEST_IP"
+namespace_id = "1020"
+simple = { limit = 180, period = 60 }
+
+[[ratelimits]]
+name = "RL_ADDRESS_SUGGEST_SESSION"
+namespace_id = "1021"
+simple = { limit = 60, period = 60 }

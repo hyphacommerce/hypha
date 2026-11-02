@@ -462,6 +462,19 @@ impl<S> AppState<S> {
         }
     }
 
+    /// The store's address autocomplete for one request (`address_suggest.rs`).
+    pub fn autocomplete<'a, P>(
+        &'a self,
+        ports: &'a P,
+    ) -> crate::address_suggest::HostAutocomplete<'a, P> {
+        crate::address_suggest::HostAutocomplete {
+            ports,
+            endpoints: self.app_endpoints(ports),
+            caller: self.extensions(),
+            env: &self.env,
+        }
+    }
+
     /// Where a request's apps answer extension points (`app_endpoints.rs`).
     pub fn app_endpoints<'a, P>(
         &'a self,

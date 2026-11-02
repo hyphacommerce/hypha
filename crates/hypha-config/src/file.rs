@@ -708,6 +708,13 @@ pub struct RateLimits {
     pub discount_code_ip: Quota,
     /// Entering a discount code, per cart.
     pub discount_code_cart: Quota,
+    /// Address suggestions and resolving one, per client address: each is a lookup the
+    /// store's autocomplete app may be billed for. Generous, since forms ask as people
+    /// type, and a storefront without `server.trusted_proxies` sends every shopper's
+    /// from one address.
+    pub address_suggest_ip: Quota,
+    /// Address suggestions and resolving one, per typing session (the form's `session`).
+    pub address_suggest_session: Quota,
 }
 
 /// The starting quotas.
@@ -749,13 +756,18 @@ impl Default for RateLimits {
             // A shopper tries a code or two, and maybe a typo.
             discount_code_ip: quota(10, 6),
             discount_code_cart: quota(5, 12),
+            // A form asks on keystrokes, a quarter second apart at most, for a few
+            // addresses at a time.
+            address_suggest_ip: quota(120, 1),
+            // One address typed: a dozen lookups, then a pick.
+            address_suggest_session: quota(30, 2),
         }
     }
 }
 
 impl RateLimits {
     /// Every limit with its key, for the checks.
-    pub(crate) fn all(&self) -> [(&'static str, Quota); 20] {
+    pub(crate) fn all(&self) -> [(&'static str, Quota); 22] {
         [
             ("login_ip", self.login_ip),
             ("login_email_from_ip", self.login_email_from_ip),
@@ -780,6 +792,8 @@ impl RateLimits {
             ("agent_write", self.agent_write),
             ("discount_code_ip", self.discount_code_ip),
             ("discount_code_cart", self.discount_code_cart),
+            ("address_suggest_ip", self.address_suggest_ip),
+            ("address_suggest_session", self.address_suggest_session),
         ]
     }
 }

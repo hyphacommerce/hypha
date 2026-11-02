@@ -13,6 +13,110 @@
         "type": "string",
         "x-hypha-open-enum": true
       },
+      "AddressResolveRequest": {
+        "description": "What Hypha sends when a suggestion is picked.",
+        "properties": {
+          "country": {
+            "description": "The country the form is for: the address must be in it.",
+            "example": "HR",
+            "type": "string"
+          },
+          "id": {
+            "description": "The suggestion's `id`, as `address.suggest` answered it.",
+            "type": "string"
+          },
+          "session": {
+            "description": "The same session the suggestions were asked in.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "country",
+          "session"
+        ],
+        "type": "object"
+      },
+      "AddressResolveResponse": {
+        "description": "The app's answer: the address's parts, which then go through the country's format\ncheck like any typed address.",
+        "properties": {
+          "address": {
+            "$ref": "#/components/schemas/SuggestedAddress"
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "type": "object"
+      },
+      "AddressSuggestRequest": {
+        "description": "What Hypha sends while someone types.",
+        "properties": {
+          "country": {
+            "description": "The country the form is for: suggestions stay in it.",
+            "example": "HR",
+            "type": "string"
+          },
+          "limit": {
+            "description": "How many suggestions to answer at most (1 to 5).",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "query": {
+            "description": "What's typed so far (3 to 200 characters).",
+            "type": "string"
+          },
+          "session": {
+            "description": "The client's token for one address being typed, the same until one is picked, for\nproviders that bill per session.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query",
+          "country",
+          "session",
+          "limit"
+        ],
+        "type": "object"
+      },
+      "AddressSuggestResponse": {
+        "description": "The app's answer: what to show in the dropdown.",
+        "properties": {
+          "suggestions": {
+            "items": {
+              "$ref": "#/components/schemas/AddressSuggestion"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "AddressSuggestion": {
+        "description": "One address offered.",
+        "properties": {
+          "description": {
+            "description": "The rest, shown smaller (\"10000 Zagreb, Croatia\").",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "description": "The app's own ID for it, sent back to `address.resolve` when it's picked.",
+            "type": "string"
+          },
+          "label": {
+            "description": "The main line shown (\"Ilica 1\").",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "type": "object"
+      },
       "AddressVerdict": {
         "description": "What an address verification provider concluded about an address, overall.\n\nKnown values: `deliverable`, `deliverable_with_fixes`, `missing_subpremise`, `ambiguous`, `undeliverable`, `unknown`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
@@ -1390,6 +1494,184 @@
   "openapi": "3.1.0",
   "paths": {},
   "webhooks": {
+    "address.resolve": {
+      "post": {
+        "description": "`POST` to the URL the app registered for `address.resolve` v1. Answer within 1000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: Hypha falls back to its own default. Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).",
+        "operationId": "address.resolve.v1",
+        "parameters": [
+          {
+            "description": "`t=<unix seconds>,v1=<hex HMAC-SHA256 of \"<t>.<raw body>\" under the app's secret>`. Check it, and refuse a `t` more than a few minutes old.",
+            "in": "header",
+            "name": "Hypha-Signature",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The point's name, as this operation's.",
+            "in": "header",
+            "name": "Hypha-Extension",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The point's version.",
+            "in": "header",
+            "name": "Hypha-Extension-Version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The same for every retry of one piece of work: answer a repeat as the first.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The store the call is for (`store_…`).",
+            "in": "header",
+            "name": "Hypha-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddressResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressResolveResponse"
+                }
+              }
+            },
+            "description": "The answer (any 2xx)."
+          },
+          "default": {
+            "description": "A failure. Apps built on `@hyphacommerce/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
+          }
+        },
+        "summary": "Turn the suggestion someone picked into the address's parts.",
+        "tags": [
+          "address"
+        ],
+        "x-hypha-extension": {
+          "point": "address.resolve",
+          "version": 1
+        },
+        "x-hypha-on-failure": "fallback",
+        "x-hypha-timeout-ms": 1000,
+        "x-hypha-version": 1
+      }
+    },
+    "address.suggest": {
+      "post": {
+        "description": "`POST` to the URL the app registered for `address.suggest` v1. Answer within 1000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: Hypha falls back to its own default. Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).",
+        "operationId": "address.suggest.v1",
+        "parameters": [
+          {
+            "description": "`t=<unix seconds>,v1=<hex HMAC-SHA256 of \"<t>.<raw body>\" under the app's secret>`. Check it, and refuse a `t` more than a few minutes old.",
+            "in": "header",
+            "name": "Hypha-Signature",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The point's name, as this operation's.",
+            "in": "header",
+            "name": "Hypha-Extension",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The point's version.",
+            "in": "header",
+            "name": "Hypha-Extension-Version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The same for every retry of one piece of work: answer a repeat as the first.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The store the call is for (`store_…`).",
+            "in": "header",
+            "name": "Hypha-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddressSuggestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressSuggestResponse"
+                }
+              }
+            },
+            "description": "The answer (any 2xx)."
+          },
+          "default": {
+            "description": "A failure. Apps built on `@hyphacommerce/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
+          }
+        },
+        "summary": "Offer up to five addresses for what someone has typed so far in an address form.",
+        "tags": [
+          "address"
+        ],
+        "x-hypha-extension": {
+          "point": "address.suggest",
+          "version": 1
+        },
+        "x-hypha-on-failure": "fallback",
+        "x-hypha-timeout-ms": 1000,
+        "x-hypha-version": 1
+      }
+    },
     "address.verify": {
       "post": {
         "description": "`POST` to the URL the app registered for `address.verify` v1. Answer within 3000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: Hypha falls back to its own default. Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).",

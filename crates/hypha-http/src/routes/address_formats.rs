@@ -10,7 +10,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use hypha_addresses::{Form, PostalCode};
-use hypha_core::{AddressField, CountryCode};
+use hypha_checkout_rules::{CheckoutSettingsRepo, HasCheckoutSettings};
+use hypha_core::{AddressField, CountryCode, RepoError};
 use serde::Serialize;
 
 use crate::{
@@ -58,7 +59,8 @@ pub struct AddressFormatResponse {
     regions: Vec<RegionResponse>,
     /// Whether the first line is expected to hold a house number.
     house_number_required: bool,
-    /// Whether the store has an address autocomplete app.
+    /// Whether the store has an address autocomplete app: offer suggestions on the first
+    /// line through `…/address-suggestions`.
     autocomplete: bool,
 }
 
@@ -98,17 +100,26 @@ impl From<Form> for AddressFormatResponse {
     }
 }
 
-fn format_of(country: &str) -> Result<Response, ApiError> {
+/// Whether the store names an autocomplete app.
+async fn autocomplete(ports: &impl HasCheckoutSettings) -> Result<bool, RepoError> {
+    let settings = ports.checkout_settings().get().await?;
+    Ok(settings.is_some_and(|s| s.autocomplete_app().is_some()))
+}
+
+fn format_of(country: &str, autocomplete: bool) -> Result<Response, ApiError> {
     let country = CountryCode::new(country).map_err(|e| {
         ApiError::from(e)
             .not_found_if("unknown_country_code")
             .not_found_if("invalid_country_code")
     })?;
-    let mut response = Json(AddressFormatResponse::from(Form::of(country))).into_response();
-    // The same for every store and caller until the data is updated with a release.
+    let mut form = AddressFormatResponse::from(Form::of(country));
+    form.autocomplete = autocomplete;
+    let mut response = Json(form).into_response();
+    // The form changes only with a release; `autocomplete` is the store's, and follows a
+    // change of its settings within minutes.
     response.headers_mut().insert(
         header::CACHE_CONTROL,
-        HeaderValue::from_static("public, max-age=86400"),
+        HeaderValue::from_static("private, max-age=300"),
     );
     Ok(response)
 }
@@ -126,8 +137,8 @@ pub async fn admin<S: Storage>(
     caller: Caller,
     PathId(country): PathId<String>,
 ) -> Result<Response, ApiError> {
-    caller.authenticate(&state).await?;
-    format_of(&country)
+    let (ports, _) = caller.authenticate(&state).await?;
+    format_of(&country, autocomplete(&ports).await?)
 }
 
 /// A country's address form: its fields in order, required ones, labels, regions.
@@ -143,6 +154,6 @@ pub async fn storefront<S: Storage>(
     caller: Caller<Storefront>,
     PathId(country): PathId<String>,
 ) -> Result<Response, ApiError> {
-    caller.authenticate(&state).await?;
-    format_of(&country)
+    let (ports, _) = caller.authenticate(&state).await?;
+    format_of(&country, autocomplete(&ports).await?)
 }

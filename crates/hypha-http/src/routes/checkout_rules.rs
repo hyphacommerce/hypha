@@ -501,12 +501,17 @@ pub struct CheckoutSettingsResponse {
     /// The app verifying shipping addresses (`address.verify`): asked when a cart's
     /// address is set and when staff change an order's. `null`: none are verified.
     verification_app: Option<String>,
+    /// The app suggesting addresses while someone types one (`address.suggest` and
+    /// `address.resolve`), for the storefront's and the admin's address forms. `null`:
+    /// forms don't suggest.
+    autocomplete_app: Option<String>,
 }
 
 impl From<&CheckoutSettings> for CheckoutSettingsResponse {
     fn from(s: &CheckoutSettings) -> Self {
         Self {
             verification_app: s.verification_app().map(|a| a.as_str().to_string()),
+            autocomplete_app: s.autocomplete_app().map(|a| a.as_str().to_string()),
         }
     }
 }
@@ -537,6 +542,12 @@ pub struct UpdateCheckoutSettingsRequest {
     #[serde(default, deserialize_with = "patch::nullable")]
     #[schema(value_type = Option<String>)]
     verification_app: Option<Option<String>>,
+    /// An app installed, enabled and granted what `address.suggest` and `address.resolve`
+    /// need (`customer_data:address`), answering both (`422 autocomplete_app_unavailable`
+    /// otherwise); `null` for none.
+    #[serde(default, deserialize_with = "patch::nullable")]
+    #[schema(value_type = Option<String>)]
+    autocomplete_app: Option<Option<String>>,
 }
 
 /// Changes the store's checkout settings (`checkout_settings.updated`).
@@ -560,6 +571,7 @@ pub async fn update_settings<S: Storage>(
         &state.app_endpoints(&ports),
         UpdateCheckoutSettings {
             verification_app: req.verification_app,
+            autocomplete_app: req.autocomplete_app,
         },
     )
     .await?;

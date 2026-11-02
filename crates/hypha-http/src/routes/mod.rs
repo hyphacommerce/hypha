@@ -6,6 +6,7 @@ pub(crate) mod address;
 // expanded in its crate) can name them; the types' fields stay private.
 pub mod account;
 pub mod address_formats;
+pub mod address_suggestions;
 pub mod agents;
 pub mod api_keys;
 pub mod app_extensions;
@@ -100,6 +101,8 @@ macro_rules! route_table {
             [admin, GET, "/admin/currencies", reference::currencies],
             [admin, GET, "/admin/countries", reference::countries],
             [admin, GET, "/admin/address-formats/{country}", address_formats::admin],
+            [admin, GET, "/admin/address-suggestions", address_suggestions::admin_suggest],
+            [admin, GET, "/admin/address-suggestions/{id}", address_suggestions::admin_resolve],
             // staff auth (no credentials needed; rate limited)
             [admin, POST, "/admin/auth/login", auth::login_handler],
             [admin, POST, "/admin/auth/login/mfa", auth::finish_login_handler],
@@ -448,6 +451,8 @@ macro_rules! route_table {
             [storefront, GET, "/storefront/products/by-handle/{handle}", products::fetch_by_handle_storefront],
             [storefront, GET, "/storefront/countries", markets::storefront_countries],
             [storefront, GET, "/storefront/address-formats/{country}", address_formats::storefront],
+            [storefront, GET, "/storefront/address-suggestions", address_suggestions::storefront_suggest],
+            [storefront, GET, "/storefront/address-suggestions/{id}", address_suggestions::storefront_resolve],
             [storefront, GET, "/storefront/categories", categories::list_storefront],
             [storefront, GET, "/storefront/custom-field-definitions", custom_fields::list_storefront],
             [storefront, GET, "/storefront/categories/by-handle/{handle}", categories::fetch_by_handle_storefront],

@@ -72,11 +72,18 @@ pub enum Rule {
     DiscountCodeIp,
     /// The same, per cart.
     DiscountCodeCart,
+    /// `GET …/address-suggestions[/{id}]` (storefront and admin), per client address:
+    /// each is a lookup the merchant pays for. Generous, since a form asks on keystrokes
+    /// and a server-rendered storefront without trusted proxies sends every shopper's from
+    /// one address.
+    AddressSuggestIp,
+    /// The same, per typing session (the client's `session`).
+    AddressSuggestSession,
 }
 
 impl Rule {
     /// In declaration order: an in-memory limiter can index by `rule as usize`.
-    pub const ALL: [Rule; 20] = [
+    pub const ALL: [Rule; 22] = [
         Rule::LoginIp,
         Rule::LoginEmailFromIp,
         Rule::LoginEmail,
@@ -97,6 +104,8 @@ impl Rule {
         Rule::AgentWrite,
         Rule::DiscountCodeIp,
         Rule::DiscountCodeCart,
+        Rule::AddressSuggestIp,
+        Rule::AddressSuggestSession,
     ];
 
     /// The rule's key under `[rate_limits]` (`login_ip`): a contract with operators,
@@ -123,6 +132,8 @@ impl Rule {
             Rule::AgentWrite => "agent_write",
             Rule::DiscountCodeIp => "discount_code_ip",
             Rule::DiscountCodeCart => "discount_code_cart",
+            Rule::AddressSuggestIp => "address_suggest_ip",
+            Rule::AddressSuggestSession => "address_suggest_session",
         }
     }
 
@@ -151,6 +162,8 @@ impl Rule {
             Rule::AgentWrite => "RL_AGENT_WRITE",
             Rule::DiscountCodeIp => "RL_DISCOUNT_CODE_IP",
             Rule::DiscountCodeCart => "RL_DISCOUNT_CODE_CART",
+            Rule::AddressSuggestIp => "RL_ADDRESS_SUGGEST_IP",
+            Rule::AddressSuggestSession => "RL_ADDRESS_SUGGEST_SESSION",
         }
     }
 
@@ -179,6 +192,8 @@ impl Rule {
             Rule::AgentWrite => 17,
             Rule::DiscountCodeIp => 18,
             Rule::DiscountCodeCart => 19,
+            Rule::AddressSuggestIp => 20,
+            Rule::AddressSuggestSession => 21,
         }
     }
 
@@ -214,6 +229,8 @@ impl Rule {
             Rule::AgentWrite => limits.agent_write,
             Rule::DiscountCodeIp => limits.discount_code_ip,
             Rule::DiscountCodeCart => limits.discount_code_cart,
+            Rule::AddressSuggestIp => limits.address_suggest_ip,
+            Rule::AddressSuggestSession => limits.address_suggest_session,
         };
         (quota.burst, quota.per.0)
     }

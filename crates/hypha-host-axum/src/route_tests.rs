@@ -60,6 +60,8 @@ mod price_lists;
 mod spores;
 // Address verification: the app, the cart's and the order's checks, review.
 mod verification;
+// Address autocomplete: the app, suggestions and resolving one, their limits.
+mod autocomplete;
 
 /// The app without file storage: most routes don't need it, so their tests don't need
 /// the S3 server.

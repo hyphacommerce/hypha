@@ -92,6 +92,8 @@ pub struct ApiErrorBody {
 /// - `discount_code_taken`: `{"code"}`, the code another discount has
 /// - `compare_at_not_above_price` / `compare_at_currency_mismatch` (variants):
 ///   `{"variant": "var_…"}`
+/// - `invalid_suggestion_query`: `{"parameter"}`, the address suggestion's parameter
+///   that breaks its rule (`q`, `session`, `limit`)
 ///
 /// Status rules: 401 no or bad credentials (with `WWW-Authenticate: Bearer`); 429 over
 /// a rate limit or locked second factor; 403
@@ -279,6 +281,27 @@ impl ApiError {
     /// fields).
     pub fn invalid_body(message: impl std::fmt::Display) -> Self {
         Self::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid_body", message)
+    }
+
+    /// An address suggestion asked of a store with no autocomplete app: forms know
+    /// beforehand from the address format's `autocomplete`.
+    pub fn autocomplete_unavailable() -> Self {
+        Self::new(
+            StatusCode::NOT_FOUND,
+            "autocomplete_unavailable",
+            "the store has no address autocomplete app",
+        )
+    }
+
+    /// An address suggestion's parameter that parses but breaks its rule (`q` too short),
+    /// with the parameter in `details.parameter`.
+    pub fn invalid_suggestion_query(parameter: &str, message: impl std::fmt::Display) -> Self {
+        Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_suggestion_query",
+            message,
+        )
+        .with_details(Some(json!({ "parameter": parameter })))
     }
 
     /// A list's `?cursor=` that isn't one the list handed out.
@@ -1941,7 +1964,9 @@ impl From<hypha_checkout_rules::CommandError> for ApiError {
             E::Rule(R::Invalid(_)) => StatusCode::UNPROCESSABLE_ENTITY,
             E::TooMany { .. } => StatusCode::CONFLICT,
             // An app named in the body.
-            E::AppKey(_) | E::VerificationAppUnavailable(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::AppKey(_) | E::VerificationAppUnavailable(_) | E::AutocompleteAppUnavailable(_) => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),

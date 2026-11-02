@@ -201,7 +201,7 @@
       "AddressFormatResponse": {
         "properties": {
           "autocomplete": {
-            "description": "Whether the store has an address autocomplete app.",
+            "description": "Whether the store has an address autocomplete app: offer suggestions on the first\nline through `…/address-suggestions`.",
             "type": "boolean"
           },
           "country": {
@@ -421,6 +421,46 @@
           "line1",
           "city",
           "country"
+        ],
+        "type": "object"
+      },
+      "AddressSuggestionResponse": {
+        "properties": {
+          "description": {
+            "description": "The rest, shown smaller (\"10000 Zagreb, Croatia\").",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "description": "Send it to `GET …/address-suggestions/{id}` when this one is picked.",
+            "type": "string"
+          },
+          "label": {
+            "description": "The main line (\"Ilica 1\").",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "type": "object"
+      },
+      "AddressSuggestionsResponse": {
+        "description": "What to show under the field.",
+        "properties": {
+          "suggestions": {
+            "description": "At most `limit`; none when the app couldn't answer (the person types on).",
+            "items": {
+              "$ref": "#/components/schemas/AddressSuggestionResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "suggestions"
         ],
         "type": "object"
       },
@@ -2945,6 +2985,47 @@
         "required": [
           "code",
           "name"
+        ],
+        "type": "object"
+      },
+      "ResolvedAddressResponse": {
+        "description": "The picked suggestion's address, normalised like any address a form sends (the region\nas its code, the postal code upper-cased), to fill the form with. Names and phone\naren't part of it.",
+        "properties": {
+          "address": {
+            "$ref": "#/components/schemas/SuggestedAddressResponse"
+          },
+          "problems": {
+            "description": "What saving it as it is would refuse (a missing postal code), so the form can say\nso before the person saves. Empty when it passes.",
+            "items": {
+              "$ref": "#/components/schemas/ResolvedProblem"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "address",
+          "problems"
+        ],
+        "type": "object"
+      },
+      "ResolvedProblem": {
+        "description": "One thing about the resolved address the country's format check doesn't accept: the\nform fills it in anyway and shows this under the field.",
+        "properties": {
+          "code": {
+            "description": "`required`, `too_long`, `invalid_format`, `unknown_region` or `region_mismatch`,\nas `invalid_address`'s problems.",
+            "type": "string"
+          },
+          "field": {
+            "$ref": "#/components/schemas/AddressFieldDto"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "code",
+          "message"
         ],
         "type": "object"
       },
@@ -5737,6 +5818,273 @@
           "address_formats"
         ],
         "x-hypha-scopes": []
+      }
+    },
+    "/storefront/address-suggestions": {
+      "get": {
+        "operationId": "storefront.address_suggestions.storefront_suggest",
+        "parameters": [
+          {
+            "description": "What's typed so far, 3 to 200 characters.",
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The country the form is for (`HR`): suggestions stay in it.",
+            "in": "query",
+            "name": "country",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "A token the form makes for one address being typed and keeps until one is picked\n(1 to 512 letters, digits, `-` and `_`): providers bill per session, and the rate\nlimit counts per session.",
+            "in": "query",
+            "name": "session",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "At most this many suggestions (1 to 5, 5 by default).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressSuggestionsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An unknown or malformed query parameter (`invalid_query`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The store has no autocomplete app (`autocomplete_unavailable`)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "`q`, `session` or `limit` breaks its rule (`invalid_suggestion_query`)"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Over the rate limit per client address or per session (`rate_limited`); see `Retry-After`"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Addresses for what a shopper has typed so far, from the store's autocomplete app.\nDebounce keystrokes; `404 autocomplete_unavailable` without an app (the address\nformat's `autocomplete` says so beforehand); no suggestions when the app fails.",
+        "tags": [
+          "address_suggestions"
+        ],
+        "x-hypha-scopes": [
+          "carts:write"
+        ]
+      }
+    },
+    "/storefront/address-suggestions/{id}": {
+      "get": {
+        "operationId": "storefront.address_suggestions.storefront_resolve",
+        "parameters": [
+          {
+            "description": "The suggestion's `id`.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The country the form is for: the address must be in it.",
+            "in": "query",
+            "name": "country",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The session the suggestion was offered in.",
+            "in": "query",
+            "name": "session",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolvedAddressResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The store has no autocomplete app (`autocomplete_unavailable`)"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Over the rate limit per client address or per session (`rate_limited`); see `Retry-After`"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The app couldn't give the address (`app_unavailable`)"
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "The address a shopper picked, normalised, with what saving it would refuse. `502\napp_unavailable` when the app can't give it: the shopper types it instead.",
+        "tags": [
+          "address_suggestions"
+        ],
+        "x-hypha-scopes": [
+          "carts:write"
+        ]
       }
     },
     "/storefront/app-extensions": {

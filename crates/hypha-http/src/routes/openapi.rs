@@ -626,6 +626,12 @@ fn points() -> Vec<PointDoc> {
         PointDoc::of::<x::AddressVerify>(
             "Verify a shipping address: whether mail reaches it, a corrected one when confident, and what it is.",
         ),
+        PointDoc::of::<x::AddressSuggest>(
+            "Offer up to five addresses for what someone has typed so far in an address form.",
+        ),
+        PointDoc::of::<x::AddressResolve>(
+            "Turn the suggestion someone picked into the address's parts.",
+        ),
     ]
 }
 

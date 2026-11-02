@@ -19,6 +19,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/address-suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Addresses for what staff have typed so far, from the store's autocomplete app, as the
+         *     storefront's.
+         */
+        get: operations["admin.address_suggestions.admin_suggest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/address-suggestions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The address staff picked, normalised, with what saving it would refuse. */
+        get: operations["admin.address_suggestions.admin_resolve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/agent-connections/{id}": {
         parameters: {
             query?: never;
@@ -4357,7 +4394,10 @@ export interface components {
          */
         AddressFlag: string;
         AddressFormatResponse: {
-            /** @description Whether the store has an address autocomplete app. */
+            /**
+             * @description Whether the store has an address autocomplete app: offer suggestions on the first
+             *     line through `…/address-suggestions`.
+             */
             autocomplete: boolean;
             country: components["schemas"]["CountryCode"];
             /** @description Whether the first line is expected to hold a house number. */
@@ -4435,6 +4475,19 @@ export interface components {
              *     says. Never sent to staff or storefronts.
              */
             redacted?: string[] | null;
+        };
+        AddressSuggestionResponse: {
+            /** @description The rest, shown smaller ("10000 Zagreb, Croatia"). */
+            description?: string | null;
+            /** @description Send it to `GET …/address-suggestions/{id}` when this one is picked. */
+            id: string;
+            /** @description The main line ("Ilica 1"). */
+            label: string;
+        };
+        /** @description What to show under the field. */
+        AddressSuggestionsResponse: {
+            /** @description At most `limit`; none when the app couldn't answer (the person types on). */
+            suggestions: components["schemas"]["AddressSuggestionResponse"][];
         };
         /**
          * @description What an address verification provider concluded about an address, overall.
@@ -5323,6 +5376,12 @@ export interface components {
         };
         /** @description Which apps checkout asks about an address. */
         CheckoutSettingsResponse: {
+            /**
+             * @description The app suggesting addresses while someone types one (`address.suggest` and
+             *     `address.resolve`), for the storefront's and the admin's address forms. `null`:
+             *     forms don't suggest.
+             */
+            autocomplete_app?: string | null;
             /**
              * @description The app verifying shipping addresses (`address.verify`): asked when a cart's
              *     address is set and when staff change an order's. `null`: none are verified.
@@ -8789,6 +8848,32 @@ export interface components {
             options: components["schemas"]["ShippingOptionId"][];
         };
         /**
+         * @description The picked suggestion's address, normalised like any address a form sends (the region
+         *     as its code, the postal code upper-cased), to fill the form with. Names and phone
+         *     aren't part of it.
+         */
+        ResolvedAddressResponse: {
+            address: components["schemas"]["SuggestedAddressResponse"];
+            /**
+             * @description What saving it as it is would refuse (a missing postal code), so the form can say
+             *     so before the person saves. Empty when it passes.
+             */
+            problems: components["schemas"]["ResolvedProblem"][];
+        };
+        /**
+         * @description One thing about the resolved address the country's format check doesn't accept: the
+         *     form fills it in anyway and shows this under the field.
+         */
+        ResolvedProblem: {
+            /**
+             * @description `required`, `too_long`, `invalid_format`, `unknown_region` or `region_mismatch`,
+             *     as `invalid_address`'s problems.
+             */
+            code: string;
+            field: components["schemas"]["AddressFieldDto"];
+            message: string;
+        };
+        /**
          * @description A RoleId: `role_` and 32 hex digits.
          * @example role_0190f1a2b3c47d8e9f00112233445566
          */
@@ -10086,6 +10171,12 @@ export interface components {
         /** @description JSON Merge Patch: absent keeps, `null` clears. */
         UpdateCheckoutSettingsRequest: {
             /**
+             * @description An app installed, enabled and granted what `address.suggest` and `address.resolve`
+             *     need (`customer_data:address`), answering both (`422 autocomplete_app_unavailable`
+             *     otherwise); `null` for none.
+             */
+            autocomplete_app?: string | null;
+            /**
              * @description An app installed, enabled and granted what `address.verify` needs
              *     (`customer_data:address`), whose manifest declares it (`422
              *     verification_app_unavailable` otherwise); `null` for none.
@@ -10680,6 +10771,193 @@ export interface operations {
             };
             /** @description A server failure (`internal_error`). */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.address_suggestions.admin_suggest": {
+        parameters: {
+            query: {
+                /** @description What's typed so far, 3 to 200 characters. */
+                q: string;
+                /** @description The country the form is for (`HR`): suggestions stay in it. */
+                country: string;
+                /**
+                 * @description A token the form makes for one address being typed and keeps until one is picked
+                 *     (1 to 512 letters, digits, `-` and `_`): providers bill per session, and the rate
+                 *     limit counts per session.
+                 */
+                session: string;
+                /** @description At most this many suggestions (1 to 5, 5 by default). */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddressSuggestionsResponse"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The store has no autocomplete app (`autocomplete_unavailable`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `q`, `session` or `limit` breaks its rule (`invalid_suggestion_query`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Over the rate limit per client address or per session (`rate_limited`); see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.address_suggestions.admin_resolve": {
+        parameters: {
+            query: {
+                /** @description The country the form is for: the address must be in it. */
+                country: string;
+                /** @description The session the suggestion was offered in. */
+                session: string;
+            };
+            header?: never;
+            path: {
+                /** @description The suggestion's `id`. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResolvedAddressResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The store has no autocomplete app (`autocomplete_unavailable`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Over the rate limit per client address or per session (`rate_limited`); see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The app couldn't give the address (`app_unavailable`) */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };
