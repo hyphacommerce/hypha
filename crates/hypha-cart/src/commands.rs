@@ -1,5 +1,7 @@
+use std::collections::{HashMap, HashSet};
+
 use hypha_core::{
-    AddressError, AddressFormats, AddressParts, AuthError, CartId, Clock, CountryCode,
+    AddressError, AddressFormats, AddressParts, AuthError, CartId, CategoryId, Clock, CountryCode,
     CountryError, Ctx, CustomerGroupId, CustomerId, Email, EmailError, ErrorCode, HasBatch,
     HasClock, HasIdempotency, IdGenerator, IdempotencyError, IdempotencyRecord, IdempotencyRequest,
     Idempotent, MarketId, Money, MoneyError, ProductId, Quantity, QuantityError, RepoError, Scope,
@@ -7,7 +9,7 @@ use hypha_core::{
 };
 use hypha_customers::{CustomerGroupRepo, CustomerRepo, HasCustomerGroups, HasCustomers};
 use hypha_inventory::{HasInventoryItems, HasLocations, StockContext};
-use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists, Market, MarketRepo};
+use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists, Market, MarketRepo, PriceListRepo};
 use hypha_pricing::PricingContext;
 use hypha_products::{HasProducts, Product, ProductRepo};
 use hypha_shipping::{
@@ -821,6 +823,15 @@ async fn load_pricing<
             .await?
             .ok_or(CommandError::MarketNotFound(cart.market()))?;
     Ok((pricing, groups))
+}
+
+/// Each of `products`' categories with all their ancestors: what a rule about categories
+/// reads of a cart's lines. A product in none is left out.
+pub async fn product_categories<S: HasPriceLists>(
+    ports: &S,
+    products: &[ProductId],
+) -> Result<HashMap<ProductId, HashSet<CategoryId>>, RepoError> {
+    ports.price_lists().product_categories(products).await
 }
 
 /// The groups `customer` is in: who a list for groups prices for.

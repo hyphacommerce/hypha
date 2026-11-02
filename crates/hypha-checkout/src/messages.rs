@@ -2,14 +2,19 @@
 //! payment) and what's worth a second look (warnings, which never do), composed from every
 //! source in one order, so the cart's responses and checkout agree.
 
-use hypha_cart::PricedCart;
-use hypha_core::{AddressFormats, CartId, Message};
+use std::collections::HashMap;
+
+use hypha_cart::{PricedCart, PricingPorts, product_categories};
+use hypha_checkout_rules::{
+    CheckoutRuleRepo, HasCheckoutRules, RuleInput, RuleLine, evaluate, names_categories,
+};
+use hypha_core::{AddressFlags, AddressFormats, CartId, Message, ProductId, RepoError};
 
 use crate::CommandError;
 
-/// What a cart's messages come from beside the cart itself: the host's address formats.
-/// One parameter for commands to take, so a source joining it doesn't change their
-/// signatures.
+/// What a cart's messages come from beside the cart and the store's own data: the host's
+/// address formats. One parameter for commands to take, so a source joining it doesn't
+/// change their signatures.
 pub trait CartChecks {
     type Formats: AddressFormats;
 
@@ -26,20 +31,66 @@ impl<F: AddressFormats> CartChecks for F {
 }
 
 /// The cart's messages, in the order a storefront shows them: the address's format
-/// warnings first. A checked-out cart has none: nothing about it can change.
+/// warnings, then the merchant's checkout rules in their order. A checked-out cart has
+/// none: nothing about it can change.
 ///
 /// The address isn't checked again for its problems: it passed them when it was set, and
 /// an address stored before a format changed still reads.
-pub fn cart_messages(checks: &impl CartChecks, cart: &PricedCart) -> Vec<Message> {
+pub async fn cart_messages<S: PricingPorts + HasCheckoutRules>(
+    ports: &S,
+    checks: &impl CartChecks,
+    cart: &PricedCart,
+) -> Result<Vec<Message>, RepoError> {
     if cart.order.is_some() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let mut messages = Vec::new();
-    if let Some(address) = &cart.shipping_address {
-        let checked = checks.formats().check(address);
+    let checked = cart
+        .shipping_address
+        .as_ref()
+        .map(|address| checks.formats().check(address));
+    if let Some(checked) = &checked {
         messages.extend(checked.warnings.iter().map(Message::format_warning));
     }
-    messages
+
+    let rules = ports.checkout_rules().list().await?;
+    if rules.iter().any(|r| r.enabled()) {
+        let categories = if names_categories(&rules) {
+            let products: Vec<ProductId> = cart.lines.iter().map(|l| l.product).collect();
+            product_categories(ports, &products).await?
+        } else {
+            HashMap::new()
+        };
+        let input = RuleInput {
+            address: checked.as_ref().map(|c| c.address.parts().clone()),
+            flags: checked
+                .as_ref()
+                .map_or(AddressFlags::default(), |c| c.flags),
+            verification: None,
+            email: cart.email.as_ref().map(|e| e.as_str().to_string()),
+            country: cart.country,
+            market: Some(cart.market),
+            channel: Some(cart.channel),
+            shipping: cart
+                .shipping_groups
+                .iter()
+                .map(|g| g.selected.as_ref().map(|s| s.option))
+                .collect(),
+            lines: cart
+                .lines
+                .iter()
+                .map(|l| RuleLine {
+                    product: l.product,
+                    categories: categories.get(&l.product).cloned().unwrap_or_default(),
+                    quantity: l.quantity.value(),
+                    shipping_weight: l.details.as_ref().and_then(|d| d.shipping_weight),
+                })
+                .collect(),
+            subtotal: Some(cart.subtotal),
+        };
+        messages.extend(evaluate(&input, &rules));
+    }
+    Ok(messages)
 }
 
 /// `checkout_blocked` with every error among `messages`, warnings left out; nothing when

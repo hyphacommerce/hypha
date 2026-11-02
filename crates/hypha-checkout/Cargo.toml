@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 hypha-core.workspace = true
 hypha-cart = { path = "../hypha-cart" }
+hypha-checkout-rules = { path = "../hypha-checkout-rules" }
 hypha-customers = { path = "../hypha-customers" }
 hypha-discounts = { path = "../hypha-discounts" }
 hypha-inventory = { path = "../hypha-inventory" }
@@ -20,6 +21,7 @@ tracing = "0.1"
 
 [dev-dependencies]
 hypha-addresses = { path = "../hypha-addresses" }
+hypha-categories = { path = "../hypha-categories" }
 serde_json.workspace = true
 uuid.workspace = true
 hypha-markets = { path = "../hypha-markets" }

@@ -13,10 +13,15 @@ use hypha_cart::{
     AddLine, CartRepo, CartStatus, CreateCart, add_line, create_cart, set_cart_customer,
     set_cart_email, set_shipping_address,
 };
+use hypha_categories::{Category, CategoryRepo, NewCategory};
 use hypha_checkout::{
     CartPaymentStarted, Checkout, CommandError, Placed, StartCartPayment, cart_messages,
     cart_payment_methods, checkout, complete_paid_checkout, set_payment_method, start_cart_payment,
     view_cart,
+};
+use hypha_checkout_rules::{
+    CheckoutRule, RuleAppliesTo, RuleCondition, RuleDraft, RuleField, RuleOutcome,
+    create_checkout_rule,
 };
 use hypha_core::{
     Actor, AuthError, CartId, Clock, CountryCode, Ctx, Currency, CustomerId, Email,
@@ -27,6 +32,7 @@ use hypha_core::{
     Address, AddressField, AddressFlags, AddressFormats, AddressParts, AddressWarning,
     AddressWarningCode, CheckedAddress, Message,
 };
+use hypha_core::{CategoryId, MessageCode, MessagePath, MessageSource, Severity};
 use hypha_core::{PaymentMethodId, Versioned};
 use hypha_customers::{Customer, CustomerRepo};
 use hypha_inventory::{InventoryItem, InventoryItemRepo, Location, LocationRepo, ReservationRef};
@@ -2292,7 +2298,7 @@ fn a_carts_messages_carry_its_addresss_format_warnings() {
     let cart = cart_with_address(&world);
     let priced = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();
     assert_eq!(
-        cart_messages(&WarnsOfHouseNumbers, &priced),
+        block_on(cart_messages(&world.ports, &WarnsOfHouseNumbers, &priced)).unwrap(),
         vec![Message::format_warning(&house_number_missing())]
     );
 }
@@ -2302,7 +2308,10 @@ fn a_cart_without_an_address_has_no_messages() {
     let world = World::new();
     let cart = world.cart();
     let priced = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();
-    assert_eq!(cart_messages(&WarnsOfHouseNumbers, &priced), Vec::new());
+    assert_eq!(
+        block_on(cart_messages(&world.ports, &WarnsOfHouseNumbers, &priced)).unwrap(),
+        Vec::new()
+    );
 }
 
 #[test]
@@ -2311,7 +2320,10 @@ fn a_checked_out_cart_has_no_messages() {
     let cart = cart_with_address(&world);
     world.checkout(cart).unwrap();
     let priced = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();
-    assert_eq!(cart_messages(&WarnsOfHouseNumbers, &priced), Vec::new());
+    assert_eq!(
+        block_on(cart_messages(&world.ports, &WarnsOfHouseNumbers, &priced)).unwrap(),
+        Vec::new()
+    );
 }
 
 #[test]
@@ -2335,4 +2347,187 @@ fn warnings_dont_stop_checkout() {
         input,
     ));
     assert!(placed.is_ok(), "{placed:?}");
+}
+
+// ---- checkout rules ----
+
+/// An error rule with `conditions`, added last.
+fn add_rule(
+    world: &World,
+    applies_to: RuleAppliesTo,
+    conditions: Vec<RuleCondition>,
+    severity: Severity,
+) -> CheckoutRule {
+    let draft = RuleDraft {
+        name: "Courier rule".to_string(),
+        enabled: true,
+        applies_to,
+        conditions,
+        outcome: RuleOutcome {
+            severity,
+            message: "Add a phone number for the courier.".to_string(),
+            path: None,
+            code: Some("phone_required".to_string()),
+        },
+    };
+    block_on(create_checkout_rule(
+        &Ctx::system(),
+        &world.ports,
+        &world.ids,
+        draft,
+    ))
+    .unwrap()
+}
+
+fn phone_missing() -> Vec<RuleCondition> {
+    vec![RuleCondition::FieldMissing {
+        field: RuleField::Phone,
+    }]
+}
+
+fn rule_message(rule: &CheckoutRule, severity: Severity, path: MessagePath) -> Message {
+    Message::new(
+        severity,
+        MessageCode::new("phone_required").unwrap(),
+        path,
+        "Add a phone number for the courier.",
+        MessageSource::Rule { rule: rule.id() },
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_rules_error_blocks_checkout_before_anything_is_reserved() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let rule = add_rule(
+        &world,
+        RuleAppliesTo::default(),
+        phone_missing(),
+        Severity::Error,
+    );
+    assert_eq!(
+        world.checkout(cart),
+        Err(CommandError::CheckoutBlocked {
+            cart,
+            messages: vec![rule_message(
+                &rule,
+                Severity::Error,
+                MessagePath::ShippingAddressField(AddressField::Phone)
+            )],
+        })
+    );
+    assert_eq!(world.mug_reserved(), 0);
+}
+
+#[test]
+fn a_rules_warning_shows_on_the_cart_and_lets_checkout_go_on() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let rule = add_rule(
+        &world,
+        RuleAppliesTo::default(),
+        phone_missing(),
+        Severity::Warning,
+    );
+    let priced = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();
+    assert_eq!(
+        block_on(cart_messages(&world.ports, &Formats, &priced)).unwrap(),
+        vec![rule_message(
+            &rule,
+            Severity::Warning,
+            MessagePath::ShippingAddressField(AddressField::Phone)
+        )]
+    );
+    assert!(world.checkout(cart).is_ok());
+}
+
+#[test]
+fn a_rule_for_a_market_the_cart_isnt_in_says_nothing() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    let elsewhere = RuleAppliesTo {
+        markets: vec![MarketId::from_uuid(Uuid::from_u128(77))],
+        ..RuleAppliesTo::default()
+    };
+    add_rule(&world, elsewhere, phone_missing(), Severity::Error);
+    assert!(world.checkout(cart).is_ok());
+}
+
+#[test]
+fn starting_a_payment_is_blocked_by_a_rules_error() {
+    let world = World::new();
+    let cart = cart_with_address(&world);
+    pay_by_card(&world, cart);
+    let rule = add_rule(
+        &world,
+        RuleAppliesTo::default(),
+        phone_missing(),
+        Severity::Error,
+    );
+    let app = CardApp::default();
+    assert_eq!(
+        start_paying(&world, cart, &app).map(|_| ()),
+        Err(CommandError::CheckoutBlocked {
+            cart,
+            messages: vec![rule_message(
+                &rule,
+                Severity::Error,
+                MessagePath::ShippingAddressField(AddressField::Phone)
+            )],
+        })
+    );
+    assert!(
+        block_on(world.payments.list_for_cart(cart))
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_rule_about_a_category_reads_the_lines_categories_with_their_ancestors() {
+    let world = World::new();
+    let cart = world.cart();
+    let category = |n: u128, parent: Option<u128>| {
+        let id = |n| CategoryId::from_uuid(Uuid::from_u128(n));
+        Category::new(NewCategory {
+            id: id(n),
+            name: format!("Category {n}"),
+            handle: Handle::new(&format!("category-{n}")).unwrap(),
+            description: None,
+            parent: parent.map(id),
+            position: 0,
+            visible: true,
+        })
+        .unwrap()
+    };
+    // Kitchen › Mugs; the cup is in Mugs.
+    for mut c in [category(1, None), category(2, Some(1))] {
+        block_on(world.ports.categories.insert(&mut c)).unwrap();
+    }
+    let mugs = CategoryId::from_uuid(Uuid::from_u128(2));
+    block_on(world.ports.categories.add_products(mugs, &[pid("cup")])).unwrap();
+    let rule = add_rule(
+        &world,
+        RuleAppliesTo::default(),
+        vec![RuleCondition::CartContains {
+            products: Vec::new(),
+            categories: vec![CategoryId::from_uuid(Uuid::from_u128(1))],
+        }],
+        Severity::Warning,
+    );
+    let priced = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();
+    let cup_line = priced
+        .lines
+        .iter()
+        .position(|l| l.product == pid("cup"))
+        .unwrap();
+    assert_eq!(
+        block_on(cart_messages(&world.ports, &Formats, &priced)).unwrap(),
+        vec![rule_message(
+            &rule,
+            Severity::Warning,
+            MessagePath::Line(u32::try_from(cup_line).unwrap())
+        )]
+    );
 }

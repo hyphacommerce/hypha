@@ -5,6 +5,7 @@ use hypha_cart::{
     promotions::{Application, Class, CodeOutcome, Share},
     read_cart,
 };
+use hypha_checkout_rules::HasCheckoutRules;
 use hypha_core::{
     Attempts, AuthError, CartId, Clock, Ctx, CustomerId, ErrorCode, HasBatch, HasIdempotency,
     IdGenerator, IdempotencyError, IdempotencyRecord, IdempotencyRequest, Idempotent, Message,
@@ -175,6 +176,7 @@ impl ErrorCode for CommandError {
 /// `CheckoutPorts` (the blanket impl below).
 pub trait CheckoutPorts:
     CartPorts
+    + HasCheckoutRules
     + HasOrders
     + HasPaymentMethods
     + HasPayments
@@ -192,6 +194,7 @@ pub trait CheckoutPorts:
 
 impl<T> CheckoutPorts for T where
     T: CartPorts
+        + HasCheckoutRules
         + HasOrders
         + HasPaymentMethods
         + HasPayments
@@ -621,7 +624,7 @@ pub(crate) async fn ready<
         });
     }
     let method = crate::payment::checkout_method(ports, payments, &cart, &reading.priced).await?;
-    let messages = cart_messages(checks, &reading.priced);
+    let messages = cart_messages(ports, checks, &reading.priced).await?;
     Ok(Ready {
         cart,
         reading,
