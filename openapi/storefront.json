@@ -424,6 +424,19 @@
         ],
         "type": "object"
       },
+      "AddressVerdict": {
+        "description": "What an address verification provider concluded about an address, overall.\n\nKnown values: `deliverable`, `deliverable_with_fixes`, `missing_subpremise`, `ambiguous`, `undeliverable`, `unknown`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "deliverable",
+          "deliverable_with_fixes",
+          "missing_subpremise",
+          "ambiguous",
+          "undeliverable",
+          "unknown"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
       "AssetId": {
         "description": "A AssetId: `asset_` and 32 hex digits.",
         "examples": [
@@ -775,6 +788,17 @@
               {
                 "$ref": "#/components/schemas/PostalAddressResponse",
                 "description": "Where it ships: in the cart's country. Required at checkout when something ships."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "shipping_address_check": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ShippingAddressCheckResponse",
+                "description": "What the store's address verification app said about the shipping address (asked\nwhen it was set); `null` without an address or a verification app."
               },
               {
                 "type": "null"
@@ -2325,6 +2349,10 @@
       "OrderSummaryResponse": {
         "description": "An order in a list: what a table of orders shows, without lines.",
         "properties": {
+          "address_review": {
+            "description": "Whether its shipping address needs review (`?address=needs_review`).",
+            "type": "boolean"
+          },
           "cancelled_at": {
             "description": "When it was cancelled, RFC 3339 in UTC; `null` if it wasn't.",
             "type": [
@@ -2405,7 +2433,8 @@
           "financial_status",
           "fulfillment_status",
           "total",
-          "item_count"
+          "item_count",
+          "address_review"
         ],
         "type": "object"
       },
@@ -3298,6 +3327,38 @@
         ],
         "type": "string",
         "x-hypha-open-enum": true
+      },
+      "ShippingAddressCheckResponse": {
+        "description": "What the store's verification app said about a cart's shipping address. Show\n`suggested` as \"Did you mean …?\": setting it is free (it's known deliverable), and\nkeeping the address as entered needs nothing recorded.",
+        "properties": {
+          "checked_at": {
+            "description": "RFC 3339, UTC.",
+            "type": "string"
+          },
+          "flags": {
+            "$ref": "#/components/schemas/VerificationFlags"
+          },
+          "suggested": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SuggestedAddressResponse",
+                "description": "The corrected address, when the app is confident of it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/AddressVerdict"
+          }
+        },
+        "required": [
+          "verdict",
+          "flags",
+          "checked_at"
+        ],
+        "type": "object"
       },
       "ShippingGroupId": {
         "description": "A ShippingGroupId: `shgrp_` and 32 hex digits.",
@@ -4215,6 +4276,67 @@
         ],
         "type": "object"
       },
+      "SuggestedAddressResponse": {
+        "description": "An address a verification app suggests: where it is, without who lives there.",
+        "properties": {
+          "city": {
+            "type": "string"
+          },
+          "company": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "country": {
+            "type": "string"
+          },
+          "line1": {
+            "type": "string"
+          },
+          "line2": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "postal_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "province": {
+            "description": "The region's code where the country lists regions.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "province_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "redacted": {
+            "description": "Personal fields left out for this caller (`customer_data:address`).",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "line1",
+          "city",
+          "country"
+        ],
+        "type": "object"
+      },
       "TaxClassId": {
         "description": "A TaxClassId: `txc_` and 32 hex digits.",
         "examples": [
@@ -4309,6 +4431,36 @@
         ],
         "pattern": "^var_[0-9a-f]{32}$",
         "type": "string"
+      },
+      "VerificationFlags": {
+        "description": "What the provider says the address is; `None` where it doesn't know.",
+        "properties": {
+          "business": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "po_box": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "residential": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "vacant": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
       }
     },
     "securitySchemes": {

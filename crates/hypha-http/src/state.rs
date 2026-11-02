@@ -445,6 +445,23 @@ impl<S> AppState<S> {
         }
     }
 
+    /// The store's address verification for a request (`address_verify.rs`); calls are
+    /// recorded with `correlation` (the cart or order they're for).
+    pub fn verifier<'a, P>(
+        &'a self,
+        ports: &'a P,
+        correlation: Option<String>,
+    ) -> crate::address_verify::HostVerifier<'a, P> {
+        crate::address_verify::HostVerifier {
+            ports,
+            endpoints: self.app_endpoints(ports),
+            caller: self.extensions(),
+            env: &self.env,
+            clock: &self.clock,
+            correlation,
+        }
+    }
+
     /// Where a request's apps answer extension points (`app_endpoints.rs`).
     pub fn app_endpoints<'a, P>(
         &'a self,
@@ -600,6 +617,7 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_purchasing::HasPurchaseOrders
         + hypha_receiving::ReceivingPorts
         + hypha_inventory::TransferPorts
+        + hypha_checkout_rules::HasCheckoutSettings
         + hypha_inventory::HasLocations
         + HasBatch<
             Batch: hypha_core::StageEvents

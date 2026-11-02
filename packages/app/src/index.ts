@@ -89,6 +89,8 @@ export type {
   SearchQueryResponse,
   AdminActionRequest,
   AdminActionResponse,
+  AddressVerifyRequest,
+  AddressVerifyResponse,
 } from "./points.ts";
 export {
   verifySessionToken,

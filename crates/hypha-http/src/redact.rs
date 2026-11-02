@@ -187,13 +187,26 @@ impl Redaction {
         }
     }
 
-    /// An order or a cart: the buyer's email and the addresses.
+    /// An order or a cart: the buyer's email and the addresses, a verification's
+    /// suggested address among them.
     fn order(self, node: &mut Node) {
         if let Node::Object(object) = node {
             for key in ["shipping_address", "billing_address"] {
                 if let Some(address) = field(object, key) {
                     self.address(address);
                 }
+            }
+            // A cart's `shipping_address_check`, an order's `address_check.verification`.
+            if let Some(Node::Object(check)) = field(object, "shipping_address_check")
+                && let Some(suggested) = field(check, "suggested")
+            {
+                self.address(suggested);
+            }
+            if let Some(Node::Object(check)) = field(object, "address_check")
+                && let Some(Node::Object(verification)) = field(check, "verification")
+                && let Some(suggested) = field(verification, "suggested")
+            {
+                self.address(suggested);
             }
             self.strip(object, &[EMAIL]);
         }
@@ -757,6 +770,33 @@ mod tests {
                                  "province", "province_name", "postal_code"]
                 }
             })
+        );
+    }
+
+    #[test]
+    fn a_verifications_suggested_address_is_redacted_like_the_address() {
+        let suggested = json!({"line1": "Ilica 1", "city": "Zagreb", "country": "HR"});
+        let cart = json!({"id": "cart_1", "shipping_address_check": {
+            "verdict": "deliverable_with_fixes", "suggested": suggested}});
+        let order = json!({"id": "ord_1", "address_check": {"verification": {
+            "verdict": "deliverable_with_fixes", "suggested": suggested}}});
+        let without = app(vec![Scope::OrdersRead]);
+        let cart = serde_json::to_value(one(&without, Family::Order, cart).unwrap()).unwrap();
+        let order = serde_json::to_value(one(&without, Family::Order, order).unwrap()).unwrap();
+        for seen in [
+            &cart["shipping_address_check"]["suggested"],
+            &order["address_check"]["verification"]["suggested"],
+        ] {
+            assert_eq!(seen.get("line1"), None);
+            assert_eq!(seen["country"], "HR");
+        }
+        let with = app(vec![Scope::OrdersRead, Scope::CustomerDataAddress]);
+        let order = json!({"id": "ord_1", "address_check": {"verification": {
+            "suggested": {"line1": "Ilica 1", "city": "Zagreb", "country": "HR"}}}});
+        let seen = serde_json::to_value(one(&with, Family::Order, order).unwrap()).unwrap();
+        assert_eq!(
+            seen["address_check"]["verification"]["suggested"]["line1"],
+            "Ilica 1"
         );
     }
 

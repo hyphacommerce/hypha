@@ -33,3 +33,8 @@ export type SearchQueryResponse = PointResponse<"search.query">;
 
 export type AdminActionRequest = PointRequest<"admin.action">;
 export type AdminActionResponse = PointResponse<"admin.action">;
+
+/** Verify a shipping address: no names or phone are sent, only where it is. */
+export type AddressVerifyRequest = PointRequest<"address.verify">;
+/** The verdict, field statuses, a suggestion (only when confident) and flags. */
+export type AddressVerifyResponse = PointResponse<"address.verify">;

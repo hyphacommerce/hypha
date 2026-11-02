@@ -623,6 +623,9 @@ fn points() -> Vec<PointDoc> {
             "Answer a storefront search with product and variant IDs in order.",
         ),
         PointDoc::of::<x::RunAdminAction>("Run one of the app's admin actions, pressed by staff."),
+        PointDoc::of::<x::AddressVerify>(
+            "Verify a shipping address: whether mail reaches it, a corrected one when confident, and what it is.",
+        ),
     ]
 }
 
@@ -1018,6 +1021,7 @@ mod tests {
         assert_eq!(
             webhooks.keys().map(String::as_str).collect::<Vec<_>>(),
             [
+                "address.verify",
                 "admin.action",
                 "payments.capture",
                 "payments.refund",

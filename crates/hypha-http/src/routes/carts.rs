@@ -18,7 +18,7 @@ use hypha_tax::TaxLine;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    address::{PostalAddressRequest, PostalAddressResponse},
+    address::{PostalAddressRequest, PostalAddressResponse, ShippingAddressCheckResponse},
     discounts::{DiscountClassDto, DiscountTargetDto, DiscountValueDto},
     payments::CartPaymentMethodResponse,
     products::ProductMediaResponse,
@@ -99,6 +99,9 @@ pub struct CartResponse {
     lines: Vec<LineResponse>,
     /// Where it ships: in the cart's country. Required at checkout when something ships.
     shipping_address: Option<PostalAddressResponse>,
+    /// What the store's address verification app said about the shipping address (asked
+    /// when it was set); `null` without an address or a verification app.
+    shipping_address_check: Option<ShippingAddressCheckResponse>,
     /// The groups of lines that ship together, each needing a chosen option before
     /// checkout; empty when nothing ships.
     shipping_groups: Vec<ShippingGroupResponse>,
@@ -341,6 +344,7 @@ impl From<&PricedCart> for CartResponse {
                 .collect(),
             // Filled by `cart_response`, which reads the store's checkout rules.
             messages: Vec::new(),
+            shipping_address_check: None,
             tax_total: cart.tax_total,
             total: cart.total,
             fully_available: cart.is_fully_available(),
@@ -614,6 +618,12 @@ pub async fn cart_response<P: HasAssets + PricingPorts + HasCheckoutRules>(
     media: Option<&Media>,
 ) -> Result<CartResponse, ApiError> {
     let mut response = CartResponse::from(cart);
+    response.shipping_address_check = cart
+        .address_check
+        .as_ref()
+        .filter(|_| cart.shipping_address.is_some())
+        .map(ShippingAddressCheckResponse::new)
+        .transpose()?;
     response.messages = hypha_checkout::cart_messages(ports, &hypha_addresses::Formats, cart)
         .await?
         .iter()
@@ -893,6 +903,7 @@ pub async fn set_address<S: Storage>(
         &ctx,
         &ports,
         &hypha_addresses::Formats,
+        &state.verifier(&ports, Some(id.to_string())),
         id,
         req.address.map(Into::into),
     )

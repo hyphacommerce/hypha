@@ -428,6 +428,18 @@
         "pattern": "^addr_[0-9a-f]{32}$",
         "type": "string"
       },
+      "AddressPrecision": {
+        "description": "How far down the provider found the address.\n\nKnown values: `country`, `locality`, `street`, `premise`, `subpremise`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "country",
+          "locality",
+          "street",
+          "premise",
+          "subpremise"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
       "AddressRequest": {
         "additionalProperties": false,
         "description": "An address for the address book. Sending it again (PUT) replaces it whole,\nincluding whether it is a default. Checked against its country's format (`GET\n…/address-formats/{country}`); every problem comes back at once as `422\ninvalid_address` with `details.problems: [{field, code, message}]`.",
@@ -588,6 +600,79 @@
         ],
         "type": "string",
         "x-hypha-open-enum": true
+      },
+      "AddressVerificationResponse": {
+        "description": "A verification as kept with an order, with what staff need to judge it.",
+        "properties": {
+          "app": {
+            "description": "The app that answered (or failed to).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "checked_at": {
+            "description": "RFC 3339, UTC.",
+            "type": "string"
+          },
+          "failure": {
+            "description": "Why the verdict is `unknown`: the app couldn't be asked, or its answer was\nrefused (its extension call log has the details).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fields": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FieldStatus"
+            },
+            "description": "Per field (`postal_code`), how sure the provider is.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "flags": {
+            "$ref": "#/components/schemas/VerificationFlags"
+          },
+          "precision": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AddressPrecision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reference": {
+            "description": "The provider's own ID for the lookup.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "suggested": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SuggestedAddressResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/AddressVerdict"
+          }
+        },
+        "required": [
+          "verdict",
+          "fields",
+          "flags",
+          "checked_at"
+        ],
+        "type": "object"
       },
       "AdjustOnHandRequest": {
         "additionalProperties": false,
@@ -2241,6 +2326,17 @@
               }
             ]
           },
+          "shipping_address_check": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ShippingAddressCheckResponse",
+                "description": "What the store's address verification app said about the shipping address (asked\nwhen it was set); `null` without an address or a verification app."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "shipping_groups": {
             "description": "The groups of lines that ship together, each needing a chosen option before\ncheckout; empty when nothing ships.",
             "items": {
@@ -2721,6 +2817,19 @@
         ],
         "type": "object"
       },
+      "ChangeShippingAddressRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "$ref": "#/components/schemas/PostalAddressRequest",
+            "description": "In the order's country."
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "type": "object"
+      },
       "ChannelId": {
         "description": "A ChannelId: `chan_` and 32 hex digits.",
         "examples": [
@@ -2873,6 +2982,19 @@
           "created_at",
           "updated_at"
         ],
+        "type": "object"
+      },
+      "CheckoutSettingsResponse": {
+        "description": "Which apps checkout asks about an address.",
+        "properties": {
+          "verification_app": {
+            "description": "The app verifying shipping addresses (`address.verify`): asked when a cart's\naddress is set and when staff change an order's. `null`: none are verified.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
         "type": "object"
       },
       "ClassRateResponse": {
@@ -6872,6 +6994,18 @@
         ],
         "type": "object"
       },
+      "FieldStatus": {
+        "description": "How sure the provider is of one field.\n\nKnown values: `confirmed`, `corrected`, `inferred`, `unconfirmed`, `missing`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "confirmed",
+          "corrected",
+          "inferred",
+          "unconfirmed",
+          "missing"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
       "FinancialStatusDto": {
         "description": "`FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no serde and\nrenaming a variant can't silently change the API. Derived from the order's payments:\nmanual payments use `pending`, `paid` and `voided`; the rest come with providers that\nmove money so.\n\nKnown values: `pending`, `authorized`, `partially_paid`, `paid`, `partially_refunded`, `refunded`, `voided`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
         "enum": [
@@ -8032,6 +8166,23 @@
         },
         "type": "object"
       },
+      "MarkedValidResponse": {
+        "properties": {
+          "at": {
+            "description": "RFC 3339, UTC.",
+            "type": "string"
+          },
+          "by": {
+            "description": "The actor's ID (`usr_…`).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "by",
+          "at"
+        ],
+        "type": "object"
+      },
       "MarketId": {
         "description": "A MarketId: `mkt_` and 32 hex digits.",
         "examples": [
@@ -8901,6 +9052,44 @@
         ],
         "type": "object"
       },
+      "OrderAddressCheckResponse": {
+        "description": "An order's address check.",
+        "properties": {
+          "marked_valid": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MarkedValidResponse",
+                "description": "Who looked at the address and said it's fine; `null` until someone does."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verification": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AddressVerificationResponse",
+                "description": "What the store's verification app said (when the cart's address was set, or when\nstaff last changed it); `null` without a verification app."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "warnings": {
+            "description": "The warnings about the address the order was placed with (or the format's, after\nstaff changed it).",
+            "items": {
+              "$ref": "#/components/schemas/CartMessageResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "warnings"
+        ],
+        "type": "object"
+      },
       "OrderDiscountResponse": {
         "description": "A discount as it applied to an order.",
         "properties": {
@@ -9100,6 +9289,21 @@
       },
       "OrderResponse": {
         "properties": {
+          "address_check": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OrderAddressCheckResponse",
+                "description": "What was known about the shipping address: its verification, the warnings it was\nplaced with, and who marked it valid. `null` for an order placed before addresses\nwere checked, or without an address."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "address_review": {
+            "description": "Whether staff should look at the address before shipping: its verification found\nit ambiguous or undeliverable, or it was placed with a warning about it, and nobody\nmarked it valid since (`POST …/address-check/mark-valid`).",
+            "type": "boolean"
+          },
           "cart": {
             "$ref": "#/components/schemas/CartId"
           },
@@ -9231,6 +9435,7 @@
           "tax_total",
           "total",
           "lines",
+          "address_review",
           "shipping_lines",
           "created_at",
           "updated_at",
@@ -9403,6 +9608,10 @@
       "OrderSummaryResponse": {
         "description": "An order in a list: what a table of orders shows, without lines.",
         "properties": {
+          "address_review": {
+            "description": "Whether its shipping address needs review (`?address=needs_review`).",
+            "type": "boolean"
+          },
           "cancelled_at": {
             "description": "When it was cancelled, RFC 3339 in UTC; `null` if it wasn't.",
             "type": [
@@ -9483,7 +9692,8 @@
           "financial_status",
           "fulfillment_status",
           "total",
-          "item_count"
+          "item_count",
+          "address_review"
         ],
         "type": "object"
       },
@@ -14362,6 +14572,38 @@
         "description": "Nothing to say yet: shipping sends every line whole.",
         "type": "object"
       },
+      "ShippingAddressCheckResponse": {
+        "description": "What the store's verification app said about a cart's shipping address. Show\n`suggested` as \"Did you mean …?\": setting it is free (it's known deliverable), and\nkeeping the address as entered needs nothing recorded.",
+        "properties": {
+          "checked_at": {
+            "description": "RFC 3339, UTC.",
+            "type": "string"
+          },
+          "flags": {
+            "$ref": "#/components/schemas/VerificationFlags"
+          },
+          "suggested": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SuggestedAddressResponse",
+                "description": "The corrected address, when the app is confident of it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/AddressVerdict"
+          }
+        },
+        "required": [
+          "verdict",
+          "flags",
+          "checked_at"
+        ],
+        "type": "object"
+      },
       "ShippingGroupId": {
         "description": "A ShippingGroupId: `shgrp_` and 32 hex digits.",
         "examples": [
@@ -14937,6 +15179,67 @@
           "name",
           "default_language",
           "setup"
+        ],
+        "type": "object"
+      },
+      "SuggestedAddressResponse": {
+        "description": "An address a verification app suggests: where it is, without who lives there.",
+        "properties": {
+          "city": {
+            "type": "string"
+          },
+          "company": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "country": {
+            "type": "string"
+          },
+          "line1": {
+            "type": "string"
+          },
+          "line2": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "postal_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "province": {
+            "description": "The region's code where the country lists regions.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "province_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "redacted": {
+            "description": "Personal fields left out for this caller (`customer_data:address`).",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "line1",
+          "city",
+          "country"
         ],
         "type": "object"
       },
@@ -15600,7 +15903,7 @@
             ]
           },
           "verify": {
-            "description": "Also asks the store's verification app, which costs a lookup: needs\n`checkout_rules:write`. There's no verification app yet, so nothing more is asked.",
+            "description": "Also asks the store's verification app, which costs a lookup: needs\n`checkout_rules:write`. Its answer is in `verification`, its warning among the\nmessages, and rules on verdicts and its flags are tried with it.",
             "type": "boolean"
           }
         },
@@ -15633,7 +15936,7 @@
             ]
           },
           "messages": {
-            "description": "What the cart would show: the format's warnings, then the rules' messages in order.",
+            "description": "What the cart would show: the format's warnings, the verification's, then the\nrules' messages in order.",
             "items": {
               "$ref": "#/components/schemas/TestMessageResponse"
             },
@@ -15645,6 +15948,17 @@
               "$ref": "#/components/schemas/TestAddressProblem"
             },
             "type": "array"
+          },
+          "verification": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AddressVerificationResponse",
+                "description": "What the verification app said, with `verify`; `null` without it, or without a\nverification app."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -16358,6 +16672,20 @@
             "format": "int32",
             "minimum": 0,
             "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateCheckoutSettingsRequest": {
+        "additionalProperties": false,
+        "description": "JSON Merge Patch: absent keeps, `null` clears.",
+        "properties": {
+          "verification_app": {
+            "description": "An app installed, enabled and granted what `address.verify` needs\n(`customer_data:address`), whose manifest declares it (`422\nverification_app_unavailable` otherwise); `null` for none.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "type": "object"
@@ -17719,6 +18047,36 @@
         "required": [
           "items"
         ],
+        "type": "object"
+      },
+      "VerificationFlags": {
+        "description": "What the provider says the address is; `None` where it doesn't know.",
+        "properties": {
+          "business": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "po_box": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "residential": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "vacant": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
         "type": "object"
       },
       "VisibilityDto": {
@@ -28391,6 +28749,193 @@
           }
         ],
         "summary": "Changes a rule (JSON Merge Patch), checked as a whole; moving it renumbers the others\nin the same commit.",
+        "tags": [
+          "checkout_rules"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "checkout_rules:write"
+        ]
+      }
+    },
+    "/admin/checkout-settings": {
+      "get": {
+        "operationId": "admin.checkout_rules.settings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutSettingsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The store's checkout settings; the defaults (nothing asked) until saved.",
+        "tags": [
+          "checkout_rules"
+        ],
+        "x-hypha-scopes": [
+          "checkout_rules:read"
+        ]
+      },
+      "patch": {
+        "operationId": "admin.checkout_rules.update_settings",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCheckoutSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutSettingsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Changes the store's checkout settings (`checkout_settings.updated`).",
         "tags": [
           "checkout_rules"
         ],
@@ -40485,6 +41030,19 @@
             }
           },
           {
+            "description": "`needs_review`: only orders whose shipping address needs review (its verification\nfound it ambiguous or undeliverable, or it was placed with a warning about it),\nuntil someone marks it valid.",
+            "in": "query",
+            "name": "address",
+            "required": false,
+            "schema": {
+              "description": "What an order list's addresses are narrowed to.",
+              "enum": [
+                "needs_review"
+              ],
+              "type": "string"
+            }
+          },
+          {
             "in": "query",
             "name": "sort",
             "required": false,
@@ -40713,6 +41271,124 @@
         ],
         "x-hypha-scopes": [
           "orders:read"
+        ]
+      }
+    },
+    "/admin/orders/{id}/address-check/mark-valid": {
+      "post": {
+        "operationId": "admin.orders.mark_address_valid",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/OrderId"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOrderResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Staff looked at the order's shipping address and it's fine: it no longer needs review\n(`order.address_marked_valid`). Marking it again changes nothing. An order without a\nshipping address is `409 order_has_no_shipping_address`.",
+        "tags": [
+          "orders"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "orders:write"
         ]
       }
     },
@@ -41498,6 +42174,154 @@
           }
         ],
         "summary": "Records that the order's money arrived (a bank transfer, cash from the courier): its\npending payments become `paid`, with the `reference` when given, and so does the order.\nA `pending` order without an open payment gets a `manual` one of its total, paid on the\nspot. The body is optional (none, `{}` or `{\"reference\": …}`). Marking a paid order\nagain changes nothing. Refused (409): a cancelled order (`order_cancelled`), an\nauthorized payment (`payment_authorized`, `details.payment`: only its provider can\ncapture it), and any other payment status (`order_not_payable`,\n`details.financial_status`: partially paid, refunded or voided, where money moved\nalready).",
+        "tags": [
+          "orders"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "orders:write"
+        ]
+      }
+    },
+    "/admin/orders/{id}/shipping-address": {
+      "put": {
+        "operationId": "admin.orders.change_shipping_address",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/OrderId"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeShippingAddressRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOrderResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Changes where the order ships, before anything has (`409 order_fulfilled` once a line\nis fulfilled, `409 order_cancelled`). The address passes its country's format (`422\ninvalid_address` with `details.problems`) and stays in the order's country (`422\naddress_country_mismatch`); the store's verification app is asked again, and the new\ncheck replaces the old (no longer marked valid). Shipping isn't priced again: the\norder keeps what was charged. Records `order.shipping_address_changed`.",
         "tags": [
           "orders"
         ],

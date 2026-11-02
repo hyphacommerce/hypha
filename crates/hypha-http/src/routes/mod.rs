@@ -191,6 +191,8 @@ macro_rules! route_table {
             [admin, GET, "/admin/orders/{id}", orders::fetch],
             [admin, POST, "/admin/orders/{id}/paid", orders::mark_paid],
             [admin, POST, "/admin/orders/{id}/cancel", orders::cancel],
+            [admin, POST, "/admin/orders/{id}/address-check/mark-valid", orders::mark_address_valid],
+            [admin, PUT, "/admin/orders/{id}/shipping-address", orders::change_shipping_address],
             // reports
             [admin, GET, "/admin/reports/sales", reports::sales],
             // payment methods
@@ -231,6 +233,8 @@ macro_rules! route_table {
             [admin, GET, "/admin/checkout-rules/{id}", checkout_rules::fetch],
             [admin, PATCH, "/admin/checkout-rules/{id}", checkout_rules::update],
             [admin, DELETE, "/admin/checkout-rules/{id}", checkout_rules::remove],
+            [admin, GET, "/admin/checkout-settings", checkout_rules::settings],
+            [admin, PATCH, "/admin/checkout-settings", checkout_rules::update_settings],
             // discounts and their codes
             [admin, GET, "/admin/discounts", discounts::list],
             [admin, POST, "/admin/discounts", discounts::create],

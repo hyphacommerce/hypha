@@ -1189,6 +1189,9 @@ fn order_error_status(e: &hypha_orders::OrderError) -> Option<StatusCode> {
             Some(StatusCode::CONFLICT)
         }
         O::NotFulfilled { .. } => Some(StatusCode::CONFLICT),
+        // Changing where it ships: the order's state, or the new address's country.
+        O::Fulfilled(_) | O::NoShippingAddress(_) => Some(StatusCode::CONFLICT),
+        O::AddressCountryMismatch { .. } => Some(StatusCode::UNPROCESSABLE_ENTITY),
         // A line ID in the body; a list's filter or sort.
         O::UnknownLine(_) | O::Filter(_) | O::SortNeedsCurrency => {
             Some(StatusCode::UNPROCESSABLE_ENTITY)
@@ -1224,8 +1227,13 @@ impl From<hypha_orders::CommandError> for ApiError {
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
             ) => StatusCode::CONFLICT,
+            E::Address(_) => StatusCode::UNPROCESSABLE_ENTITY,
         };
-        Self::domain(status, e)
+        let details = match &e {
+            E::Address(a) => Some(address_problems(a)),
+            _ => None,
+        };
+        Self::domain(status, e).with_details(details)
     }
 }
 
@@ -1932,6 +1940,8 @@ impl From<hypha_checkout_rules::CommandError> for ApiError {
             E::NotFound(_) => StatusCode::NOT_FOUND,
             E::Rule(R::Invalid(_)) => StatusCode::UNPROCESSABLE_ENTITY,
             E::TooMany { .. } => StatusCode::CONFLICT,
+            // An app named in the body.
+            E::AppKey(_) | E::VerificationAppUnavailable(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),

@@ -1,6 +1,102 @@
 {
   "components": {
     "schemas": {
+      "AddressPrecision": {
+        "description": "How far down the provider found the address.\n\nKnown values: `country`, `locality`, `street`, `premise`, `subpremise`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "country",
+          "locality",
+          "street",
+          "premise",
+          "subpremise"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "AddressVerdict": {
+        "description": "What an address verification provider concluded about an address, overall.\n\nKnown values: `deliverable`, `deliverable_with_fixes`, `missing_subpremise`, `ambiguous`, `undeliverable`, `unknown`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "deliverable",
+          "deliverable_with_fixes",
+          "missing_subpremise",
+          "ambiguous",
+          "undeliverable",
+          "unknown"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "AddressVerifyRequest": {
+        "description": "What Hypha sends.",
+        "properties": {
+          "address": {
+            "$ref": "#/components/schemas/VerifiedAddress"
+          },
+          "context": {
+            "$ref": "#/components/schemas/VerifyContext",
+            "description": "`cart` when a shopper sets it, `order` when staff edit an order's."
+          }
+        },
+        "required": [
+          "address",
+          "context"
+        ],
+        "type": "object"
+      },
+      "AddressVerifyResponse": {
+        "description": "The app's answer.",
+        "properties": {
+          "fields": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FieldVerification"
+            },
+            "description": "Per address field (`postal_code`), how sure the provider is.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "flags": {
+            "$ref": "#/components/schemas/VerificationFlags",
+            "description": "What the address is; a flag left out is unknown."
+          },
+          "precision": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AddressPrecision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reference": {
+            "description": "The provider's own ID for the lookup.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "suggested": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SuggestedAddress",
+                "description": "The corrected address, only when the provider is confident; same country."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/AddressVerdict"
+          }
+        },
+        "required": [
+          "verdict"
+        ],
+        "type": "object"
+      },
       "AdminActionContext": {
         "description": "The objects the action was pressed on, as the admin passed them (checked against\nthe action's target).",
         "properties": {
@@ -192,6 +288,30 @@
         "format": "email",
         "maxLength": 254,
         "type": "string"
+      },
+      "FieldStatus": {
+        "description": "How sure the provider is of one field.\n\nKnown values: `confirmed`, `corrected`, `inferred`, `unconfirmed`, `missing`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "confirmed",
+          "corrected",
+          "inferred",
+          "unconfirmed",
+          "missing"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "FieldVerification": {
+        "description": "How sure the provider is of one field: an object, so a later version can say more.",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/FieldStatus"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
       },
       "FulfillmentId": {
         "description": "A FulfillmentId: `ful_` and 32 hex digits.",
@@ -1112,6 +1232,50 @@
         "type": "string",
         "x-hypha-open-enum": true
       },
+      "SuggestedAddress": {
+        "description": "An address as a provider suggests it: where it is, without who lives there (names and\nphone are never sent, so never suggested).",
+        "properties": {
+          "city": {
+            "type": "string"
+          },
+          "company": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "country": {
+            "type": "string"
+          },
+          "line1": {
+            "type": "string"
+          },
+          "line2": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "postal_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "province": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "line1",
+          "city",
+          "country"
+        ],
+        "type": "object"
+      },
       "UserId": {
         "description": "A UserId: `user_` and 32 hex digits.",
         "examples": [
@@ -1127,6 +1291,90 @@
         ],
         "pattern": "^var_[0-9a-f]{32}$",
         "type": "string"
+      },
+      "VerificationFlags": {
+        "description": "What the provider says the address is; `None` where it doesn't know.",
+        "properties": {
+          "business": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "po_box": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "residential": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "vacant": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "VerifiedAddress": {
+        "description": "The address to verify: where it is, never who lives there (no names or phone).",
+        "properties": {
+          "city": {
+            "type": "string"
+          },
+          "company": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "country": {
+            "type": "string"
+          },
+          "line1": {
+            "type": "string"
+          },
+          "line2": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "postal_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "province": {
+            "description": "The region's code where the country lists regions (`CA`).",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "line1",
+          "city",
+          "country"
+        ],
+        "type": "object"
+      },
+      "VerifyContext": {
+        "description": "Where an address is verified: setting a cart's, or staff editing an order's.\n\nKnown values: `cart`, `order`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "cart",
+          "order"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
       }
     }
   },
@@ -1142,6 +1390,95 @@
   "openapi": "3.1.0",
   "paths": {},
   "webhooks": {
+    "address.verify": {
+      "post": {
+        "description": "`POST` to the URL the app registered for `address.verify` v1. Answer within 3000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: Hypha falls back to its own default. Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).",
+        "operationId": "address.verify.v1",
+        "parameters": [
+          {
+            "description": "`t=<unix seconds>,v1=<hex HMAC-SHA256 of \"<t>.<raw body>\" under the app's secret>`. Check it, and refuse a `t` more than a few minutes old.",
+            "in": "header",
+            "name": "Hypha-Signature",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The point's name, as this operation's.",
+            "in": "header",
+            "name": "Hypha-Extension",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The point's version.",
+            "in": "header",
+            "name": "Hypha-Extension-Version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The same for every retry of one piece of work: answer a repeat as the first.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The store the call is for (`store_…`).",
+            "in": "header",
+            "name": "Hypha-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddressVerifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressVerifyResponse"
+                }
+              }
+            },
+            "description": "The answer (any 2xx)."
+          },
+          "default": {
+            "description": "A failure. Apps built on `@hyphacommerce/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
+          }
+        },
+        "summary": "Verify a shipping address: whether mail reaches it, a corrected one when confident, and what it is.",
+        "tags": [
+          "address"
+        ],
+        "x-hypha-extension": {
+          "point": "address.verify",
+          "version": 1
+        },
+        "x-hypha-on-failure": "fallback",
+        "x-hypha-timeout-ms": 3000,
+        "x-hypha-version": 1
+      }
+    },
     "admin.action": {
       "post": {
         "description": "`POST` to the URL the app registered for `admin.action` v1. Answer within 10000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: the flow stops with `app_unavailable` (502, `details: {app, point}`). Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).",

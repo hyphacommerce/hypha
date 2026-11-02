@@ -917,6 +917,13 @@ export interface components {
             redacted?: string[] | null;
         };
         /**
+         * @description What an address verification provider concluded about an address, overall.
+         *
+         *     Known values: `deliverable`, `deliverable_with_fixes`, `missing_subpremise`, `ambiguous`, `undeliverable`, `unknown`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        AddressVerdict: string;
+        /**
          * @description A AssetId: `asset_` and 32 hex digits.
          * @example asset_0190f1a2b3c47d8e9f00112233445566
          */
@@ -1065,6 +1072,7 @@ export interface components {
              */
             redacted?: string[] | null;
             shipping_address?: components["schemas"]["PostalAddressResponse"] | null;
+            shipping_address_check?: components["schemas"]["ShippingAddressCheckResponse"] | null;
             /**
              * @description The groups of lines that ship together, each needing a chosen option before
              *     checkout; empty when nothing ships.
@@ -1628,6 +1636,8 @@ export interface components {
         };
         /** @description An order in a list: what a table of orders shows, without lines. */
         OrderSummaryResponse: {
+            /** @description Whether its shipping address needs review (`?address=needs_review`). */
+            address_review: boolean;
             /** @description When it was cancelled, RFC 3339 in UTC; `null` if it wasn't. */
             cancelled_at?: string | null;
             /** @description The sales channel it was placed through. */
@@ -1991,6 +2001,18 @@ export interface components {
          */
         SeverityDto: string;
         /**
+         * @description What the store's verification app said about a cart's shipping address. Show
+         *     `suggested` as "Did you mean …?": setting it is free (it's known deliverable), and
+         *     keeping the address as entered needs nothing recorded.
+         */
+        ShippingAddressCheckResponse: {
+            /** @description RFC 3339, UTC. */
+            checked_at: string;
+            flags: components["schemas"]["VerificationFlags"];
+            suggested?: components["schemas"]["SuggestedAddressResponse"] | null;
+            verdict: components["schemas"]["AddressVerdict"];
+        };
+        /**
          * @description A ShippingGroupId: `shgrp_` and 32 hex digits.
          * @example shgrp_0190f1a2b3c47d8e9f00112233445566
          */
@@ -2302,6 +2324,20 @@ export interface components {
             /** @description Its option values ("M / Blue"); `null` for a product without options. */
             title?: string | null;
         };
+        /** @description An address a verification app suggests: where it is, without who lives there. */
+        SuggestedAddressResponse: {
+            city: string;
+            company?: string | null;
+            country: string;
+            line1: string;
+            line2?: string | null;
+            postal_code?: string | null;
+            /** @description The region's code where the country lists regions. */
+            province?: string | null;
+            province_name?: string | null;
+            /** @description Personal fields left out for this caller (`customer_data:address`). */
+            redacted?: string[] | null;
+        };
         /**
          * @description A TaxClassId: `txc_` and 32 hex digits.
          * @example txc_0190f1a2b3c47d8e9f00112233445566
@@ -2341,6 +2377,13 @@ export interface components {
          * @example var_0190f1a2b3c47d8e9f00112233445566
          */
         VariantId: string;
+        /** @description What the provider says the address is; `None` where it doesn't know. */
+        VerificationFlags: {
+            business?: boolean | null;
+            po_box?: boolean | null;
+            residential?: boolean | null;
+            vacant?: boolean | null;
+        };
     };
     responses: never;
     parameters: never;

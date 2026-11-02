@@ -58,6 +58,8 @@ mod previews;
 mod price_lists;
 // A host built with a spore.
 mod spores;
+// Address verification: the app, the cart's and the order's checks, review.
+mod verification;
 
 /// The app without file storage: most routes don't need it, so their tests don't need
 /// the S3 server.

@@ -615,6 +615,26 @@ async fn personal_data(app: &TestApp) -> (String, String, String) {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
 
+    // A verification app suggesting a corrected address: personal data in carts' and
+    // orders' checks.
+    let (base, _, _) = fake_app(&[(
+        "/verify",
+        200,
+        json!({"verdict": "deliverable_with_fixes",
+            "suggested": {"line1": "Piistreet 2", "city": "Piicity",
+                          "postal_code": "HR-19 987", "country": "HR"}}),
+    )])
+    .await;
+    app_answering(app, "app_verify", &base, &[("address.verify", "/verify")]).await;
+    let (status, body) = send(
+        app,
+        "PATCH",
+        "/admin/checkout-settings",
+        Some(r#"{"verification_app":"app_verify"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
     let pk = publishable(app).await;
     let (_, cart) = send_as(
         app,
@@ -785,6 +805,16 @@ async fn no_admin_route_shows_personal_data_without_its_scopes() {
         ("GET", "/admin/orders".to_string(), None),
         ("GET", format!("/admin/orders/{order}"), None),
         ("POST", format!("/admin/orders/{order}/paid"), None),
+        (
+            "PUT",
+            format!("/admin/orders/{order}/shipping-address"),
+            Some(json!({"address": serde_json::from_str::<Value>(&address).unwrap()}).to_string()),
+        ),
+        (
+            "POST",
+            format!("/admin/orders/{order}/address-check/mark-valid"),
+            None,
+        ),
         ("PUT", format!("/admin/carts/{cart}/customer"), Some(link)),
         ("GET", format!("/admin/notifications?order={order}"), None),
         (

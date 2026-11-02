@@ -6,20 +6,22 @@ use std::collections::HashMap;
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_addresses::Formats;
 use hypha_checkout_rules::{
-    CheckoutRule, RuleAppliesTo, RuleCondition, RuleDraft, RuleInput, RuleLine, RuleOutcome,
-    RulePatch, create_checkout_rule, delete_checkout_rule, evaluate, get_checkout_rule,
-    list_checkout_rules, names_categories, update_checkout_rule,
+    CheckoutRule, CheckoutSettings, RuleAppliesTo, RuleCondition, RuleDraft, RuleInput, RuleLine,
+    RuleOutcome, RulePatch, UpdateCheckoutSettings, VerifiedFacts, create_checkout_rule,
+    delete_checkout_rule, evaluate, get_checkout_rule, get_checkout_settings, list_checkout_rules,
+    names_categories, update_checkout_rule, update_checkout_settings,
 };
 use hypha_core::{
-    AddressError, AddressFormats, ChannelId, CheckoutRuleId, CountryCode, MarketId, Message, Money,
-    ProductId, Scope, ShippingOptionId, Stamped, VariantId,
+    AddressError, AddressFormats, AddressVerifier, ChannelId, CheckoutRuleId, CountryCode,
+    MarketId, Message, Money, ProductId, Scope, ShippingOptionId, Stamped, VariantId,
+    VerifyContext,
 };
 use hypha_products::{HasProducts, ProductError, ProductRepo};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{
-    address::{PostalAddressRequest, PostalAddressResponse},
+    address::{AddressVerificationResponse, PostalAddressRequest, PostalAddressResponse},
     carts::CartMessageResponse,
     stamp_times,
 };
@@ -278,7 +280,8 @@ pub struct TestCheckoutRulesRequest {
     #[serde(default)]
     rule_id: Option<CheckoutRuleId>,
     /// Also asks the store's verification app, which costs a lookup: needs
-    /// `checkout_rules:write`. There's no verification app yet, so nothing more is asked.
+    /// `checkout_rules:write`. Its answer is in `verification`, its warning among the
+    /// messages, and rules on verdicts and its flags are tried with it.
     #[serde(default)]
     verify: bool,
 }
@@ -318,7 +321,11 @@ pub struct TestCheckoutRulesResponse {
     /// The address as a cart would keep it (the region as its code); `null` with problems.
     address: Option<PostalAddressResponse>,
     flags: Option<TestAddressFlags>,
-    /// What the cart would show: the format's warnings, then the rules' messages in order.
+    /// What the verification app said, with `verify`; `null` without it, or without a
+    /// verification app.
+    verification: Option<AddressVerificationResponse>,
+    /// What the cart would show: the format's warnings, the verification's, then the
+    /// rules' messages in order.
     messages: Vec<TestMessageResponse>,
 }
 
@@ -376,6 +383,7 @@ pub async fn test<S: Storage>(
                     .collect(),
                 address: None,
                 flags: None,
+                verification: None,
                 messages: Vec::new(),
             }));
         }
@@ -408,12 +416,27 @@ pub async fn test<S: Storage>(
         HashMap::new()
     };
 
+    let verification = if req.verify {
+        let verifier = state.verifier(&ports, None);
+        let digest = verifier.digest(&checked.address);
+        verifier
+            .verify(&checked.address, &digest, VerifyContext::Cart)
+            .await?
+    } else {
+        None
+    };
     let address = checked.address.parts().clone();
     let input = RuleInput {
         country: CountryCode::new(&address.country)?,
         address: Some(address),
         flags: checked.flags,
-        verification: None,
+        verification: verification.as_ref().map(|v| VerifiedFacts {
+            verdict: Some(v.verdict),
+            po_box: v.flags.po_box,
+            residential: v.flags.residential,
+            business: v.flags.business,
+            vacant: v.flags.vacant,
+        }),
         email: req.email,
         market: req.market,
         channel: req.channel,
@@ -438,6 +461,15 @@ pub async fn test<S: Storage>(
             draft: false,
         })
         .collect();
+    messages.extend(
+        verification
+            .as_ref()
+            .and_then(Message::verification_warning)
+            .map(|m| TestMessageResponse {
+                message: CartMessageResponse::from(&m),
+                draft: false,
+            }),
+    );
     messages.extend(evaluate(&input, &rules).iter().map(|m| {
         let draft = matches!(m.source(), hypha_core::MessageSource::Rule { rule } if Some(*rule) == draft_id);
         TestMessageResponse {
@@ -455,6 +487,81 @@ pub async fn test<S: Storage>(
             parcel_locker: flags.parcel_locker,
             non_latin: flags.non_latin,
         }),
+        verification: verification
+            .as_ref()
+            .map(AddressVerificationResponse::new)
+            .transpose()?,
         messages,
     }))
+}
+
+/// Which apps checkout asks about an address.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct CheckoutSettingsResponse {
+    /// The app verifying shipping addresses (`address.verify`): asked when a cart's
+    /// address is set and when staff change an order's. `null`: none are verified.
+    verification_app: Option<String>,
+}
+
+impl From<&CheckoutSettings> for CheckoutSettingsResponse {
+    fn from(s: &CheckoutSettings) -> Self {
+        Self {
+            verification_app: s.verification_app().map(|a| a.as_str().to_string()),
+        }
+    }
+}
+
+/// The store's checkout settings; the defaults (nothing asked) until saved.
+#[utoipa::path(
+    get,
+    path = "/admin/checkout-settings",
+    responses((status = 200, description = "OK", body = CheckoutSettingsResponse)),
+    extensions(("x-hypha-scopes" = json!(["checkout_rules:read"]))),
+)]
+pub async fn settings<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+) -> Result<Json<CheckoutSettingsResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let settings = get_checkout_settings(&ctx, &ports).await?;
+    Ok(Json(CheckoutSettingsResponse::from(&settings)))
+}
+
+/// JSON Merge Patch: absent keeps, `null` clears.
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateCheckoutSettingsRequest {
+    /// An app installed, enabled and granted what `address.verify` needs
+    /// (`customer_data:address`), whose manifest declares it (`422
+    /// verification_app_unavailable` otherwise); `null` for none.
+    #[serde(default, deserialize_with = "patch::nullable")]
+    #[schema(value_type = Option<String>)]
+    verification_app: Option<Option<String>>,
+}
+
+/// Changes the store's checkout settings (`checkout_settings.updated`).
+#[utoipa::path(
+    patch,
+    path = "/admin/checkout-settings",
+    request_body = UpdateCheckoutSettingsRequest,
+    responses((status = 200, description = "OK", body = CheckoutSettingsResponse)),
+    extensions(("x-hypha-scopes" = json!(["checkout_rules:write"]))),
+)]
+pub async fn update_settings<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    body: JsonBody<UpdateCheckoutSettingsRequest>,
+) -> Result<Json<CheckoutSettingsResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    let settings = update_checkout_settings(
+        &ctx,
+        &ports,
+        &state.app_endpoints(&ports),
+        UpdateCheckoutSettings {
+            verification_app: req.verification_app,
+        },
+    )
+    .await?;
+    Ok(Json(CheckoutSettingsResponse::from(&settings)))
 }
