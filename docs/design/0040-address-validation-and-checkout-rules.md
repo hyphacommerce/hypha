@@ -867,3 +867,53 @@ One branch per step, stacked with `gh stack` from `feat/address-validation`:
   preset, or a saved rule's page) has every condition's fields, the outcome, and "Try an
   address" beside it. The agent grant form and the apps' scope labels name
   `checkout_rules`.
+
+### Step 4: verification
+
+- **The kept answer** is core's `AddressVerification` (`verification.rs`): the digest of
+  the fields sent, verdict, precision, field statuses, suggestion with its own digest,
+  flags (each `Option`), app, the provider's reference, `failure` (why `unknown`) and
+  `checked_at`. It's the JSON stored on carts (`carts.address_check`) and inside orders'
+  `address_check`, so it grows by added fields only. The port is core's
+  `AddressVerifier` (`digest`, `verify`), not checkout's: setting a cart's address is
+  `hypha-cart`'s command and changing an order's is `hypha-orders`', and both take it, so
+  no domain gains an edge. `NoVerification` is the stand-in for tests.
+- **Reuse:** `verify_address` keeps the previous answer for the same digest, and turns it
+  into `deliverable` (suggestion cleared) for its suggestion's digest; a failed one is
+  asked again, so an outage isn't kept. The host normalises the suggestion with
+  `Formats` before taking its digest, so setting it matches. Orders always ask again.
+- **The wire:** `address.verify` v1 answers `fields` as `{name: {status}}` (an object per
+  field, as §5.1 shows, so a later version can say more); `check` refuses a suggestion in
+  another country or without street and city, and a status for a name that isn't an
+  address field. The idempotency key is `verify_` and the digest's first 32 characters:
+  the same question, the same key.
+- **`CheckoutSettings`** arrived here (one row, `checkout_settings`, migration 0099 with
+  the carts' and orders' columns): `verification_app` alone so far, checked through core's
+  `AppPoints` (`422 verification_app_unavailable`), event `checkout_settings.updated`
+  routed with `checkout_rules:read`.
+- **Messages:** `Message::verification_warning` maps §5.4's table; `apartment_missing`
+  points at `$.shipping_address.line2`. Rules read the verdict and the flags through
+  `VerifiedFacts`. The test route's `verify: true` asks the app and answers
+  `verification` beside the messages.
+- **Orders:** `OrderAddressCheck::placed` keeps the cart's warnings whose path is the
+  address or one of its fields (a line's or an option's are about something else).
+  "Needs review" is `Order::needs_address_review`, stored as `orders.address_review` on
+  every write (a partial index) for `?address=needs_review`; orders and summaries answer
+  `address_review`. Marking valid records the actor's prefixed ID; marking again changes
+  nothing; an order without an address is `409 order_has_no_shipping_address`. Changing
+  the address keeps it in the order's country (`422 address_country_mismatch`): its
+  shipping and tax were priced for that country and aren't again. `Order::may_ship_to`
+  runs before the lookup, so a refused change costs none. Erasure drops the checks with
+  the address.
+- **Redaction:** the suggestion is stripped like an address (`Family::Order`) on carts
+  and orders; `order.shipping_address_changed` carries the whole address, which
+  webhooks redact by field name as every payload. The personal-data route test sets a
+  verification app suggesting a marked address and changes and marks an order's.
+- **The admin:** Settings → Checkout's "Address verification" card lists the enabled
+  apps whose endpoints include `address.verify`; orders get a "Needs review" view,
+  filter and badge; the order page an "Address check" card (verdict, flags, warnings,
+  suggestion, "Mark as valid", "Use suggested address") and "Edit address" on "Ships to",
+  both with the country's form, read by the page once it knows the order's country.
+- **The storefront:** checkout shows "Did you mean this address?" with the suggestion in
+  place of the `address_corrections_suggested` message; "Use this address" saves the
+  details with it, "Use as entered" hides it.
