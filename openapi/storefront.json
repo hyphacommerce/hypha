@@ -181,6 +181,93 @@
         ],
         "type": "object"
       },
+      "AddressFieldDto": {
+        "description": "A field of an address, as named in requests and responses.\n\nKnown values: `first_name`, `last_name`, `company`, `line1`, `line2`, `city`, `province`, `postal_code`, `country`, `phone`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "first_name",
+          "last_name",
+          "company",
+          "line1",
+          "line2",
+          "city",
+          "province",
+          "postal_code",
+          "country",
+          "phone"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "AddressFormatResponse": {
+        "properties": {
+          "autocomplete": {
+            "description": "Whether the store has an address autocomplete app.",
+            "type": "boolean"
+          },
+          "country": {
+            "$ref": "#/components/schemas/CountryCode"
+          },
+          "house_number_required": {
+            "description": "Whether the first line is expected to hold a house number.",
+            "type": "boolean"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Each field's label, by field (\"State\", \"ZIP code\"). English for now.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "postal_code": {
+            "$ref": "#/components/schemas/PostalCodeUse"
+          },
+          "postal_code_example": {
+            "description": "A postal code in the country's shape, for a placeholder.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "regions": {
+            "description": "The regions to choose from, where the country lists them: the region is then a\nselect and `province` holds the code. Empty where it's free text or not asked.",
+            "items": {
+              "$ref": "#/components/schemas/RegionResponse"
+            },
+            "type": "array"
+          },
+          "required": {
+            "description": "The fields a write refuses empty (`422 invalid_address`, `required`).",
+            "items": {
+              "$ref": "#/components/schemas/AddressFieldDto"
+            },
+            "type": "array"
+          },
+          "rows": {
+            "description": "The form's fields, row by row, in the country's order; the country itself apart.",
+            "items": {
+              "items": {
+                "$ref": "#/components/schemas/AddressFieldDto"
+              },
+              "type": "array"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "country",
+          "rows",
+          "required",
+          "labels",
+          "postal_code",
+          "regions",
+          "house_number_required",
+          "autocomplete"
+        ],
+        "type": "object"
+      },
       "AddressId": {
         "description": "A AddressId: `addr_` and 32 hex digits.",
         "examples": [
@@ -191,7 +278,7 @@
       },
       "AddressRequest": {
         "additionalProperties": false,
-        "description": "An address for the address book. Sending it again (PUT) replaces it whole,\nincluding whether it is a default.",
+        "description": "An address for the address book. Sending it again (PUT) replaces it whole,\nincluding whether it is a default. Checked against its country's format (`GET\n…/address-formats/{country}`); every problem comes back at once as `422\ninvalid_address` with `details.problems: [{field, code, message}]`.",
         "properties": {
           "city": {
             "type": "string"
@@ -304,6 +391,14 @@
             ]
           },
           "province": {
+            "description": "The region's code where the country lists regions (`CA`), else as entered.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "province_name": {
+            "description": "The region's name beside its code (\"California\"), where the country lists\nregions.",
             "type": [
               "string",
               "null"
@@ -2417,7 +2512,7 @@
       },
       "PostalAddressRequest": {
         "additionalProperties": false,
-        "description": "Sent: checked by `Address::new` (last name, first line and city required; text is\ntrimmed, at most 255 characters per field).",
+        "description": "Sent: last name, first line and city required, text trimmed, at most 255 characters\nper field. A cart's or a location's address is also checked against its country's\nformat (`GET …/address-formats/{country}`): its required fields, the postal code's\nshape, the region (a name, alternate name or code, stored as the code where the\ncountry lists regions). Every problem comes back at once as `422 invalid_address`\nwith `details.problems: [{field, code, message}]`.",
         "properties": {
           "city": {
             "type": "string"
@@ -2522,6 +2617,14 @@
             ]
           },
           "province": {
+            "description": "The region's code where the country lists regions (`CA`), else as entered.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "province_name": {
+            "description": "The region's name beside its code (\"California\"), where the country lists\nregions.",
             "type": [
               "string",
               "null"
@@ -2545,6 +2648,17 @@
           "country"
         ],
         "type": "object"
+      },
+      "PostalCodeUse": {
+        "description": "How a country uses postal codes.\n\nKnown values: `none`, `required`, `recommended`, `optional`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "none",
+          "required",
+          "recommended",
+          "optional"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
       },
       "PriceBreakDto": {
         "additionalProperties": false,
@@ -2669,6 +2783,23 @@
         ],
         "pattern": "^po_[0-9a-f]{32}$",
         "type": "string"
+      },
+      "RegionResponse": {
+        "properties": {
+          "code": {
+            "description": "What `province` holds: `CA`, `M`.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The English name: \"California\", \"Madrid\".",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name"
+        ],
+        "type": "object"
       },
       "SearchHitResponse": {
         "description": "One result: a listing, a product or a variant (the request's `group`), shown by\nits best match.",
@@ -5239,6 +5370,93 @@
           "account"
         ],
         "x-hypha-customer-session": true,
+        "x-hypha-scopes": []
+      }
+    },
+    "/storefront/address-formats/{country}": {
+      "get": {
+        "operationId": "storefront.address_formats.storefront",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "country",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CountryCode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressFormatResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "A country's address form: its fields in order, required ones, labels, regions.",
+        "tags": [
+          "address_formats"
+        ],
         "x-hypha-scopes": []
       }
     },

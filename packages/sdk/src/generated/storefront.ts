@@ -195,6 +195,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/storefront/address-formats/{country}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A country's address form: its fields in order, required ones, labels, regions. */
+        get: operations["storefront.address_formats.storefront"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/storefront/app-extensions": {
         parameters: {
             query?: never;
@@ -817,13 +834,45 @@ export interface components {
             variant: components["schemas"]["VariantId"];
         };
         /**
+         * @description A field of an address, as named in requests and responses.
+         *
+         *     Known values: `first_name`, `last_name`, `company`, `line1`, `line2`, `city`, `province`, `postal_code`, `country`, `phone`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        AddressFieldDto: string;
+        AddressFormatResponse: {
+            /** @description Whether the store has an address autocomplete app. */
+            autocomplete: boolean;
+            country: components["schemas"]["CountryCode"];
+            /** @description Whether the first line is expected to hold a house number. */
+            house_number_required: boolean;
+            /** @description Each field's label, by field ("State", "ZIP code"). English for now. */
+            labels: {
+                [key: string]: string;
+            };
+            postal_code: components["schemas"]["PostalCodeUse"];
+            /** @description A postal code in the country's shape, for a placeholder. */
+            postal_code_example?: string | null;
+            /**
+             * @description The regions to choose from, where the country lists them: the region is then a
+             *     select and `province` holds the code. Empty where it's free text or not asked.
+             */
+            regions: components["schemas"]["RegionResponse"][];
+            /** @description The fields a write refuses empty (`422 invalid_address`, `required`). */
+            required: components["schemas"]["AddressFieldDto"][];
+            /** @description The form's fields, row by row, in the country's order; the country itself apart. */
+            rows: components["schemas"]["AddressFieldDto"][][];
+        };
+        /**
          * @description A AddressId: `addr_` and 32 hex digits.
          * @example addr_0190f1a2b3c47d8e9f00112233445566
          */
         AddressId: string;
         /**
          * @description An address for the address book. Sending it again (PUT) replaces it whole,
-         *     including whether it is a default.
+         *     including whether it is a default. Checked against its country's format (`GET
+         *     …/address-formats/{country}`); every problem comes back at once as `422
+         *     invalid_address` with `details.problems: [{field, code, message}]`.
          */
         AddressRequest: {
             city: string;
@@ -850,7 +899,13 @@ export interface components {
             line2?: string | null;
             phone?: string | null;
             postal_code?: string | null;
+            /** @description The region's code where the country lists regions (`CA`), else as entered. */
             province?: string | null;
+            /**
+             * @description The region's name beside its code ("California"), where the country lists
+             *     regions.
+             */
+            province_name?: string | null;
             /**
              * @description Personal fields left out for this caller: an API key or app without the matching
              *     `customer_data:*` scope. They are absent from the object then, whatever the schema
@@ -1641,8 +1696,12 @@ export interface components {
             status: components["schemas"]["PaymentStatusDto"];
         };
         /**
-         * @description Sent: checked by `Address::new` (last name, first line and city required; text is
-         *     trimmed, at most 255 characters per field).
+         * @description Sent: last name, first line and city required, text trimmed, at most 255 characters
+         *     per field. A cart's or a location's address is also checked against its country's
+         *     format (`GET …/address-formats/{country}`): its required fields, the postal code's
+         *     shape, the region (a name, alternate name or code, stored as the code where the
+         *     country lists regions). Every problem comes back at once as `422 invalid_address`
+         *     with `details.problems: [{field, code, message}]`.
          */
         PostalAddressRequest: {
             city: string;
@@ -1667,7 +1726,13 @@ export interface components {
             line2?: string | null;
             phone?: string | null;
             postal_code?: string | null;
+            /** @description The region's code where the country lists regions (`CA`), else as entered. */
             province?: string | null;
+            /**
+             * @description The region's name beside its code ("California"), where the country lists
+             *     regions.
+             */
+            province_name?: string | null;
             /**
              * @description Personal fields left out for this caller: an API key or app without the matching
              *     `customer_data:*` scope. They are absent from the object then, whatever the schema
@@ -1675,6 +1740,13 @@ export interface components {
              */
             redacted?: string[] | null;
         };
+        /**
+         * @description How a country uses postal codes.
+         *
+         *     Known values: `none`, `required`, `recommended`, `optional`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        PostalCodeUse: string;
         /** @description From `min_quantity` of the variant in one cart line, each costs `price`. */
         PriceBreakDto: {
             /** Format: int32 */
@@ -1736,6 +1808,12 @@ export interface components {
          * @example po_0190f1a2b3c47d8e9f00112233445566
          */
         PurchaseOrderId: string;
+        RegionResponse: {
+            /** @description What `province` holds: `CA`, `M`. */
+            code: string;
+            /** @description The English name: "California", "Madrid". */
+            name: string;
+        };
         /**
          * @description One result: a listing, a product or a variant (the request's `group`), shown by
          *     its best match.
@@ -3099,6 +3177,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlacedOrderResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.address_formats.storefront": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                country: components["schemas"]["CountryCode"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddressFormatResponse"];
                 };
             };
             /** @description A malformed ID in the path (`invalid_path`). */

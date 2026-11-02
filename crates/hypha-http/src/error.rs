@@ -574,6 +574,18 @@ fn completed(order: OrderId) -> Value {
     json!({ "order": order })
 }
 
+/// `invalid_address`'s details: every problem by field, so a form marks each one.
+fn address_problems(e: &hypha_core::AddressError) -> Value {
+    let problems: Vec<Value> = e
+        .problems()
+        .iter()
+        .map(
+            |p| json!({ "field": p.field.as_str(), "code": p.code.as_str(), "message": p.message }),
+        )
+        .collect();
+    json!({ "problems": problems })
+}
+
 // ---------- axum's own rejections (bad JSON, bad path IDs) ----------
 
 impl From<JsonRejection> for ApiError {
@@ -808,7 +820,11 @@ impl From<hypha_stores::CommandError> for ApiError {
             // Only possible at startup, and a deployment problem rather than a request one.
             E::Repo(RepoError::Backend(_)) | E::MultipleStores(_) => return Self::internal(e),
         };
-        Self::domain(status, e)
+        let details = match &e {
+            E::Address(a) => Some(address_problems(a)),
+            _ => None,
+        };
+        Self::domain(status, e).with_details(details)
     }
 }
 
@@ -991,6 +1007,7 @@ impl From<hypha_cart::CommandError> for ApiError {
             }) => Some(shortages([(*variant, *requested, *available)])),
             E::Cart(CartError::Completed { order }) => Some(completed(*order)),
             E::ShippingOptionNotOffered { reason, .. } => Some(json!({ "reason": reason.code() })),
+            E::Address(a) => Some(address_problems(a)),
             _ => None,
         };
         Self::domain(status, e).with_details(details)
@@ -1085,6 +1102,7 @@ impl From<hypha_inventory::CommandError> for ApiError {
                     .map(|l| serde_json::json!({ "variant": l.variant, "in_transit": l.in_transit }))
                     .collect::<Vec<_>>()
             })),
+            E::Inventory(I::Address(a)) => Some(address_problems(a)),
             _ => None,
         };
         Self::domain(status, e).with_details(details)
@@ -1154,6 +1172,7 @@ impl From<hypha_customers::CommandError> for ApiError {
             E::Customer(C::TooManyFilterIds { field, max }) => {
                 Some(json!({ "field": field, "max": max }))
             }
+            E::Address(a) => Some(address_problems(a)),
             _ => None,
         };
         Self::domain(status, e).with_details(details)
@@ -1782,6 +1801,7 @@ impl From<hypha_purchasing::CommandError> for ApiError {
             E::Purchasing(P::ExchangeRateRequired { currency, store }) => {
                 Some(json!({ "currency": currency, "store_currency": store }))
             }
+            E::Purchasing(P::Address(a)) => Some(address_problems(a)),
             E::Purchasing(P::BelowReceived { variant, minimum }) => {
                 Some(json!({ "variant": variant, "minimum": minimum }))
             }

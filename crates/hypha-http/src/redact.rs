@@ -53,7 +53,14 @@ pub struct Redaction {
 const NAME: &[&str] = &["first_name", "last_name"];
 const EMAIL: &[&str] = &["email"];
 const PHONE: &[&str] = &["phone"];
-const ADDRESS: &[&str] = &["line1", "line2", "city", "province", "postal_code"];
+const ADDRESS: &[&str] = &[
+    "line1",
+    "line2",
+    "city",
+    "province",
+    "province_name",
+    "postal_code",
+];
 
 impl Redaction {
     /// Nothing removed.
@@ -111,6 +118,8 @@ impl Redaction {
         let removed: Vec<&'static str> = self
             .removed()
             .filter(|f| [NAME, PHONE, ADDRESS].iter().any(|g| g.contains(f)))
+            // An extension's address has the region's code only.
+            .filter(|f| *f != "province_name")
             .collect();
         for field in &removed {
             match *field {
@@ -745,7 +754,7 @@ mod tests {
                 "shipping_address": {
                     "company": "Acme", "country": "HR",
                     "redacted": ["first_name", "last_name", "phone", "line1", "line2", "city",
-                                 "province", "postal_code"]
+                                 "province", "province_name", "postal_code"]
                 }
             })
         );

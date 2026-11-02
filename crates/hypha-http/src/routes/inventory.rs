@@ -190,9 +190,15 @@ pub async fn update_location_handler<S: Storage>(
         priority: req.priority,
         address: req.address.map(|a| a.map(Into::into)),
     };
-    let location = update_location(&ctx, ports.locations(), id, input)
-        .await
-        .map_err(|e| ApiError::from(e).not_found_if("location_not_found"))?;
+    let location = update_location(
+        &ctx,
+        ports.locations(),
+        &hypha_addresses::Formats,
+        id,
+        input,
+    )
+    .await
+    .map_err(|e| ApiError::from(e).not_found_if("location_not_found"))?;
     Ok(Json(LocationResponse::from(&location)))
 }
 

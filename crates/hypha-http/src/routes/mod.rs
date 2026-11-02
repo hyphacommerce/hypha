@@ -5,6 +5,7 @@ pub(crate) mod address;
 // Handlers and their request and response types are `pub` so a host's router (`router!`,
 // expanded in its crate) can name them; the types' fields stay private.
 pub mod account;
+pub mod address_formats;
 pub mod agents;
 pub mod api_keys;
 pub mod app_extensions;
@@ -97,6 +98,7 @@ macro_rules! route_table {
             // reference data for pickers
             [admin, GET, "/admin/currencies", reference::currencies],
             [admin, GET, "/admin/countries", reference::countries],
+            [admin, GET, "/admin/address-formats/{country}", address_formats::admin],
             // staff auth (no credentials needed; rate limited)
             [admin, POST, "/admin/auth/login", auth::login_handler],
             [admin, POST, "/admin/auth/login/mfa", auth::finish_login_handler],
@@ -433,6 +435,7 @@ macro_rules! route_table {
             [storefront, GET, "/storefront/products/{id}", products::fetch_storefront],
             [storefront, GET, "/storefront/products/by-handle/{handle}", products::fetch_by_handle_storefront],
             [storefront, GET, "/storefront/countries", markets::storefront_countries],
+            [storefront, GET, "/storefront/address-formats/{country}", address_formats::storefront],
             [storefront, GET, "/storefront/categories", categories::list_storefront],
             [storefront, GET, "/storefront/custom-field-definitions", custom_fields::list_storefront],
             [storefront, GET, "/storefront/categories/by-handle/{handle}", categories::fetch_by_handle_storefront],

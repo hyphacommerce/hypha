@@ -8,9 +8,10 @@
     reason = "a failing test panics, and fixtures cast small counters"
 )]
 
+use hypha_addresses::Formats;
 use hypha_core::{
-    Actor, AddressError, AddressId, AddressParts, AuthError, Ctx, CustomerId, Email, EmailError,
-    ErrorCode, Scope, UserId,
+    Actor, AddressError, AddressField, AddressId, AddressParts, AddressProblem, AddressProblemCode,
+    AuthError, Ctx, CustomerId, Email, EmailError, ErrorCode, Scope, UserId,
 };
 use hypha_customers::{
     CommandError, CreateCustomer, Customer, CustomerError, CustomerRepo, SaveAddress,
@@ -92,6 +93,7 @@ impl World {
             &Ctx::system(),
             &self.customers,
             &self.ids,
+            &Formats,
             id,
             input,
         ))
@@ -363,12 +365,33 @@ fn add_address_stores_it_and_its_defaults() {
 }
 
 #[test]
+fn add_address_stores_the_region_as_its_code() {
+    let world = World::new();
+    let c = world.create("ana@example.hr").unwrap();
+    let mut input = save("Mountain View", false, false);
+    input.address.country = "US".to_string();
+    input.address.province = Some("California".to_string());
+    input.address.postal_code = Some("94043".to_string());
+    let updated = world.add(c.id(), input).unwrap();
+    assert_eq!(
+        updated.addresses()[0].address.parts().province.as_deref(),
+        Some("CA")
+    );
+}
+
+#[test]
 fn add_address_rejects_an_invalid_address() {
     let world = World::new();
     let c = world.create("ana@example.hr").unwrap();
     assert_eq!(
         world.add(c.id(), save(" ", false, false)),
-        Err(CommandError::Address(AddressError::Missing("city")))
+        Err(CommandError::Address(AddressError::Invalid(vec![
+            AddressProblem {
+                field: AddressField::City,
+                code: AddressProblemCode::Required,
+                message: "Enter a city".to_string(),
+            }
+        ])))
     );
     let mut lowercase = save("Zagreb", false, false);
     lowercase.address.country = "hr".to_string();
@@ -391,6 +414,7 @@ fn update_address_replaces_it() {
     let updated = block_on(update_address(
         &Ctx::system(),
         &world.customers,
+        &Formats,
         c.id(),
         id,
         save("Split", false, true),

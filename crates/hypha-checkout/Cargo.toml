@@ -19,6 +19,7 @@ thiserror.workspace = true
 tracing = "0.1"
 
 [dev-dependencies]
+hypha-addresses = { path = "../hypha-addresses" }
 serde_json.workspace = true
 uuid.workspace = true
 hypha-markets = { path = "../hypha-markets" }

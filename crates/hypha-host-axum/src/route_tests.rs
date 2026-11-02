@@ -31,6 +31,8 @@ use crate::platform::UuidV7Ids;
 use crate::storage::PgDatabase;
 use crate::testing::*;
 
+// Addresses against their country's format.
+mod addresses;
 // Agents, their calls and proposals.
 mod agents;
 // Apps installed through OAuth, and personal data.
@@ -4172,13 +4174,15 @@ async fn a_cart_ships_by_an_app_providers_signed_quote() {
         (StatusCode::CONFLICT, "shipping_address_required")
     );
     let address = |country: &str| {
+        let postal_code = if country == "SI" { "1000" } else { "10000" };
         json!({"address": {"last_name": "Horvat", "line1": "Ilica 1", "city": "Zagreb",
-            "country": country}})
+            "postal_code": postal_code, "country": country}})
         .to_string()
     };
     let set_address = format!("{cart_path}/shipping-address");
     let (status, json) = send_as(&app, &pk, "PUT", &set_address, Some(&address("SI"))).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{json}");
+    assert_eq!(json["code"], "address_country_mismatch");
     let (status, json) = send_as(&app, &pk, "PUT", &set_address, Some(&address("HR"))).await;
     assert_eq!(status, StatusCode::OK, "{json}");
     assert_eq!(json["shipping_address"]["city"], "Zagreb");
@@ -4355,8 +4359,7 @@ async fn a_failing_provider_brings_out_the_backup() {
         Some(&line),
     )
     .await;
-    let address =
-        r#"{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","country":"HR"}}"#;
+    let address = r#"{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR"}}"#;
     send_as(
         &app,
         &pk,
@@ -4460,8 +4463,7 @@ async fn an_oversized_answer_fails_the_rate_app() {
         Some(&line),
     )
     .await;
-    let address =
-        r#"{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","country":"HR"}}"#;
+    let address = r#"{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR"}}"#;
     send_as(
         &app,
         &pk,

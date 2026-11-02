@@ -378,7 +378,7 @@ async fn the_account_shows_and_changes_the_customers_own_record() {
     assert_eq!(admin["first_name"], "Nina", "the admin sees the change");
 
     // The address book.
-    let address = json!({"last_name": "Kos", "line1": "Ilica 1", "city": "Zagreb", "country": "HR", "default_shipping": true});
+    let address = json!({"last_name": "Kos", "line1": "Ilica 1", "city": "Zagreb", "postal_code": "10000", "country": "HR", "default_shipping": true});
     let (status, account) = send_signed_in(
         &app,
         &pk,
@@ -391,8 +391,7 @@ async fn the_account_shows_and_changes_the_customers_own_record() {
     assert_eq!(status, StatusCode::CREATED, "{account}");
     let address_id = account["addresses"][0]["id"].as_str().unwrap().to_string();
     assert_eq!(account["default_shipping_address"], address_id);
-    let changed =
-        json!({"last_name": "Kos", "line1": "Ilica 2", "city": "Zagreb", "country": "HR"});
+    let changed = json!({"last_name": "Kos", "line1": "Ilica 2", "city": "Zagreb", "postal_code": "10000", "country": "HR"});
     let (status, account) = send_signed_in(
         &app,
         &pk,

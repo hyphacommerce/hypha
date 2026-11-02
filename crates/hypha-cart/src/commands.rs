@@ -1,9 +1,9 @@
 use hypha_core::{
-    AddressError, AddressParts, AuthError, CartId, Clock, CountryCode, CountryError, Ctx,
-    CustomerGroupId, CustomerId, Email, EmailError, ErrorCode, HasBatch, HasClock, HasIdempotency,
-    IdGenerator, IdempotencyError, IdempotencyRecord, IdempotencyRequest, Idempotent, MarketId,
-    Money, MoneyError, ProductId, Quantity, QuantityError, RepoError, Scope, ShippingGroupId,
-    ShippingOptionId, StageIdempotency, Timestamp, VariantId, earlier_id,
+    AddressError, AddressFormats, AddressParts, AuthError, CartId, Clock, CountryCode,
+    CountryError, Ctx, CustomerGroupId, CustomerId, Email, EmailError, ErrorCode, HasBatch,
+    HasClock, HasIdempotency, IdGenerator, IdempotencyError, IdempotencyRecord, IdempotencyRequest,
+    Idempotent, MarketId, Money, MoneyError, ProductId, Quantity, QuantityError, RepoError, Scope,
+    ShippingGroupId, ShippingOptionId, StageIdempotency, Timestamp, VariantId, earlier_id,
 };
 use hypha_customers::{CustomerGroupRepo, CustomerRepo, HasCustomerGroups, HasCustomers};
 use hypha_inventory::{HasInventoryItems, HasLocations, StockContext};
@@ -879,15 +879,19 @@ fn product_ids(cart: &Cart) -> Vec<ProductId> {
 // ---------- shipping ----------
 
 /// Sets where the cart ships, or clears it with `None`. It must be in the cart's
-/// country; a new address drops the shipping choice.
+/// country and pass its format (`formats`), which normalises it; a new address drops the
+/// shipping choice.
 pub async fn set_shipping_address<S: HasCarts + PricingPorts>(
     ctx: &Ctx,
     ports: &S,
+    formats: &impl AddressFormats,
     id: CartId,
     address: Option<AddressParts>,
 ) -> Result<PricedCart, CommandError> {
     ctx.require(Scope::CartsWrite)?;
-    let address = address.map(hypha_core::Address::new).transpose()?;
+    let address = address
+        .map(|parts| formats.validate(parts).map(|checked| checked.address))
+        .transpose()?;
     let mut cart = load_open_cart(ctx, ports, id).await?;
     cart.set_shipping_address(address)?;
     let priced = reprice(ports, &cart).await?;

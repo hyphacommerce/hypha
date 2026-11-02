@@ -813,7 +813,14 @@ pub async fn set_address<S: Storage>(
 ) -> Result<Json<CartResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
-    let priced = set_shipping_address(&ctx, &ports, id, req.address.map(Into::into)).await?;
+    let priced = set_shipping_address(
+        &ctx,
+        &ports,
+        &hypha_addresses::Formats,
+        id,
+        req.address.map(Into::into),
+    )
+    .await?;
     Ok(Json(
         cart_response(&priced, &ports, state.media.as_deref()).await?,
     ))

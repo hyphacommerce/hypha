@@ -2,11 +2,48 @@
 //! address, a cart's shipping address, the address an order snapshots. The customer
 //! address book has its own DTOs (an ID and default flags beside these fields).
 
-use hypha_core::{Address, AddressParts, CountryCode};
+use hypha_core::{Address, AddressField, AddressParts, CountryCode};
 use serde::{Deserialize, Serialize};
 
-/// Sent: checked by `Address::new` (last name, first line and city required; text is
-/// trimmed, at most 255 characters per field).
+/// A field of an address, as named in requests and responses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum AddressFieldDto {
+    FirstName,
+    LastName,
+    Company,
+    Line1,
+    Line2,
+    City,
+    Province,
+    PostalCode,
+    Country,
+    Phone,
+}
+
+impl From<AddressField> for AddressFieldDto {
+    fn from(f: AddressField) -> Self {
+        match f {
+            AddressField::FirstName => Self::FirstName,
+            AddressField::LastName => Self::LastName,
+            AddressField::Company => Self::Company,
+            AddressField::Line1 => Self::Line1,
+            AddressField::Line2 => Self::Line2,
+            AddressField::City => Self::City,
+            AddressField::Province => Self::Province,
+            AddressField::PostalCode => Self::PostalCode,
+            AddressField::Country => Self::Country,
+            AddressField::Phone => Self::Phone,
+        }
+    }
+}
+
+/// Sent: last name, first line and city required, text trimmed, at most 255 characters
+/// per field. A cart's or a location's address is also checked against its country's
+/// format (`GET …/address-formats/{country}`): its required fields, the postal code's
+/// shape, the region (a name, alternate name or code, stored as the code where the
+/// country lists regions). Every problem comes back at once as `422 invalid_address`
+/// with `details.problems: [{field, code, message}]`.
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PostalAddressRequest {
@@ -54,7 +91,11 @@ pub(crate) struct PostalAddressResponse {
     line1: String,
     line2: Option<String>,
     city: String,
+    /// The region's code where the country lists regions (`CA`), else as entered.
     province: Option<String>,
+    /// The region's name beside its code ("California"), where the country lists
+    /// regions.
+    province_name: Option<&'static str>,
     postal_code: Option<String>,
     country: CountryCode,
     phone: Option<String>,
@@ -64,6 +105,14 @@ pub(crate) struct PostalAddressResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(required = false)]
     redacted: Option<Vec<String>>,
+}
+
+/// The name of the address's region, where its country lists regions.
+pub(crate) fn province_name(a: &Address) -> Option<&'static str> {
+    a.parts()
+        .province
+        .as_deref()
+        .and_then(|code| hypha_addresses::region_name(a.country(), code))
 }
 
 impl From<&Address> for PostalAddressResponse {
@@ -77,6 +126,7 @@ impl From<&Address> for PostalAddressResponse {
             line2: p.line2.clone(),
             city: p.city.clone(),
             province: p.province.clone(),
+            province_name: province_name(a),
             postal_code: p.postal_code.clone(),
             country: a.country(),
             phone: p.phone.clone(),

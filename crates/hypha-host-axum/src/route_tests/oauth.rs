@@ -581,7 +581,7 @@ const PII: [&str; 10] = [
     "Piistreet 1",
     "Piiflat 2",
     "Piicity",
-    "PII-10000",
+    "HR-19 987",
     "Piiprovince",
     // A personal custom field's value.
     "Piinote",
@@ -598,7 +598,7 @@ async fn personal_data(app: &TestApp) -> (String, String, String) {
     let (order, _, _) = placed_order_for_three_mugs(app).await;
     let address = json!({"first_name": "Piiana", "last_name": "Piihorvat", "company": "Acme",
         "line1": "Piistreet 1", "line2": "Piiflat 2", "city": "Piicity",
-        "province": "Piiprovince", "postal_code": "PII-10000", "country": "HR",
+        "province": "Piiprovince", "postal_code": "HR-19 987", "country": "HR",
         "phone": "+385 PII 1"});
     let body = json!({"email": "pii-ana@example.hr", "first_name": "Piiana",
         "last_name": "Piihorvat", "phone": "+385 PII 1"})
@@ -748,7 +748,7 @@ async fn no_admin_route_shows_personal_data_without_its_scopes() {
     let notification = sent["items"][0]["id"].as_str().unwrap().to_string();
     let to_cancel = [another_order(&app).await, another_order(&app).await];
     let address = json!({"first_name": "Piiana", "last_name": "Piihorvat", "company": "Acme",
-        "line1": "Piistreet 1", "city": "Piicity", "postal_code": "PII-10000",
+        "line1": "Piistreet 1", "city": "Piicity", "postal_code": "HR-19 987",
         "country": "HR", "phone": "+385 PII 1"})
     .to_string();
     let consent = json!({"state": "subscribed"}).to_string();
