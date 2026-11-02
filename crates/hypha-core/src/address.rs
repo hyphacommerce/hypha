@@ -320,6 +320,53 @@ pub struct AddressFlags {
     pub non_latin: bool,
 }
 
+/// What an address verification provider concluded about an address, overall.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum AddressVerdict {
+    /// Found as written.
+    Deliverable,
+    /// Found once some parts were corrected; the provider may suggest the corrected one.
+    DeliverableWithFixes,
+    /// The building takes mail, but an apartment or unit is missing.
+    MissingSubpremise,
+    /// It could be more than one place.
+    Ambiguous,
+    /// Not found, or not a place mail is delivered to.
+    Undeliverable,
+    /// The provider couldn't tell, or couldn't be asked.
+    Unknown,
+}
+
+impl AddressVerdict {
+    pub const ALL: [AddressVerdict; 6] = [
+        AddressVerdict::Deliverable,
+        AddressVerdict::DeliverableWithFixes,
+        AddressVerdict::MissingSubpremise,
+        AddressVerdict::Ambiguous,
+        AddressVerdict::Undeliverable,
+        AddressVerdict::Unknown,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AddressVerdict::Deliverable => "deliverable",
+            AddressVerdict::DeliverableWithFixes => "deliverable_with_fixes",
+            AddressVerdict::MissingSubpremise => "missing_subpremise",
+            AddressVerdict::Ambiguous => "ambiguous",
+            AddressVerdict::Undeliverable => "undeliverable",
+            AddressVerdict::Unknown => "unknown",
+        }
+    }
+}
+
+impl std::fmt::Display for AddressVerdict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// An address checked against its country's format.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckedAddress {

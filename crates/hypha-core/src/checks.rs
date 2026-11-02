@@ -15,6 +15,7 @@ use crate::{AppKey, CheckoutRuleId};
 
 /// Whether a message stops checkout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum Severity {
     /// Checkout refuses the cart until it's fixed.

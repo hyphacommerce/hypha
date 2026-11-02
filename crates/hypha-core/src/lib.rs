@@ -36,7 +36,8 @@ pub mod weight;
 
 pub use address::{
     Address, AddressError, AddressField, AddressFlags, AddressFormats, AddressParts,
-    AddressProblem, AddressProblemCode, AddressWarning, AddressWarningCode, CheckedAddress,
+    AddressProblem, AddressProblemCode, AddressVerdict, AddressWarning, AddressWarningCode,
+    CheckedAddress,
 };
 pub use app_key::{AppKey, AppKeyError, AppKind, AppPoints};
 pub use callback_url::{CallbackUrl, CallbackUrlError};
