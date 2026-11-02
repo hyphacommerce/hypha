@@ -64,7 +64,7 @@ async fn checkout_settings_start_empty() {
     assert_eq!(status, StatusCode::OK, "{json}");
     assert_eq!(
         json,
-        json!({"verification_app": null, "autocomplete_app": null})
+        json!({"verification_app": null, "autocomplete_app": null, "validation_apps": []})
     );
 }
 

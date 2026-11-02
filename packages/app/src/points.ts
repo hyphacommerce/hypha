@@ -45,3 +45,8 @@ export type AddressSuggestResponse = PointResponse<"address.suggest">;
 /** Turn the picked suggestion into the address's parts, in the form's country. */
 export type AddressResolveRequest = PointRequest<"address.resolve">;
 export type AddressResolveResponse = PointResponse<"address.resolve">;
+
+/** Validate a cart for checkout: its address and email as the app's grant allows. */
+export type CheckoutValidateRequest = PointRequest<"checkout.validate">;
+/** At most 20 messages, each on a part of the cart (`message` builds one). */
+export type CheckoutValidateResponse = PointResponse<"checkout.validate">;

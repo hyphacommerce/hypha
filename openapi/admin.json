@@ -3025,7 +3025,7 @@
         "type": "object"
       },
       "CheckoutSettingsResponse": {
-        "description": "Which apps checkout asks about an address.",
+        "description": "Which apps checkout asks about an address and a cart.",
         "properties": {
           "autocomplete_app": {
             "description": "The app suggesting addresses while someone types one (`address.suggest` and\n`address.resolve`), for the storefront's and the admin's address forms. `null`:\nforms don't suggest.",
@@ -3033,6 +3033,13 @@
               "string",
               "null"
             ]
+          },
+          "validation_apps": {
+            "description": "Every app answering `checkout.validate` now (installed, enabled, granted\n`carts:read`; at most five), by key, with how checkout treats it. Each is asked when\na cart's address is set, when an option is chosen and at checkout.",
+            "items": {
+              "$ref": "#/components/schemas/ValidationAppDto"
+            },
+            "type": "array"
           },
           "verification_app": {
             "description": "The app verifying shipping addresses (`address.verify`): asked when a cart's\naddress is set and when staff change an order's. `null`: none are verified.",
@@ -3042,6 +3049,9 @@
             ]
           }
         },
+        "required": [
+          "validation_apps"
+        ],
         "type": "object"
       },
       "ClassRateResponse": {
@@ -16775,6 +16785,16 @@
               "null"
             ]
           },
+          "validation_apps": {
+            "description": "How checkout treats each validation app named, replacing what was set: an app left\nout goes back to the default (asked, not blocking). Each answering\n`checkout.validate` (`422 validation_app_unavailable` otherwise), once (`422\nduplicate_validation_app`).",
+            "items": {
+              "$ref": "#/components/schemas/ValidationAppDto"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "verification_app": {
             "description": "An app installed, enabled and granted what `address.verify` needs\n(`customer_data:address`), whose manifest declares it (`422\nverification_app_unavailable` otherwise); `null` for none.",
             "type": [
@@ -17836,6 +17856,30 @@
           "role",
           "status",
           "created_at"
+        ],
+        "type": "object"
+      },
+      "ValidationAppDto": {
+        "additionalProperties": false,
+        "description": "How checkout treats one validation app.",
+        "properties": {
+          "app": {
+            "description": "`app_<name>`.",
+            "type": "string"
+          },
+          "block_on_failure": {
+            "description": "Whether checkout stops (a `validation_unavailable` error on the cart) when the app\ncan't be asked, rather than going on without it: off until set.",
+            "type": "boolean"
+          },
+          "enabled": {
+            "description": "Whether it's asked: on for an app installed for `checkout.validate` until set.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "app",
+          "enabled",
+          "block_on_failure"
         ],
         "type": "object"
       },
@@ -22516,7 +22560,7 @@
             "bearer": []
           }
         ],
-        "summary": "Sets where a private app (one without a manifest) answers extension points,\nreplacing what it had; an empty list stops every call. Each point once\n(`duplicate_extension_point`), a point and version this Hypha knows\n(`unknown_extension_point`). Calls are signed with the app's secret. An app\ninstalled from its manifest registers its points there instead\n(`endpoints_from_manifest`, 409).",
+        "summary": "Sets where a private app (one without a manifest) answers extension points,\nreplacing what it had; an empty list stops every call. Each point once\n(`duplicate_extension_point`), a point and version this Hypha knows\n(`unknown_extension_point`). Calls are signed with the app's secret. An app\ninstalled from its manifest registers its points there instead\n(`endpoints_from_manifest`, 409). A sixth app answering `checkout.validate` is\n`too_many_validation_apps` (409).",
         "tags": [
           "apps"
         ],
@@ -41141,7 +41185,7 @@
             "bearer": []
           }
         ],
-        "summary": "Approves a request: installs the app (or replaces its grant) with the scopes asked\nfor. The staff member needs `apps:write` and every scope requested\n(`not_allowed_to_grant`, 403, otherwise). 409 `oauth_request_expired` after ten\nminutes, `oauth_request_decided` once answered; `app_installed_from_other_url` (or,\nfor an upload, `app_installed_from_url`) when the key is an app installed from\nanother manifest URL since the request was made. A private app's approval answers\nwith its `credentials` (and no `redirect_to`), shown this once.",
+        "summary": "Approves a request: installs the app (or replaces its grant) with the scopes asked\nfor. The staff member needs `apps:write` and every scope requested\n(`not_allowed_to_grant`, 403, otherwise). 409 `oauth_request_expired` after ten\nminutes, `oauth_request_decided` once answered; `app_installed_from_other_url` (or,\nfor an upload, `app_installed_from_url`) when the key is an app installed from\nanother manifest URL since the request was made; `too_many_validation_apps` when it\nwould make a sixth app validate checkouts. A private app's approval answers with its\n`credentials` (and no `redirect_to`), shown this once.",
         "tags": [
           "oauth"
         ],

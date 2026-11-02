@@ -5,6 +5,7 @@ use hypha_cart::{
     remove_discount_code, select_shipping, set_cart_customer, set_cart_email, set_line_quantity,
     set_shipping_address, shipping_offers,
 };
+use hypha_checkout::CartChecks;
 use hypha_checkout_rules::HasCheckoutRules;
 use hypha_core::{
     AssetId, CartId, CheckoutRuleId, CountryCode, Currency, CustomerId, DiscountId, Email,
@@ -586,7 +587,13 @@ pub async fn add_code<S: Storage>(
     let req = body.parse()?;
     let priced = add_discount_code(&ctx, &ports, id, &req.code).await?;
     Ok(Json(
-        cart_response(&priced, &ports, state.media.as_deref()).await?,
+        cart_response(
+            &priced,
+            &ports,
+            &state.cart_checks(&ports),
+            state.media.as_deref(),
+        )
+        .await?,
     ))
 }
 
@@ -606,7 +613,13 @@ pub async fn remove_code<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let priced = remove_discount_code(&ctx, &ports, id, &code).await?;
     Ok(Json(
-        cart_response(&priced, &ports, state.media.as_deref()).await?,
+        cart_response(
+            &priced,
+            &ports,
+            &state.cart_checks(&ports),
+            state.media.as_deref(),
+        )
+        .await?,
     ))
 }
 
@@ -615,6 +628,7 @@ pub async fn remove_code<S: Storage>(
 pub async fn cart_response<P: HasAssets + PricingPorts + HasCheckoutRules>(
     cart: &PricedCart,
     ports: &P,
+    checks: &impl CartChecks,
     media: Option<&Media>,
 ) -> Result<CartResponse, ApiError> {
     let mut response = CartResponse::from(cart);
@@ -624,7 +638,7 @@ pub async fn cart_response<P: HasAssets + PricingPorts + HasCheckoutRules>(
         .filter(|_| cart.shipping_address.is_some())
         .map(ShippingAddressCheckResponse::new)
         .transpose()?;
-    response.messages = hypha_checkout::cart_messages(ports, &hypha_addresses::Formats, cart)
+    response.messages = hypha_checkout::cart_messages(ports, checks, cart)
         .await?
         .iter()
         .map(CartMessageResponse::from)
@@ -677,7 +691,13 @@ pub async fn create<S: Storage>(
     let created = create_cart(&ctx, &ports, &state.ids, &state.clock, input).await?;
     Ok(idempotent_response(
         StatusCode::CREATED,
-        cart_response(&created.value, &ports, state.media.as_deref()).await?,
+        cart_response(
+            &created.value,
+            &ports,
+            &state.cart_checks(&ports),
+            state.media.as_deref(),
+        )
+        .await?,
         created.replayed,
     ))
 }
@@ -698,7 +718,13 @@ pub async fn fetch<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let priced = hypha_checkout::view_cart(&ctx, &ports, id).await?;
     Ok(Json(
-        cart_response(&priced, &ports, state.media.as_deref()).await?,
+        cart_response(
+            &priced,
+            &ports,
+            &state.cart_checks(&ports),
+            state.media.as_deref(),
+        )
+        .await?,
     ))
 }
 
@@ -728,7 +754,13 @@ pub async fn add<S: Storage>(
     let added = add_line(&ctx, &ports, &state.clock, input).await?;
     Ok(idempotent_response(
         StatusCode::OK,
-        cart_response(&added.value, &ports, state.media.as_deref()).await?,
+        cart_response(
+            &added.value,
+            &ports,
+            &state.cart_checks(&ports),
+            state.media.as_deref(),
+        )
+        .await?,
         added.replayed,
     ))
 }
@@ -752,7 +784,13 @@ pub async fn set_email<S: Storage>(
     let req = body.parse()?;
     let priced = set_cart_email(&ctx, &ports, id, req.email).await?;
     Ok(Json(
-        cart_response(&priced, &ports, state.media.as_deref()).await?,
+        cart_response(
+            &priced,
+            &ports,
+            &state.cart_checks(&ports),
+            state.media.as_deref(),
+        )
+        .await?,
     ))
 }
 
@@ -783,7 +821,13 @@ pub async fn set_marketing<S: Storage>(
     let req = body.parse()?;
     let priced = hypha_cart::set_cart_marketing(&ctx, &ports, id, req.opt_in).await?;
     Ok(Json(
-        cart_response(&priced, &ports, state.media.as_deref()).await?,
+        cart_response(
+            &priced,
+            &ports,
+            &state.cart_checks(&ports),
+            state.media.as_deref(),
+        )
+        .await?,
     ))
 }
 
@@ -805,7 +849,13 @@ pub async fn set_customer<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let priced = set_cart_customer(&ctx, &ports, id, req.customer).await?;
-    let cart = cart_response(&priced, &ports, state.media.as_deref()).await?;
+    let cart = cart_response(
+        &priced,
+        &ports,
+        &state.cart_checks(&ports),
+        state.media.as_deref(),
+    )
+    .await?;
     // The admin surface: personal data per the caller.
     Ok(Json(crate::redact::one(
         &ctx,
@@ -847,7 +897,13 @@ pub async fn set_quantity<S: Storage>(
         .await
         .map_err(|e| ApiError::from(e).not_found_if("line_not_found"))?;
     Ok(Json(
-        cart_response(&priced, &ports, state.media.as_deref()).await?,
+        cart_response(
+            &priced,
+            &ports,
+            &state.cart_checks(&ports),
+            state.media.as_deref(),
+        )
+        .await?,
     ))
 }
 
@@ -869,7 +925,13 @@ pub async fn remove_line<S: Storage>(
         .await
         .map_err(|e| ApiError::from(e).not_found_if("line_not_found"))?;
     Ok(Json(
-        cart_response(&priced, &ports, state.media.as_deref()).await?,
+        cart_response(
+            &priced,
+            &ports,
+            &state.cart_checks(&ports),
+            state.media.as_deref(),
+        )
+        .await?,
     ))
 }
 
@@ -899,7 +961,7 @@ pub async fn set_address<S: Storage>(
 ) -> Result<Json<CartResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
-    let priced = set_shipping_address(
+    let mut priced = set_shipping_address(
         &ctx,
         &ports,
         &hypha_addresses::Formats,
@@ -908,8 +970,18 @@ pub async fn set_address<S: Storage>(
         req.address.map(Into::into),
     )
     .await?;
+    let checks = state.cart_checks(&ports);
+    hypha_checkout::validate_cart(
+        &ctx,
+        &ports,
+        &checks,
+        &state.clock,
+        &mut priced,
+        hypha_core::ValidationStep::Address,
+    )
+    .await?;
     Ok(Json(
-        cart_response(&priced, &ports, state.media.as_deref()).await?,
+        cart_response(&priced, &ports, &checks, state.media.as_deref()).await?,
     ))
 }
 
@@ -1038,9 +1110,20 @@ pub async fn select<S: Storage>(
     rate_limit::enforce(&state.limiter, Rule::ShippingQuotesCart, &id.to_string()).await?;
     let req = body.parse()?;
     let rates = state.cart_rates(&ports, id);
-    let priced = select_shipping(&ctx, &ports, &rates, &state.clock, id, group, req.option).await?;
+    let mut priced =
+        select_shipping(&ctx, &ports, &rates, &state.clock, id, group, req.option).await?;
+    let checks = state.cart_checks(&ports);
+    hypha_checkout::validate_cart(
+        &ctx,
+        &ports,
+        &checks,
+        &state.clock,
+        &mut priced,
+        hypha_core::ValidationStep::Shipping,
+    )
+    .await?;
     Ok(Json(
-        cart_response(&priced, &ports, state.media.as_deref()).await?,
+        cart_response(&priced, &ports, &checks, state.media.as_deref()).await?,
     ))
 }
 
@@ -1107,6 +1190,12 @@ pub async fn set_payment_method<S: Storage>(
             // The method arrives in the body: invalid input, not the cart's state.
             .map_err(|e| ApiError::from(e).unprocessable_if("payment_method_unavailable"))?;
     Ok(Json(
-        cart_response(&priced, &ports, state.media.as_deref()).await?,
+        cart_response(
+            &priced,
+            &ports,
+            &state.cart_checks(&ports),
+            state.media.as_deref(),
+        )
+        .await?,
     ))
 }

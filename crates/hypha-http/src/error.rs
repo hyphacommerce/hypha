@@ -1964,9 +1964,13 @@ impl From<hypha_checkout_rules::CommandError> for ApiError {
             E::Rule(R::Invalid(_)) => StatusCode::UNPROCESSABLE_ENTITY,
             E::TooMany { .. } => StatusCode::CONFLICT,
             // An app named in the body.
-            E::AppKey(_) | E::VerificationAppUnavailable(_) | E::AutocompleteAppUnavailable(_) => {
-                StatusCode::UNPROCESSABLE_ENTITY
-            }
+            E::AppKey(_)
+            | E::VerificationAppUnavailable(_)
+            | E::AutocompleteAppUnavailable(_)
+            | E::ValidationAppUnavailable(_)
+            | E::DuplicateValidationApp(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            // A grant approved or endpoints set while the store has as many as it may.
+            E::TooManyValidationApps { .. } => StatusCode::CONFLICT,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
@@ -1978,7 +1982,8 @@ impl From<hypha_checkout_rules::CommandError> for ApiError {
 }
 
 /// `invalid_checkout_rule`: `{"problems": [{"path", "code", "message"}]}`, every broken
-/// rule; `too_many_checkout_rules`: `{"max"}`.
+/// rule; `too_many_checkout_rules` and `too_many_validation_apps`: `{"max"}`;
+/// `validation_app_unavailable` and `duplicate_validation_app`: `{"app"}`.
 fn checkout_rule_details(e: &hypha_checkout_rules::CommandError) -> Option<Value> {
     use hypha_checkout_rules::{CheckoutRuleError as R, CommandError as E};
     match e {
@@ -1988,7 +1993,10 @@ fn checkout_rule_details(e: &hypha_checkout_rules::CommandError) -> Option<Value
                 .map(|p| json!({"path": p.path, "code": p.code, "message": p.message}))
                 .collect::<Vec<_>>()
         })),
-        E::TooMany { max } => Some(json!({ "max": max })),
+        E::TooMany { max } | E::TooManyValidationApps { max } => Some(json!({ "max": max })),
+        E::ValidationAppUnavailable(app) | E::DuplicateValidationApp(app) => {
+            Some(json!({ "app": app.as_str() }))
+        }
         _ => None,
     }
 }

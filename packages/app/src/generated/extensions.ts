@@ -83,6 +83,26 @@ export interface webhooks {
         patch?: never;
         trace?: never;
     };
+    "checkout.validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Say what's wrong with a cart (errors stop checkout) or worth a second look (warnings), each on the part it's about.
+         * @description `POST` to the URL the app registered for `checkout.validate` v1. Answer within 2000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: the merchant's setting for the app decides: checkout goes on without it, or stops with a `validation_unavailable` error on the cart. Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).
+         */
+        post: operations["checkout.validate.v1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "payments.capture": {
         parameters: {
             query?: never;
@@ -370,6 +390,20 @@ export interface components {
          * @example chan_0190f1a2b3c47d8e9f00112233445566
          */
         ChannelId: string;
+        /** @description What Hypha sends. */
+        CheckoutValidateRequest: {
+            cart: components["schemas"]["ValidatedCart"];
+            /**
+             * @description `address` when the shipping address was set, `shipping` when an option was chosen,
+             *     `checkout` when the shopper places the order or starts its payment.
+             */
+            step: components["schemas"]["ValidationStep"];
+        };
+        /** @description The app's answer. */
+        CheckoutValidateResponse: {
+            /** @description At most 20; none when the cart is fine. */
+            messages: components["schemas"]["ValidationMessage"][];
+        };
         /**
          * @description An ISO 3166-1 alpha-2 country code.
          * @example HR
@@ -742,6 +776,18 @@ export interface components {
          */
         SearchSort: "relevance" | "newest" | "price_asc" | "price_desc" | "title";
         /**
+         * @description Whether a message stops checkout.
+         *
+         *     Known values: `error`, `warning`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        Severity: "error" | "warning";
+        /**
+         * @description A ShippingOptionId: `shipopt_` and 32 hex digits.
+         * @example shipopt_0190f1a2b3c47d8e9f00112233445566
+         */
+        ShippingOptionId: string;
+        /**
          * @description An address as a provider suggests it: where it is, without who lives there (names and
          *     phone are never sent, so never suggested).
          */
@@ -759,6 +805,85 @@ export interface components {
          * @example user_0190f1a2b3c47d8e9f00112233445566
          */
         UserId: string;
+        /** @description A kept verification, as an app needs it. */
+        ValidatedAddressCheck: {
+            flags: components["schemas"]["VerificationFlags"];
+            verdict: components["schemas"]["AddressVerdict"];
+        };
+        /**
+         * @description The cart as the app sees it. Paths in its answer point into the cart's own response,
+         *     whose arrays are in this order.
+         */
+        ValidatedCart: {
+            channel: components["schemas"]["ChannelId"];
+            country: components["schemas"]["CountryCode"];
+            currency: components["schemas"]["Currency"];
+            customer?: components["schemas"]["CustomerId"] | null;
+            /**
+             * @description `null` without one, or without the app's `customer_data:email` (then listed in
+             *     `redacted`).
+             */
+            email?: string | null;
+            id: components["schemas"]["CartId"];
+            lines: components["schemas"]["ValidatedLine"][];
+            market: components["schemas"]["MarketId"];
+            /** @description The cart's personal fields left out for this app (`email`). */
+            redacted?: string[] | null;
+            shipping_address?: components["schemas"]["PostalAddressResponse"] | null;
+            shipping_address_check?: components["schemas"]["ValidatedAddressCheck"] | null;
+            /** @description One per group of shipped lines, with its chosen option. */
+            shipping_groups: components["schemas"]["ValidatedShippingGroup"][];
+            /** @description The available lines after discounts. */
+            subtotal: components["schemas"]["Money"];
+            total: components["schemas"]["Money"];
+        };
+        /** @description One cart line. */
+        ValidatedLine: {
+            product: components["schemas"]["ProductId"];
+            /** Format: int32 */
+            quantity: number;
+            sku?: string | null;
+            unit_price?: components["schemas"]["Money"] | null;
+            variant: components["schemas"]["VariantId"];
+            /**
+             * Format: int32
+             * @description One unit's weight when the variant is shipped and has one.
+             */
+            weight_grams?: number | null;
+        };
+        /** @description A group of shipped lines and the option chosen for it. */
+        ValidatedShippingGroup: {
+            /** @description The option's code (`dhl_express`). */
+            code?: string | null;
+            option?: components["schemas"]["ShippingOptionId"] | null;
+            /** @description A provider's key for an option a rate app or spore prices (`app_dhl`). */
+            provider?: string | null;
+        };
+        /** @description One message the app has for the shopper. */
+        ValidationMessage: {
+            /**
+             * @description The app's own: snake_case, a letter first, at most 64 characters.
+             * @example alcohol_restricted
+             */
+            code: string;
+            /** @description Plain text for the shopper, 1 to 500 characters. */
+            message: string;
+            /**
+             * @description Where it shows: `$`, `$.email`, `$.shipping_address`, `$.shipping_address.<field>`,
+             *     `$.shipping_groups[<i>]` or `$.lines[<i>]`, an index the request has.
+             * @example $.shipping_address.postal_code
+             */
+            path: string;
+            /** @description `error` stops checkout; `warning` never does. */
+            severity: components["schemas"]["Severity"];
+        };
+        /**
+         * @description When a validation app is asked: as the shopper goes through checkout.
+         *
+         *     Known values: `address`, `shipping`, `checkout`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        ValidationStep: "address" | "shipping" | "checkout";
         /**
          * @description A VariantId: `var_` and 32 hex digits.
          * @example var_0190f1a2b3c47d8e9f00112233445566
@@ -955,6 +1080,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminActionResponse"];
+                };
+            };
+            /** @description A failure. Apps built on `@hyphacommerce/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "checkout.validate.v1": {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description `t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>" under the app's secret>`. Check it, and refuse a `t` more than a few minutes old. */
+                "Hypha-Signature": string;
+                /** @description The point's name, as this operation's. */
+                "Hypha-Extension": string;
+                /** @description The point's version. */
+                "Hypha-Extension-Version": string;
+                /** @description The same for every retry of one piece of work: answer a repeat as the first. */
+                "Idempotency-Key": string;
+                /** @description The store the call is for (`store_…`). */
+                "Hypha-Store": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CheckoutValidateRequest"];
+            };
+        };
+        responses: {
+            /** @description The answer (any 2xx). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckoutValidateResponse"];
                 };
             };
             /** @description A failure. Apps built on `@hyphacommerce/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log. */
@@ -1284,6 +1451,11 @@ export interface ExtensionPoints {
     request: NonNullable<webhooks["admin.action"]["post"]["requestBody"]>["content"]["application/json"];
     response: webhooks["admin.action"]["post"]["responses"][200]["content"]["application/json"];
   };
+  "checkout.validate": {
+    version: 1;
+    request: NonNullable<webhooks["checkout.validate"]["post"]["requestBody"]>["content"]["application/json"];
+    response: webhooks["checkout.validate"]["post"]["responses"][200]["content"]["application/json"];
+  };
   "payments.capture": {
     version: 1;
     request: NonNullable<webhooks["payments.capture"]["post"]["requestBody"]>["content"]["application/json"];
@@ -1327,6 +1499,7 @@ export const EXTENSION_POINT_VERSIONS: { [P in keyof ExtensionPoints]: Extension
   "address.suggest": 1,
   "address.verify": 1,
   "admin.action": 1,
+  "checkout.validate": 1,
   "payments.capture": 1,
   "payments.refund": 1,
   "payments.start": 2,

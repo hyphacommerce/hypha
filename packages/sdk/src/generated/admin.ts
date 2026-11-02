@@ -621,7 +621,8 @@ export interface paths {
          *     (`duplicate_extension_point`), a point and version this Hypha knows
          *     (`unknown_extension_point`). Calls are signed with the app's secret. An app
          *     installed from its manifest registers its points there instead
-         *     (`endpoints_from_manifest`, 409).
+         *     (`endpoints_from_manifest`, 409). A sixth app answering `checkout.validate` is
+         *     `too_many_validation_apps` (409).
          */
         put: operations["admin.apps.set_extension_points"];
         post?: never;
@@ -2625,8 +2626,9 @@ export interface paths {
          *     (`not_allowed_to_grant`, 403, otherwise). 409 `oauth_request_expired` after ten
          *     minutes, `oauth_request_decided` once answered; `app_installed_from_other_url` (or,
          *     for an upload, `app_installed_from_url`) when the key is an app installed from
-         *     another manifest URL since the request was made. A private app's approval answers
-         *     with its `credentials` (and no `redirect_to`), shown this once.
+         *     another manifest URL since the request was made; `too_many_validation_apps` when it
+         *     would make a sixth app validate checkouts. A private app's approval answers with its
+         *     `credentials` (and no `redirect_to`), shown this once.
          */
         post: operations["admin.oauth.approve_request"];
         delete?: never;
@@ -5374,7 +5376,7 @@ export interface components {
             position: number;
             updated_at: string;
         };
-        /** @description Which apps checkout asks about an address. */
+        /** @description Which apps checkout asks about an address and a cart. */
         CheckoutSettingsResponse: {
             /**
              * @description The app suggesting addresses while someone types one (`address.suggest` and
@@ -5382,6 +5384,12 @@ export interface components {
              *     forms don't suggest.
              */
             autocomplete_app?: string | null;
+            /**
+             * @description Every app answering `checkout.validate` now (installed, enabled, granted
+             *     `carts:read`; at most five), by key, with how checkout treats it. Each is asked when
+             *     a cart's address is set, when an option is chosen and at checkout.
+             */
+            validation_apps: components["schemas"]["ValidationAppDto"][];
             /**
              * @description The app verifying shipping addresses (`address.verify`): asked when a cart's
              *     address is set and when staff change an order's. `null`: none are verified.
@@ -10177,6 +10185,13 @@ export interface components {
              */
             autocomplete_app?: string | null;
             /**
+             * @description How checkout treats each validation app named, replacing what was set: an app left
+             *     out goes back to the default (asked, not blocking). Each answering
+             *     `checkout.validate` (`422 validation_app_unavailable` otherwise), once (`422
+             *     duplicate_validation_app`).
+             */
+            validation_apps?: components["schemas"]["ValidationAppDto"][] | null;
+            /**
              * @description An app installed, enabled and granted what `address.verify` needs
              *     (`customer_data:address`), whose manifest declares it (`422
              *     verification_app_unavailable` otherwise); `null` for none.
@@ -10571,6 +10586,18 @@ export interface components {
             name: string;
             role: components["schemas"]["RoleId"];
             status: string;
+        };
+        /** @description How checkout treats one validation app. */
+        ValidationAppDto: {
+            /** @description `app_<name>`. */
+            app: string;
+            /**
+             * @description Whether checkout stops (a `validation_unavailable` error on the cart) when the app
+             *     can't be asked, rather than going on without it: off until set.
+             */
+            block_on_failure: boolean;
+            /** @description Whether it's asked: on for an app installed for `checkout.validate` until set. */
+            enabled: boolean;
         };
         ValueInUseResponse: {
             /**

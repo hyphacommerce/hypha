@@ -807,7 +807,7 @@ pub async fn checkout_handler<S: Storage>(
         &state.clock,
         &rates,
         &providers,
-        &hypha_addresses::Formats,
+        &state.cart_checks(&ports),
         input,
     )
     .await?;
@@ -953,7 +953,7 @@ pub async fn start_cart_payment<S: Storage>(
         &state.clock,
         &rates,
         &providers,
-        &hypha_addresses::Formats,
+        &state.cart_checks(&ports),
         input,
     )
     .await?;

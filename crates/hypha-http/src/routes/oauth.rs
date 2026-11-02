@@ -895,8 +895,9 @@ pub async fn fetch_request<S: Storage>(
 /// (`not_allowed_to_grant`, 403, otherwise). 409 `oauth_request_expired` after ten
 /// minutes, `oauth_request_decided` once answered; `app_installed_from_other_url` (or,
 /// for an upload, `app_installed_from_url`) when the key is an app installed from
-/// another manifest URL since the request was made. A private app's approval answers
-/// with its `credentials` (and no `redirect_to`), shown this once.
+/// another manifest URL since the request was made; `too_many_validation_apps` when it
+/// would make a sixth app validate checkouts. A private app's approval answers with its
+/// `credentials` (and no `redirect_to`), shown this once.
 #[utoipa::path(
     post,
     path = "/admin/oauth/requests/{id}/approve",
@@ -911,6 +912,7 @@ pub async fn approve_request<S: Storage>(
     PathId(id): PathId<OAuthRequestId>,
 ) -> Result<Response, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
+    crate::checkout_validate::ensure_room_for_request(&ports, id).await?;
     // The manifest applied and the app's custom fields synced to it, in one commit.
     let prepared = prepare_approval(&ctx, &ports, &state.env, id).await?;
     let approval = crate::app_fields::commit_applying(&ports, &state.env, prepared).await?;

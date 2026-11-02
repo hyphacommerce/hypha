@@ -5,11 +5,12 @@ use std::collections::HashMap;
 
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_addresses::Formats;
+use hypha_apps::{HasApps, HasExtensionEndpoints};
 use hypha_checkout_rules::{
     CheckoutRule, CheckoutSettings, RuleAppliesTo, RuleCondition, RuleDraft, RuleInput, RuleLine,
-    RuleOutcome, RulePatch, UpdateCheckoutSettings, VerifiedFacts, create_checkout_rule,
-    delete_checkout_rule, evaluate, get_checkout_rule, get_checkout_settings, list_checkout_rules,
-    names_categories, update_checkout_rule, update_checkout_settings,
+    RuleOutcome, RulePatch, UpdateCheckoutSettings, ValidationAppInput, VerifiedFacts,
+    create_checkout_rule, delete_checkout_rule, evaluate, get_checkout_rule, get_checkout_settings,
+    list_checkout_rules, names_categories, update_checkout_rule, update_checkout_settings,
 };
 use hypha_core::{
     AddressError, AddressFormats, AddressVerifier, ChannelId, CheckoutRuleId, CountryCode,
@@ -495,7 +496,20 @@ pub async fn test<S: Storage>(
     }))
 }
 
-/// Which apps checkout asks about an address.
+/// How checkout treats one validation app.
+#[derive(Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ValidationAppDto {
+    /// `app_<name>`.
+    app: String,
+    /// Whether it's asked: on for an app installed for `checkout.validate` until set.
+    enabled: bool,
+    /// Whether checkout stops (a `validation_unavailable` error on the cart) when the app
+    /// can't be asked, rather than going on without it: off until set.
+    block_on_failure: bool,
+}
+
+/// Which apps checkout asks about an address and a cart.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct CheckoutSettingsResponse {
     /// The app verifying shipping addresses (`address.verify`): asked when a cart's
@@ -505,14 +519,31 @@ pub struct CheckoutSettingsResponse {
     /// `address.resolve`), for the storefront's and the admin's address forms. `null`:
     /// forms don't suggest.
     autocomplete_app: Option<String>,
+    /// Every app answering `checkout.validate` now (installed, enabled, granted
+    /// `carts:read`; at most five), by key, with how checkout treats it. Each is asked when
+    /// a cart's address is set, when an option is chosen and at checkout.
+    validation_apps: Vec<ValidationAppDto>,
 }
 
-impl From<&CheckoutSettings> for CheckoutSettingsResponse {
-    fn from(s: &CheckoutSettings) -> Self {
-        Self {
+impl CheckoutSettingsResponse {
+    async fn new<P: HasApps + HasExtensionEndpoints>(
+        ports: &P,
+        s: &CheckoutSettings,
+    ) -> Result<Self, ApiError> {
+        let validation_apps = crate::checkout_validate::validation_apps(ports, s)
+            .await?
+            .into_iter()
+            .map(|v| ValidationAppDto {
+                app: v.app.as_str().to_string(),
+                enabled: v.enabled,
+                block_on_failure: v.block_on_failure,
+            })
+            .collect();
+        Ok(Self {
             verification_app: s.verification_app().map(|a| a.as_str().to_string()),
             autocomplete_app: s.autocomplete_app().map(|a| a.as_str().to_string()),
-        }
+            validation_apps,
+        })
     }
 }
 
@@ -529,7 +560,9 @@ pub async fn settings<S: Storage>(
 ) -> Result<Json<CheckoutSettingsResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let settings = get_checkout_settings(&ctx, &ports).await?;
-    Ok(Json(CheckoutSettingsResponse::from(&settings)))
+    Ok(Json(
+        CheckoutSettingsResponse::new(&ports, &settings).await?,
+    ))
 }
 
 /// JSON Merge Patch: absent keeps, `null` clears.
@@ -548,6 +581,12 @@ pub struct UpdateCheckoutSettingsRequest {
     #[serde(default, deserialize_with = "patch::nullable")]
     #[schema(value_type = Option<String>)]
     autocomplete_app: Option<Option<String>>,
+    /// How checkout treats each validation app named, replacing what was set: an app left
+    /// out goes back to the default (asked, not blocking). Each answering
+    /// `checkout.validate` (`422 validation_app_unavailable` otherwise), once (`422
+    /// duplicate_validation_app`).
+    #[serde(default, deserialize_with = "patch::non_null")]
+    validation_apps: Option<Vec<ValidationAppDto>>,
 }
 
 /// Changes the store's checkout settings (`checkout_settings.updated`).
@@ -572,8 +611,19 @@ pub async fn update_settings<S: Storage>(
         UpdateCheckoutSettings {
             verification_app: req.verification_app,
             autocomplete_app: req.autocomplete_app,
+            validation_apps: req.validation_apps.map(|apps| {
+                apps.into_iter()
+                    .map(|a| ValidationAppInput {
+                        app: a.app,
+                        enabled: a.enabled,
+                        block_on_failure: a.block_on_failure,
+                    })
+                    .collect()
+            }),
         },
     )
     .await?;
-    Ok(Json(CheckoutSettingsResponse::from(&settings)))
+    Ok(Json(
+        CheckoutSettingsResponse::new(&ports, &settings).await?,
+    ))
 }

@@ -841,7 +841,8 @@ pub async fn extension_points<S: Storage>(
 /// (`duplicate_extension_point`), a point and version this Hypha knows
 /// (`unknown_extension_point`). Calls are signed with the app's secret. An app
 /// installed from its manifest registers its points there instead
-/// (`endpoints_from_manifest`, 409).
+/// (`endpoints_from_manifest`, 409). A sixth app answering `checkout.validate` is
+/// `too_many_validation_apps` (409).
 #[utoipa::path(
     put,
     path = "/admin/apps/{key}/extension-points",
@@ -858,6 +859,24 @@ pub async fn set_extension_points<S: Storage>(
 ) -> Result<Json<ExtensionEndpointsDto>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
+    if let Ok(app) = hypha_apps::AppKey::new(&key)
+        && req
+            .extension_points
+            .iter()
+            .any(|e| e.point == hypha_extensions::CheckoutValidate::NAME)
+    {
+        // Endpoints set for an app that may answer: a sixth validation app is refused.
+        use hypha_apps::{AppRepo, HasApps};
+        use hypha_extensions::ExtensionPoint;
+        if ports
+            .apps()
+            .get(&app)
+            .await?
+            .is_some_and(|a| a.may_answer(hypha_extensions::CheckoutValidate::SCOPE))
+        {
+            crate::checkout_validate::ensure_room_for(&ports, &app).await?;
+        }
+    }
     let inputs = req
         .extension_points
         .into_iter()

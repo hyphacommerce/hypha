@@ -62,6 +62,8 @@ mod spores;
 mod verification;
 // Address autocomplete: the app, suggestions and resolving one, their limits.
 mod autocomplete;
+// Validation apps: checkout.validate, their kept answers, failures and the limit.
+mod validation_apps;
 
 /// The app without file storage: most routes don't need it, so their tests don't need
 /// the S3 server.

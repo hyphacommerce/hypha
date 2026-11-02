@@ -95,7 +95,16 @@ export type {
   AddressSuggestResponse,
   AddressResolveRequest,
   AddressResolveResponse,
+  CheckoutValidateRequest,
+  CheckoutValidateResponse,
 } from "./points.ts";
+export {
+  message,
+  MAX_MESSAGE_LENGTH,
+  type ValidationMessage,
+  type MessagePath,
+  type AddressField,
+} from "./validation.ts";
 export {
   verifySessionToken,
   signSessionToken,

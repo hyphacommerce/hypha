@@ -462,6 +462,34 @@ impl<S> AppState<S> {
         }
     }
 
+    /// The store's validation apps for one request (`checkout_validate.rs`).
+    pub fn validators<'a, P>(
+        &'a self,
+        ports: &'a P,
+    ) -> crate::checkout_validate::HostValidators<'a, P> {
+        crate::checkout_validate::HostValidators {
+            ports,
+            endpoints: self.app_endpoints(ports),
+            caller: self.extensions(),
+            env: &self.env,
+        }
+    }
+
+    /// What a cart's messages come from for one request: the address formats and the
+    /// store's validation apps.
+    pub fn cart_checks<'a, P>(
+        &'a self,
+        ports: &'a P,
+    ) -> hypha_checkout::Checks<
+        hypha_addresses::Formats,
+        crate::checkout_validate::HostValidators<'a, P>,
+    > {
+        hypha_checkout::Checks {
+            formats: hypha_addresses::Formats,
+            validators: self.validators(ports),
+        }
+    }
+
     /// The store's address autocomplete for one request (`address_suggest.rs`).
     pub fn autocomplete<'a, P>(
         &'a self,
@@ -508,7 +536,8 @@ impl<S: Storage> AppState<S> {
             + hypha_apps::HasApps
             + hypha_apps::HasExtensionEndpoints
             + hypha_apps::HasSporeSettings
-            + hypha_extensions::HasExtensionCalls,
+            + hypha_extensions::HasExtensionCalls
+            + hypha_checkout_rules::HasCheckoutSettings,
     {
         let (Some(cart), None) = (payment.cart(), payment.order()) else {
             return Ok(None);
@@ -525,7 +554,7 @@ impl<S: Storage> AppState<S> {
             &self.clock,
             &rates,
             &providers,
-            &hypha_addresses::Formats,
+            &self.cart_checks(ports),
             payment.id(),
         )
         .await?;

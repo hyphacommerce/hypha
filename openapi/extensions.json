@@ -360,6 +360,39 @@
         "pattern": "^chan_[0-9a-f]{32}$",
         "type": "string"
       },
+      "CheckoutValidateRequest": {
+        "description": "What Hypha sends.",
+        "properties": {
+          "cart": {
+            "$ref": "#/components/schemas/ValidatedCart"
+          },
+          "step": {
+            "$ref": "#/components/schemas/ValidationStep",
+            "description": "`address` when the shipping address was set, `shipping` when an option was chosen,\n`checkout` when the shopper places the order or starts its payment."
+          }
+        },
+        "required": [
+          "step",
+          "cart"
+        ],
+        "type": "object"
+      },
+      "CheckoutValidateResponse": {
+        "description": "The app's answer.",
+        "properties": {
+          "messages": {
+            "description": "At most 20; none when the cart is fine.",
+            "items": {
+              "$ref": "#/components/schemas/ValidationMessage"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "messages"
+        ],
+        "type": "object"
+      },
       "CountryCode": {
         "description": "An ISO 3166-1 alpha-2 country code.",
         "examples": [
@@ -1336,6 +1369,23 @@
         "type": "string",
         "x-hypha-open-enum": true
       },
+      "Severity": {
+        "description": "Whether a message stops checkout.\n\nKnown values: `error`, `warning`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "error",
+          "warning"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "ShippingOptionId": {
+        "description": "A ShippingOptionId: `shipopt_` and 32 hex digits.",
+        "examples": [
+          "shipopt_0190f1a2b3c47d8e9f00112233445566"
+        ],
+        "pattern": "^shipopt_[0-9a-f]{32}$",
+        "type": "string"
+      },
       "SuggestedAddress": {
         "description": "An address as a provider suggests it: where it is, without who lives there (names and\nphone are never sent, so never suggested).",
         "properties": {
@@ -1387,6 +1437,242 @@
         ],
         "pattern": "^user_[0-9a-f]{32}$",
         "type": "string"
+      },
+      "ValidatedAddressCheck": {
+        "description": "A kept verification, as an app needs it.",
+        "properties": {
+          "flags": {
+            "$ref": "#/components/schemas/VerificationFlags"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/AddressVerdict"
+          }
+        },
+        "required": [
+          "verdict",
+          "flags"
+        ],
+        "type": "object"
+      },
+      "ValidatedCart": {
+        "description": "The cart as the app sees it. Paths in its answer point into the cart's own response,\nwhose arrays are in this order.",
+        "properties": {
+          "channel": {
+            "$ref": "#/components/schemas/ChannelId"
+          },
+          "country": {
+            "$ref": "#/components/schemas/CountryCode"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "customer": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CustomerId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "email": {
+            "description": "`null` without one, or without the app's `customer_data:email` (then listed in\n`redacted`).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "$ref": "#/components/schemas/CartId"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ValidatedLine"
+            },
+            "type": "array"
+          },
+          "market": {
+            "$ref": "#/components/schemas/MarketId"
+          },
+          "redacted": {
+            "description": "The cart's personal fields left out for this app (`email`).",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "shipping_address": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PostalAddressResponse",
+                "description": "Redacted per the app's grant as `shipping.rates`' destination is."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "shipping_address_check": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ValidatedAddressCheck",
+                "description": "What the store's verification app said about the address, when it was asked."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "shipping_groups": {
+            "description": "One per group of shipped lines, with its chosen option.",
+            "items": {
+              "$ref": "#/components/schemas/ValidatedShippingGroup"
+            },
+            "type": "array"
+          },
+          "subtotal": {
+            "$ref": "#/components/schemas/Money",
+            "description": "The available lines after discounts."
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money"
+          }
+        },
+        "required": [
+          "id",
+          "market",
+          "channel",
+          "country",
+          "currency",
+          "lines",
+          "shipping_groups",
+          "subtotal",
+          "total"
+        ],
+        "type": "object"
+      },
+      "ValidatedLine": {
+        "description": "One cart line.",
+        "properties": {
+          "product": {
+            "$ref": "#/components/schemas/ProductId"
+          },
+          "quantity": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sku": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unit_price": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Money",
+                "description": "`null` for a line that can't be bought now (sold out, unpublished)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "variant": {
+            "$ref": "#/components/schemas/VariantId"
+          },
+          "weight_grams": {
+            "description": "One unit's weight when the variant is shipped and has one.",
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "variant",
+          "product",
+          "quantity"
+        ],
+        "type": "object"
+      },
+      "ValidatedShippingGroup": {
+        "description": "A group of shipped lines and the option chosen for it.",
+        "properties": {
+          "code": {
+            "description": "The option's code (`dhl_express`).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "option": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ShippingOptionId",
+                "description": "`null` until the shopper chooses one."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provider": {
+            "description": "A provider's key for an option a rate app or spore prices (`app_dhl`).",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ValidationMessage": {
+        "description": "One message the app has for the shopper.",
+        "properties": {
+          "code": {
+            "description": "The app's own: snake_case, a letter first, at most 64 characters.",
+            "example": "alcohol_restricted",
+            "type": "string"
+          },
+          "message": {
+            "description": "Plain text for the shopper, 1 to 500 characters.",
+            "type": "string"
+          },
+          "path": {
+            "description": "Where it shows: `$`, `$.email`, `$.shipping_address`, `$.shipping_address.<field>`,\n`$.shipping_groups[<i>]` or `$.lines[<i>]`, an index the request has.",
+            "example": "$.shipping_address.postal_code",
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Severity",
+            "description": "`error` stops checkout; `warning` never does."
+          }
+        },
+        "required": [
+          "severity",
+          "code",
+          "path",
+          "message"
+        ],
+        "type": "object"
+      },
+      "ValidationStep": {
+        "description": "When a validation app is asked: as the shopper goes through checkout.\n\nKnown values: `address`, `shipping`, `checkout`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "address",
+          "shipping",
+          "checkout"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
       },
       "VariantId": {
         "description": "A VariantId: `var_` and 32 hex digits.",
@@ -1847,6 +2133,95 @@
         },
         "x-hypha-on-failure": "fail_closed",
         "x-hypha-timeout-ms": 10000,
+        "x-hypha-version": 1
+      }
+    },
+    "checkout.validate": {
+      "post": {
+        "description": "`POST` to the URL the app registered for `checkout.validate` v1. Answer within 2000 ms (unless the app's registration sets another timeout), in at most 256 KiB, with a 2xx and the response below. Anything else (no answer, another status, a body that isn't the response) is a failure: the merchant's setting for the app decides: checkout goes on without it, or stops with a `validation_unavailable` error on the cart. Every call is in the app's call log (`GET /admin/apps/{key}/extension-calls`).",
+        "operationId": "checkout.validate.v1",
+        "parameters": [
+          {
+            "description": "`t=<unix seconds>,v1=<hex HMAC-SHA256 of \"<t>.<raw body>\" under the app's secret>`. Check it, and refuse a `t` more than a few minutes old.",
+            "in": "header",
+            "name": "Hypha-Signature",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The point's name, as this operation's.",
+            "in": "header",
+            "name": "Hypha-Extension",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The point's version.",
+            "in": "header",
+            "name": "Hypha-Extension-Version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The same for every retry of one piece of work: answer a repeat as the first.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The store the call is for (`store_…`).",
+            "in": "header",
+            "name": "Hypha-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckoutValidateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutValidateResponse"
+                }
+              }
+            },
+            "description": "The answer (any 2xx)."
+          },
+          "default": {
+            "description": "A failure. Apps built on `@hyphacommerce/app` answer `{code, error}` (`invalid_signature`, `unknown_extension`, `unsupported_version`, `invalid_request`, `handler_failed`); the code is kept in the call log."
+          }
+        },
+        "summary": "Say what's wrong with a cart (errors stop checkout) or worth a second look (warnings), each on the part it's about.",
+        "tags": [
+          "checkout"
+        ],
+        "x-hypha-extension": {
+          "point": "checkout.validate",
+          "version": 1
+        },
+        "x-hypha-on-failure": "configured",
+        "x-hypha-timeout-ms": 2000,
         "x-hypha-version": 1
       }
     },
