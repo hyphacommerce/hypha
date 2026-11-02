@@ -1302,11 +1302,12 @@ PY
     step "a rule refusing undeliverable addresses" 201 - -X POST "$BASE/admin/checkout-rules" -H "$JSON" \
         -d '{"name":"Undeliverable","conditions":[{"type":"verification_is","verdicts":["undeliverable"]}],"outcome":{"severity":"error","message":"We can'"'"'t deliver to this address.","code":"undeliverable"}}'
     UNDELIVERABLE_RULE=$(id)
+    step "the cart again" 200 - "$VERIFY_CART"
     step "by standard" 200 - -X PUT "$VERIFY_CART/shipping/$(shgrp)" -H "$JSON" -d "{\"option\":\"$STANDARD\"}"
     step "paid on delivery" 200 - -X PUT "$VERIFY_CART/payment-method" -H "$JSON" \
         -d "{\"payment_method\":\"$COD\"}"
     step "checkout refuses it" 409 checkout_blocked -X POST "$VERIFY_CART/checkout" -H "$JSON" -d '{}'
-    contains "with the rule's message" '"code":"undeliverable","path":"$.shipping_address"'
+    contains "with the rule's message" '"code":"undeliverable","message":"We can'"'"'t deliver to this address.","path":"$.shipping_address"'
     step "the test panel asks the app too" 200 - -X POST "$BASE/admin/checkout-rules/test" -H "$JSON" \
         -d '{"address":{"last_name":"Horvat","line1":"Nowhere 1","city":"Zagreb","postal_code":"10000","country":"HR"},"verify":true}'
     contains "its verdict" '"verification":{"verdict":"undeliverable"'
@@ -1321,7 +1322,7 @@ PY
     step "orders needing review" 200 - "$BASE/admin/orders?address=needs_review"
     contains "list it" "\"id\":\"$VERIFY_ORDER\""
     step "staff mark it valid" 200 - -X POST "$BASE/admin/orders/$VERIFY_ORDER/address-check/mark-valid"
-    contains "by them" '"marked_valid":{"by":"usr_'
+    contains "by them" '"marked_valid":{"by":"user_'
     contains "no longer needing review" '"address_review":false'
     step "nothing needs review now" 200 - "$BASE/admin/orders?address=needs_review"
     lacks "not listed" "$VERIFY_ORDER"
