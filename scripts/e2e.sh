@@ -1006,6 +1006,29 @@ contains "with the order's number" '"order_number":'
 step "what it took off in all" 200 - "$BASE/admin/discounts/$WELCOME"
 contains "per currency" '"discounted_total":[{"amount":90,"currency":"EUR"}]'
 
+echo "## cart messages"
+step "a cart for Germany" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"DE"}'
+DE="$BASE/storefront/carts/$(id)"
+contains "a new cart has no messages" '"messages":[]'
+step "add a mug to it" 200 - -X POST "$DE/lines" -H "$JSON" -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
+DE_GROUP=$(shgrp)
+step "its email" 200 - -X PUT "$DE/email" -H "$JSON" -d '{"email":"lukas@example.de"}'
+step "a German address without a house number" 200 - -X PUT "$DE/shipping-address" -H "$JSON" \
+    -d '{"address":{"last_name":"Weber","line1":"Torstraße","city":"Berlin","postal_code":"10119","country":"DE"}}'
+contains "warns under the first line" '"messages":[{"severity":"warning","code":"house_number_missing","path":"$.shipping_address.line1","message":"Add a house number","source":{"type":"format"}}]'
+step "read again" 200 - "$DE"
+contains "the warning is worked out on every read" '"code":"house_number_missing"'
+step "ship it standard" 200 - -X PUT "$DE/shipping/$DE_GROUP" -H "$JSON" -d "{\"option\":\"$STANDARD\"}"
+step "pay it on delivery" 200 - -X PUT "$DE/payment-method" -H "$JSON" -d "{\"payment_method\":\"$COD\"}"
+step "a warning doesn't stop checkout" 201 - -X POST "$DE/checkout" -H "$JSON" -d '{}'
+step "the checked-out cart" 200 - "$DE"
+contains "has no messages" '"messages":[]'
+step "another cart for Germany" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"DE"}'
+DE="$BASE/storefront/carts/$(id)"
+step "a German address with its house number" 200 - -X PUT "$DE/shipping-address" -H "$JSON" \
+    -d '{"address":{"last_name":"Weber","line1":"Torstraße 140","city":"Berlin","postal_code":"10119","country":"DE"}}'
+contains "has nothing to say" '"messages":[]'
+
 echo "## payment and search apps"
 step "a payment app that isn't installed" 422 payment_provider_unknown -X POST "$METHODS" -H "$JSON" \
     -d '{"provider":"app_pay","name":"Card"}'
