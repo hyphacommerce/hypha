@@ -55,6 +55,7 @@ export const GRANT_AREAS: { area: string; canWrite: boolean }[] = [
   { area: "agents", canWrite: false },
   { area: "discounts", canWrite: true },
   { area: "purchasing", canWrite: true },
+  { area: "checkout_rules", canWrite: true },
 ];
 
 /** Write scopes an agent may only propose (a person approves every use), with their labels. */

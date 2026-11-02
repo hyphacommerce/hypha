@@ -104,6 +104,7 @@ const AREAS: Record<string, string> = {
   categories: "categories",
   channels: "sales channels",
   checkout: "checkout",
+  checkout_rules: "checkout rules",
   custom_fields: "custom fields",
   customers: "customers",
   fulfillments: "fulfilments",
