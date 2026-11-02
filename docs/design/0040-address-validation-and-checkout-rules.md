@@ -1073,3 +1073,22 @@ A review of the whole stack (2026-11-02) changed:
 - **Left as is:** the address form code (`lib/address.ts`, `address-line.tsx`,
   `address-fields.tsx`) is still copied between the admin and the storefront; sharing it
   means a workspace UI package, which is its own decision.
+
+### Browser test fixes
+
+Trying the storefront's checkout and the admin with `pnpm dev` (2026-11-02) changed:
+
+- **The test route leaves out echoed warnings too:** `POST /admin/checkout-rules/test`
+  composes its messages through `hypha_checkout::without_echoed_warnings`, so it shows
+  what a cart would (it still listed `house_number_missing` beside a rule's error).
+- **"Try an address" by the country's format:** the panel renders the country's form
+  (labels, required fields, the region as a select, autocomplete on line 1), without the
+  names, which never decide a rule, and with the phone, which can. It starts on the
+  rule's first country, else the first market's (it started on Afghanistan), and offers
+  "Ask the verification app" (`verify: true`) to staff with `checkout_rules:write`, so a
+  rule on the verdict can be tried; the result names the verdict.
+- **Late suggestions stay closed:** an autocomplete answer arriving after focus left line 1
+  no longer opens the list under it (both apps).
+- **Names, not IDs, on an order's address check:** "Checked … by" names the app and
+  "Marked valid … by" the staff member (their IDs where the role can't read apps or
+  users).
