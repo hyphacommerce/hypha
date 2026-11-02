@@ -44,6 +44,10 @@
 // come, a draft), a transfer in transit between the warehouses and a few costs set by hand,
 // and widens the "Demo (read-only)" role. Suppliers are skipped by name with their orders,
 // so a second run adds nothing.
+//
+// `pnpm seed --checkout` on a store this script seeded before checkout rules adds them (no
+// PO boxes with the express options, a house number in the Netherlands and Germany, both
+// errors) and widens the "Demo (read-only)" role. Rules are skipped by name.
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -1746,6 +1750,69 @@ async function addPricing() {
   for (const line of added) console.log(`  ${line}`);
 }
 
+// ---------- checkout rules (the run, and `--checkout`) ----------
+
+/**
+ * What a checkout must meet beyond each country's address format, as a merchant would set
+ * them up from the admin's presets. Both are errors, so the demo shows checkout refusing:
+ * a PO box with an express option asks for Standard or a street address under the options,
+ * and a Dutch or German first line without a number asks for it under the field.
+ */
+function checkoutRules(express) {
+  return [
+    {
+      name: "No PO boxes for express",
+      applies_to: { shipping_options: express },
+      conditions: [{ type: "address_is", flag: "po_box" }],
+      outcome: {
+        severity: "error",
+        message:
+          "Express couriers can't deliver to PO boxes. Choose Standard or enter a street address.",
+        code: "po_box_not_allowed",
+      },
+    },
+    {
+      name: "House number required",
+      applies_to: { countries: { mode: "include", codes: ["NL", "DE"] } },
+      conditions: [{ type: "field_not_matches", field: "line1", pattern: "\\d" }],
+      outcome: {
+        severity: "error",
+        message: "Add your house number to the first address line.",
+        path: "$.shipping_address.line1",
+        code: "house_number_required",
+      },
+    },
+  ];
+}
+
+/** Adds the checkout rules the store lacks (by name); the names it added. */
+async function seedCheckoutRules() {
+  const zones = (await admin.get("/admin/shipping-zones")).items;
+  const express = zones.flatMap((zone) =>
+    zone.options.filter((option) => option.code === "express").map((option) => option.id),
+  );
+  const have = new Set((await admin.get("/admin/checkout-rules")).items.map((rule) => rule.name));
+  const added = [];
+  for (const rule of checkoutRules(express)) {
+    if (have.has(rule.name)) continue;
+    await admin.post("/admin/checkout-rules", rule);
+    added.push(`checkout rule ${rule.name}`);
+  }
+  return added;
+}
+
+/**
+ * `--checkout`, on a store this script seeded before checkout rules: adds them and widens
+ * the demo's read-only role. Running it again adds nothing.
+ */
+async function addCheckoutRules() {
+  const added = await seedCheckoutRules();
+  const scopes = await widenDemoRole();
+  if (scopes.length > 0) added.push(`${DEMO_ROLE}: ${scopes.join(", ")}`);
+  console.log(added.length > 0 ? "\nAdded:" : "\nNothing to add: the store has it all.");
+  for (const line of added) console.log(`  ${line}`);
+}
+
 // ---------- purchasing (the run, and `--purchasing`) ----------
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -2035,11 +2102,14 @@ async function main() {
     throw new Error(`login needs ${login.status}: use a store owner without 2FA`);
   token = login.session.token;
 
-  const flags = ["--images", "--pricing", "--purchasing"].filter((f) => process.argv.includes(f));
+  const flags = ["--images", "--pricing", "--purchasing", "--checkout"].filter((f) =>
+    process.argv.includes(f),
+  );
   if (flags.length > 0) {
     if (flags.includes("--images")) await replaceImages();
     if (flags.includes("--pricing")) await addPricing();
     if (flags.includes("--purchasing")) await addPurchasing();
+    if (flags.includes("--checkout")) await addCheckoutRules();
     return;
   }
 
@@ -2141,6 +2211,10 @@ async function main() {
       });
     }
   }
+
+  // Before the orders, so they're placed under the rules too.
+  console.log("Checkout rules");
+  await seedCheckoutRules();
 
   console.log("Custom fields");
   for (const field of FIELDS) await admin.post("/admin/custom-field-definitions", field);
