@@ -44,6 +44,7 @@ import {
   loaded,
   requireStaff,
   sessionClient,
+  staffNames,
 } from "@/lib/hypha";
 import { type Extensions, loadExtensions } from "@/lib/app-extensions";
 import { definitionsOf } from "@/lib/custom-fields-server";
@@ -311,13 +312,24 @@ async function Order({ id }: { id: string }) {
   ]);
   const order = loaded(found);
   // The country's form, for changing the address: read once the order names its country.
-  const format = order.shipping_address
-    ? (
-        await client.GET("/admin/address-formats/{country}", {
-          params: { path: { country: order.country } },
-        })
-      ).data
-    : undefined;
+  // The address check names an app and a staff member by ID: their names, when it does
+  // (IDs stay where the role can't read apps or users).
+  const check = order.address_check;
+  const [format, people, apps] = await Promise.all([
+    order.shipping_address
+      ? client
+          .GET("/admin/address-formats/{country}", {
+            params: { path: { country: order.country } },
+          })
+          .then((r) => r.data)
+      : undefined,
+    check?.marked_valid ? staffNames(client) : new Map<string, string>(),
+    check?.verification?.app
+      ? client
+          .GET("/admin/apps")
+          .then((r) => new Map((r.data?.items ?? []).map((a) => [a.key, a.name])))
+      : new Map<string, string>(),
+  ]);
   const canWriteOrders = me.scopes.includes("orders:write");
   const listNames = priceListNames(client, order.lines);
   const countryName = (code: string) => countries.find((c) => c.code === code)?.name ?? code;
@@ -600,7 +612,12 @@ async function Order({ id }: { id: string }) {
             </Card>
           )}
 
-          <AddressCheckCard order={order} format={format} canWrite={canWriteOrders} />
+          <AddressCheckCard
+            order={order}
+            format={format}
+            canWrite={canWriteOrders}
+            names={Object.fromEntries([...people, ...apps])}
+          />
 
           {definitions.length > 0 && fields.data && (
             <CustomFieldsCard

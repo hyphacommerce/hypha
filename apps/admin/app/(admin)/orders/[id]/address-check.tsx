@@ -79,11 +79,14 @@ export function AddressCheckCard({
   order,
   format,
   canWrite,
+  names,
 }: {
   order: Order;
   /** The order's country's form; none when it couldn't be read. */
   format?: AddressFormat;
   canWrite: boolean;
+  /** Staff members' and apps' names, by user ID and app key. */
+  names: Record<string, string>;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string>();
@@ -130,7 +133,7 @@ export function AddressCheckCard({
           {verification && (
             <MetadataListItem label="Checked">
               <DateTime value={verification.checked_at} />
-              {verification.app ? ` by ${verification.app}` : ""}
+              {verification.app ? ` by ${names[verification.app] ?? verification.app}` : ""}
             </MetadataListItem>
           )}
           {verification?.suggested && (
@@ -145,7 +148,8 @@ export function AddressCheckCard({
           ))}
           {check.marked_valid && (
             <MetadataListItem label="Marked valid">
-              <DateTime value={check.marked_valid.at} /> by {check.marked_valid.by}
+              <DateTime value={check.marked_valid.at} /> by{" "}
+              {names[check.marked_valid.by] ?? check.marked_valid.by}
             </MetadataListItem>
           )}
         </MetadataList>
