@@ -19,7 +19,12 @@ import {
   type SortOption,
   type View,
 } from "@/components/resource-table/resource-table";
-import { CancelledBadge, FulfillmentBadge, PaymentBadge } from "@/components/status";
+import {
+  CancelledBadge,
+  FulfillmentBadge,
+  NeedsReviewBadge,
+  PaymentBadge,
+} from "@/components/status";
 import type { Definition } from "@/lib/custom-fields";
 import { type Currencies, formatMoney } from "@/lib/format";
 import { UNPAID } from "@/lib/payments";
@@ -50,6 +55,7 @@ const VIEWS: View[] = [
   },
   { label: "Unpaid", params: { financial_status: UNPAID, cancelled: ["false"] } },
   { label: "Cancelled", params: { cancelled: ["true"] } },
+  { label: "Needs review", params: { address: ["needs_review"], cancelled: ["false"] } },
 ];
 
 const SORTS: Record<string, SortDef> = {
@@ -118,6 +124,12 @@ export function OrdersTable({
         { value: "true", label: "Cancelled" },
       ],
     },
+    {
+      kind: "select",
+      param: "address",
+      label: "Address",
+      options: [{ value: "needs_review", label: "Needs review" }],
+    },
     { kind: "dates", param: "placed", label: "Placed" },
     {
       kind: "select",
@@ -146,6 +158,8 @@ export function OrdersTable({
           </Link>
           {order.cancelled_at ? (
             <CancelledBadge />
+          ) : order.address_review ? (
+            <NeedsReviewBadge />
           ) : (
             <Text type="supporting" color="secondary">
               {order.item_count} {order.item_count === 1 ? "item" : "items"}

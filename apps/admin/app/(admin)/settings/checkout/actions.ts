@@ -100,3 +100,14 @@ export async function tryAddress(
   if (error) return failed(error);
   return { result: data };
 }
+
+/** Names the app verifying shipping addresses; `null` for none. */
+export async function setVerificationApp(app: string | null): Promise<Result> {
+  const client = await sessionClient();
+  const { error } = await client.PATCH("/admin/checkout-settings", {
+    body: { verification_app: app },
+  });
+  if (error) return { error: describe(error) };
+  refresh();
+  return {};
+}

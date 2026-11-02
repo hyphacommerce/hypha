@@ -1,7 +1,9 @@
 "use server";
 
+import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { revalidatePath } from "next/cache";
 
+import { type FieldProblems, problemsOf } from "@/lib/address";
 import { describe, sessionClient } from "@/lib/hypha";
 import { type TrackingInput, trackingBody, trackingProblem } from "@/lib/tracking";
 
@@ -115,5 +117,39 @@ export async function resendNotification(orderId: string, id: string): Promise<A
   });
   if (error) return { error: describe(error) };
   revalidatePath(`/orders/${orderId}`);
+  return {};
+}
+
+/** Staff looked at the order's shipping address and it's fine: it no longer needs review. */
+export async function markAddressValid(id: string): Promise<ActionResult> {
+  const client = await sessionClient();
+  const { error } = await client.POST("/admin/orders/{id}/address-check/mark-valid", {
+    params: { path: { id } },
+  });
+  if (error) return { error: describe(error) };
+  refresh(id);
+  return {};
+}
+
+/**
+ * Changes where the order ships, before anything has: the API checks the country's
+ * format (each field's problem comes back) and asks the verification app again.
+ */
+export async function changeOrderAddress(
+  id: string,
+  address: AdminSchemas["PostalAddressRequest"],
+): Promise<ActionResult & { problems?: FieldProblems }> {
+  const client = await sessionClient();
+  const { error } = await client.PUT("/admin/orders/{id}/shipping-address", {
+    params: { path: { id } },
+    body: { address },
+  });
+  if (error) {
+    const problems = problemsOf(error);
+    return problems
+      ? { error: "Check the highlighted fields.", problems }
+      : { error: describe(error) };
+  }
+  refresh(id);
   return {};
 }

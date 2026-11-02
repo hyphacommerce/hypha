@@ -26,6 +26,7 @@ import { DetailSkeleton } from "@/components/skeletons";
 import {
   CancelledBadge,
   FulfillmentBadge,
+  NeedsReviewBadge,
   PaymentBadge,
   PaymentStatusBadge,
 } from "@/components/status";
@@ -48,6 +49,7 @@ import { type Extensions, loadExtensions } from "@/lib/app-extensions";
 import { definitionsOf } from "@/lib/custom-fields-server";
 import { canMarkPaid, providerLabel } from "@/lib/payments";
 
+import { AddressCheckCard, EditAddressButton } from "./address-check";
 import { EmailsCard } from "./emails";
 import { CancelOrderButton, FulfilButton, type Place, ShipmentsCard } from "./fulfilment";
 import { MarkPaid } from "./mark-paid";
@@ -308,6 +310,15 @@ async function Order({ id }: { id: string }) {
     client.GET("/admin/orders/{id}/custom-fields", { params: { path: { id } } }),
   ]);
   const order = loaded(found);
+  // The country's form, for changing the address: read once the order names its country.
+  const format = order.shipping_address
+    ? (
+        await client.GET("/admin/address-formats/{country}", {
+          params: { path: { country: order.country } },
+        })
+      ).data
+    : undefined;
+  const canWriteOrders = me.scopes.includes("orders:write");
   const listNames = priceListNames(client, order.lines);
   const countryName = (code: string) => countries.find((c) => c.code === code)?.name ?? code;
   const fulfillments = shipments.data?.items ?? [];
@@ -330,6 +341,7 @@ async function Order({ id }: { id: string }) {
         badges={
           <HStack gap={1}>
             {cancelled && <CancelledBadge />}
+            {order.address_review && <NeedsReviewBadge />}
             <PaymentBadge status={order.financial_status} />
             <FulfillmentBadge status={order.fulfillment_status} />
           </HStack>
@@ -584,8 +596,11 @@ async function Order({ id }: { id: string }) {
                   <MetadataListItem label="Phone">{order.shipping_address.phone}</MetadataListItem>
                 )}
               </MetadataList>
+              {canWriteOrders && format && <EditAddressButton order={order} format={format} />}
             </Card>
           )}
+
+          <AddressCheckCard order={order} format={format} canWrite={canWriteOrders} />
 
           {definitions.length > 0 && fields.data && (
             <CustomFieldsCard
