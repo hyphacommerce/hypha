@@ -950,3 +950,47 @@ One branch per step, stacked with `gh stack` from `feat/address-validation`:
   Escape back, a session token per address typed. The storefront's checkout and account
   forms and the admin's customer address dialog and order "Edit address" use it;
   Settings → Checkout names the app beside the verification one.
+
+### Step 6: validation apps
+
+- **The point:** `checkout.validate` v1, `carts:read`, `READ_ONLY`, 2 s. Its `check` refuses
+  more than 20 messages, text that's blank or over 500 characters once trimmed, and a
+  `$.lines[i]` or `$.shipping_groups[i]` index the request doesn't have; a path outside
+  §4's set doesn't parse, which is a refused answer too. The request's cart is §7.1's,
+  with `redacted: ["email"]` when the email is left out and the address redacted as
+  `shipping.rates`' destination is (`PostalAddress`).
+- **`OnFailure::Configured`:** `apply_policy` keeps the error for a `Configured` point, as
+  for a `FailClosed` one; the caller applies the merchant's setting. The extensions
+  document says so for the point (`x-hypha-on-failure: configured`).
+- **What's asked:** every app answering the point (`find_endpoint`'s rule: installed and
+  granted `carts:read`, or made by hand with an endpoint), unless the settings turn it off.
+  `CheckoutSettings::validation_apps` holds only what the merchant set (`{app, enabled,
+  block_on_failure}`, migration 0101); an app not listed is asked and doesn't block. The
+  settings response lists every answering app with its setting, so the admin needs no
+  second read; a `PATCH` replaces the list, each app answering the point, once.
+- **Five at most:** an app's endpoints set by hand, or a grant approved, that would make a
+  sixth is refused `409 too_many_validation_apps` (`details.max`); an app answering already
+  keeps its place. A grant is judged before it's applied: its manifest registers the point
+  and either the request's scopes or the app's grant now has `carts:read`.
+- **The digest:** SHA-256 of the body the app would be sent, redacted for it, without the
+  step: an answer holds for the same cart at any step. So an app without
+  `customer_data:address` isn't asked again when only the street or postal code changes:
+  it can't see them. The idempotency key is `validate_<step>_<digest prefix>`.
+- **Kept with the cart:** `Cart::app_checks` (`carts.app_checks`, migration 0101), core's
+  `AppCheck {app, digest, messages, failure, checked_at}`. A failure is kept (so a blocking
+  app's `validation_unavailable` shows on the cart) but never holds: it's asked again next
+  time. An app no longer asked loses its answer at the next refresh. Erasure clears them.
+- **When:** the storefront's address and shipping-choice routes call
+  `hypha_checkout::validate_cart` after their command (a write lost to a race keeps
+  nothing, and checkout asks again). Checkout and starting a payment refresh in `ready`,
+  after the existing checks and before composing messages, and write the fresh answers at
+  once, so a refused checkout or a retry of the attempt doesn't ask the same cart again.
+- **Messages on a read:** each answering app's last messages, stale ones included (the
+  note's "last answer"; checkout asks again before it decides), but not those pointing at
+  a line or group the cart no longer has, so a response's paths stay valid in it.
+- **`@hyphacommerce/app`:** `CheckoutValidateRequest`/`Response` and `message(path, code,
+  text, severity = "error")`, typed paths, refusing a code or text Hypha would. The apps
+  guide (`/docs/guides/apps`) lists the address points and `checkout.validate`, with the
+  worked example (no wine to the Canary Islands).
+- **The admin:** Settings → Checkout's "Validation apps" card: each answering app with
+  "Asked" and "Block checkout when this app fails".

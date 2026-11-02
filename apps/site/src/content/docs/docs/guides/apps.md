@@ -104,6 +104,9 @@ with a typed request and a typed answer, a timeout and what happens when the app
 | `shipping.rates` | Quoting shipping for a cart |
 | `search.query` | A storefront search, when the store uses the app's engine |
 | `admin.action` | A button the app added to the admin |
+| `address.verify` | A shipping address set on a cart or an order, when the store picked the app to verify addresses |
+| `address.suggest`, `address.resolve` | Someone typing an address, when the store picked the app for autocomplete |
+| `checkout.validate` | A cart's address set, an option chosen, and checkout: every app declaring it is asked |
 
 ```ts
 import { defineExtensionHandler, extensionHandler } from "@hyphacommerce/app";
@@ -122,6 +125,45 @@ answers the point's version your `@hyphacommerce/app` was generated from (the on
 matching Hypha calls); to keep answering an older one too, pass `{ versions: [1, 2] }` and
 branch on `context.version`, since the body is typed by the newest version only.
 Every call is logged, and staff can see each app's calls in the admin.
+
+### Validating checkouts
+
+`checkout.validate` lets an app say what's wrong with a cart, each message on the part of
+the cart it's about (`$.shipping_address.postal_code`, `$.lines[0]`, `$.shipping_groups[0]`,
+`$` for the whole cart). An `error` stops checkout until the shopper fixes it; a `warning`
+only shows. Hypha asks when the address is set, when a shipping option is chosen and at
+checkout, and keeps the answer with the cart: your app is asked again only when what it
+would be sent changes (the address and email are sent only if your grant has
+`customer_data:address` and `customer_data:email`). It needs `carts:read`. Answer within 2
+seconds with at most 20 messages; by default a failing app is skipped, and the merchant
+can make its failure block checkout instead.
+
+No wine to the Canary Islands, whose postal codes start with 35 and 38:
+
+```ts
+import { defineExtensionHandler, extensionHandler, message } from "@hyphacommerce/app";
+
+const noWine = defineExtensionHandler("checkout.validate", (request) => {
+  const postal = request.cart.shipping_address?.postal_code ?? "";
+  const wine = request.cart.lines.some((line) => line.sku?.startsWith("WINE-"));
+  if (!wine || !/^3[58]/.test(postal)) return { messages: [] };
+  return {
+    messages: [
+      message(
+        "$.shipping_address.postal_code",
+        "alcohol_restricted",
+        "We can't ship wine to the Canary Islands. Remove it or choose another address.",
+      ),
+    ],
+  };
+});
+
+export default extensionHandler({ handlers: [noWine], secret: SECRET });
+```
+
+A rule this simple needs no app: the merchant can set it up under Settings → Checkout as a
+checkout rule. An app earns its place when the answer depends on data it keeps (licences,
+stock elsewhere, a carrier's own checks).
 
 ## The admin and the storefront
 
