@@ -1035,6 +1035,8 @@ version = "0.1.0-beta.2"
 dependencies = [
  "hypha-addresses",
  "hypha-cart",
+ "hypha-categories",
+ "hypha-checkout-rules",
  "hypha-core",
  "hypha-customers",
  "hypha-discounts",
@@ -1050,6 +1052,19 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "hypha-checkout-rules"
+version = "0.1.0-beta.2"
+dependencies = [
+ "hypha-core",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "utoipa",
  "uuid",
 ]
 
@@ -1286,6 +1301,7 @@ dependencies = [
  "hypha-categories",
  "hypha-channels",
  "hypha-checkout",
+ "hypha-checkout-rules",
  "hypha-config",
  "hypha-core",
  "hypha-custom-fields",
@@ -1700,6 +1716,7 @@ dependencies = [
  "hypha-categories",
  "hypha-channels",
  "hypha-checkout",
+ "hypha-checkout-rules",
  "hypha-core",
  "hypha-custom-fields",
  "hypha-customers",
@@ -1781,6 +1798,7 @@ dependencies = [
  "hypha-cart",
  "hypha-categories",
  "hypha-channels",
+ "hypha-checkout-rules",
  "hypha-core",
  "hypha-custom-fields",
  "hypha-customer-accounts",

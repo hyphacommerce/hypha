@@ -101,6 +101,8 @@ pub struct InMemoryPorts {
     pub receipts: crate::InMemoryReceipts,
     /// Stock moving between locations.
     pub transfers: crate::InMemoryTransfers,
+    /// What a cart must meet to be checked out.
+    pub checkout_rules: crate::InMemoryCheckoutRules,
 }
 
 impl Default for InMemoryPorts {
@@ -182,6 +184,7 @@ impl Default for InMemoryPorts {
             purchase_orders: crate::InMemoryPurchaseOrders::sharing(&suppliers, &outbox),
             receipts: crate::InMemoryReceipts::default(),
             transfers: crate::InMemoryTransfers::sharing(&outbox),
+            checkout_rules: crate::InMemoryCheckoutRules::sharing(&outbox),
             suppliers,
             outbox,
         }
@@ -192,6 +195,13 @@ impl hypha_core::HasPreviewTokens for InMemoryPorts {
     type PreviewTokens = crate::InMemoryPreviewTokenRepo;
     fn preview_tokens(&self) -> &crate::InMemoryPreviewTokenRepo {
         &self.preview_tokens
+    }
+}
+
+impl hypha_checkout_rules::HasCheckoutRules for InMemoryPorts {
+    type CheckoutRules = crate::InMemoryCheckoutRules;
+    fn checkout_rules(&self) -> &crate::InMemoryCheckoutRules {
+        &self.checkout_rules
     }
 }
 
