@@ -273,6 +273,10 @@ function EditAddressDialog({
           onChange={setField}
           problems={problems}
           tried={tried}
+          onFill={(filled, found) => {
+            setDraft((d) => ({ ...d, ...filled }));
+            setProblems(found);
+          }}
         />
         <HStack gap={2} hAlign="end">
           <Button label="Cancel" variant="ghost" onClick={onClose} />

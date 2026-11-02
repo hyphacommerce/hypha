@@ -42,19 +42,19 @@ export async function loadRuleOptions(client: Client): Promise<RuleOptions> {
  * The installed apps that answer `address.verify`, for the verification picker: an app's
  * endpoints are read when its list entry doesn't rule it out. None without `apps:read`.
  */
-export async function loadVerificationApps(
+export async function loadAnsweringApps(
   client: Client,
+  points: readonly string[],
 ): Promise<{ value: string; label: string }[]> {
   const apps = await client.GET("/admin/apps");
   const candidates = (apps.data?.items ?? []).filter((a) => a.enabled);
   const answering = await Promise.all(
     candidates.map(async (app) => {
-      const points = await client.GET("/admin/apps/{key}/extension-points", {
+      const found = await client.GET("/admin/apps/{key}/extension-points", {
         params: { path: { key: app.key } },
       });
-      const answers = (points.data?.extension_points ?? []).some(
-        (p) => p.point === "address.verify",
-      );
+      const declared = new Set((found.data?.extension_points ?? []).map((p) => p.point));
+      const answers = points.every((p) => declared.has(p));
       return answers ? { value: app.key, label: app.name } : null;
     }),
   );

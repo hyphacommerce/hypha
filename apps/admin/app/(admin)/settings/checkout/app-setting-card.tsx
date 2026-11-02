@@ -1,8 +1,9 @@
 "use client";
 
-// The app that verifies shipping addresses (`address.verify`): asked when a cart's
-// address is set and when staff change an order's. Its answer only warns and suggests;
-// a checkout rule on the verdict makes it block.
+// An app checkout settings name: the one verifying shipping addresses
+// (`address.verify`: asked when a cart's address is set and when staff change an
+// order's; it only warns and suggests, a checkout rule on the verdict makes it block), or
+// the one suggesting addresses as people type (`address.suggest` and `address.resolve`).
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -13,19 +14,46 @@ import { Text } from "@astryxdesign/core/Text";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import { setVerificationApp } from "./actions";
+import { type AppSetting, setCheckoutApp } from "./actions";
 
 /** "None" in the picker. */
 const NONE = "none";
 
-export function VerificationCard({
+/** What each setting's card says. */
+const TEXT: Record<
+  AppSetting,
+  { title: string; description: string; picker: string; none: string; empty: string }
+> = {
+  verification_app: {
+    title: "Address verification",
+    description:
+      "An app that checks whether mail reaches a shipping address and suggests a corrected one. Shoppers see a warning and the suggestion; add a rule on the verdict to stop checkout.",
+    picker: "Verification app",
+    none: "None: addresses aren't verified",
+    empty:
+      "No installed app verifies addresses. Install one whose manifest declares address.verify.",
+  },
+  autocomplete_app: {
+    title: "Address autocomplete",
+    description:
+      "An app that suggests addresses as people type the first line, in the storefront's checkout and account and in the admin's address forms. Picking one fills the form.",
+    picker: "Autocomplete app",
+    none: "None: addresses are typed",
+    empty:
+      "No installed app suggests addresses. Install one whose manifest declares address.suggest and address.resolve.",
+  },
+};
+
+export function AppSettingCard({
+  setting,
   current,
   apps,
   canWrite,
 }: {
+  setting: AppSetting;
   /** The app named now, if any. */
   current: string | null;
-  /** The installed apps that answer `address.verify`: key and name. */
+  /** The installed apps that answer the setting's points: key and name. */
   apps: { value: string; label: string }[];
   canWrite: boolean;
 }) {
@@ -34,8 +62,9 @@ export function VerificationCard({
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
   // The app named stays a choice even when it no longer answers, so it can be seen.
+  const text = TEXT[setting];
   const options = [
-    { value: NONE, label: "None: addresses aren't verified" },
+    { value: NONE, label: text.none },
     ...apps,
     ...(current && !apps.some((a) => a.value === current)
       ? [{ value: current, label: `${current} (no longer answers)` }]
@@ -43,7 +72,7 @@ export function VerificationCard({
   ];
   const save = () =>
     startTransition(async () => {
-      const result = await setVerificationApp(chosen === NONE ? null : chosen);
+      const result = await setCheckoutApp(setting, chosen === NONE ? null : chosen);
       setError(result.error);
       if (!result.error) router.refresh();
     });
@@ -53,22 +82,17 @@ export function VerificationCard({
       <VStack gap={3}>
         <VStack gap={1}>
           <Text type="display-3" as="h2">
-            Address verification
+            {text.title}
           </Text>
-          <Text color="secondary">
-            An app that checks whether mail reaches a shipping address and suggests a corrected one.
-            Shoppers see a warning and the suggestion; add a rule on the verdict to stop checkout.
-          </Text>
+          <Text color="secondary">{text.description}</Text>
         </VStack>
         {error && <Banner status="error" title={error} />}
         {apps.length === 0 && !current ? (
-          <Text color="secondary">
-            No installed app verifies addresses. Install one whose manifest declares address.verify.
-          </Text>
+          <Text color="secondary">{text.empty}</Text>
         ) : (
           <HStack gap={2} vAlign="end" wrap="wrap">
             <Selector
-              label="Verification app"
+              label={text.picker}
               options={options}
               value={chosen}
               onChange={setChosen}

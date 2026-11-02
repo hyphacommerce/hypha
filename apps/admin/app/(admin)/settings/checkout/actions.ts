@@ -101,11 +101,15 @@ export async function tryAddress(
   return { result: data };
 }
 
-/** Names the app verifying shipping addresses; `null` for none. */
-export async function setVerificationApp(app: string | null): Promise<Result> {
+/** An app the checkout settings name. */
+export type AppSetting = "verification_app" | "autocomplete_app";
+
+/** Names the app verifying shipping addresses, or the one suggesting them; `null` for
+ * none. */
+export async function setCheckoutApp(setting: AppSetting, app: string | null): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.PATCH("/admin/checkout-settings", {
-    body: { verification_app: app },
+    body: { [setting]: app },
   });
   if (error) return { error: describe(error) };
   refresh();

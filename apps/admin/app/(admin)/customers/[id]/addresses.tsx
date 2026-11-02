@@ -283,6 +283,10 @@ function AddressDialog({
             onChange={setField}
             problems={problems}
             tried={tried}
+            onFill={(filled, found) => {
+              setDraft((d) => ({ ...d, ...filled }));
+              setProblems(found);
+            }}
           />
         ) : (
           draft.country !== "" && <Text color="secondary">Loading the country&apos;s form…</Text>
