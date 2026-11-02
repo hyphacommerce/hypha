@@ -12,7 +12,7 @@ import { CodeStates } from "@/components/discounts";
 import { lineImage } from "@/components/line-image";
 import { SummaryLine, Totals } from "@/components/totals";
 import { loadAccount } from "@/lib/account";
-import { api, countryOf } from "@/lib/api";
+import { api, countryOf, loadAddressFormat } from "@/lib/api";
 import { Price } from "@/components/price";
 import { linePrice, readCartDiscounts, shippingPrice } from "@/lib/discounts";
 import { formatMoney } from "@/lib/money";
@@ -55,12 +55,14 @@ export default async function CheckoutPage({
   const client = api();
   // The options alongside the cart, not after it: they only count once the cart has an
   // address and something to ship, and otherwise the API refuses them (unused here).
-  const [{ data: cart }, options, payment, account] = await Promise.all([
+  const [{ data: cart }, options, payment, account, format] = await Promise.all([
     client.GET("/storefront/carts/{id}", { params: { path: { id } } }),
     client.GET("/storefront/carts/{id}/shipping-options", { params: { path: { id } } }),
     client.GET("/storefront/carts/{id}/payment-methods", { params: { path: { id } } }),
     // A signed-in shopper's address book and marketing choice fill the form.
     loadAccount(),
+    // How the country lays out its addresses.
+    loadAddressFormat(code),
   ]);
   if (!cart || cart.order || cart.lines.length === 0) redirect(link(code, "/cart"));
 
@@ -112,6 +114,7 @@ export default async function CheckoutPage({
             <DetailsForm
               country={code}
               countryName={country.name}
+              format={format}
               saved={detailsDone}
               initialOptIn={
                 cart.marketing_opt_in || account?.email_marketing.state === "subscribed"

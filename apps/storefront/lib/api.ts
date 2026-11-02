@@ -9,6 +9,7 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 
+import { type AddressFormat, type FieldProblems, problemsOf } from "./address";
 import { FRESH_SECONDS, TAGS } from "./cache-tags";
 import { type FieldContext, type FieldPart, referenceIds } from "./custom-fields";
 import { link } from "./site";
@@ -95,6 +96,20 @@ export async function countryOf(folder: string): Promise<Country> {
   if (!country) notFound();
   return country;
 }
+
+/** A country's address form: the same for every store until a release changes it. */
+export const loadAddressFormat = cache((country: string) =>
+  unstable_cache(
+    async (): Promise<AddressFormat> =>
+      loaded(
+        await api().GET("/storefront/address-formats/{country}", {
+          params: { path: { country } },
+        }),
+      ),
+    ["address-format", country],
+    { revalidate: 86_400 },
+  )(),
+);
 
 /** The shown category tree, once per request (and cached, tagged `categories`). */
 export const loadCategories = cache(
@@ -234,6 +249,21 @@ export async function fieldContext(
 }
 
 /** A message for the shopper, by the API's stable error code. */
+/**
+ * An action's refusal: the message to show and, for an address, each field's problem
+ * (the banner then only points at them).
+ */
+export function refusedWith(error: { code: string; error: string; details?: unknown }): {
+  error: string;
+  problems?: FieldProblems;
+} {
+  const problems = problemsOf(error);
+  if (problems && Object.keys(problems).length > 0) {
+    return { error: "Check the highlighted fields.", problems };
+  }
+  return { error: describe(error) };
+}
+
 export function describe(error: { code: string; error: string }): string {
   switch (error.code) {
     case "out_of_stock":

@@ -26,16 +26,17 @@ import {
   selectShipping,
   startCartPayment,
 } from "@/app/[country]/actions";
+import { AddressFields } from "@/components/address-fields";
 import { Skeleton } from "@/components/skeletons";
+import { type AddressFormat, type FieldProblems, missingIn } from "@/lib/address";
 import { saleLabel } from "@/lib/prices";
 
-/** The fields the form won't save without (marked required below). */
-const REQUIRED: (keyof Details)[] = ["email", "last_name", "line1", "city"];
-
-/** Contact and shipping address, saved together. */
+/** Contact and shipping address, saved together; the address laid out as its country
+ * does (`format`). */
 export function DetailsForm({
   country,
   countryName,
+  format,
   initial,
   initialOptIn,
   emailFixed = false,
@@ -43,6 +44,7 @@ export function DetailsForm({
 }: {
   country: string;
   countryName: string;
+  format: AddressFormat;
   initial: Details;
   /** Whether the shopper ticked "Email me with news and offers". */
   initialOptIn: boolean;
@@ -54,11 +56,15 @@ export function DetailsForm({
   const [details, setDetails] = useState(initial);
   const [optIn, setOptIn] = useState(initialOptIn);
   const [error, setError] = useState<string>();
+  const [problems, setProblems] = useState<FieldProblems>();
   const [pending, start] = useTransition();
   const [tried, setTried] = useState(false);
 
-  const set = (key: keyof Details) => (value: string) =>
+  const set = (key: keyof Details) => (value: string) => {
     setDetails((d) => ({ ...d, [key]: value }));
+    // A field changed since the save no longer has the problem it reported.
+    if (key !== "email") setProblems((p) => (p?.[key] ? { ...p, [key]: undefined } : p));
+  };
   const required = (key: keyof Details) =>
     tried && details[key].trim() === ""
       ? { type: "error" as const, message: "Required" }
@@ -66,11 +72,12 @@ export function DetailsForm({
 
   const submit = () => {
     setTried(true);
-    if (REQUIRED.some((k) => details[k].trim() === "")) return;
+    if (details.email.trim() === "" || missingIn(format, details).length > 0) return;
     start(async () => {
       // A save answers with the page re-rendered (`refresh` in the action).
       const result = await saveDetails(country, details, optIn);
       setError(result?.error);
+      setProblems(result?.problems);
     });
   };
 
@@ -115,21 +122,14 @@ export function DetailsForm({
             Ships to {countryName}. To ship elsewhere, switch the currency at the top.
           </Text>
         </VStack>
-        <Grid columns={{ minWidth: 220 }} gap={3}>
-          {field("first_name", "First name")}
-          {field("last_name", "Last name", { required: true })}
-        </Grid>
-        {field("company", "Company")}
-        {field("line1", "Address", { required: true })}
-        {field("line2", "Apartment, suite")}
-        <Grid columns={{ minWidth: 220 }} gap={3}>
-          {field("postal_code", "Postal code")}
-          {field("city", "City", { required: true })}
-        </Grid>
-        <Grid columns={{ minWidth: 220 }} gap={3}>
-          {field("province", "Region")}
-          {field("phone", "Phone")}
-        </Grid>
+        <AddressFields
+          format={format}
+          values={details}
+          onChange={(key, value) => set(key)(value)}
+          problems={problems}
+          tried={tried}
+          size="lg"
+        />
       </VStack>
       {error && <Banner status="error" title={error} />}
       <div>

@@ -12,13 +12,13 @@ import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 
 import { type ActionResult } from "@/app/[country]/actions";
 import { accountApi, forgetSession, rememberSession, sessionToken } from "@/lib/account";
-import { api, describe, shopperApi } from "@/lib/api";
+import { api, refusedWith, shopperApi } from "@/lib/api";
 import { cartId, link } from "@/lib/site";
 
 export type AddressInput = StorefrontSchemas["AddressRequest"];
 
-function refused(error: { code: string; error: string }): ActionResult {
-  return { error: describe(error) };
+function refused(error: { code: string; error: string; details?: unknown }): ActionResult {
+  return refusedWith(error);
 }
 
 /** `value` trimmed, or `null` for a blank optional field. */

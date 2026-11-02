@@ -13,7 +13,8 @@ import { redirect } from "next/navigation";
 
 import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 
-import { api, describe, loadCountries, shopperApi } from "@/lib/api";
+import { type AddressValues, type FieldProblems } from "@/lib/address";
+import { api, describe, loadCountries, refusedWith, shopperApi } from "@/lib/api";
 import { type ListingPage, readListingPage } from "@/lib/listing-data";
 import { formatRange } from "@/lib/money";
 import { COUNTRY_COOKIE } from "@/lib/routing";
@@ -23,7 +24,8 @@ import { accountApi, forgetSession, sessionHeaders } from "@/lib/account";
 import { cartId, forgetCart, link, mode, rememberCart } from "@/lib/site";
 
 /** What a refused action tells its form. */
-export type ActionResult = { error: string } | undefined;
+/** Why an action was refused; an address's problems by field (`invalid_address`). */
+export type ActionResult = { error: string; problems?: FieldProblems } | undefined;
 
 /** The shopper's cart as the API prices it. */
 export type Cart = StorefrontSchemas["CartResponse"];
@@ -31,10 +33,10 @@ export type Cart = StorefrontSchemas["CartResponse"];
 /** A cart action's answer: the cart as it is now, or why it was refused. */
 export type CartResult = { cart: Cart | null; error?: string };
 
-type ApiError = { code: string; error: string };
+type ApiError = { code: string; error: string; details?: unknown };
 
 function refused(error: ApiError): ActionResult {
-  return { error: describe(error) };
+  return refusedWith(error);
 }
 
 /** `value` trimmed, or `null` for a blank optional field. */
@@ -203,18 +205,7 @@ export async function removeDiscountCode(input: {
   return { cart: data ?? (await loadCart(input.country)) };
 }
 
-export type Details = {
-  email: string;
-  first_name: string;
-  last_name: string;
-  company: string;
-  line1: string;
-  line2: string;
-  postal_code: string;
-  city: string;
-  province: string;
-  phone: string;
-};
+export type Details = AddressValues & { email: string };
 
 /** Checkout's first step: the email, the marketing box and the shipping address,
  * together. One after the other: all write the cart, so at once they'd race for its

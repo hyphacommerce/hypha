@@ -13,6 +13,14 @@ import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { useState, useTransition } from "react";
 
+import { AddressFields } from "@/components/address-fields";
+import {
+  type AddressFormat,
+  type AddressValues,
+  type FieldProblems,
+  missingIn,
+} from "@/lib/address";
+
 import {
   type AddressInput,
   cancelErasure,
@@ -80,16 +88,7 @@ export function ProfileForm({
   );
 }
 
-export type AddressFields = {
-  first_name: string;
-  last_name: string;
-  company: string;
-  line1: string;
-  line2: string;
-  postal_code: string;
-  city: string;
-  province: string;
-  phone: string;
+export type AddressFields = AddressValues & {
   default_shipping: boolean;
   default_billing: boolean;
 };
@@ -108,24 +107,25 @@ const EMPTY: AddressFields = {
   default_billing: false,
 };
 
-const REQUIRED = ["last_name", "line1", "city"] as const;
-
 /** `value` trimmed, or `null` for a blank optional field. */
 function optional(value: string): string | null {
   const trimmed = value.trim();
   return trimmed === "" ? null : trimmed;
 }
 
-/** Adds an address or edits `address`; `onDone` closes the form. */
+/** Adds an address or edits `address`, laid out as the country does (`format`);
+ * `onDone` closes the form. */
 function AddressForm({
   country,
   countryName,
+  format,
   address,
   initial = EMPTY,
   onDone,
 }: {
   country: string;
   countryName: string;
+  format: AddressFormat;
   /** The address being replaced; `null` for a new one. */
   address: string | null;
   initial?: AddressFields;
@@ -133,17 +133,17 @@ function AddressForm({
 }) {
   const [values, setValues] = useState(initial);
   const [error, setError] = useState<string>();
+  const [problems, setProblems] = useState<FieldProblems>();
   const [tried, setTried] = useState(false);
   const [pending, start] = useTransition();
-  const set = (key: keyof AddressFields) => (value: string) =>
+  const set = (key: keyof AddressValues, value: string) => {
     setValues((v) => ({ ...v, [key]: value }));
-  const required = (key: (typeof REQUIRED)[number]) =>
-    tried && values[key].trim() === ""
-      ? { type: "error" as const, message: "Required" }
-      : undefined;
+    // A field changed since the save no longer has the problem it reported.
+    setProblems((p) => (p?.[key] ? { ...p, [key]: undefined } : p));
+  };
   const submit = () => {
     setTried(true);
-    if (REQUIRED.some((k) => values[k].trim() === "")) return;
+    if (missingIn(format, values).length > 0) return;
     const body: AddressInput = {
       first_name: optional(values.first_name),
       last_name: values.last_name.trim(),
@@ -161,6 +161,7 @@ function AddressForm({
     start(async () => {
       const result = await saveAddress(country, address, body);
       setError(result?.error);
+      setProblems(result?.problems);
       if (!result) onDone();
     });
   };
@@ -173,54 +174,13 @@ function AddressForm({
         <Text type="supporting">
           In {countryName}. To ship elsewhere, switch the currency at the top.
         </Text>
-        <Grid columns={{ minWidth: 220 }} gap={3}>
-          <TextInput
-            label="First name"
-            isOptional
-            value={values.first_name}
-            onChange={set("first_name")}
-          />
-          <TextInput
-            label="Last name"
-            isRequired
-            value={values.last_name}
-            onChange={set("last_name")}
-            status={required("last_name")}
-          />
-        </Grid>
-        <TextInput label="Company" isOptional value={values.company} onChange={set("company")} />
-        <TextInput
-          label="Address"
-          isRequired
-          value={values.line1}
-          onChange={set("line1")}
-          status={required("line1")}
+        <AddressFields
+          format={format}
+          values={values}
+          onChange={set}
+          problems={problems}
+          tried={tried}
         />
-        <TextInput
-          label="Apartment, suite"
-          isOptional
-          value={values.line2}
-          onChange={set("line2")}
-        />
-        <Grid columns={{ minWidth: 220 }} gap={3}>
-          <TextInput
-            label="Postal code"
-            isOptional
-            value={values.postal_code}
-            onChange={set("postal_code")}
-          />
-          <TextInput
-            label="City"
-            isRequired
-            value={values.city}
-            onChange={set("city")}
-            status={required("city")}
-          />
-        </Grid>
-        <Grid columns={{ minWidth: 220 }} gap={3}>
-          <TextInput label="Region" isOptional value={values.province} onChange={set("province")} />
-          <TextInput label="Phone" isOptional value={values.phone} onChange={set("phone")} />
-        </Grid>
         <CheckboxInput
           label="Use as my shipping address"
           value={values.default_shipping}
@@ -256,10 +216,13 @@ export type SavedAddress = {
 export function AddressBook({
   country,
   countryName,
+  format,
   addresses,
 }: {
   country: string;
   countryName: string;
+  /** How the country lays out its addresses. */
+  format: AddressFormat;
   addresses: SavedAddress[];
 }) {
   // An address's ID being edited, `NEW` for a new one, or nothing.
@@ -278,6 +241,7 @@ export function AddressBook({
               key={a.id}
               country={country}
               countryName={countryName}
+              format={format}
               address={a.id}
               initial={a.fields}
               onDone={() => setEditing(null)}
@@ -326,6 +290,7 @@ export function AddressBook({
         <AddressForm
           country={country}
           countryName={countryName}
+          format={format}
           address={null}
           onDone={() => setEditing(null)}
         />
