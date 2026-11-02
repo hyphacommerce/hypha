@@ -209,10 +209,46 @@ where
         .await?
         .and_then(|app| app.grant().map(|g| g.has(CheckoutValidate::SCOPE)))
         .unwrap_or(false);
-    if !(granted_now || found.scopes().contains(&CheckoutValidate::SCOPE)) {
+    let asked_for = found.scopes().contains(&CheckoutValidate::SCOPE)
+        || CheckoutValidate::SCOPE
+            .implied_by()
+            .is_some_and(|wider| found.scopes().contains(&wider));
+    if !(granted_now || asked_for) {
         return Ok(());
     }
     ensure_room_for(ports, key).await
+}
+
+/// Refuses enabling `app` when it would then answer `checkout.validate` while the store
+/// has as many apps doing so as it may (`too_many_validation_apps`). An app enabled
+/// already, or that wouldn't answer, passes.
+pub async fn ensure_room_for_enabling<P: HasApps + HasExtensionEndpoints>(
+    ports: &P,
+    app: &AppKey,
+) -> Result<(), ApiError> {
+    let Some(mut found) = ports.apps().get(app).await? else {
+        return Ok(());
+    };
+    if found.enabled() {
+        return Ok(());
+    }
+    found.set_enabled(true);
+    ensure_room_for_app(ports, &found).await
+}
+
+/// Refuses `app` as it's about to be stored (a manifest refreshed, an app enabled) when it
+/// would answer `checkout.validate` while the store has as many apps doing so as it may.
+pub async fn ensure_room_for_app<P: HasApps + HasExtensionEndpoints>(
+    ports: &P,
+    app: &App,
+) -> Result<(), ApiError> {
+    let Some(point) = known(CheckoutValidate::NAME) else {
+        return Ok(());
+    };
+    if endpoint_of(ports, app, point).await?.is_none() {
+        return Ok(());
+    }
+    ensure_room_for(ports, app.key()).await
 }
 
 /// The cart as `checkout.validate` sends it, with `redaction`'s personal fields left out.

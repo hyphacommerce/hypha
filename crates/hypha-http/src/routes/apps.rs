@@ -437,6 +437,12 @@ pub async fn update<S: Storage>(
 ) -> Result<Json<AppResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
+    if req.enabled == Some(true) {
+        ctx.require(Scope::AppsWrite)?;
+        if let Ok(app) = hypha_apps::AppKey::new(&key) {
+            crate::checkout_validate::ensure_room_for_enabling(&ports, &app).await?;
+        }
+    }
     let input = UpdateApp {
         name: req.name,
         enabled: req.enabled,
@@ -859,6 +865,7 @@ pub async fn set_extension_points<S: Storage>(
 ) -> Result<Json<ExtensionEndpointsDto>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
+    ctx.require(Scope::AppsWrite)?;
     if let Ok(app) = hypha_apps::AppKey::new(&key)
         && req
             .extension_points

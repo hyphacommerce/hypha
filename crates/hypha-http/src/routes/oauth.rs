@@ -912,6 +912,9 @@ pub async fn approve_request<S: Storage>(
     PathId(id): PathId<OAuthRequestId>,
 ) -> Result<Response, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
+    // Authorised before the limit is looked at, so a caller without the scope learns
+    // nothing about the store's apps.
+    ctx.require(Scope::AppsWrite)?;
     crate::checkout_validate::ensure_room_for_request(&ports, id).await?;
     // The manifest applied and the app's custom fields synced to it, in one commit.
     let prepared = prepare_approval(&ctx, &ports, &state.env, id).await?;

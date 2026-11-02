@@ -242,3 +242,123 @@ async fn a_sixth_validation_app_is_refused() {
     let (status, json) = send(&app, "PUT", path, Some(&body)).await;
     assert_eq!(status, StatusCode::OK, "{json}");
 }
+
+/// Five hand-made apps answering `checkout.validate` at `base`.
+async fn five_validation_apps(app: &TestApp, base: &str) {
+    for n in 1..=5 {
+        app_answering(
+            app,
+            &format!("app_rules_{n}"),
+            base,
+            &[("checkout.validate", "/validate")],
+        )
+        .await;
+    }
+}
+
+/// A local app whose manifest registers `checkout.validate` and asks for `scopes`; its
+/// base URL.
+async fn validating_manifest(scopes: &[&str]) -> String {
+    use axum::{Router, routing::get};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let manifest = json!({
+        "key": "app_sixth",
+        "name": "Sixth",
+        "version": "1.0.0",
+        "publisher": "Rules Ltd",
+        "app_url": base,
+        "redirect_uris": ["/callback"],
+        "scopes": scopes,
+        "privacy_url": "/privacy",
+        "extension_points": [{"point": "checkout.validate", "version": 1, "url": "/validate"}]
+    })
+    .to_string();
+    let router = Router::new().route(
+        "/hypha-app.json",
+        get(move || {
+            let manifest = manifest.clone();
+            async move { ([(CONTENT_TYPE, "application/json")], manifest) }
+        }),
+    );
+    tokio::spawn(async move { axum::serve(listener, router).await });
+    base
+}
+
+/// Asks to install the app at `base` with `scope`: the consent request's ID.
+async fn consent_request(app: &TestApp, base: &str, scope: &str) -> String {
+    use super::oauth::{encode, query_param, raw};
+    let client = format!("{base}/hypha-app.json");
+    let redirect = format!("{base}/callback");
+    let query = encode(&[
+        ("response_type", "code"),
+        ("client_id", &client),
+        ("redirect_uri", &redirect),
+        ("state", "st4te"),
+        (
+            "code_challenge",
+            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+        ),
+        ("code_challenge_method", "S256"),
+        ("scope", scope),
+    ]);
+    let (status, location, body) =
+        raw(app, "GET", &format!("/oauth/authorize?{query}"), None).await;
+    assert_eq!(status, StatusCode::FOUND, "{body}");
+    query_param(&location.unwrap(), "request").unwrap()
+}
+
+#[tokio::test]
+async fn approving_a_sixth_validation_app_is_refused() {
+    let app = super::oauth::oauth_app().await;
+    let (base, _, _) = fake_app(&[("/validate", 200, json!({"messages": []}))]).await;
+    five_validation_apps(&app, &base).await;
+    let sixth = validating_manifest(&["carts:read"]).await;
+    let request = consent_request(&app, &sixth, "carts:read").await;
+    let owner = owner_session(&app).await;
+    let path = format!("/admin/oauth/requests/{request}/approve");
+    let (status, json) = send_as(&app, &owner, "POST", &path, None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "too_many_validation_apps")
+    );
+}
+
+#[tokio::test]
+async fn a_sixth_validation_app_asking_for_carts_write_is_refused_too() {
+    let app = super::oauth::oauth_app().await;
+    let (base, _, _) = fake_app(&[("/validate", 200, json!({"messages": []}))]).await;
+    five_validation_apps(&app, &base).await;
+    let sixth = validating_manifest(&["carts:write"]).await;
+    let request = consent_request(&app, &sixth, "carts:write").await;
+    let owner = owner_session(&app).await;
+    let path = format!("/admin/oauth/requests/{request}/approve");
+    let (status, json) = send_as(&app, &owner, "POST", &path, None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "too_many_validation_apps")
+    );
+}
+
+#[tokio::test]
+async fn enabling_a_sixth_validation_app_is_refused() {
+    let app = app().await;
+    let (base, _, _) = fake_app(&[("/validate", 200, json!({"messages": []}))]).await;
+    five_validation_apps(&app, &base).await;
+    create_app(&app, json!({"key": "app_rules_6", "name": "Six"})).await;
+    let disable = json!({"enabled": false}).to_string();
+    let (status, json) = send(&app, "PATCH", "/admin/apps/app_rules_6", Some(&disable)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let body = json!({"extension_points": [{"point": "checkout.validate", "version": 1,
+        "url": format!("{base}/validate")}]})
+    .to_string();
+    let path = "/admin/apps/app_rules_6/extension-points";
+    let (status, json) = send(&app, "PUT", path, Some(&body)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let enable = json!({"enabled": true}).to_string();
+    let (status, json) = send(&app, "PATCH", "/admin/apps/app_rules_6", Some(&enable)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "too_many_validation_apps")
+    );
+}
