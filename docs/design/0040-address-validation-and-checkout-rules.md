@@ -822,3 +822,48 @@ One branch per step, stacked with `gh stack` from `feat/address-validation`:
 - **Tested:** no source makes an error yet, so `refuse_errors` is unit-tested with one
   injected; checkout's tests use a `CartChecks` that warns and check out anyway, and the
   route tests and e2e set a Dutch or German address without a house number.
+
+### Step 3: rules
+
+- **The leaf:** `hypha-checkout-rules` on core alone. A rule's parts (`RuleAppliesTo`,
+  `RuleCondition`, `RuleOutcome`) are plain data that derive serde and, behind an
+  `openapi` feature, `ToSchema`: the API's shape and the stored JSON are one, as
+  discounts' JSON is, so a reshape needs a migration. `CheckoutRule::new`/`update`/
+  `restore` check the whole draft (`invalid_checkout_rule`, `details.problems: [{path,
+  code, message}]`). Limits beside §6.2's: 250 per list (countries, markets, channels,
+  options, regions, products and categories together), 50 amounts, a field length up to
+  255, postal codes of at most 20 characters.
+- **Patterns:** compiled when saved, with a size limit; after loading, on first use, since
+  compiling up to a thousand patterns on every read of a cart costs more than the rules. A
+  pattern a later `regex` couldn't compile never holds.
+- **Paths:** a rule's message may point anywhere in §4's set but a line (whose index
+  changes as the shopper edits): `path_not_allowed`. Without one: the chosen option's
+  group for a rule on options, else the field the first condition reads (line 1 for a
+  flag, the address for a verdict, the first matching line for `cart_contains`), else `$`.
+- **Order:** `position` is the list's order; moving a rule renumbers every rule densely in
+  one commit (`CheckoutRuleRepo::update_many`, all or `StaleVersion`), each with
+  `checkout_rule.updated` naming `position`. A new rule goes last.
+- **In the messages:** `cart_messages(ports, checks, cart)` reads the rules on every
+  composition (one query of at most 100 rows) and lines' categories only when an enabled
+  rule names some (`hypha_cart::product_categories`, the price lists' read, so checkout
+  gains no edge but the approved one). `PricedCart` gained `channel` and `LineDetails`
+  `shipping_weight` for the input. The cart response's messages are filled in
+  `cart_response`, which already read the store.
+- **Verification facts** (`VerifiedFacts`: verdict, `po_box`, `residential`, `business`,
+  `vacant`) are in `RuleInput` already, `None` until step 4 keeps them: `verification_is`
+  and the verification flags don't hold meanwhile. Core gained `AddressVerdict` for the
+  conditions to name.
+- **`CheckoutSettings` waits for step 4:** each of its fields (verification app,
+  autocomplete app, validation apps) arrives with the step that uses it, so there's no
+  empty settings route in between.
+- **The test route** (`POST /admin/checkout-rules/test`) answers the format's problems
+  (and nothing more, as a cart would refuse the address), or the normalised address, its
+  flags and the messages: the format's warnings, then every enabled rule's, with a draft
+  `rule` tried in place of `rule_id` (or last) even while it's off, its messages marked
+  `draft` (a draft not saved yet names `crule_000…0`). Lines are read by variant for their
+  product, categories and weight; the subtotal is given, not priced.
+- **The admin:** Settings → Checkout lists the rules (enable, move up and down, delete),
+  "Add rule" offers §6.5's presets (`lib/checkout-rules.ts`), and the editor (new from a
+  preset, or a saved rule's page) has every condition's fields, the outcome, and "Try an
+  address" beside it. The agent grant form and the apps' scope labels name
+  `checkout_rules`.
