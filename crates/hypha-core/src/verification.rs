@@ -189,15 +189,18 @@ pub trait AddressVerifier {
     /// verification is found by.
     fn digest(&self, address: &Address) -> String;
 
-    /// Asks the store's verification app about `address`; `None` when the store has none.
-    /// The app failing is an `unknown` verdict with why, never an error: only reading the
-    /// store's settings can fail.
-    async fn verify(
+    /// The store's verification app now; `None` when it has none.
+    async fn app(&self) -> Result<Option<AppKey>, RepoError>;
+
+    /// Asks `app` about `address`. The app failing is an `unknown` verdict with why, never
+    /// an error: only storage can fail.
+    async fn ask(
         &self,
+        app: &AppKey,
         address: &Address,
         digest: &str,
         context: VerifyContext,
-    ) -> Result<Option<AddressVerification>, RepoError>;
+    ) -> Result<AddressVerification, RepoError>;
 }
 
 impl<T: AddressVerifier + ?Sized> AddressVerifier for &T {
@@ -205,13 +208,18 @@ impl<T: AddressVerifier + ?Sized> AddressVerifier for &T {
         (**self).digest(address)
     }
 
-    async fn verify(
+    async fn app(&self) -> Result<Option<AppKey>, RepoError> {
+        (**self).app().await
+    }
+
+    async fn ask(
         &self,
+        app: &AppKey,
         address: &Address,
         digest: &str,
         context: VerifyContext,
-    ) -> Result<Option<AddressVerification>, RepoError> {
-        (**self).verify(address, digest, context).await
+    ) -> Result<AddressVerification, RepoError> {
+        (**self).ask(app, address, digest, context).await
     }
 }
 
@@ -224,29 +232,50 @@ impl AddressVerifier for NoVerification {
         String::new()
     }
 
-    async fn verify(
-        &self,
-        _address: &Address,
-        _digest: &str,
-        _context: VerifyContext,
-    ) -> Result<Option<AddressVerification>, RepoError> {
+    async fn app(&self) -> Result<Option<AppKey>, RepoError> {
         Ok(None)
+    }
+
+    /// Never called: there's no app to ask.
+    async fn ask(
+        &self,
+        app: &AppKey,
+        _address: &Address,
+        digest: &str,
+        _context: VerifyContext,
+    ) -> Result<AddressVerification, RepoError> {
+        Ok(AddressVerification::failed(
+            digest.to_string(),
+            app.clone(),
+            "no verification app".to_string(),
+            Timestamp::from_unix_micros(0),
+        ))
     }
 }
 
-/// The verification of a cart's `address`: what `previous` says when it covers the same
-/// address (or its accepted suggestion), else the app asked now.
+/// The verification of `address`: what `previous` says when the same app checked the same
+/// address (or its accepted suggestion), else the store's app asked now; `None` when the
+/// store has no verification app, so a check from an app it no longer uses is dropped.
 pub async fn verify_address(
     verifier: &impl AddressVerifier,
     address: &Address,
     previous: Option<&AddressVerification>,
     context: VerifyContext,
 ) -> Result<Option<AddressVerification>, RepoError> {
+    let Some(app) = verifier.app().await? else {
+        return Ok(None);
+    };
     let digest = verifier.digest(address);
-    if let Some(kept) = previous.and_then(|p| p.reusable_for(&digest)) {
+    let kept = previous
+        .filter(|p| p.app.as_ref() == Some(&app))
+        .and_then(|p| p.reusable_for(&digest));
+    if let Some(kept) = kept {
         return Ok(Some(kept));
     }
-    verifier.verify(address, &digest, context).await
+    verifier
+        .ask(&app, address, &digest, context)
+        .await
+        .map(Some)
 }
 
 /// An optional `AppKey` as its string.
@@ -361,5 +390,92 @@ mod tests {
     fn contexts_have_stable_names() {
         assert_eq!(VerifyContext::Cart.as_str(), "cart");
         assert_eq!(VerifyContext::Order.as_str(), "order");
+    }
+
+    /// Answers `deliverable` from `app` (none: no verification app), counting the calls.
+    struct Fake {
+        app: Option<AppKey>,
+        asked: std::cell::Cell<u32>,
+    }
+
+    impl Fake {
+        fn with(app: Option<&str>) -> Self {
+            Self {
+                app: app.map(|a| AppKey::new(a).unwrap()),
+                asked: std::cell::Cell::new(0),
+            }
+        }
+    }
+
+    impl AddressVerifier for Fake {
+        fn digest(&self, _address: &Address) -> String {
+            "a".to_string()
+        }
+
+        async fn app(&self) -> Result<Option<AppKey>, RepoError> {
+            Ok(self.app.clone())
+        }
+
+        async fn ask(
+            &self,
+            app: &AppKey,
+            _address: &Address,
+            digest: &str,
+            _context: VerifyContext,
+        ) -> Result<AddressVerification, RepoError> {
+            self.asked.set(self.asked.get() + 1);
+            Ok(AddressVerification {
+                digest: digest.to_string(),
+                verdict: AddressVerdict::Deliverable,
+                app: Some(app.clone()),
+                ..kept()
+            })
+        }
+    }
+
+    fn address() -> Address {
+        Address::new(crate::AddressParts {
+            first_name: None,
+            last_name: "Doe".to_string(),
+            company: None,
+            line1: "1 Main St".to_string(),
+            line2: None,
+            city: "Springfield".to_string(),
+            province: None,
+            postal_code: None,
+            country: "US".to_string(),
+            phone: None,
+        })
+        .unwrap()
+    }
+
+    fn verified(verifier: &Fake, previous: &AddressVerification) -> Option<AddressVerification> {
+        pollster::block_on(verify_address(
+            verifier,
+            &address(),
+            Some(previous),
+            VerifyContext::Cart,
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn the_same_app_reuses_its_answer() {
+        let verifier = Fake::with(Some("app_verify"));
+        assert_eq!(verified(&verifier, &kept()), Some(kept()));
+        assert_eq!(verifier.asked.get(), 0);
+    }
+
+    #[test]
+    fn another_app_is_asked_again() {
+        let verifier = Fake::with(Some("app_other"));
+        let answer = verified(&verifier, &kept()).unwrap();
+        assert_eq!(answer.app, Some(AppKey::new("app_other").unwrap()));
+        assert_eq!(verifier.asked.get(), 1);
+    }
+
+    #[test]
+    fn no_verification_app_drops_the_kept_check() {
+        assert_eq!(verified(&Fake::with(None), &kept()), None);
     }
 }

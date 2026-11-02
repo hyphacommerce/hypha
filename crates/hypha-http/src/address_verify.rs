@@ -51,28 +51,31 @@ where
         )
     }
 
-    async fn verify(
+    async fn app(&self) -> Result<Option<AppKey>, RepoError> {
+        let settings = self.ports.checkout_settings().get().await?;
+        Ok(settings.and_then(|s| s.verification_app().cloned()))
+    }
+
+    async fn ask(
         &self,
+        app: &AppKey,
         address: &Address,
         digest: &str,
         context: VerifyContext,
-    ) -> Result<Option<AddressVerification>, RepoError> {
-        let settings = self.ports.checkout_settings().get().await?;
-        let Some(app) = settings.and_then(|s| s.verification_app().cloned()) else {
-            return Ok(None);
-        };
+    ) -> Result<AddressVerification, RepoError> {
+        let app = app.clone();
         let now = self.clock.now();
         let failed =
             |why: String| AddressVerification::failed(digest.to_string(), app.clone(), why, now);
         let endpoint = match self.endpoints.endpoint(&app, AddressVerify::NAME).await {
             Ok(Some(found)) => found,
             Ok(None) => {
-                return Ok(Some(failed(
+                return Ok(failed(
                     "it doesn't answer address.verify (any more)".to_string(),
-                )));
+                ));
             }
             Err(EndpointError::Repo(e)) => return Err(e),
-            Err(e @ EndpointError::Secret(_)) => return Ok(Some(failed(e.to_string()))),
+            Err(e @ EndpointError::Secret(_)) => return Ok(failed(e.to_string())),
         };
         let p = address.parts();
         let request = AddressVerifyRequest {
@@ -101,14 +104,14 @@ where
             )
             .await,
         );
-        Ok(Some(match answered {
+        Ok(match answered {
             Ok(Answered::App(answer)) => kept(digest, app, answer, now),
             Ok(Answered::Fallback(e)) | Err(e) => {
                 tracing::warn!(%app, point = AddressVerify::NAME, why = %e,
                     "address verification failed; the address is kept as unknown");
                 failed(e.to_string())
             }
-        }))
+        })
     }
 }
 

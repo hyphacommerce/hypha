@@ -13,9 +13,8 @@ use hypha_checkout_rules::{
     list_checkout_rules, names_categories, update_checkout_rule, update_checkout_settings,
 };
 use hypha_core::{
-    AddressError, AddressFormats, AddressVerifier, ChannelId, CheckoutRuleId, CountryCode,
-    MarketId, Message, Money, ProductId, Scope, ShippingOptionId, Stamped, VariantId,
-    VerifyContext,
+    AddressError, AddressFormats, ChannelId, CheckoutRuleId, CountryCode, MarketId, Message, Money,
+    ProductId, Scope, ShippingOptionId, Stamped, VariantId, VerifyContext, verify_address,
 };
 use hypha_products::{HasProducts, ProductError, ProductRepo};
 use serde::{Deserialize, Serialize};
@@ -419,10 +418,7 @@ pub async fn test<S: Storage>(
 
     let verification = if req.verify {
         let verifier = state.verifier(&ports, None);
-        let digest = verifier.digest(&checked.address);
-        verifier
-            .verify(&checked.address, &digest, VerifyContext::Cart)
-            .await?
+        verify_address(&verifier, &checked.address, None, VerifyContext::Cart).await?
     } else {
         None
     };
