@@ -1239,7 +1239,8 @@ step "an app that isn't there verifies nothing" 422 verification_app_unavailable
 # A verification app when python3 is here (the host must run with
 # HYPHA_ALLOW_PRIVATE_CALLBACKS=true to reach it): "Nowhere" is undeliverable, "Ilica 1a"
 # is Ilica 1 corrected, anything else is deliverable. It suggests addresses too: Ilica 1
-# and Ilica 12 (without its postal code), and "ljubljana" in another country.
+# and Ilica 12 (without its postal code), and "ljubljana" in another country. As a
+# validation app, two or more of the first line is an error; "/broken" always fails.
 if command -v python3 >/dev/null 2>&1; then
     VERIFY_PORT=${E2E_VERIFY_PORT:-3198}
     python3 - "$VERIFY_PORT" <<'PY' &
@@ -1253,6 +1254,17 @@ class App(http.server.BaseHTTPRequestHandler):
                 {"id": "ilica-1", "label": "Ilica 1", "description": "10000 Zagreb, Croatia"},
                 {"id": "ilica-12", "label": "Ilica 12"},
             ][:sent["limit"]]}
+            return self.answer(answer)
+        if self.path == "/broken":
+            self.send_response(500)
+            self.end_headers()
+            return
+        if self.path == "/validate":
+            line = (sent["cart"]["lines"] or [{}])[0]
+            answer = {"messages": []}
+            if line.get("quantity", 0) >= 2:
+                answer["messages"].append({"severity": "error", "code": "two_or_more",
+                    "path": "$.lines[0]", "message": "At most one mug per order."})
             return self.answer(answer)
         if self.path == "/resolve":
             if sent["id"] == "ilica-1":
@@ -1405,6 +1417,95 @@ PY
     lacks "without what was typed" '"query":"Ilica"'
     step "no more autocomplete" 200 - -X PATCH "$BASE/admin/checkout-settings" -H "$JSON" \
         -d '{"autocomplete_app":null}'
+
+    echo "## validation apps"
+    validate_calls() {
+        step "the validation app's calls" 200 - "$BASE/admin/apps/app_rules/extension-calls"
+        if [[ $(grep -o '"point":"checkout.validate"' <<<"$BODY" | wc -l | tr -d ' ') == "$1" ]]; then
+            echo "ok   $2"
+        else
+            echo "FAIL $2: expected $1 calls: $BODY"
+            FAILED=$((FAILED + 1))
+        fi
+    }
+    step "a validation app" 201 - -X POST "$BASE/admin/apps" -H "$JSON" \
+        -d '{"key":"app_rules","name":"Rules"}'
+    step "it answers checkout.validate" 200 - -X PUT "$BASE/admin/apps/app_rules/extension-points" \
+        -H "$JSON" -d "{\"extension_points\":[{\"point\":\"checkout.validate\",\"version\":1,\"url\":\"$VERIFY_URL/validate\"}]}"
+    step "the settings list it" 200 - "$BASE/admin/checkout-settings"
+    contains "asked, not blocking" '"validation_apps":[{"app":"app_rules","enabled":true,"block_on_failure":false}]'
+    step "an app that doesn't validate can't be set" 422 validation_app_unavailable -X PATCH \
+        "$BASE/admin/checkout-settings" -H "$JSON" \
+        -d '{"validation_apps":[{"app":"app_verify","enabled":true,"block_on_failure":false}]}'
+    sleep 3
+    step "a cart to validate" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
+    RULES_CART="$BASE/storefront/carts/$(id)"
+    step "two mugs in it" 200 - -X POST "$RULES_CART/lines" -H "$JSON" \
+        -d "{\"variant\":\"$MUG_VAR\",\"quantity\":2}"
+    step "with an email" 200 - -X PUT "$RULES_CART/email" -H "$JSON" -d '{"email":"rules@example.hr"}'
+    step "an address" 200 - -X PUT "$RULES_CART/shipping-address" -H "$JSON" \
+        -d '{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR"}}'
+    contains "the app's error on the line" '"severity":"error","code":"two_or_more","path":"$.lines[0]","message":"At most one mug per order."'
+    contains "from the app" '"source":{"type":"app","app":"app_rules"}'
+    step "the same address again" 200 - -X PUT "$RULES_CART/shipping-address" -H "$JSON" \
+        -d '{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR"}}'
+    validate_calls 1 "the same cart is asked once"
+    step "the cart again" 200 - "$RULES_CART"
+    step "by standard" 200 - -X PUT "$RULES_CART/shipping/$(shgrp)" -H "$JSON" -d "{\"option\":\"$STANDARD\"}"
+    contains "still the app's error" '"code":"two_or_more"'
+    validate_calls 2 "a shipping choice asks again"
+    step "paid on delivery" 200 - -X PUT "$RULES_CART/payment-method" -H "$JSON" \
+        -d "{\"payment_method\":\"$COD\"}"
+    step "checkout refuses it" 409 checkout_blocked -X POST "$RULES_CART/checkout" -H "$JSON" -d '{}'
+    contains "with the app's error" '"code":"two_or_more","message":"At most one mug per order.","path":"$.lines[0]"'
+    validate_calls 2 "checkout used the kept answer"
+    step "one mug" 200 - -X PUT "$RULES_CART/lines/$MUG_VAR" -H "$JSON" -d '{"quantity":1}'
+    contains "the old answer shows until it's asked again" '"code":"two_or_more"'
+    validate_calls 2 "changing a line asks nobody"
+    step "checkout asks again and places it" 201 - -X POST "$RULES_CART/checkout" -H "$JSON" -d '{}'
+    validate_calls 3 "checkout asked the changed cart"
+
+    step "the app breaks" 200 - -X PUT "$BASE/admin/apps/app_rules/extension-points" \
+        -H "$JSON" -d "{\"extension_points\":[{\"point\":\"checkout.validate\",\"version\":1,\"url\":\"$VERIFY_URL/broken\"}]}"
+    sleep 3
+    step "another cart" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
+    RULES_CART="$BASE/storefront/carts/$(id)"
+    step "a mug in it" 200 - -X POST "$RULES_CART/lines" -H "$JSON" \
+        -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
+    step "with an email" 200 - -X PUT "$RULES_CART/email" -H "$JSON" -d '{"email":"rules@example.hr"}'
+    step "an address the failing app is asked about" 200 - -X PUT "$RULES_CART/shipping-address" \
+        -H "$JSON" -d '{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR"}}'
+    contains "its failure says nothing" '"messages":[]'
+    step "the cart again" 200 - "$RULES_CART"
+    step "by standard" 200 - -X PUT "$RULES_CART/shipping/$(shgrp)" -H "$JSON" -d "{\"option\":\"$STANDARD\"}"
+    step "paid on delivery" 200 - -X PUT "$RULES_CART/payment-method" -H "$JSON" \
+        -d "{\"payment_method\":\"$COD\"}"
+    step "its failure blocks checkout" 200 - -X PATCH "$BASE/admin/checkout-settings" -H "$JSON" \
+        -d '{"validation_apps":[{"app":"app_rules","enabled":true,"block_on_failure":true}]}'
+    contains "as set" '"block_on_failure":true'
+    step "the cart says so" 200 - "$RULES_CART"
+    contains "validation unavailable" '"severity":"error","code":"validation_unavailable","path":"$","message":"We can'"'"'t check your order right now. Try again in a moment."'
+    step "checkout refuses it" 409 checkout_blocked -X POST "$RULES_CART/checkout" -H "$JSON" -d '{}'
+    contains "while the app fails" '"code":"validation_unavailable"'
+    step "its failure is skipped again" 200 - -X PATCH "$BASE/admin/checkout-settings" -H "$JSON" \
+        -d '{"validation_apps":[{"app":"app_rules","enabled":true,"block_on_failure":false}]}'
+    step "checkout goes on without it" 201 - -X POST "$RULES_CART/checkout" -H "$JSON" -d '{}'
+
+    for n in 2 3 4 5 6; do
+        step "validation app $n" 201 - -X POST "$BASE/admin/apps" -H "$JSON" \
+            -d "{\"key\":\"app_rules_$n\",\"name\":\"Rules $n\"}"
+    done
+    for n in 2 3 4 5; do
+        step "app $n validates too" 200 - -X PUT "$BASE/admin/apps/app_rules_$n/extension-points" \
+            -H "$JSON" -d "{\"extension_points\":[{\"point\":\"checkout.validate\",\"version\":1,\"url\":\"$VERIFY_URL/validate\"}]}"
+    done
+    step "a sixth is refused" 409 too_many_validation_apps -X PUT \
+        "$BASE/admin/apps/app_rules_6/extension-points" -H "$JSON" \
+        -d "{\"extension_points\":[{\"point\":\"checkout.validate\",\"version\":1,\"url\":\"$VERIFY_URL/validate\"}]}"
+    contains "names the limit" '"max":5'
+    for key in app_rules app_rules_2 app_rules_3 app_rules_4 app_rules_5 app_rules_6; do
+        step "$key goes" 204 - -X DELETE "$BASE/admin/apps/$key"
+    done
     kill "$VERIFIER" 2>/dev/null
 fi
 
