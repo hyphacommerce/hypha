@@ -3,7 +3,7 @@
 //! the address valid. Stored as JSON with the order, so its shape is storage's: a field
 //! is added, never renamed.
 
-use hypha_core::{AddressVerification, Message, MessagePath, Timestamp};
+use hypha_core::{AddressVerification, AddressWarning, Message, MessagePath, Timestamp};
 use serde::{Deserialize, Serialize};
 
 /// Who looked at the address and said it's fine, and when.
@@ -41,6 +41,24 @@ impl OrderAddressCheck {
                 .collect(),
             marked_valid: None,
         }
+    }
+
+    /// The check of an address staff set: its verification, and the warnings a cart
+    /// would show for it (the format's and the verification's), as when it's placed.
+    pub fn edited(
+        verification: Option<AddressVerification>,
+        format_warnings: &[AddressWarning],
+    ) -> Self {
+        let messages: Vec<Message> = format_warnings
+            .iter()
+            .map(Message::format_warning)
+            .chain(
+                verification
+                    .as_ref()
+                    .and_then(Message::verification_warning),
+            )
+            .collect();
+        Self::placed(verification, &messages)
     }
 
     /// Whether staff should look at the address before shipping it: the provider
@@ -132,6 +150,14 @@ mod tests {
     #[test]
     fn an_address_warning_needs_review() {
         assert!(OrderAddressCheck::placed(None, &[house_number()]).needs_review());
+    }
+
+    #[test]
+    fn an_edited_address_keeps_the_verifications_warning() {
+        let check =
+            OrderAddressCheck::edited(Some(verification(AddressVerdict::MissingSubpremise)), &[]);
+        assert_eq!(check.warnings.len(), 1);
+        assert!(check.needs_review());
     }
 
     #[test]

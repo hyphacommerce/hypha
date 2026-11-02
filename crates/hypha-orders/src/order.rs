@@ -710,10 +710,14 @@ impl Order {
         Ok(true)
     }
 
-    /// Whether the shipping address may change to one in `country`: not once the order
-    /// is cancelled or anything has shipped, and only within its country. Commands ask
-    /// before spending a verification on the new address.
+    /// Whether the shipping address may change to one in `country`: not for an order that
+    /// ships nothing (it was placed without one), not once it's cancelled or anything has
+    /// shipped, and only within its country. Commands ask before spending a verification
+    /// on the new address.
     pub fn may_ship_to(&self, country: CountryCode) -> Result<(), OrderError> {
+        if self.shipping_address.is_none() {
+            return Err(OrderError::NoShippingAddress(self.id));
+        }
         if self.cancelled.is_some() {
             return Err(OrderError::Cancelled(self.id));
         }
@@ -1772,6 +1776,15 @@ mod tests {
         let mut order = placed();
         assert_eq!(
             order.mark_address_valid("system".to_string(), at()),
+            Err(OrderError::NoShippingAddress(order.id()))
+        );
+    }
+
+    #[test]
+    fn an_order_that_ships_nothing_gets_no_address() {
+        let mut order = placed();
+        assert_eq!(
+            order.change_shipping_address(zagreb(), undeliverable()),
             Err(OrderError::NoShippingAddress(order.id()))
         );
     }

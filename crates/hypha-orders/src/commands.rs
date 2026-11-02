@@ -1,7 +1,6 @@
 use hypha_core::{
     AddressError, AddressFormats, AddressParts, AddressVerifier, AuthError, Clock, Ctx, CustomerId,
-    ErrorCode, Keyset, Message, OrderId, Page, PageRequest, RepoError, Scope, VerifyContext,
-    verify_address,
+    ErrorCode, Keyset, OrderId, Page, PageRequest, RepoError, Scope, VerifyContext, verify_address,
 };
 use thiserror::Error;
 
@@ -134,15 +133,7 @@ pub async fn change_order_shipping_address<R: OrderRepo>(
     order.may_ship_to(checked.address.country())?;
     let verification =
         verify_address(verifier, &checked.address, None, VerifyContext::Order).await?;
-    let check = OrderAddressCheck {
-        verification,
-        warnings: checked
-            .warnings
-            .iter()
-            .map(Message::format_warning)
-            .collect(),
-        marked_valid: None,
-    };
+    let check = OrderAddressCheck::edited(verification, &checked.warnings);
     order.change_shipping_address(checked.address, check)?;
     orders.update(&mut order).await?;
     Ok(order)
