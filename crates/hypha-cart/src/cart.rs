@@ -769,6 +769,36 @@ mod tests {
         }
     }
 
+    fn checked() -> AddressVerification {
+        AddressVerification::failed(
+            "d".to_string(),
+            hypha_core::AppKey::new("app_verify").unwrap(),
+            "timeout".to_string(),
+            Timestamp::from_unix_micros(1),
+        )
+    }
+
+    #[test]
+    fn an_address_keeps_its_check_and_clearing_it_drops_both() {
+        let mut c = cart();
+        let address = Address::new(hr_address("HR")).unwrap();
+        c.set_shipping_address(Some(address), Some(checked()))
+            .unwrap();
+        assert_eq!(c.address_check(), Some(&checked()));
+        c.set_shipping_address(None, Some(checked())).unwrap();
+        assert_eq!(c.address_check(), None);
+    }
+
+    #[test]
+    fn redacting_a_cart_drops_its_address_check() {
+        let mut c = cart();
+        let address = Address::new(hr_address("HR")).unwrap();
+        c.set_shipping_address(Some(address), Some(checked()))
+            .unwrap();
+        c.redact(Email::new("erased@example.invalid").unwrap());
+        assert_eq!(c.address_check(), None);
+    }
+
     #[test]
     fn a_quote_holds_for_fifteen_minutes() {
         let quote = StoredQuote {

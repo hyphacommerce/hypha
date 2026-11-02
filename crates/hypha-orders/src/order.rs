@@ -1707,4 +1707,122 @@ mod tests {
             serde_json::json!(["WELCOME10", "SPRING"])
         );
     }
+
+    // ---- the shipping address ----
+
+    fn undeliverable() -> OrderAddressCheck {
+        OrderAddressCheck {
+            verification: Some(hypha_core::AddressVerification {
+                digest: "d".to_string(),
+                verdict: hypha_core::AddressVerdict::Undeliverable,
+                precision: None,
+                fields: Default::default(),
+                suggested: None,
+                suggested_digest: None,
+                flags: Default::default(),
+                app: None,
+                reference: None,
+                failure: None,
+                checked_at: at(),
+            }),
+            warnings: Vec::new(),
+            marked_valid: None,
+        }
+    }
+
+    fn shipped_to_zagreb() -> Order {
+        let mut order = Order::place(NewOrder {
+            shipping_address: Some(zagreb()),
+            address_check: Some(undeliverable()),
+            ..new_order()
+        })
+        .unwrap();
+        order.take_events();
+        order
+    }
+
+    #[test]
+    fn an_undeliverable_address_needs_review_until_marked_valid() {
+        let mut order = shipped_to_zagreb();
+        assert!(order.needs_address_review());
+        assert_eq!(
+            order.mark_address_valid("system".to_string(), at()),
+            Ok(true)
+        );
+        assert!(!order.needs_address_review());
+        assert_eq!(event_types(&mut order), ["order.address_marked_valid"]);
+    }
+
+    #[test]
+    fn marking_valid_again_changes_nothing() {
+        let mut order = shipped_to_zagreb();
+        order
+            .mark_address_valid("system".to_string(), at())
+            .unwrap();
+        order.take_events();
+        assert_eq!(
+            order.mark_address_valid("system".to_string(), at()),
+            Ok(false)
+        );
+        assert!(order.take_events().is_empty());
+    }
+
+    #[test]
+    fn an_order_without_an_address_has_nothing_to_mark() {
+        let mut order = placed();
+        assert_eq!(
+            order.mark_address_valid("system".to_string(), at()),
+            Err(OrderError::NoShippingAddress(order.id()))
+        );
+    }
+
+    #[test]
+    fn a_new_address_replaces_the_check_and_says_so() {
+        let mut order = shipped_to_zagreb();
+        order
+            .mark_address_valid("system".to_string(), at())
+            .unwrap();
+        order.take_events();
+        order
+            .change_shipping_address(zagreb(), undeliverable())
+            .unwrap();
+        assert_eq!(order.address_check().unwrap().marked_valid, None);
+        assert!(order.needs_address_review());
+        let events = order.take_events();
+        assert_eq!(events[0].event_type, "order.shipping_address_changed");
+        assert_eq!(events[0].data["address"]["line1"], "Ilica 1");
+    }
+
+    #[test]
+    fn an_address_in_another_country_is_refused() {
+        let mut order = shipped_to_zagreb();
+        let mut parts = zagreb().parts().clone();
+        parts.country = "SI".to_string();
+        let ljubljana = Address::new(parts).unwrap();
+        assert_eq!(
+            order.change_shipping_address(ljubljana, undeliverable()),
+            Err(OrderError::AddressCountryMismatch {
+                address: CountryCode::new("SI").unwrap(),
+                order: CountryCode::new("HR").unwrap(),
+            })
+        );
+    }
+
+    #[test]
+    fn the_address_stays_once_anything_is_fulfilled() {
+        let mut order = shipped_to_zagreb();
+        let line = order.lines()[0].id;
+        order.fulfil(&[(line, q(1))]).unwrap();
+        assert_eq!(
+            order.change_shipping_address(zagreb(), undeliverable()),
+            Err(OrderError::Fulfilled(order.id()))
+        );
+    }
+
+    #[test]
+    fn erasing_the_buyer_takes_the_check_too() {
+        let mut order = shipped_to_zagreb();
+        order.redact(Email::new("erased@example.invalid").unwrap());
+        assert_eq!(order.address_check(), None);
+    }
 }
