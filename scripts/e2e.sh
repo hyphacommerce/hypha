@@ -1223,6 +1223,127 @@ PY
     contains "no search app" '"search_app":null'
 fi
 
+echo "## address verification"
+step "no verification app yet" 200 - "$BASE/admin/checkout-settings"
+contains "none is named" '"verification_app":null'
+step "an app that isn't there verifies nothing" 422 verification_app_unavailable -X PATCH \
+    "$BASE/admin/checkout-settings" -H "$JSON" -d '{"verification_app":"app_verify"}'
+# A verification app when python3 is here (the host must run with
+# HYPHA_ALLOW_PRIVATE_CALLBACKS=true to reach it): "Nowhere" is undeliverable, "Ilica 1a"
+# is Ilica 1 corrected, anything else is deliverable.
+if command -v python3 >/dev/null 2>&1; then
+    VERIFY_PORT=${E2E_VERIFY_PORT:-3198}
+    python3 - "$VERIFY_PORT" <<'PY' &
+import http.server, json, sys
+
+class App(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        sent = json.loads(self.rfile.read(int(self.headers.get("content-length", 0))))
+        line1 = sent["address"]["line1"]
+        if "Nowhere" in line1:
+            answer = {"verdict": "undeliverable"}
+        elif line1 == "Ilica 1a":
+            answer = {"verdict": "deliverable_with_fixes",
+                      "fields": {"line1": {"status": "corrected"}},
+                      "suggested": {"line1": "Ilica 1", "city": "Zagreb",
+                                    "postal_code": "10000", "country": "HR"},
+                      "flags": {"residential": True}}
+        else:
+            answer = {"verdict": "deliverable"}
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(answer).encode())
+
+    def log_message(self, *args):
+        pass
+
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), App).serve_forever()
+PY
+    VERIFIER=$!
+    disown "$VERIFIER"
+    sleep 1
+    VERIFY_URL="http://127.0.0.1:$VERIFY_PORT"
+    step "a verification app" 201 - -X POST "$BASE/admin/apps" -H "$JSON" \
+        -d '{"key":"app_verify","name":"Verify"}'
+    step "it answers address.verify" 200 - -X PUT "$BASE/admin/apps/app_verify/extension-points" \
+        -H "$JSON" -d "{\"extension_points\":[{\"point\":\"address.verify\",\"version\":1,\"url\":\"$VERIFY_URL/verify\"}]}"
+    step "addresses are verified by it" 200 - -X PATCH "$BASE/admin/checkout-settings" -H "$JSON" \
+        -d '{"verification_app":"app_verify"}'
+    contains "the setting is kept" '"verification_app":"app_verify"'
+    # Cart creation is rate limited per address: wait for one more.
+    sleep 3
+    step "a cart to verify" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR"}'
+    VERIFY_CART="$BASE/storefront/carts/$(id)"
+    step "a mug in it" 200 - -X POST "$VERIFY_CART/lines" -H "$JSON" \
+        -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
+    step "with an email" 200 - -X PUT "$VERIFY_CART/email" -H "$JSON" -d '{"email":"verify@example.hr"}'
+    step "an address with a mistake" 200 - -X PUT "$VERIFY_CART/shipping-address" -H "$JSON" \
+        -d '{"address":{"last_name":"Horvat","line1":"Ilica 1a","city":"Zagreb","postal_code":"10000","country":"HR"}}'
+    contains "the app suggests a correction" '"shipping_address_check":{"verdict":"deliverable_with_fixes","suggested":{"company":null,"line1":"Ilica 1"'
+    contains "a warning about it" '"code":"address_corrections_suggested","path":"$.shipping_address"'
+    contains "from the verification" '"source":{"type":"verification"}'
+    step "the same address again" 200 - -X PUT "$VERIFY_CART/shipping-address" -H "$JSON" \
+        -d '{"address":{"last_name":"Horvat","line1":"Ilica 1a","city":"Zagreb","postal_code":"10000","country":"HR"}}'
+    step "the suggestion taken" 200 - -X PUT "$VERIFY_CART/shipping-address" -H "$JSON" \
+        -d '{"address":{"last_name":"Horvat","line1":"Ilica 1","city":"Zagreb","postal_code":"10000","country":"HR"}}'
+    contains "deliverable, as suggested" '"shipping_address_check":{"verdict":"deliverable","suggested":null'
+    lacks "no warning left" 'address_corrections_suggested'
+    step "the app's calls" 200 - "$BASE/admin/apps/app_verify/extension-calls"
+    if [[ $(grep -o '"point":"address.verify"' <<<"$BODY" | wc -l | tr -d ' ') == 1 ]]; then
+        echo "ok   one lookup for the address, its repeat and its suggestion"
+    else
+        echo "FAIL one lookup for the address, its repeat and its suggestion: $BODY"
+        FAILED=$((FAILED + 1))
+    fi
+    step "an address nobody delivers to" 200 - -X PUT "$VERIFY_CART/shipping-address" -H "$JSON" \
+        -d '{"address":{"last_name":"Horvat","line1":"Nowhere 1","city":"Zagreb","postal_code":"10000","country":"HR"}}'
+    contains "a warning, not an error" '"severity":"warning","code":"address_undeliverable"'
+    step "a rule refusing undeliverable addresses" 201 - -X POST "$BASE/admin/checkout-rules" -H "$JSON" \
+        -d '{"name":"Undeliverable","conditions":[{"type":"verification_is","verdicts":["undeliverable"]}],"outcome":{"severity":"error","message":"We can'"'"'t deliver to this address.","code":"undeliverable"}}'
+    UNDELIVERABLE_RULE=$(id)
+    step "by standard" 200 - -X PUT "$VERIFY_CART/shipping/$(shgrp)" -H "$JSON" -d "{\"option\":\"$STANDARD\"}"
+    step "paid on delivery" 200 - -X PUT "$VERIFY_CART/payment-method" -H "$JSON" \
+        -d "{\"payment_method\":\"$COD\"}"
+    step "checkout refuses it" 409 checkout_blocked -X POST "$VERIFY_CART/checkout" -H "$JSON" -d '{}'
+    contains "with the rule's message" '"code":"undeliverable","path":"$.shipping_address"'
+    step "the test panel asks the app too" 200 - -X POST "$BASE/admin/checkout-rules/test" -H "$JSON" \
+        -d '{"address":{"last_name":"Horvat","line1":"Nowhere 1","city":"Zagreb","postal_code":"10000","country":"HR"},"verify":true}'
+    contains "its verdict" '"verification":{"verdict":"undeliverable"'
+    contains "and the rule's error" '"code":"undeliverable"'
+    step "the rule goes" 204 - -X DELETE "$BASE/admin/checkout-rules/$UNDELIVERABLE_RULE"
+    step "checkout places it" 201 - -X POST "$VERIFY_CART/checkout" -H "$JSON" -d '{}'
+    VERIFY_ORDER=$(id)
+    step "the order kept its check" 200 - "$BASE/admin/orders/$VERIFY_ORDER"
+    contains "the verdict" '"address_check":{"verification":{"verdict":"undeliverable"'
+    contains "and the warning" '"warnings":[{"severity":"warning","code":"address_undeliverable"'
+    contains "it needs review" '"address_review":true'
+    step "orders needing review" 200 - "$BASE/admin/orders?address=needs_review"
+    contains "list it" "\"id\":\"$VERIFY_ORDER\""
+    step "staff mark it valid" 200 - -X POST "$BASE/admin/orders/$VERIFY_ORDER/address-check/mark-valid"
+    contains "by them" '"marked_valid":{"by":"usr_'
+    contains "no longer needing review" '"address_review":false'
+    step "nothing needs review now" 200 - "$BASE/admin/orders?address=needs_review"
+    lacks "not listed" "$VERIFY_ORDER"
+    step "a new address without its postal code" 422 invalid_address -X PUT \
+        "$BASE/admin/orders/$VERIFY_ORDER/shipping-address" -H "$JSON" \
+        -d '{"address":{"last_name":"Horvat","line1":"Ilica 3","city":"Zagreb","country":"HR"}}'
+    contains "names the field" '"field":"postal_code"'
+    step "a new address in another country" 422 address_country_mismatch -X PUT \
+        "$BASE/admin/orders/$VERIFY_ORDER/shipping-address" -H "$JSON" \
+        -d '{"address":{"last_name":"Novak","line1":"Slovenska 1","city":"Ljubljana","postal_code":"1000","country":"SI"}}'
+    step "staff correct the address" 200 - -X PUT "$BASE/admin/orders/$VERIFY_ORDER/shipping-address" \
+        -H "$JSON" -d '{"address":{"last_name":"Horvat","line1":"Ilica 3","city":"Zagreb","postal_code":"10000","country":"HR"}}'
+    contains "it ships there" '"line1":"Ilica 3"'
+    contains "verified again" '"address_check":{"verification":{"verdict":"deliverable"'
+    contains "nobody has marked it yet" '"marked_valid":null'
+    step "the order's lookup" 200 - "$BASE/admin/apps/app_verify/extension-calls"
+    contains "is recorded for it" "\"correlation\":\"$VERIFY_ORDER\""
+    step "no more verification" 200 - -X PATCH "$BASE/admin/checkout-settings" -H "$JSON" \
+        -d '{"verification_app":null}'
+    kill "$VERIFIER" 2>/dev/null
+fi
+
 step "archive mug" 200 - -X PATCH "$BASE/admin/products/$MUG/status" -H "$JSON" -d '{"status":"archived"}'
 step "get cart" 200 - "$BASE/storefront/carts/$CART"
 contains "mug line is unavailable" '"status":"unavailable","reason_code":"product_not_active"'
@@ -1875,6 +1996,9 @@ step "the lamp left the warehouse" 200 - "$BASE/admin/inventory-items/$LAMP_ITEM
 contains "3 on hand, 3 reserved" '"on_hand":3,"reserved":3,"available":0'
 step "the order is partly fulfilled" 200 - "$BASE/admin/orders/$SHOP_ORDER"
 contains "one lamp left" '"fulfillment_status":"partially_fulfilled"'
+step "its address can't change once something shipped" 409 order_fulfilled -X PUT \
+    "$BASE/admin/orders/$SHOP_ORDER/shipping-address" -H "$JSON" \
+    -d '{"address":{"last_name":"Horvat","line1":"Ilica 3","city":"Zagreb","postal_code":"10000","country":"HR"}}'
 step "new tracking" 200 - -X PATCH "$BASE/admin/fulfillments/$FULFILLMENT" -H "$JSON" \
     -d '{"tracking":[{"number":"JD2"}],"notify":true}'
 contains "replaces the old" '"tracking":[{"carrier":null,"number":"JD2","url":null}]'
