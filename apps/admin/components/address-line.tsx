@@ -63,7 +63,8 @@ export function AddressLineInput({
       const found = await suggest(q, session).catch(() => []);
       if (ask !== asked.current) return;
       setSuggestions(found);
-      setOpen(found.length > 0);
+      // An answer arriving after focus left the field doesn't open the list under it.
+      setOpen(found.length > 0 && !!wrapper.current?.contains(document.activeElement));
     }, DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [typed, session, suggest]);
