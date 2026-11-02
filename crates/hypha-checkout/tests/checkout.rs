@@ -1909,6 +1909,27 @@ fn storage_failures_dont_give_money_back() {
     );
 }
 
+#[test]
+fn an_app_that_didnt_answer_doesnt_give_money_back() {
+    let blocked = CommandError::CheckoutBlocked {
+        cart: CartId::from_uuid(Uuid::from_u128(1)),
+        messages: vec![Message::validation_unavailable(&validating_app())],
+    };
+    assert!(!blocked.gives_money_back());
+}
+
+#[test]
+fn an_error_beside_an_app_that_didnt_answer_gives_money_back() {
+    let blocked = CommandError::CheckoutBlocked {
+        cart: CartId::from_uuid(Uuid::from_u128(1)),
+        messages: vec![
+            Message::validation_unavailable(&validating_app()),
+            app_says(Severity::Error),
+        ],
+    };
+    assert!(blocked.gives_money_back());
+}
+
 // ---- scopes of the cart's payment commands ----
 
 fn caller_with(scopes: Vec<Scope>) -> Ctx {

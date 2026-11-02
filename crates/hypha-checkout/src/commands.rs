@@ -461,11 +461,14 @@ impl CommandError {
     /// Whether this error means the order can't be placed as the shopper paid for it, so
     /// money the cart's payment committed goes back: a line sold out, the total changed,
     /// the cart can't be checked out as it is. Not for errors that may pass (storage, a
-    /// race, a shipping option whose provider is down: the provider's report delivered
-    /// again, or the shopper choosing again, completes it) or that are about the payment
-    /// itself.
+    /// race, a shipping option whose provider is down, a validation app that didn't
+    /// answer: the provider's report delivered again, or the shopper choosing again,
+    /// completes it) or that are about the payment itself.
     pub fn gives_money_back(&self) -> bool {
         match self {
+            CommandError::CheckoutBlocked { messages, .. } => messages
+                .iter()
+                .any(|m| *m.code() != Message::VALIDATION_UNAVAILABLE),
             CommandError::Cart(hypha_cart::CommandError::Repo(_))
             | CommandError::Inventory(hypha_inventory::CommandError::Repo(_))
             | CommandError::ShippingUnavailable(_) => false,
@@ -477,7 +480,6 @@ impl CommandError {
             | CommandError::Unavailable { .. }
             | CommandError::TotalChanged { .. }
             | CommandError::DiscountsChanged { .. }
-            | CommandError::CheckoutBlocked { .. }
             | CommandError::ShippingAddressRequired(_)
             | CommandError::ShippingOptionRequired(_)
             | CommandError::PaymentMethodRequired(_)
