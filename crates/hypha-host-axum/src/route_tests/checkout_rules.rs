@@ -244,13 +244,14 @@ async fn trying_an_address_shows_what_the_cart_would() {
         .collect();
     assert_eq!(
         said,
+        // The format's house number warning steps aside for the rule's error on line 1,
+        // as on a cart.
         [
-            ("house_number_missing", "$.shipping_address.line1", false),
             ("po_box_not_allowed", "$.shipping_address.line1", false),
             ("rule", "$.shipping_address.phone", true),
         ]
     );
-    assert_eq!(json["messages"][1]["source"]["rule"], json!(saved));
+    assert_eq!(json["messages"][0]["source"]["rule"], json!(saved));
 
     // A format problem stops it there, as a cart would refuse the address.
     let wrong = json!({"address": {"last_name": "de Vries", "line1": "Prinsengracht 263",

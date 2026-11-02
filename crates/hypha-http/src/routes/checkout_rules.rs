@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_addresses::Formats;
 use hypha_apps::{HasApps, HasExtensionEndpoints};
+use hypha_checkout::without_echoed_warnings;
 use hypha_checkout_rules::{
     CheckoutRule, CheckoutSettings, RuleAppliesTo, RuleCondition, RuleDraft, RuleInput, RuleLine,
     RuleOutcome, RulePatch, UpdateCheckoutSettings, ValidationAppInput, VerifiedFacts,
@@ -449,31 +450,26 @@ pub async fn test<S: Storage>(
             .collect(),
         subtotal: req.subtotal,
     };
-    let mut messages: Vec<TestMessageResponse> = checked
+    // The cart's messages in the cart's order, with the same built-in warnings left out
+    // where an error already points.
+    let mut messages: Vec<Message> = checked
         .warnings
         .iter()
         .map(Message::format_warning)
-        .map(|m| TestMessageResponse {
-            message: CartMessageResponse::from(&m),
-            draft: false,
-        })
         .collect();
     messages.extend(
         verification
             .as_ref()
-            .and_then(Message::verification_warning)
-            .map(|m| TestMessageResponse {
-                message: CartMessageResponse::from(&m),
-                draft: false,
-            }),
+            .and_then(Message::verification_warning),
     );
-    messages.extend(evaluate(&input, &rules).iter().map(|m| {
-        let draft = matches!(m.source(), hypha_core::MessageSource::Rule { rule } if Some(*rule) == draft_id);
-        TestMessageResponse {
+    messages.extend(evaluate(&input, &rules));
+    let messages = without_echoed_warnings(messages)
+        .iter()
+        .map(|m| TestMessageResponse {
             message: CartMessageResponse::from(m),
-            draft,
-        }
-    }));
+            draft: matches!(m.source(), hypha_core::MessageSource::Rule { rule } if Some(*rule) == draft_id),
+        })
+        .collect();
     let flags = checked.flags;
     Ok(Json(TestCheckoutRulesResponse {
         problems: Vec::new(),

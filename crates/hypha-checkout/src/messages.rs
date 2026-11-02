@@ -146,7 +146,7 @@ pub async fn cart_messages<S: PricingPorts + HasCheckoutRules>(
 /// that already carries an error: the shopper has that error to fix there, and a
 /// merchant's rule often says the same thing more firmly (a house number required where
 /// the format only suspects it's missing).
-fn without_echoed_warnings(messages: Vec<Message>) -> Vec<Message> {
+pub fn without_echoed_warnings(messages: Vec<Message>) -> Vec<Message> {
     let errors: Vec<MessagePath> = messages
         .iter()
         .filter(|m| m.is_error())
