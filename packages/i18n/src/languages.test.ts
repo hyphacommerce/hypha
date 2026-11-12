@@ -54,9 +54,26 @@ test("matchLanguage: wanted order decides, each tried fully before the next", ()
   assert.equal(matchLanguage(["it", "de"], ["de", "fr"]), "de");
 });
 
-test("matchLanguage never widens a wanted language to a regional one", () => {
-  assert.equal(matchLanguage(["de"], ["de-CH"]), undefined);
-  assert.equal(matchLanguage(["sr"], ["sr-Latn"]), undefined);
+test("matchLanguage widens to the same language as a last resort", () => {
+  assert.equal(matchLanguage(["sr"], ["en", "sr-Latn"]), "sr-Latn");
+  assert.equal(matchLanguage(["sr-RS"], ["en", "sr-Latn"]), "sr-Latn");
+  assert.equal(matchLanguage(["de"], ["de-AT"]), "de-AT");
+  assert.equal(matchLanguage(["DE-ch"], ["en", "de-AT", "de-DE"]), "de-AT");
+});
+
+test("matchLanguage: any exact or shortened match beats a widened one", () => {
+  assert.equal(matchLanguage(["sr", "en-GB"], ["en", "sr-Latn"]), "en");
+  assert.equal(matchLanguage(["de", "fr"], ["de-AT", "fr"]), "fr");
+});
+
+test("matchLanguage: widening follows the wanted order", () => {
+  assert.equal(matchLanguage(["sr", "de"], ["de-AT", "sr-Latn"]), "sr-Latn");
+  assert.equal(matchLanguage(["ja", "de"], ["de-AT", "sr-Latn"]), "de-AT");
+});
+
+test("matchLanguage: widening compares whole language subtags", () => {
+  assert.equal(matchLanguage(["s"], ["sr-Latn"]), undefined);
+  assert.equal(matchLanguage(["sr"], ["srx"]), undefined);
 });
 
 test("matchLanguage: nothing wanted, nothing available, nothing in common", () => {
