@@ -77,6 +77,7 @@ export default defineConfig({
           "scripts/**",
           "packages/sdk/scripts/**",
           "packages/app/scripts/**",
+          "packages/i18n/scripts/**",
           "apps/*/scripts/**",
         ],
         plugins: ["node"],
@@ -84,8 +85,9 @@ export default defineConfig({
       },
       {
         // The apps platform's packages run in browsers (the bridge, blocks and
-        // elements) and on Workers (the SDK): Web APIs only.
+        // elements) and on Workers (the SDK), the translations in both: Web APIs only.
         files: [
+          "packages/i18n/src/**",
           "packages/app/src/**",
           "packages/app-bridge/src/**",
           "packages/app-bridge-host/src/**",
@@ -114,6 +116,7 @@ export default defineConfig({
       {
         files: [
           "packages/app*/src/**/*.test.ts",
+          "packages/i18n/src/**/*.test.ts",
           "packages/app-bridge/src/testing.ts",
           "packages/storefront-elements/src/**/*.test.ts",
         ],

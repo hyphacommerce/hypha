@@ -1,0 +1,5 @@
+{
+  "title": "Your cart",
+  "items_count": "{count, plural, one {# item} other {# items}}",
+  "terms": "By ordering you accept our <link>terms</link>."
+}
