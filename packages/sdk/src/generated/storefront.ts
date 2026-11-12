@@ -2168,6 +2168,11 @@ export interface components {
         StorefrontCountryResponse: {
             country: components["schemas"]["CountryCode"];
             currency: components["schemas"]["Currency"];
+            /**
+             * @description The languages shoppers are offered here, in order: the first is the country's
+             *     default. Never empty: the store's default language when its market lists none.
+             */
+            languages: components["schemas"]["Language"][];
             market: components["schemas"]["MarketId"];
             /**
              * Format: int32
@@ -2358,6 +2363,12 @@ export interface components {
             default_language: components["schemas"]["Language"];
             /** @description Plain text, at most 500 characters. */
             description?: string | null;
+            /**
+             * @description The other languages shoppers can be served, in the merchant's order: the
+             *     published ones only. Which of them a country offers is on
+             *     `GET /storefront/countries`.
+             */
+            languages: components["schemas"]["Language"][];
             name: string;
         };
         /**

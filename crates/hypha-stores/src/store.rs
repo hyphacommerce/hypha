@@ -5,6 +5,15 @@ use hypha_core::{
 
 use crate::error::StoreError;
 
+/// A language the store's content is translated into, beside its default language.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoreLanguage {
+    pub language: Language,
+    /// Whether shoppers may be served it. An unpublished language can be translated and
+    /// previewed, but no storefront read answers in it and no market may offer it.
+    pub published: bool,
+}
+
 /// A merchant's store and its details. Store-wide settings (policies, custom field
 /// definitions) will hang off it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +29,8 @@ pub struct Store {
     legal_address: Option<Address>,
     timezone: Option<Timezone>,
     default_language: Language,
+    /// The other languages, in the merchant's order; never the default one.
+    languages: Vec<StoreLanguage>,
     /// The base currency every cost is kept in; `None` until the merchant chooses one.
     currency: Option<Currency>,
     setup: SetupProgress,
@@ -64,6 +75,8 @@ impl Store {
     pub const MAX_NAME_CHARS: usize = 100;
     /// A short plain-text description, for a storefront's header or meta tags.
     pub const MAX_DESCRIPTION_CHARS: usize = 500;
+    /// How many languages a store has beside its default one.
+    pub const MAX_LANGUAGES: usize = 20;
 
     /// The name is trimmed; it must not be empty or longer than `MAX_NAME_CHARS`. Every
     /// other detail starts empty, and the content language is English (`en`) until the
@@ -80,6 +93,7 @@ impl Store {
             legal_address: None,
             timezone: None,
             default_language: english(),
+            languages: Vec::new(),
             currency: None,
             setup: SetupProgress::default(),
         })
@@ -116,9 +130,39 @@ impl Store {
     }
 
     /// The language every content field (titles, descriptions, option labels) is
-    /// written in.
-    pub fn set_default_language(&mut self, language: Language) {
+    /// written in. One of the store's other languages is refused rather than dropped from
+    /// them: the list is the merchant's to change, with `set_languages`.
+    pub fn set_default_language(&mut self, language: Language) -> Result<(), StoreError> {
+        if self.languages.iter().any(|l| l.language == language) {
+            return Err(StoreError::DefaultLanguageListed(language));
+        }
         self.default_language = language;
+        Ok(())
+    }
+
+    /// Sets the default language and the other languages together, replacing both: at
+    /// most `MAX_LANGUAGES` others, each once, none of them the default.
+    pub fn set_languages(
+        &mut self,
+        default: Language,
+        languages: Vec<StoreLanguage>,
+    ) -> Result<(), StoreError> {
+        if languages.len() > Self::MAX_LANGUAGES {
+            return Err(StoreError::TooManyLanguages {
+                max: Self::MAX_LANGUAGES,
+            });
+        }
+        for (i, entry) in languages.iter().enumerate() {
+            if entry.language == default {
+                return Err(StoreError::LanguageIsDefault(default));
+            }
+            if languages[..i].iter().any(|l| l.language == entry.language) {
+                return Err(StoreError::DuplicateLanguage(entry.language.clone()));
+            }
+        }
+        self.default_language = default;
+        self.languages = languages;
+        Ok(())
     }
 
     /// The currency costs are kept in. Whether it may still change (no cost recorded in
@@ -178,6 +222,24 @@ impl Store {
         &self.default_language
     }
 
+    /// The languages beside the default one, published or not.
+    pub fn languages(&self) -> &[StoreLanguage] {
+        &self.languages
+    }
+
+    /// The languages shoppers may be served: the default one, then the published others.
+    pub fn offered_languages(&self) -> Vec<Language> {
+        std::iter::once(&self.default_language)
+            .chain(
+                self.languages
+                    .iter()
+                    .filter(|l| l.published)
+                    .map(|l| &l.language),
+            )
+            .cloned()
+            .collect()
+    }
+
     pub fn currency(&self) -> Option<Currency> {
         self.currency
     }
@@ -194,6 +256,7 @@ impl Store {
             legal_address: self.legal_address.as_ref().map(|a| a.parts().clone()),
             timezone: self.timezone,
             default_language: self.default_language.clone(),
+            languages: self.languages.clone(),
             currency: self.currency,
             setup_step: self.setup.step.as_ref().map(|s| s.as_str().to_string()),
             setup_finished_at: self.setup.finished_at,
@@ -210,7 +273,7 @@ impl Store {
         store.set_legal_name(s.legal_name.as_deref())?;
         store.legal_address = s.legal_address.map(Address::new).transpose()?;
         store.timezone = s.timezone;
-        store.default_language = s.default_language;
+        store.set_languages(s.default_language, s.languages)?;
         store.currency = s.currency;
         store.setup = SetupProgress {
             step: s.setup_step.as_deref().map(SetupStep::new).transpose()?,
@@ -263,6 +326,7 @@ pub struct StoreSnapshot {
     pub legal_address: Option<AddressParts>,
     pub timezone: Option<Timezone>,
     pub default_language: Language,
+    pub languages: Vec<StoreLanguage>,
     pub currency: Option<Currency>,
     pub setup_step: Option<String>,
     pub setup_finished_at: Option<Timestamp>,
@@ -438,7 +502,115 @@ mod tests {
         };
         store.set_legal_address(Some(Address::new(parts).unwrap()));
         store.set_timezone(Some(Timezone::new("Europe/Zagreb").unwrap()));
-        store.set_default_language(Language::new("hr").unwrap());
+        store
+            .set_languages(lang("hr"), vec![other("de", true), other("sr-Latn", false)])
+            .unwrap();
         assert_eq!(Store::restore(store.snapshot()), Ok(store));
+    }
+
+    fn lang(tag: &str) -> Language {
+        Language::new(tag).unwrap()
+    }
+
+    fn other(tag: &str, published: bool) -> StoreLanguage {
+        StoreLanguage {
+            language: lang(tag),
+            published,
+        }
+    }
+
+    #[test]
+    fn a_new_store_has_no_other_languages_and_offers_its_default() {
+        let store = Store::new(sid(), "Acme").unwrap();
+        assert_eq!(store.languages(), &[]);
+        assert_eq!(store.offered_languages(), vec![lang("en")]);
+    }
+
+    #[test]
+    fn languages_keep_their_order_and_only_published_ones_are_offered() {
+        let mut store = Store::new(sid(), "Acme").unwrap();
+        let list = vec![
+            other("de", true),
+            other("fr", false),
+            other("sr-Latn", true),
+        ];
+        assert_eq!(store.set_languages(lang("en"), list.clone()), Ok(()));
+        assert_eq!(store.languages(), list.as_slice());
+        assert_eq!(
+            store.offered_languages(),
+            vec![lang("en"), lang("de"), lang("sr-Latn")]
+        );
+    }
+
+    #[test]
+    fn the_default_language_is_never_among_the_others() {
+        let mut store = Store::new(sid(), "Acme").unwrap();
+        assert_eq!(
+            store.set_languages(lang("en"), vec![other("de", true), other("EN", false)]),
+            Err(StoreError::LanguageIsDefault(lang("en")))
+        );
+        assert_eq!(store.languages(), &[]);
+    }
+
+    #[test]
+    fn a_language_is_listed_once_whatever_its_spelling() {
+        let mut store = Store::new(sid(), "Acme").unwrap();
+        assert_eq!(
+            store.set_languages(lang("en"), vec![other("de", true), other("DE", false)]),
+            Err(StoreError::DuplicateLanguage(lang("de")))
+        );
+    }
+
+    #[test]
+    fn twenty_other_languages_is_the_limit() {
+        let mut store = Store::new(sid(), "Acme").unwrap();
+        // `aa`, `ab`, …: 21 distinct tags, none of them `en`.
+        let tags: Vec<StoreLanguage> = (b'a'..=b'u')
+            .map(|c| other(&format!("a{}", c as char), true))
+            .collect();
+        assert_eq!(store.set_languages(lang("en"), tags[..20].to_vec()), Ok(()));
+        assert_eq!(
+            store.set_languages(lang("en"), tags),
+            Err(StoreError::TooManyLanguages { max: 20 })
+        );
+        assert_eq!(store.languages().len(), 20);
+    }
+
+    #[test]
+    fn the_default_language_cant_become_one_of_the_others() {
+        let mut store = Store::new(sid(), "Acme").unwrap();
+        store
+            .set_languages(lang("en"), vec![other("de", true)])
+            .unwrap();
+        assert_eq!(
+            store.set_default_language(lang("de")),
+            Err(StoreError::DefaultLanguageListed(lang("de")))
+        );
+        assert_eq!(store.default_language(), &lang("en"));
+        assert_eq!(store.set_default_language(lang("fr")), Ok(()));
+        assert_eq!(store.default_language(), &lang("fr"));
+    }
+
+    #[test]
+    fn the_default_and_the_others_can_swap_in_one_change() {
+        let mut store = Store::new(sid(), "Acme").unwrap();
+        store
+            .set_languages(lang("en"), vec![other("de", true)])
+            .unwrap();
+        assert_eq!(
+            store.set_languages(lang("de"), vec![other("en", true)]),
+            Ok(())
+        );
+        assert_eq!(store.offered_languages(), vec![lang("de"), lang("en")]);
+    }
+
+    #[test]
+    fn restore_rechecks_the_languages() {
+        let mut bad = Store::new(sid(), "Acme").unwrap().snapshot();
+        bad.languages = vec![other("en", true)];
+        assert_eq!(
+            Store::restore(bad),
+            Err(StoreError::LanguageIsDefault(lang("en")))
+        );
     }
 }

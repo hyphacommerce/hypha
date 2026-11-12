@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use hypha_categories::{Category, CategoryRepo, HasCategories, NewCategory};
 use hypha_core::{
     BasisPoints, CatalogId, CategoryId, CountryCode, Currency, CustomerGroupId, Handle, HasBatch,
-    Keyset, MarketId, Money, Page, PageLimit, PageRequest, Price, PriceListId, ProductId,
+    Keyset, Language, MarketId, Money, Page, PageLimit, PageRequest, Price, PriceListId, ProductId,
     RepoError, Timestamp, VariantId, Version, Versioned,
 };
 use hypha_customers::{CustomerGroup, CustomerGroupRepo, HasCustomerGroups, StageCustomerGroups};
@@ -42,6 +42,10 @@ fn vid(n: u128) -> VariantId {
 
 fn cc(code: &str) -> CountryCode {
     CountryCode::new(code).unwrap()
+}
+
+fn lang(tag: &str) -> Language {
+    Language::new(tag).unwrap()
 }
 
 fn market(n: u128, countries: &[&str]) -> Market {
@@ -118,6 +122,9 @@ async fn market_round_trips<R: MarketRepo>(repo: &R) {
     // Country order is part of the market and must survive.
     let mut m = market(1, &["HR", "DE", "AT"]);
     m.set_prices_include_tax(true);
+    // Language order is the market's too (not alphabetical here).
+    m.set_languages(vec![lang("sr-Latn"), lang("en"), lang("de")])
+        .unwrap();
     repo.insert(&mut m).await.unwrap();
     assert_eq!(m.version(), Version::new(1));
     assert_eq!(repo.get(m.id()).await, Ok(Some(m.clone())));
@@ -143,12 +150,21 @@ async fn market_update<R: MarketRepo>(repo: &R) {
     m.add_country(cc("AT")).unwrap();
     m.remove_country(cc("HR")).unwrap();
     m.set_prices_include_tax(true);
+    m.set_languages(vec![lang("de"), lang("en-GB")]).unwrap();
     repo.update(&mut m).await.unwrap();
 
     assert_eq!(m.version(), Version::new(2));
     assert_eq!(repo.get(m.id()).await, Ok(Some(m.clone())));
-    assert_eq!(repo.get_by_country(cc("AT")).await, Ok(Some(m)));
+    assert_eq!(repo.get_by_country(cc("AT")).await, Ok(Some(m.clone())));
     assert_eq!(repo.get_by_country(cc("HR")).await, Ok(None));
+
+    // Reordered, then cleared.
+    m.set_languages(vec![lang("en-GB"), lang("de")]).unwrap();
+    repo.update(&mut m).await.unwrap();
+    assert_eq!(repo.get(m.id()).await, Ok(Some(m.clone())));
+    m.set_languages(Vec::new()).unwrap();
+    repo.update(&mut m).await.unwrap();
+    assert_eq!(repo.list_all().await, Ok(vec![m]));
 }
 
 async fn market_country_key<R: MarketRepo>(repo: &R) {

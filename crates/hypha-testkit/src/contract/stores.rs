@@ -2,7 +2,7 @@ use hypha_core::{
     Address, AddressParts, Currency, Email, Language, RepoError, StoreId, Timestamp, Timezone,
     Version, Versioned,
 };
-use hypha_stores::{SetupStep, Store, StoreRepo, repo::keys};
+use hypha_stores::{SetupStep, Store, StoreLanguage, StoreRepo, repo::keys};
 use uuid::Uuid;
 
 use super::scenario;
@@ -17,6 +17,49 @@ pub async fn store_repo<R: StoreRepo>(make: impl AsyncFn() -> R) {
     keys_and_stale(&make().await).await;
     scenario("store: every detail is set, stored and cleared");
     details_round_trip(&make().await).await;
+    scenario("store: its other languages keep their order and whether they're published");
+    languages_round_trip(&make().await).await;
+}
+
+async fn languages_round_trip<R: StoreRepo>(repo: &R) {
+    let other = |tag: &str, published| StoreLanguage {
+        language: Language::new(tag).unwrap(),
+        published,
+    };
+    let mut s = store(1, "Acme");
+    repo.insert(&mut s).await.unwrap();
+    assert_eq!(repo.get(s.id()).await.unwrap().unwrap().languages(), &[]);
+
+    // Not in alphabetical order, so the stored order is the list's.
+    s.set_languages(
+        Language::new("hr").unwrap(),
+        vec![
+            other("sr-Latn", true),
+            other("de", false),
+            other("en-GB", true),
+        ],
+    )
+    .unwrap();
+    repo.update(&mut s).await.unwrap();
+    assert_eq!(repo.get(s.id()).await, Ok(Some(s.clone())));
+
+    s.set_languages(Language::new("hr").unwrap(), vec![other("de", true)])
+        .unwrap();
+    repo.update(&mut s).await.unwrap();
+    assert_eq!(repo.get(s.id()).await, Ok(Some(s.clone())));
+    assert_eq!(repo.list_all().await, Ok(vec![s.clone()]));
+
+    s.set_languages(Language::new("hr").unwrap(), Vec::new())
+        .unwrap();
+    repo.update(&mut s).await.unwrap();
+    assert_eq!(repo.get(s.id()).await, Ok(Some(s)));
+
+    // A store inserted with languages keeps them too.
+    let mut b = store(2, "Other");
+    b.set_languages(Language::new("en").unwrap(), vec![other("fr", false)])
+        .unwrap();
+    repo.insert(&mut b).await.unwrap();
+    assert_eq!(repo.get(b.id()).await, Ok(Some(b)));
 }
 
 async fn details_round_trip<R: StoreRepo>(repo: &R) {
@@ -40,7 +83,8 @@ async fn details_round_trip<R: StoreRepo>(repo: &R) {
     .unwrap();
     s.set_legal_address(Some(address));
     s.set_timezone(Some(Timezone::new("Europe/Zagreb").unwrap()));
-    s.set_default_language(Language::new("sr-Latn-RS").unwrap());
+    s.set_default_language(Language::new("sr-Latn-RS").unwrap())
+        .unwrap();
     s.set_currency(Some(Currency::RSD));
     s.set_setup_step(Some(SetupStep::new("shipping").unwrap()));
     // A microsecond past a whole second, so precision is checked too.

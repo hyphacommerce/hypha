@@ -85,6 +85,8 @@ pub struct ApiErrorBody {
 ///   `compare_at_not_above_price`, `compare_at_currency_mismatch`, …)
 /// - `too_many_prices`: `{"max"}`, the most one request may set
 /// - `price_list_in_use`: `{"catalogs": ["cat_…"]}`, the catalogs holding it
+/// - `language_in_use`: `{"markets": [{"id": "mkt_…", "languages": ["de"]}]}`, the
+///   markets offering languages the store would stop offering, each with those
 /// - `price_list_name_taken`: `{"price_list": "pl_…"}`, the list that has the name
 /// - `invalid_discount`: `{"problems": [{"path", "code", "message"}]}`, every rule the
 ///   discount breaks at once (`path` like `kind.rewards[0].value.basis_points`)
@@ -784,6 +786,8 @@ impl From<hypha_markets::CommandError> for ApiError {
             | E::PriceListNameTaken { .. }
             | E::PriceListInUse { .. } => StatusCode::CONFLICT,
             E::Country(_)
+            | E::Language(_)
+            | E::LanguageNotOffered(_)
             | E::Market(_)
             | E::Money(_)
             | E::PriceList(_)
@@ -830,6 +834,10 @@ impl From<hypha_stores::CommandError> for ApiError {
         let status = match &e {
             E::Auth(_) => StatusCode::FORBIDDEN,
             E::StoreNotFound(_) => StatusCode::NOT_FOUND,
+            // The list as stored is in the way, not the language sent.
+            E::Store(hypha_stores::StoreError::DefaultLanguageListed(_)) | E::LanguageInUse(_) => {
+                StatusCode::CONFLICT
+            }
             E::Store(_)
             | E::Email(_)
             | E::Address(_)
@@ -845,6 +853,13 @@ impl From<hypha_stores::CommandError> for ApiError {
         };
         let details = match &e {
             E::Address(a) => Some(address_problems(a)),
+            E::LanguageInUse(markets) => {
+                let markets: Vec<Value> = markets
+                    .iter()
+                    .map(|m| json!({ "id": m.market, "languages": m.languages }))
+                    .collect();
+                Some(json!({ "markets": markets }))
+            }
             _ => None,
         };
         Self::domain(status, e).with_details(details)

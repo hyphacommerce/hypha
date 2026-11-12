@@ -1,8 +1,8 @@
 use hypha_core::{
     AuthError, BasisPoints, CatalogId, CountryCode, CountryError, Ctx, Currency, CustomerGroupId,
-    ErrorCode, HasBatch, IdGenerator, Keyset, MarketId, Money, MoneyError, Page, PageRequest,
-    PendingEvent, Price, PriceListId, ProductId, RepoError, Scope, StageEvents, Subject, Timestamp,
-    VariantId, report_duplicate,
+    ErrorCode, HasBatch, IdGenerator, Keyset, Language, LanguageError, MarketId, Money, MoneyError,
+    Page, PageRequest, PendingEvent, Price, PriceListId, ProductId, RepoError, Scope, StageEvents,
+    Subject, Timestamp, VariantId, report_duplicate,
 };
 use thiserror::Error;
 
@@ -30,6 +30,8 @@ pub enum CommandError {
     Repo(#[from] RepoError),
     #[error(transparent)]
     Country(#[from] CountryError),
+    #[error(transparent)]
+    Language(#[from] LanguageError),
     #[error(transparent)]
     Market(#[from] MarketError),
     #[error(transparent)]
@@ -68,6 +70,11 @@ pub enum CommandError {
         price_list: PriceListId,
         catalogs: Vec<CatalogId>,
     },
+    /// Not the store's default language nor one of its published ones.
+    #[error(
+        "the store doesn't offer {0}: a market's languages are the store's default or published ones"
+    )]
+    LanguageNotOffered(Language),
     /// The audience names a group that doesn't exist (storage's check: this leaf can't
     /// see groups).
     #[error("a customer group the audience names doesn't exist")]
@@ -80,6 +87,7 @@ impl ErrorCode for CommandError {
             CommandError::Auth(e) => e.code(),
             CommandError::Repo(e) => e.code(),
             CommandError::Country(e) => e.code(),
+            CommandError::Language(e) => e.code(),
             CommandError::Market(e) => e.code(),
             CommandError::Money(e) => e.code(),
             CommandError::PriceList(e) => e.code(),
@@ -92,6 +100,7 @@ impl ErrorCode for CommandError {
             CommandError::PriceListNameTaken { .. } => "price_list_name_taken",
             CommandError::TooManyPrices { .. } => "too_many_prices",
             CommandError::PriceListInUse { .. } => "price_list_in_use",
+            CommandError::LanguageNotOffered(_) => "language_not_offered",
             CommandError::AudienceGroupNotFound => "customer_group_not_found",
         }
     }
@@ -244,6 +253,12 @@ pub async fn create_market<M: MarketRepo, I: IdGenerator>(
 pub struct UpdateMarket {
     pub name: Option<String>,
     pub prices_include_tax: Option<bool>,
+    /// BCP 47 tags in the order shoppers are offered them, the first the market's
+    /// default; empty for the store's default language alone.
+    pub languages: Option<Vec<String>>,
+    /// Set by the host, not the caller: the languages the store offers (its default and
+    /// its published ones), which a market's are chosen from.
+    pub store_languages: Vec<Language>,
 }
 
 pub async fn update_market<M: MarketRepo>(
@@ -260,6 +275,19 @@ pub async fn update_market<M: MarketRepo>(
     }
     if let Some(include) = input.prices_include_tax {
         market.set_prices_include_tax(include);
+    }
+    if let Some(languages) = &input.languages {
+        let languages = languages
+            .iter()
+            .map(|l| Language::new(l))
+            .collect::<Result<Vec<_>, _>>()?;
+        if let Some(unknown) = languages
+            .iter()
+            .find(|l| !input.store_languages.contains(l))
+        {
+            return Err(CommandError::LanguageNotOffered(unknown.clone()));
+        }
+        market.set_languages(languages)?;
     }
     markets.update(&mut market).await?;
     Ok(market)

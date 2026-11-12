@@ -279,6 +279,12 @@ contains "the email is lowercased" '"contact_email":"hello@e2e.example"'
 contains "the address is kept" '"city":"Zagreb"'
 step "an unknown time zone" 422 unknown_timezone -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"timezone":"Mars/Base"}'
 step "a malformed language" 422 invalid_language -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"default_language":"en_GB"}'
+step "the store's other languages" 200 - -X PATCH "$BASE/admin/store" -H "$JSON" \
+    -d '{"languages":[{"language":"DE","published":true},{"language":"fr"}]}'
+contains "in canonical case, unpublished unless said" '"languages":[{"language":"de","published":true},{"language":"fr","published":false}]'
+step "the default language among the others" 422 language_is_default -X PATCH "$BASE/admin/store" -H "$JSON" \
+    -d '{"languages":[{"language":"en","published":true}]}'
+step "a listed language as the default" 409 default_language_listed -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"default_language":"de"}'
 step "clear the legal address" 200 - -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"legal_address":null}'
 contains "it is gone" '"legal_address":null'
 step "choose the base currency costs are kept in" 200 - -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"currency":"EUR"}'
@@ -496,6 +502,12 @@ contains "prices exclude tax by default" '"prices_include_tax":false'
 step "prices include tax" 200 - -X PATCH "$BASE/admin/markets/$MARKET" -H "$JSON" -d '{"prices_include_tax":true}'
 contains "market now includes tax" '"prices_include_tax":true'
 step "back to excluding tax" 200 - -X PATCH "$BASE/admin/markets/$MARKET" -H "$JSON" -d '{"prices_include_tax":false}'
+step "the market's languages" 200 - -X PATCH "$BASE/admin/markets/$MARKET" -H "$JSON" -d '{"languages":["en","DE"]}'
+contains "in order, the first its default" '"languages":["en","de"]'
+step "a language the store hasn't published" 422 language_not_offered -X PATCH "$BASE/admin/markets/$MARKET" -H "$JSON" -d '{"languages":["en","fr"]}'
+step "unpublishing a language the market offers" 409 language_in_use -X PATCH "$BASE/admin/store" -H "$JSON" \
+    -d '{"languages":[{"language":"de","published":false}]}'
+contains "names the market and the language" "\"markets\":[{\"id\":\"$MARKET\",\"languages\":[\"de\"]}]"
 step "sell to Slovenia too" 200 - -X POST "$BASE/admin/markets/$MARKET/countries" -H "$JSON" -d '{"country":"SI"}'
 contains "Slovenia added" '"countries":["HR","DE","SI"]'
 step "stop selling to Slovenia" 200 - -X DELETE "$BASE/admin/markets/$MARKET/countries/SI"
@@ -676,6 +688,7 @@ step "an unknown handle" 404 product_not_found "$BASE/storefront/products/by-han
 step "an unknown parameter" 400 invalid_query "$BASE/storefront/products/by-handle/mug?currency=EUR"
 step "where the store sells" 200 - "$BASE/storefront/countries"
 contains "Croatia, in euros" "{\"country\":\"HR\",\"name\":\"Croatia\",\"market\":\"$MARKET\",\"currency\":\"EUR\",\"minor_units\":2"
+contains "in the market's languages" '"languages":["en","de"]'
 step "the US address form" 200 - "$BASE/storefront/address-formats/US"
 contains "city, state and ZIP code on one row" '["city","province","postal_code"]'
 contains "its labels" '"postal_code":"ZIP code","province":"State"'

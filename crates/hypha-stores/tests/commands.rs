@@ -10,11 +10,11 @@
 
 use hypha_core::{
     Actor, AddressParts, AuthError, CountryError, Ctx, Currency, CurrencyError, EmailError,
-    LanguageError, Scope, StoreId, TimezoneError, UserId, Versioned,
+    Language, LanguageError, MarketId, Scope, StoreId, TimezoneError, UserId, Versioned,
 };
 use hypha_stores::{
-    CommandError, Store, StoreError, StoreRepo, UpdateStore, create_store, ensure_single_store,
-    get_store, update_store,
+    CommandError, LanguageInput, MarketLanguages, Store, StoreError, StoreLanguage, StoreRepo,
+    UpdateStore, create_store, ensure_single_store, get_store, update_store,
 };
 use hypha_testkit::{FixedClock, InMemoryStoreRepo, SequentialIds};
 use pollster::block_on;
@@ -493,4 +493,222 @@ fn update_store_tracks_the_setup_guide() {
             "Shipping!".to_string()
         )))
     );
+}
+
+fn lang(tag: &str) -> Language {
+    Language::new(tag).unwrap()
+}
+
+fn listed(tag: &str, published: bool) -> LanguageInput {
+    LanguageInput {
+        language: tag.to_string(),
+        published,
+    }
+}
+
+fn offering(market: u128, tags: &[&str]) -> MarketLanguages {
+    MarketLanguages {
+        market: MarketId::from_uuid(Uuid::from_u128(market)),
+        languages: tags.iter().map(|t| lang(t)).collect(),
+    }
+}
+
+/// A store whose default is `en`, with `de` published and `fr` not.
+fn store_in_three_languages(repo: &InMemoryStoreRepo) -> Store {
+    let store = block_on(create_store(
+        &Ctx::system(),
+        repo,
+        &SequentialIds::default(),
+        "Acme",
+    ))
+    .unwrap();
+    let input = UpdateStore {
+        languages: Some(vec![listed("DE", true), listed("fr", false)]),
+        ..UpdateStore::default()
+    };
+    block_on(update_store(
+        &Ctx::system(),
+        repo,
+        &clock(),
+        store.id(),
+        input,
+    ))
+    .unwrap()
+}
+
+#[test]
+fn update_store_replaces_the_languages() {
+    let repo = InMemoryStoreRepo::default();
+    let store = store_in_three_languages(&repo);
+    assert_eq!(
+        store.languages(),
+        &[
+            StoreLanguage {
+                language: lang("de"),
+                published: true
+            },
+            StoreLanguage {
+                language: lang("fr"),
+                published: false
+            },
+        ]
+    );
+    let stored = block_on(get_store(&Ctx::system(), &repo, store.id())).unwrap();
+    assert_eq!(stored, store);
+
+    let cleared = block_on(update_store(
+        &Ctx::system(),
+        &repo,
+        &clock(),
+        store.id(),
+        UpdateStore {
+            languages: Some(Vec::new()),
+            ..UpdateStore::default()
+        },
+    ))
+    .unwrap();
+    assert_eq!(cleared.languages(), &[]);
+}
+
+#[test]
+fn update_store_refuses_languages_that_break_a_rule() {
+    let repo = InMemoryStoreRepo::default();
+    let store = store_in_three_languages(&repo);
+    let update = |default: Option<&str>, languages: Option<Vec<LanguageInput>>| {
+        let input = UpdateStore {
+            default_language: default.map(str::to_string),
+            languages,
+            ..UpdateStore::default()
+        };
+        block_on(update_store(
+            &Ctx::system(),
+            &repo,
+            &clock(),
+            store.id(),
+            input,
+        ))
+    };
+    assert_eq!(
+        update(None, Some(vec![listed("de_DE", true)])),
+        Err(CommandError::Language(LanguageError::Invalid(
+            "de_DE".to_string()
+        )))
+    );
+    assert_eq!(
+        update(None, Some(vec![listed("en", true)])),
+        Err(CommandError::Store(StoreError::LanguageIsDefault(lang(
+            "en"
+        ))))
+    );
+    assert_eq!(
+        update(None, Some(vec![listed("de", true), listed("de", false)])),
+        Err(CommandError::Store(StoreError::DuplicateLanguage(lang(
+            "de"
+        ))))
+    );
+    assert_eq!(
+        update(Some("de"), None),
+        Err(CommandError::Store(StoreError::DefaultLanguageListed(
+            lang("de")
+        )))
+    );
+    assert_eq!(
+        update(Some("de"), Some(vec![listed("de", true)])),
+        Err(CommandError::Store(StoreError::LanguageIsDefault(lang(
+            "de"
+        ))))
+    );
+    let stored = block_on(get_store(&Ctx::system(), &repo, store.id())).unwrap();
+    assert_eq!(stored, store, "nothing changed");
+}
+
+#[test]
+fn the_default_and_another_language_swap_in_one_update() {
+    let repo = InMemoryStoreRepo::default();
+    let store = store_in_three_languages(&repo);
+    let input = UpdateStore {
+        default_language: Some("de".to_string()),
+        languages: Some(vec![listed("en", true), listed("fr", false)]),
+        ..UpdateStore::default()
+    };
+    let swapped = block_on(update_store(
+        &Ctx::system(),
+        &repo,
+        &clock(),
+        store.id(),
+        input,
+    ))
+    .unwrap();
+    assert_eq!(swapped.offered_languages(), vec![lang("de"), lang("en")]);
+}
+
+#[test]
+fn a_language_a_market_offers_stays_offered() {
+    let repo = InMemoryStoreRepo::default();
+    let store = store_in_three_languages(&repo);
+    let update = |default: Option<&str>, languages: Option<Vec<LanguageInput>>| {
+        let input = UpdateStore {
+            default_language: default.map(str::to_string),
+            languages,
+            market_languages: vec![
+                offering(1, &["en", "de"]),
+                offering(2, &["de"]),
+                offering(3, &[]),
+            ],
+            ..UpdateStore::default()
+        };
+        block_on(update_store(
+            &Ctx::system(),
+            &repo,
+            &clock(),
+            store.id(),
+            input,
+        ))
+    };
+    // Removed.
+    assert_eq!(
+        update(None, Some(vec![listed("fr", false)])),
+        Err(CommandError::LanguageInUse(vec![
+            offering(1, &["de"]),
+            offering(2, &["de"])
+        ]))
+    );
+    // Unpublished.
+    assert_eq!(
+        update(None, Some(vec![listed("de", false), listed("fr", false)])),
+        Err(CommandError::LanguageInUse(vec![
+            offering(1, &["de"]),
+            offering(2, &["de"])
+        ]))
+    );
+    // The default replaced by a language no market names.
+    assert_eq!(
+        update(Some("hr"), None),
+        Err(CommandError::LanguageInUse(vec![offering(1, &["en"])]))
+    );
+    let stored = block_on(get_store(&Ctx::system(), &repo, store.id())).unwrap();
+    assert_eq!(stored, store, "nothing changed");
+
+    // Languages no market names change freely, and so does a swap that keeps both.
+    assert!(update(None, Some(vec![listed("de", true)])).is_ok());
+    assert!(update(Some("de"), Some(vec![listed("en", true)])).is_ok());
+}
+
+#[test]
+fn what_markets_offer_alone_changes_nothing() {
+    let repo = InMemoryStoreRepo::default();
+    let store = store_in_three_languages(&repo);
+    let input = UpdateStore {
+        market_languages: vec![offering(1, &["hr"])],
+        ..UpdateStore::default()
+    };
+    let same = block_on(update_store(
+        &Ctx::system(),
+        &repo,
+        &clock(),
+        store.id(),
+        input,
+    ))
+    .unwrap();
+    assert_eq!(same.version(), store.version());
 }

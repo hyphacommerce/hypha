@@ -6,7 +6,8 @@ use axum::{Json, extract::State, http::StatusCode};
 use hypha_cart::explain_product_prices;
 use hypha_core::{
     CatalogId, CategoryId, Clock, CountryCode, Ctx, Currency, CustomerGroupId, ErrorCode, Keyset,
-    MarketId, Money, PriceListId, ProductId, Quantity, SortKey, Stamped, Timestamp, VariantId,
+    Language, MarketId, Money, PriceListId, ProductId, Quantity, SortKey, Stamped, Timestamp,
+    VariantId,
 };
 use hypha_customers::{CustomerGroupRepo, HasCustomerGroups};
 use hypha_markets::{
@@ -59,6 +60,13 @@ pub struct UpdateMarketRequest {
     // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
     #[schema(value_type = bool, required = false)]
     prices_include_tax: Option<bool>,
+    /// The languages shoppers are offered here, replacing the list: BCP 47 tags in
+    /// order, the first the market's default, each the store's default language or one
+    /// of its published ones (`422 language_not_offered`), each once. Empty for the
+    /// store's default language alone.
+    #[serde(default, deserialize_with = "patch::non_null")]
+    #[schema(value_type = Vec<String>, required = false)]
+    languages: Option<Vec<String>>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -68,6 +76,9 @@ pub struct MarketResponse {
     countries: Vec<CountryCode>,
     currency: Currency,
     prices_include_tax: bool,
+    /// The languages shoppers are offered here, in order: the first is the market's
+    /// default. Empty means the store's default language alone.
+    languages: Vec<Language>,
     /// The catalog of what it sells, once one is created (`POST /admin/catalogs`).
     catalog: Option<CatalogId>,
     /// The catalog's price lists, by ID: the lowest live price among them wins.
@@ -82,6 +93,7 @@ impl MarketResponse {
             countries: m.countries().to_vec(),
             currency: m.currency(),
             prices_include_tax: m.prices_include_tax(),
+            languages: m.languages().to_vec(),
             catalog,
             price_lists,
         }
@@ -195,9 +207,16 @@ pub async fn update_market_handler<S: Storage>(
 ) -> Result<Json<MarketResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
+    // Only a change of languages needs the store's.
+    let store_languages = match req.languages {
+        Some(_) => super::stores::offered_languages(&state, &ports).await?,
+        None => Vec::new(),
+    };
     let input = UpdateMarket {
         name: req.name,
         prices_include_tax: req.prices_include_tax,
+        languages: req.languages,
+        store_languages,
     };
     let market = update_market(&ctx, ports.markets(), id, input)
         .await
@@ -1334,6 +1353,9 @@ pub struct StorefrontCountryResponse {
     #[schema(minimum = 0)]
     minor_units: u8,
     prices_include_tax: bool,
+    /// The languages shoppers are offered here, in order: the first is the country's
+    /// default. Never empty: the store's default language when its market lists none.
+    languages: Vec<Language>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -1356,21 +1378,43 @@ pub async fn storefront_countries<S: Storage>(
 ) -> Result<Json<StorefrontCountryListResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let markets = list_markets_only(&ctx, ports.markets()).await?;
+    let offered = super::stores::offered_languages(&state, &ports).await?;
     let mut items: Vec<StorefrontCountryResponse> = markets
         .iter()
         .flat_map(|m| {
-            m.countries().iter().map(|c| StorefrontCountryResponse {
-                country: *c,
-                name: c.name(),
-                market: m.id(),
-                currency: m.currency(),
-                minor_units: m.currency().minor_units(),
-                prices_include_tax: m.prices_include_tax(),
-            })
+            let languages = market_languages(m, &offered);
+            m.countries()
+                .iter()
+                .map(move |c| StorefrontCountryResponse {
+                    country: *c,
+                    name: c.name(),
+                    market: m.id(),
+                    currency: m.currency(),
+                    minor_units: m.currency().minor_units(),
+                    prices_include_tax: m.prices_include_tax(),
+                    languages: languages.clone(),
+                })
         })
         .collect();
     items.sort_by_key(|i| i.country.as_str());
     Ok(Json(StorefrontCountryListResponse { items }))
+}
+
+/// What a market offers shoppers, out of what the store offers (`offered`, its default
+/// first): the market's list in order, or the store's default when it has none. A
+/// language the store stopped offering since (the store's check and a market's write
+/// don't share a transaction) is left out rather than promised.
+fn market_languages(market: &Market, offered: &[Language]) -> Vec<Language> {
+    let languages: Vec<Language> = market
+        .languages()
+        .iter()
+        .filter(|l| offered.contains(l))
+        .cloned()
+        .collect();
+    if languages.is_empty() {
+        return offered.first().cloned().into_iter().collect();
+    }
+    languages
 }
 
 // ---------- a product's prices ----------

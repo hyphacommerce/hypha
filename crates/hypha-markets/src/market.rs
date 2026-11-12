@@ -1,8 +1,8 @@
 use std::collections::{BTreeSet, HashSet};
 
 use hypha_core::{
-    CountryCode, Currency, MarketId, PendingEvent, Recorded, Stamped, Stamps, Subject, Version,
-    Versioned, required_text,
+    CountryCode, Currency, Language, MarketId, PendingEvent, Recorded, Stamped, Stamps, Subject,
+    Version, Versioned, required_text,
 };
 
 use crate::{
@@ -20,6 +20,9 @@ pub struct Market {
     countries: Vec<CountryCode>,
     currency: Currency,
     prices_include_tax: bool,
+    /// The languages shoppers are served here, the first being the market's default;
+    /// empty for the store's default language alone.
+    languages: Vec<Language>,
     changes: Changes,
 }
 
@@ -75,6 +78,9 @@ impl Stamped for Market {
 }
 
 impl Market {
+    /// As many as a store can offer: its default language and 20 others.
+    pub const MAX_LANGUAGES: usize = 21;
+
     pub fn new(
         id: MarketId,
         name: String,
@@ -100,6 +106,7 @@ impl Market {
             countries,
             currency,
             prices_include_tax: false,
+            languages: Vec::new(),
             changes: Changes::default(),
         };
         market.changed("created");
@@ -125,6 +132,27 @@ impl Market {
             self.prices_include_tax = include;
             self.changed("prices_include_tax");
         }
+    }
+
+    /// The languages the market offers, in order (the first is its default); none means
+    /// the store's default language alone. Each may be listed once. Whether the store
+    /// offers them is the command's to check: a market can't see the store.
+    pub fn set_languages(&mut self, languages: Vec<Language>) -> Result<(), MarketError> {
+        if languages.len() > Self::MAX_LANGUAGES {
+            return Err(MarketError::TooManyLanguages {
+                max: Self::MAX_LANGUAGES,
+            });
+        }
+        for (i, language) in languages.iter().enumerate() {
+            if languages[..i].contains(language) {
+                return Err(MarketError::DuplicateLanguage(language.clone()));
+            }
+        }
+        if self.languages != languages {
+            self.languages = languages;
+            self.changed("languages");
+        }
+        Ok(())
     }
 
     pub fn covers(&self, country: CountryCode) -> bool {
@@ -174,6 +202,10 @@ impl Market {
     pub fn prices_include_tax(&self) -> bool {
         self.prices_include_tax
     }
+
+    pub fn languages(&self) -> &[Language] {
+        &self.languages
+    }
 }
 
 /// Plain-data form of a `Market` for storage adapters.
@@ -186,6 +218,7 @@ pub struct MarketSnapshot {
     pub countries: Vec<CountryCode>,
     pub currency: Currency,
     pub prices_include_tax: bool,
+    pub languages: Vec<Language>,
 }
 
 impl Market {
@@ -198,6 +231,7 @@ impl Market {
             countries: self.countries.clone(),
             currency: self.currency,
             prices_include_tax: self.prices_include_tax,
+            languages: self.languages.clone(),
         }
     }
 
@@ -205,6 +239,7 @@ impl Market {
     pub fn restore(s: MarketSnapshot) -> Result<Market, MarketError> {
         let mut market = Market::new(s.id, s.name, s.countries, s.currency)?;
         market.prices_include_tax = s.prices_include_tax;
+        market.set_languages(s.languages)?;
         market.version = s.version;
         market.stamps = s.stamps;
         // Built through `new`, which records a change that didn't happen.
@@ -304,10 +339,76 @@ mod tests {
         assert!(m.countries.len() == 1);
     }
 
+    fn lang(tag: &str) -> Language {
+        Language::new(tag).unwrap()
+    }
+
+    fn fields(m: &mut Market) -> Vec<String> {
+        m.take_events()
+            .iter()
+            .flat_map(|e| e.data["fields"].as_array().cloned().unwrap_or_default())
+            .filter_map(|f| f.as_str().map(str::to_string))
+            .collect()
+    }
+
+    #[test]
+    fn a_new_market_lists_no_languages() {
+        assert_eq!(market(1, &["RS"]).unwrap().languages(), &[]);
+    }
+
+    #[test]
+    fn languages_keep_their_order_and_are_recorded_as_a_change() {
+        let mut m = market(1, &["RS"]).unwrap();
+        m.take_events();
+        assert_eq!(m.set_languages(vec![lang("sr-Latn"), lang("en")]), Ok(()));
+        assert_eq!(m.languages(), &[lang("sr-Latn"), lang("en")]);
+        assert_eq!(fields(&mut m), vec!["languages"]);
+
+        // The same list again is no change; another order is one.
+        assert_eq!(m.set_languages(vec![lang("sr-Latn"), lang("en")]), Ok(()));
+        assert_eq!(fields(&mut m), Vec::<String>::new());
+        assert_eq!(m.set_languages(vec![lang("en"), lang("sr-Latn")]), Ok(()));
+        assert_eq!(fields(&mut m), vec!["languages"]);
+    }
+
+    #[test]
+    fn a_language_is_listed_once_whatever_its_spelling() {
+        let mut m = market(1, &["RS"]).unwrap();
+        assert_eq!(
+            m.set_languages(vec![lang("en"), lang("de"), lang("EN")]),
+            Err(MarketError::DuplicateLanguage(lang("en")))
+        );
+        assert_eq!(m.languages(), &[]);
+    }
+
+    #[test]
+    fn twenty_one_languages_is_the_limit() {
+        let mut m = market(1, &["RS"]).unwrap();
+        let tags: Vec<Language> = (b'a'..=b'v')
+            .map(|c| lang(&format!("a{}", c as char)))
+            .collect();
+        assert_eq!(m.set_languages(tags[..21].to_vec()), Ok(()));
+        assert_eq!(
+            m.set_languages(tags),
+            Err(MarketError::TooManyLanguages { max: 21 })
+        );
+    }
+
+    #[test]
+    fn restore_rejects_a_repeated_language() {
+        let mut s = market(1, &["RS"]).unwrap().snapshot();
+        s.languages = vec![lang("en"), lang("en")];
+        assert_eq!(
+            Market::restore(s),
+            Err(MarketError::DuplicateLanguage(lang("en")))
+        );
+    }
+
     #[test]
     fn restore_round_trips() {
         let mut m = market(1, &["RS", "HR"]).unwrap();
         m.set_prices_include_tax(true);
+        m.set_languages(vec![lang("sr-Latn"), lang("en")]).unwrap();
         m.set_version(Version::new(3));
         assert_eq!(Market::restore(m.snapshot()), Ok(m));
     }

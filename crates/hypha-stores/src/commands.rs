@@ -1,11 +1,11 @@
 use hypha_core::{
     Address, AddressError, AddressParts, AuthError, Clock, Ctx, Currency, CurrencyError, Email,
-    EmailError, ErrorCode, IdGenerator, Language, LanguageError, RepoError, Scope, StoreId,
-    Timezone, TimezoneError,
+    EmailError, ErrorCode, IdGenerator, Language, LanguageError, MarketId, RepoError, Scope,
+    StoreId, Timezone, TimezoneError,
 };
 use thiserror::Error;
 
-use crate::{SetupStep, Store, StoreError, StoreRepo};
+use crate::{SetupStep, Store, StoreError, StoreLanguage, StoreRepo};
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum CommandError {
@@ -30,6 +30,10 @@ pub enum CommandError {
     /// Costs are recorded in the base currency: changing it would misread them.
     #[error("the base currency can't change once a cost is recorded in it")]
     CurrencyLocked,
+    /// Markets still offer languages the store would stop offering (removed, unpublished,
+    /// or the default one replaced): each such market with those languages.
+    #[error("{} market(s) still offer a language the store would no longer offer", .0.len())]
+    LanguageInUse(Vec<MarketLanguages>),
     /// One store per deployment (model A) found more than one.
     #[error("expected exactly one store in this deployment, found {0}")]
     MultipleStores(usize),
@@ -48,6 +52,7 @@ impl ErrorCode for CommandError {
             CommandError::Currency(e) => e.code(),
             CommandError::StoreNotFound(_) => "store_not_found",
             CommandError::CurrencyLocked => "store_currency_locked",
+            CommandError::LanguageInUse(_) => "language_in_use",
             CommandError::MultipleStores(_) => "multiple_stores",
         }
     }
@@ -87,6 +92,11 @@ pub struct UpdateStore {
     pub timezone: Option<Option<String>>,
     /// A BCP 47 tag (`en`, `sr-Latn`).
     pub default_language: Option<String>,
+    /// The languages beside the default one, replacing the list.
+    pub languages: Option<Vec<LanguageInput>>,
+    /// Set by the host, not the caller: the languages each market offers by name, which
+    /// the store must keep offering (its default, or published).
+    pub market_languages: Vec<MarketLanguages>,
     /// An ISO 4217 code: the base currency costs are kept in.
     pub currency: Option<Option<String>>,
     /// Set by the host, not the caller: whether a cost was ever recorded, which fixes
@@ -98,14 +108,44 @@ pub struct UpdateStore {
     pub setup_finished: Option<bool>,
 }
 
+/// One of the store's other languages, unvalidated.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LanguageInput {
+    /// A BCP 47 tag.
+    pub language: String,
+    pub published: bool,
+}
+
+/// Languages a market names: what it offers (the host's input), or what it would be left
+/// offering without the store's say (`CommandError::LanguageInUse`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarketLanguages {
+    pub market: MarketId,
+    pub languages: Vec<Language>,
+}
+
 impl UpdateStore {
+    /// Whether the caller asked for no change; what the host adds doesn't count.
     fn is_empty(&self) -> bool {
-        *self
-            == Self {
-                currency_locked: self.currency_locked,
-                ..Self::default()
-            }
+        let asked = Self {
+            currency_locked: false,
+            market_languages: Vec::new(),
+            ..self.clone()
+        };
+        asked == Self::default()
     }
+}
+
+/// The markets that offer a language `store` doesn't, each with those languages.
+fn languages_in_use(store: &Store, markets: Vec<MarketLanguages>) -> Vec<MarketLanguages> {
+    let offered = store.offered_languages();
+    markets
+        .into_iter()
+        .filter_map(|mut m| {
+            m.languages.retain(|l| !offered.contains(l));
+            (!m.languages.is_empty()).then_some(m)
+        })
+        .collect()
 }
 
 /// Changes the store's details. Needs `stores:write` even when nothing changes, so the
@@ -141,8 +181,32 @@ pub async fn update_store<R: StoreRepo>(
     if let Some(timezone) = input.timezone {
         store.set_timezone(timezone.as_deref().map(Timezone::new).transpose()?);
     }
-    if let Some(language) = &input.default_language {
-        store.set_default_language(Language::new(language)?);
+    let default_language = input
+        .default_language
+        .as_deref()
+        .map(Language::new)
+        .transpose()?;
+    match (default_language, input.languages) {
+        // Together, so the old default and one of the others can swap in one request.
+        (default, Some(languages)) => {
+            let default = default.unwrap_or_else(|| store.default_language().clone());
+            let languages = languages
+                .into_iter()
+                .map(|l| {
+                    Ok(StoreLanguage {
+                        language: Language::new(&l.language)?,
+                        published: l.published,
+                    })
+                })
+                .collect::<Result<Vec<_>, LanguageError>>()?;
+            store.set_languages(default, languages)?;
+        }
+        (Some(default), None) => store.set_default_language(default)?,
+        (None, None) => {}
+    }
+    let in_use = languages_in_use(&store, input.market_languages);
+    if !in_use.is_empty() {
+        return Err(CommandError::LanguageInUse(in_use));
     }
     if let Some(currency) = &input.currency {
         let currency = currency.as_deref().map(Currency::new).transpose()?;

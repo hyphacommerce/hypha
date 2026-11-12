@@ -2,7 +2,7 @@ use hypha_core::{
     Currency, Email, Language, RepoError, StoreId, Timezone, Version, Versioned, stamp_insert,
     stamp_update,
 };
-use hypha_stores::{Store, StoreRepo, StoreSnapshot};
+use hypha_stores::{Store, StoreLanguage, StoreRepo, StoreSnapshot};
 use tokio_postgres::{
     Row,
     types::{ToSql, Type},
@@ -23,7 +23,7 @@ use crate::{
 fn store_columns() -> String {
     format!(
         "id, version, name, contact_email, description, legal_name, timezone, \
-         default_language, currency, setup_step, {}, {}, {}",
+         default_language, languages::text AS languages, currency, setup_step, {}, {}, {}",
         micros("setup_finished_at"),
         address_columns("legal_address_"),
         stamp_columns(""),
@@ -37,6 +37,7 @@ fn store_from_row(row: &Row) -> Result<Store, RepoError> {
     let timezone: Option<String> = col(row, "timezone")?;
     let language: String = col(row, "default_language")?;
     let currency: Option<String> = col(row, "currency")?;
+    let languages: String = col(row, "languages")?;
     Store::restore(StoreSnapshot {
         id,
         version: version_from_db(col(row, "version")?)?,
@@ -56,6 +57,7 @@ fn store_from_row(row: &Row) -> Result<Store, RepoError> {
             .transpose()
             .map_err(|e| bad(&e))?,
         default_language: Language::new(&language).map_err(|e| bad(&e))?,
+        languages: languages_from_db(&languages).map_err(|e| bad(&e))?,
         currency: currency
             .as_deref()
             .map(Currency::new)
@@ -67,6 +69,31 @@ fn store_from_row(row: &Row) -> Result<Store, RepoError> {
     .map_err(|e| bad(&e))
 }
 
+/// The `languages` column: `[{"language": "de", "published": true}]`, in order.
+fn languages_to_db(languages: &[StoreLanguage]) -> String {
+    let entries: Vec<serde_json::Value> = languages
+        .iter()
+        .map(|l| serde_json::json!({ "language": l.language.as_str(), "published": l.published }))
+        .collect();
+    serde_json::Value::Array(entries).to_string()
+}
+
+fn languages_from_db(json: &str) -> Result<Vec<StoreLanguage>, String> {
+    #[derive(serde::Deserialize)]
+    struct Entry {
+        language: Language,
+        published: bool,
+    }
+    let entries: Vec<Entry> = serde_json::from_str(json).map_err(|e| format!("languages: {e}"))?;
+    Ok(entries
+        .into_iter()
+        .map(|e| StoreLanguage {
+            language: e.language,
+            published: e.published,
+        })
+        .collect())
+}
+
 /// Sets every detail column to `s`'s (inside the caller's transaction).
 async fn write_details(tx: &impl Queries, s: &StoreSnapshot) -> Result<(), RepoError> {
     let id = s.id.as_uuid();
@@ -76,8 +103,9 @@ async fn write_details(tx: &impl Queries, s: &StoreSnapshot) -> Result<(), RepoE
     let language = s.default_language.as_str();
     let currency = s.currency.map(|c| c.as_str());
     let finished = opt_micros(s.setup_finished_at);
+    let languages = languages_to_db(&s.languages);
     let mut params = id_and_address(&id, &address);
-    let details: [(&(dyn ToSql + Sync), Type); 8] = [
+    let details: [(&(dyn ToSql + Sync), Type); 9] = [
         (&email, Type::TEXT),
         (&s.description, Type::TEXT),
         (&s.legal_name, Type::TEXT),
@@ -86,6 +114,7 @@ async fn write_details(tx: &impl Queries, s: &StoreSnapshot) -> Result<(), RepoE
         (&s.setup_step, Type::TEXT),
         (&finished, Type::INT8),
         (&currency, Type::TEXT),
+        (&languages, Type::TEXT),
     ];
     params.extend(details);
     let first = 2 + ADDRESS_LEN;
@@ -94,7 +123,7 @@ async fn write_details(tx: &impl Queries, s: &StoreSnapshot) -> Result<(), RepoE
             "UPDATE stores SET {}, contact_email = ${}, description = ${}, legal_name = ${},
                  timezone = ${}, default_language = ${}, setup_step = ${},
                  setup_finished_at = 'epoch'::timestamptz + ${}::bigint * interval '1 microsecond',
-                 currency = ${}
+                 currency = ${}, languages = ${}::text::jsonb
              WHERE id = $1",
             address_assignments("legal_address_", 2),
             first,
@@ -105,6 +134,7 @@ async fn write_details(tx: &impl Queries, s: &StoreSnapshot) -> Result<(), RepoE
             first + 5,
             first + 6,
             first + 7,
+            first + 8,
         ),
         &params,
     )

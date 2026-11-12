@@ -3661,6 +3661,13 @@
           "currency": {
             "$ref": "#/components/schemas/Currency"
           },
+          "languages": {
+            "description": "The languages shoppers are offered here, in order: the first is the country's\ndefault. Never empty: the store's default language when its market lists none.",
+            "items": {
+              "$ref": "#/components/schemas/Language"
+            },
+            "type": "array"
+          },
           "market": {
             "$ref": "#/components/schemas/MarketId"
           },
@@ -3684,7 +3691,8 @@
           "market",
           "currency",
           "minor_units",
-          "prices_include_tax"
+          "prices_include_tax",
+          "languages"
         ],
         "type": "object"
       },
@@ -4223,13 +4231,21 @@
               "null"
             ]
           },
+          "languages": {
+            "description": "The other languages shoppers can be served, in the merchant's order: the\npublished ones only. Which of them a country offers is on\n`GET /storefront/countries`.",
+            "items": {
+              "$ref": "#/components/schemas/Language"
+            },
+            "type": "array"
+          },
           "name": {
             "type": "string"
           }
         },
         "required": [
           "name",
-          "default_language"
+          "default_language",
+          "languages"
         ],
         "type": "object"
       },
