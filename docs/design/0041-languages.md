@@ -76,7 +76,7 @@ options and their values, and Astryx's own catalogs in 31 languages.
 | ML10 | **Search: one document per variant, market and language** the market offers. Facet values keep the source text as their key and carry a label in the document's language, so a filter's URL means the same in every language (§6) |
 | ML11 | **The API's `error` strings stay English.** `code` and `details` are the contract; each app maps the codes it can meet. Built-in cart messages gain `params` so a client can render them itself; `message` stays as the English fallback (§7) |
 | ML12 | **Emails are rendered in the order's language:** the merchant's template for that language, else the build's default for it, else the default language's. Money and dates in emails follow the language (§7.3) |
-| ML13 | **App strings are ICU MessageFormat catalogs** (`messages/<language>.json` per app), read through a small shared package on `intl-messageformat`. The same format Astryx ships its own catalogs in. No framework plugin (§8) |
+| ML13 | **App strings are ICU MessageFormat catalogs** (`messages/<language>/<namespace>.json` per app), read through a small shared package on `intl-messageformat`. The same format Astryx ships its own catalogs in. No framework plugin (§8) |
 | ML14 | **The admin's language belongs to the staff member** (`users.language`), then the browser's, then English. It has nothing to do with the store's content languages (§8.3) |
 | ML15 | **Storefront URLs: `/{country}` is the market's default language, `/{language}-{country}` another** (`/de`, `/en-de`). Existing URLs keep working (§9) |
 | ML16 | **Scopes `translations:read` and `translations:write`.** Agents may hold both, so an agent can translate a catalogue through MCP, as proposals where the grant says so (§10) |
@@ -302,10 +302,16 @@ translated.
 ### 8.1 Mechanism
 
 - `packages/i18n` (`@hyphacommerce/i18n`): `createTranslator(language, catalog)` on
-  `intl-messageformat`; a provider and `useT()` for client components; `getT()` for
-  server components and actions. Web APIs only.
-- Catalogs: `apps/<app>/messages/en.json`, ICU MessageFormat, flat dotted keys
-  (`cart.items_count`: `{count, plural, one {# item} other {# items}}`).
+  `intl-messageformat`; a provider and `useT()` for client components. Web APIs only,
+  and no framework: each app writes its own `getT(language)` for server components and
+  actions in `lib/i18n.ts`, on React's `cache`.
+- Catalogs: `apps/<app>/messages/<language>/<namespace>.json`, ICU MessageFormat, each
+  file a flat object. A key is `<namespace>.<key>` (`cart.items_count`:
+  `{count, plural, one {# item} other {# items}}`). A file per area keeps branches that
+  add strings from conflicting.
+- Matching a browser's languages against what's offered: the exact tag, then the tag
+  with its last parts taken off (`sr-Latn-RS` → `sr-Latn` → `sr`), then any offered tag
+  of the same language (`sr` finds `sr-Latn`).
 - Keys are typed from `en.json`, so a missing key doesn't compile. A check fails when a
   catalog has a key `en.json` lacks, and reports what each still misses.
 - A lint rule refuses literal text in JSX once an app is extracted.
