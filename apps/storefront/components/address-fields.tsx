@@ -22,7 +22,7 @@ import {
   type FieldProblems,
   asField,
 } from "@/lib/address";
-import { type PlacedMessages, statusOf } from "@/lib/messages";
+import { type PlacedMessages, statusOf } from "@/lib/cart-messages";
 
 /** The fields a form sends, `country` apart (it's the page's). */
 type Field = Exclude<AddressField, "country">;

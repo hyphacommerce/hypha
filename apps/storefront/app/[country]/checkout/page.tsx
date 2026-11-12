@@ -16,7 +16,7 @@ import { loadAccount } from "@/lib/account";
 import { api, countryOf, loadAddressFormat } from "@/lib/api";
 import { Price } from "@/components/price";
 import { linePrice, readCartDiscounts, shippingPrice } from "@/lib/discounts";
-import { placeMessages } from "@/lib/messages";
+import { placeMessages } from "@/lib/cart-messages";
 import { formatMoney } from "@/lib/money";
 import { cartId, link } from "@/lib/site";
 

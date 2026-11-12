@@ -21,7 +21,7 @@ import { CartMessages } from "@/components/cart-messages";
 import { DiscountNotes } from "@/components/discounts";
 import { Price } from "@/components/price";
 import { type Application, type LineDiscount, linePrice, readCartDiscounts } from "@/lib/discounts";
-import { placeMessages } from "@/lib/messages";
+import { placeMessages } from "@/lib/cart-messages";
 
 import { useCart } from "./cart-provider";
 

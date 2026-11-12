@@ -36,7 +36,7 @@ import {
   type FieldProblems,
   missingIn,
 } from "@/lib/address";
-import { type CartMessage, type PlacedMessages, statusOf } from "@/lib/messages";
+import { type CartMessage, type PlacedMessages, statusOf } from "@/lib/cart-messages";
 import { saleLabel } from "@/lib/prices";
 import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 

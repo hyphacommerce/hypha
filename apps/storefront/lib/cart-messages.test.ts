@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { type CartMessage, blockedBy, placeMessages, placeOf, statusOf } from "./messages.ts";
+import { type CartMessage, blockedBy, placeMessages, placeOf, statusOf } from "./cart-messages.ts";
 
 const message = (path: string, severity = "warning", text = "Check this"): CartMessage => ({
   severity,

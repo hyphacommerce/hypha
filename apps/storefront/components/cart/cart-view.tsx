@@ -14,7 +14,7 @@ import { HStack, StackItem, VStack } from "@astryxdesign/core/Stack";
 import { CartMessages } from "@/components/cart-messages";
 import { Totals } from "@/components/totals";
 import { readCartDiscounts } from "@/lib/discounts";
-import { placeMessages } from "@/lib/messages";
+import { placeMessages } from "@/lib/cart-messages";
 
 import { CartLines } from "./cart-lines";
 import { useCart } from "./cart-provider";
