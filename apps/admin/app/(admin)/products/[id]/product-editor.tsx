@@ -9,6 +9,7 @@ import { CustomFieldsForm, CustomFieldsFrame } from "@/components/custom-fields/
 import { SaveBar } from "@/components/save-bar";
 import type { CategoryNode } from "@/lib/categories";
 import { type Definition, type FieldsResponse, isWritable } from "@/lib/custom-fields";
+import { useT } from "@/lib/use-t";
 
 import { type Stock, saveProduct } from "../actions";
 import { CategoriesCard } from "./categories-card";
@@ -73,6 +74,7 @@ export function ProductEditor({
   /** The variants' definitions: each saved variant's fields open in a dialog. */
   variantFields?: { definitions: Definition[]; scopes: readonly string[] | null };
 }) {
+  const t = useT<"products">();
   const currencies = useCurrencies();
   const currency = product.variants[0]?.price.currency ?? "EUR";
   const fieldDefinitions = customFields?.definitions ?? NO_DEFINITIONS;
@@ -126,7 +128,7 @@ export function ProductEditor({
     setError(undefined);
   };
   const save = () => {
-    const built = plan(draft, saved, currency, currencies);
+    const built = plan(draft, saved, currency, currencies, t);
     if ("error" in built) {
       setError(built.error);
       return;
@@ -163,7 +165,7 @@ export function ProductEditor({
     });
   };
 
-  const savedTitles = Object.fromEntries(base.variants.map((v) => [v.id, v.title ?? "Default"]));
+  const savedTitles = Object.fromEntries(base.variants.map((v) => [v.id, v.title ?? t("common.default")]));
 
   return (
     <>

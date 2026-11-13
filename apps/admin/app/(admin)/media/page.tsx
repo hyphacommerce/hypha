@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/page-header";
 import { type SearchParams, one, oneOf } from "@/components/resource-table/params";
 import { listPage, pageQuery } from "@/components/resource-table/server";
 import { sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import { MediaLibrary } from "@/resources/media";
 
 import { Uploader } from "./uploader";
@@ -16,12 +17,12 @@ const SORTS = ["newest", "oldest", "name_asc", "name_desc"] as const;
 
 /** The header, the uploader and the library's toolbar render at once; the files stream in. */
 export default async function MediaPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const params = await searchParams;
+  const [params, t] = await Promise.all([searchParams, getT()]);
   const view = one(params, "view") === "table" ? "table" : "grid";
   return (
     <Section padding={6}>
       <VStack gap={5}>
-        <PageHeader title="Media" />
+        <PageHeader title={t("media.title")} />
         <Uploader />
         <Suspense fallback={<MediaLibrary view={view} />}>
           <MediaRows params={params} view={view} />

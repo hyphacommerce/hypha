@@ -7,6 +7,9 @@ import { HStack, VStack } from "@astryxdesign/core/Layout";
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { useState, useTransition } from "react";
 
+import type { KeyIn } from "@/lib/messages";
+import { useT } from "@/lib/use-t";
+
 import { deleteProduct, setProductStatus } from "../actions";
 
 type Status = AdminSchemas["ProductStatus"];
@@ -16,13 +19,16 @@ type Status = AdminSchemas["ProductStatus"];
  * a draft goes live, a live product goes back to draft or is archived, and an archived
  * one comes back as a draft.
  */
-const MOVES: Record<Status, { to: Status; label: string; primary?: boolean }[]> = {
-  draft: [{ to: "active", label: "Publish", primary: true }],
+const MOVES: Record<
+  Status,
+  { to: Status; label: KeyIn<"products" | "common">; primary?: boolean }[]
+> = {
+  draft: [{ to: "active", label: "products.status_publish", primary: true }],
   active: [
-    { to: "draft", label: "Unpublish" },
-    { to: "archived", label: "Archive" },
+    { to: "draft", label: "products.status_unpublish" },
+    { to: "archived", label: "common.archive" },
   ],
-  archived: [{ to: "draft", label: "Restore as draft" }],
+  archived: [{ to: "draft", label: "products.status_restore" }],
 };
 
 export function StatusActions({
@@ -34,6 +40,7 @@ export function StatusActions({
   title: string;
   status: Status;
 }) {
+  const t = useT<"products">();
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState<Status>();
   const [confirming, setConfirming] = useState(false);
@@ -54,7 +61,7 @@ export function StatusActions({
         {MOVES[status].map((m) => (
           <Button
             key={m.to}
-            label={m.label}
+            label={t(m.label)}
             variant={m.primary ? "primary" : "secondary"}
             isLoading={pending === m.to}
             isDisabled={pending !== undefined && pending !== m.to}
@@ -62,7 +69,7 @@ export function StatusActions({
           />
         ))}
         <Button
-          label="Delete"
+          label={t("common.delete")}
           variant="secondary"
           isDisabled={pending !== undefined}
           onClick={() => setConfirming(true)}
@@ -75,18 +82,16 @@ export function StatusActions({
 }
 
 function DeleteDialog({ id, title, onClose }: { id: string; title: string; onClose: () => void }) {
+  const t = useT<"products">();
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
   return (
     <AlertDialog
       isOpen
       onOpenChange={(isOpen) => !isOpen && onClose()}
-      title={`Delete ${title}?`}
-      description={
-        error ??
-        "It's removed with its variants, prices and stock records, and leaves every sales channel. Its media stay in the library and orders keep their lines. Archive it instead to keep it."
-      }
-      actionLabel="Delete product"
+      title={t("common.delete_named", { name: title })}
+      description={error ?? t("products.delete_description")}
+      actionLabel={t("products.delete_action")}
       isActionLoading={isPending}
       onAction={() =>
         startTransition(async () => {

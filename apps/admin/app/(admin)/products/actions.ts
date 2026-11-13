@@ -8,6 +8,7 @@ import type { FieldsPatch } from "@/components/custom-fields/actions";
 import { type FieldsResponse, jsonObject, problemsOf } from "@/lib/custom-fields";
 import { parseMoney } from "@/lib/format";
 import { describe, loadCurrencies, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 
 import type { SavePlan, SelectionRef } from "./[id]/draft";
 
@@ -18,7 +19,7 @@ export async function createProduct(
   input: { title: string; handle: string; price: string; currency: AdminSchemas["Currency"] },
 ): Promise<FormState> {
   const amount = parseMoney(input.price, input.currency, await loadCurrencies());
-  if (amount === null) return { error: "Enter the price as a number, like 18 or 18.50." };
+  if (amount === null) return { error: (await getT())("products.error_price_format") };
   const client = await sessionClient();
   const { data, error } = await client.POST("/admin/products", {
     body: {
@@ -336,5 +337,5 @@ export async function productPrices(
     params: { path: { id }, query: { quantity, group } },
   });
   if (data) return { prices: data };
-  return { error: error ? await describe(error) : "The prices couldn't be read." };
+  return { error: error ? await describe(error) : (await getT())("products.prices_unreadable") };
 }

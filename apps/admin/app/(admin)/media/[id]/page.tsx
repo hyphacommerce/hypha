@@ -10,19 +10,19 @@ import { Suspense } from "react";
 import { DateTime } from "@/components/date-time";
 import { type Crumb, PageHeader } from "@/components/page-header";
 import { DetailSkeleton } from "@/components/skeletons";
-import { formatBytes } from "@/lib/format";
+import { getFormat } from "@/lib/get-format";
 import { loaded, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
+import type { T } from "@/lib/messages";
 
 import { AssetForm } from "./asset-form";
 import { DeleteAsset } from "./delete-asset";
 
 type Asset = AdminSchemas["AssetResponse"];
 
-const BACK: Crumb = { label: "Media", href: "/media" };
-
 /** The file itself, as large as the column allows. */
-function FilePreview({ asset }: { asset: Asset }) {
-  if (!asset.url) return <Text color="secondary">The file isn&apos;t ready.</Text>;
+function FilePreview({ asset, t }: { asset: Asset; t: T }) {
+  if (!asset.url) return <Text color="secondary">{t("media.not_ready")}</Text>;
   switch (asset.kind) {
     case "image":
       return (
@@ -39,7 +39,7 @@ function FilePreview({ asset }: { asset: Asset }) {
     case "file":
       return (
         <Link href={asset.url} isExternalLink>
-          Open {asset.filename}
+          {t("media.open_file", { filename: asset.filename })}
         </Link>
       );
   }
@@ -50,23 +50,26 @@ function FilePreview({ asset }: { asset: Asset }) {
  * renders at once; the file streams in behind a skeleton of the page.
  */
 export default async function AssetPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+  const [{ id }, t] = await Promise.all([params, getT()]);
+  const back: Crumb = { label: t("media.title"), href: "/media" };
   return (
     <Section padding={6}>
       <VStack gap={5}>
-        <Suspense fallback={<DetailSkeleton back={BACK} />}>
-          <Asset id={id} />
+        <Suspense fallback={<DetailSkeleton back={back} />}>
+          <Asset id={id} back={back} />
         </Suspense>
       </VStack>
     </Section>
   );
 }
 
-async function Asset({ id }: { id: string }) {
+async function Asset({ id, back }: { id: string; back: Crumb }) {
   const client = await sessionClient();
-  const [assetResult, usagesResult] = await Promise.all([
+  const [assetResult, usagesResult, t, format] = await Promise.all([
     client.GET("/admin/assets/{id}", { params: { path: { id } } }),
     client.GET("/admin/assets/{id}/usages", { params: { path: { id }, query: { limit: 25 } } }),
+    getT(),
+    getFormat(),
   ]);
   const asset = loaded(assetResult);
   const usages = loaded(usagesResult);
@@ -88,12 +91,12 @@ async function Asset({ id }: { id: string }) {
     <>
       <PageHeader
         title={asset.title ?? asset.filename}
-        back={BACK}
+        back={back}
         actions={<DeleteAsset id={asset.id} />}
       />
       <HStack gap={5} vAlign="start" wrap="wrap">
         <Card padding={4}>
-          <FilePreview asset={asset} />
+          <FilePreview asset={asset} t={t} />
         </Card>
         <VStack gap={5} width={360}>
           <Card padding={4}>
@@ -106,18 +109,19 @@ async function Asset({ id }: { id: string }) {
           </Card>
           <Card padding={4}>
             <VStack gap={2}>
-              <Text type="label">Used by</Text>
+              <Text type="label">{t("media.used_by")}</Text>
               {usages.items.length === 0 ? (
                 <Text type="supporting" color="secondary">
-                  Nothing yet. Files in use can&apos;t be deleted.
+                  {t("media.used_by_none")}
                 </Text>
               ) : (
                 <>
                   {usages.items.map((u) =>
                     u.owner.kind === "product" ? (
                       <Link key={u.owner.id} href={`/products/${u.owner.id}`}>
-                        {titles.get(u.owner.id)}
-                        {u.role === "featured" ? " (featured)" : ""}
+                        {u.role === "featured"
+                          ? t("media.used_by_featured", { title: titles.get(u.owner.id) ?? "" })
+                          : titles.get(u.owner.id)}
                       </Link>
                     ) : (
                       <Text key={`${u.owner.kind}:${u.owner.id}`}>
@@ -127,26 +131,34 @@ async function Asset({ id }: { id: string }) {
                   )}
                   {usages.has_more && (
                     <Text type="supporting" color="secondary">
-                      And more.
+                      {t("media.used_by_more")}
                     </Text>
                   )}
                 </>
               )}
             </VStack>
           </Card>
-          <MetadataList title="Details">
-            <MetadataListItem label="File">{asset.filename}</MetadataListItem>
-            <MetadataListItem label="Type">{asset.mime_type}</MetadataListItem>
-            <MetadataListItem label="Size">{formatBytes(asset.byte_size)}</MetadataListItem>
+          <MetadataList title={t("common.details")}>
+            <MetadataListItem label={t("media.file")}>{asset.filename}</MetadataListItem>
+            <MetadataListItem label={t("common.type")}>{asset.mime_type}</MetadataListItem>
+            <MetadataListItem label={t("media.size")}>
+              {format.bytes(asset.byte_size)}
+            </MetadataListItem>
             {asset.width && asset.height ? (
-              <MetadataListItem label="Dimensions">
-                {asset.width} × {asset.height} px
+              <MetadataListItem label={t("media.dimensions")}>
+                {/* Pixel counts as they are: no thousands separators. */}
+                {t("media.dimensions_value", {
+                  width: String(asset.width),
+                  height: String(asset.height),
+                })}
               </MetadataListItem>
             ) : null}
-            <MetadataListItem label="Visibility">
-              {asset.visibility === "public" ? "Public" : "Private"}
+            <MetadataListItem label={t("media.visibility")}>
+              {asset.visibility === "public"
+                ? t("media.visibility_public")
+                : t("media.visibility_private")}
             </MetadataListItem>
-            <MetadataListItem label="Uploaded">
+            <MetadataListItem label={t("media.uploaded")}>
               <DateTime value={asset.created_at} />
             </MetadataListItem>
           </MetadataList>

@@ -23,7 +23,14 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { ArrowDownIcon, ArrowUpIcon, FolderIcon } from "@heroicons/react/24/outline";
 import { useState, useTransition } from "react";
 
-import { type CategoryNode, VISIBILITY, flatten, toHandle } from "@/lib/categories";
+import {
+  type CategoryNode,
+  VISIBILITY,
+  flatten,
+  toHandle,
+  visibilityOptions,
+} from "@/lib/categories";
+import { useT } from "@/lib/use-t";
 
 import { createCategory, updateCategory } from "./actions";
 
@@ -32,6 +39,7 @@ export const TOP_LEVEL = "top";
 
 /** The tree as indented rows, each movable among its siblings. */
 export function CategoryTree({ tree }: { tree: CategoryNode[] }) {
+  const t = useT<"categories">();
   const rows = flatten(tree);
   const [isAdding, setIsAdding] = useState(false);
   const [error, setError] = useState<string>();
@@ -44,23 +52,27 @@ export function CategoryTree({ tree }: { tree: CategoryNode[] }) {
       <VStack gap={3}>
         <HStack gap={2} hAlign="between" vAlign="center">
           <Text type="display-3" as="h2">
-            Tree
+            {t("categories.tree_title")}
           </Text>
-          <Button label="Add category" variant="primary" onClick={() => setIsAdding(true)} />
+          <Button
+            label={t("categories.add")}
+            variant="primary"
+            onClick={() => setIsAdding(true)}
+          />
         </HStack>
         {error && <Banner status="error" title={error} />}
         {rows.length === 0 ? (
           <EmptyState
             icon={<FolderIcon width={32} />}
-            title="No categories yet"
-            description="Add one, then put products in it from its page or from a product's page."
+            title={t("categories.empty_title")}
+            description={t("categories.empty_description")}
           />
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHeaderCell>Category</TableHeaderCell>
-                <TableHeaderCell>Handle</TableHeaderCell>
+                <TableHeaderCell>{t("common.category")}</TableHeaderCell>
+                <TableHeaderCell>{t("common.handle")}</TableHeaderCell>
                 <TableHeaderCell>
                   <span />
                 </TableHeaderCell>
@@ -77,9 +89,9 @@ export function CategoryTree({ tree }: { tree: CategoryNode[] }) {
                         {row.name}
                       </Link>
                       {!row.visible ? (
-                        <Badge label="Hidden" />
+                        <Badge label={t("categories.hidden")} />
                       ) : (
-                        row.isHiddenInStore && <Badge label="Under a hidden one" />
+                        row.isHiddenInStore && <Badge label={t("categories.hidden_by_ancestor")} />
                       )}
                     </HStack>
                   </TableCell>
@@ -89,7 +101,7 @@ export function CategoryTree({ tree }: { tree: CategoryNode[] }) {
                   <TableCell>
                     <HStack gap={1} hAlign="end">
                       <IconButton
-                        label={`Move ${row.name} up`}
+                        label={t("categories.move_up", { name: row.name })}
                         icon={<ArrowUpIcon />}
                         size="sm"
                         variant="ghost"
@@ -97,7 +109,7 @@ export function CategoryTree({ tree }: { tree: CategoryNode[] }) {
                         onClick={() => move(row.id, row.position - 1)}
                       />
                       <IconButton
-                        label={`Move ${row.name} down`}
+                        label={t("categories.move_down", { name: row.name })}
                         icon={<ArrowDownIcon />}
                         size="sm"
                         variant="ghost"
@@ -119,6 +131,7 @@ export function CategoryTree({ tree }: { tree: CategoryNode[] }) {
 
 /** A new category: name, handle, parent, and whether it shows (Hidden preselected). */
 function AddCategoryDialog({ tree, onClose }: { tree: CategoryNode[]; onClose: () => void }) {
+  const t = useT<"categories">();
   const [name, setName] = useState("");
   // Follows the name until edited by hand; clearing it follows the name again.
   const [handle, setHandle] = useState<string>();
@@ -144,27 +157,36 @@ function AddCategoryDialog({ tree, onClose }: { tree: CategoryNode[]; onClose: (
 
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={520} purpose="form">
-      <DialogHeader title="Add category" onOpenChange={(isOpen) => !isOpen && onClose()} />
+      <DialogHeader
+        title={t("categories.add")}
+        onOpenChange={(isOpen) => !isOpen && onClose()}
+      />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
-        <TextInput label="Name" placeholder="Shirts" value={name} onChange={setName} hasAutoFocus />
         <TextInput
-          label="Handle"
-          description="Its address in the storefront: lowercase letters, digits and dashes. Unique across categories."
+          label={t("common.name")}
+          placeholder={t("categories.name_placeholder")}
+          value={name}
+          onChange={setName}
+          hasAutoFocus
+        />
+        <TextInput
+          label={t("common.handle")}
+          description={t("categories.add_handle_description")}
           value={effectiveHandle}
           onChange={(value) => setHandle(value === "" ? undefined : value)}
         />
         <ParentSelector tree={tree} value={parent} onChange={setParent} />
         <Selector
-          label="Visibility"
-          options={[...VISIBILITY]}
+          label={t("categories.visibility")}
+          options={visibilityOptions(t)}
           value={visibility}
           onChange={setVisibility}
         />
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label="Add category"
+            label={t("categories.add")}
             variant="primary"
             isDisabled={!isComplete}
             isLoading={isPending}
@@ -189,11 +211,20 @@ export function ParentSelector({
   onChange: (parent: string) => void;
   exclude?: Set<string>;
 }) {
+  const t = useT<"categories">();
   const options = [
-    { value: TOP_LEVEL, label: "Top level" },
+    { value: TOP_LEVEL, label: t("categories.top_level") },
     ...flatten(tree)
       .filter((row) => !exclude?.has(row.id))
       .map((row) => ({ value: row.id, label: row.path })),
   ];
-  return <Selector label="Parent" options={options} value={value} onChange={onChange} hasSearch />;
+  return (
+    <Selector
+      label={t("categories.parent")}
+      options={options}
+      value={value}
+      onChange={onChange}
+      hasSearch
+    />
+  );
 }

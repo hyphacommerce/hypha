@@ -12,10 +12,19 @@ import { Token } from "@astryxdesign/core/Token";
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { useState } from "react";
 
+import type { KeyIn } from "@/lib/messages";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
+
 import { type Draft, type OptionDraft, newKey, orphaned, variantTitle } from "./draft";
 
 /** Names offered for a new option, the ones most products use. */
-const COMMON_NAMES = ["Size", "Color", "Material", "Style"];
+const COMMON_NAMES: KeyIn<"products">[] = [
+  "products.option_common_size",
+  "products.option_common_color",
+  "products.option_common_material",
+  "products.option_common_style",
+];
 
 /** Labels typed or pasted into "Add values", split on commas and new lines. */
 const splitLabels = (text: string) =>
@@ -39,6 +48,8 @@ export function OptionsEditor({
   savedTitles: Record<string, string>;
   onChange: (change: Partial<Draft>) => void;
 }) {
+  const t = useT<"products">();
+  const format = useFormat();
   // Which options are open for editing; a new one opens.
   const [open, setOpen] = useState<Set<string>>(new Set());
   const list = draft.options;
@@ -72,15 +83,15 @@ export function OptionsEditor({
         <HStack gap={2} hAlign="between" vAlign="center">
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Options
+              {t("products.options_title")}
             </Text>
             <Text type="supporting" color="secondary">
-              What variants differ by, like Size or Color.
+              {t("products.options_hint")}
             </Text>
           </VStack>
           {list.length > 0 && (
             <Button
-              label="Add option"
+              label={t("products.options_add_one")}
               variant="secondary"
               size="sm"
               icon={<PlusIcon width={16} />}
@@ -92,21 +103,27 @@ export function OptionsEditor({
         {removed.length > 0 && (
           <Banner
             status="warning"
-            title={`Saving removes ${removed.length === 1 ? "a variant" : `${removed.length} variants`}: ${removed
-              .map((v) => (v.id ? savedTitles[v.id] : undefined) ?? variantTitle(draft, v) ?? "new")
-              .join(", ")}.`}
-            description="They use values you removed. Their prices in price lists and their stock records stay behind until they're cleaned up."
+            title={t("products.options_removes_variants", {
+              count: removed.length,
+              titles: format.list(
+                removed.map(
+                  (v) =>
+                    (v.id ? savedTitles[v.id] : undefined) ??
+                    variantTitle(draft, v) ??
+                    t("products.options_removes_new"),
+                ),
+                "unit",
+              ),
+            })}
+            description={t("products.options_removes_description")}
           />
         )}
 
         {list.length === 0 && (
           <VStack gap={3} hAlign="start">
-            <Text color="secondary">
-              This product is sold one way. Add options if it comes in several sizes, colors or
-              materials: each combination becomes a variant with its own price, SKU and stock.
-            </Text>
+            <Text color="secondary">{t("products.options_empty")}</Text>
             <Button
-              label="Add options"
+              label={t("products.options_add")}
               variant="secondary"
               icon={<PlusIcon width={16} />}
               onClick={add}
@@ -136,11 +153,11 @@ export function OptionsEditor({
             ) : (
               <HStack gap={3} hAlign="between" vAlign="center">
                 <VStack gap={2}>
-                  <Text weight="medium">{d.name || "Unnamed option"}</Text>
+                  <Text weight="medium">{d.name || t("products.option_unnamed")}</Text>
                   <HStack gap={1} wrap="wrap">
                     {d.values.length === 0 ? (
                       <Text type="supporting" color="secondary">
-                        No values yet
+                        {t("products.option_no_values")}
                       </Text>
                     ) : (
                       d.values.map((v) => <Token key={v.key} label={v.label} size="sm" />)
@@ -148,7 +165,7 @@ export function OptionsEditor({
                   </HStack>
                 </VStack>
                 <Button
-                  label="Edit"
+                  label={t("common.edit")}
                   variant="ghost"
                   size="sm"
                   onClick={() => toggle(d.key, true)}
@@ -204,7 +221,10 @@ function OptionForm({
   onRemove: () => void;
   onDone: () => void;
 }) {
+  const t = useT<"products">();
   const setValues = (values: OptionDraft["values"]) => onChange((d) => ({ ...d, values }));
+  // An option still without a name is "this option" in its inputs' labels.
+  const named = { named: option.name ? "yes" : "no", option: option.name };
   const moveValue = (from: number, to: number) => {
     const next = [...option.values];
     const [v] = next.splice(from, 1);
@@ -218,24 +238,24 @@ function OptionForm({
     <VStack gap={3}>
       <HStack gap={2} vAlign="end">
         <TextInput
-          label="Option name"
-          placeholder="Size"
+          label={t("products.option_name")}
+          placeholder={t("products.option_name_placeholder")}
           value={option.name}
           onChange={(name) => onChange((d) => ({ ...d, name }))}
           width={240}
           hasAutoFocus={option.name === ""}
         />
         <IconButton
-          label="Move option up"
-          tooltip="Move up"
+          label={t("products.option_move_up")}
+          tooltip={t("products.move_up")}
           variant="ghost"
           icon={<ArrowUpIcon width={16} />}
           isDisabled={isFirst}
           onClick={() => onMove(-1)}
         />
         <IconButton
-          label="Move option down"
-          tooltip="Move down"
+          label={t("products.option_move_down")}
+          tooltip={t("products.move_down")}
           variant="ghost"
           icon={<ArrowDownIcon width={16} />}
           isDisabled={isLast}
@@ -245,15 +265,15 @@ function OptionForm({
       {option.name === "" && (
         <HStack gap={1} wrap="wrap" vAlign="center">
           <Text type="supporting" color="secondary">
-            Common:
+            {t("products.option_common")}
           </Text>
-          {COMMON_NAMES.map((name) => (
+          {COMMON_NAMES.map((key) => (
             <Button
-              key={name}
-              label={name}
+              key={key}
+              label={t(key)}
               size="sm"
               variant="ghost"
-              onClick={() => onChange((d) => ({ ...d, name }))}
+              onClick={() => onChange((d) => ({ ...d, name: t(key) }))}
             />
           ))}
         </HStack>
@@ -262,17 +282,18 @@ function OptionForm({
       <VStack gap={2}>
         <VStack gap={0}>
           <Text type="supporting" weight="medium">
-            Values
+            {t("products.option_values")}
           </Text>
           <Text type="supporting" color="secondary">
-            Renaming a value keeps its variants. Type several separated by commas, or press Enter
-            after each.
+            {t("products.option_values_hint")}
           </Text>
         </VStack>
-        {option.values.map((v, i) => (
+        {option.values.map((v, i) => {
+          const value = { named: v.label ? "yes" : "no", value: v.label };
+          return (
           <HStack key={v.key} gap={1} vAlign="center">
             <TextInput
-              label={`Value ${i + 1} of ${option.name || "this option"}`}
+              label={t("products.option_value_label", { ...named, number: i + 1 })}
               isLabelHidden
               size="sm"
               value={v.label}
@@ -281,17 +302,17 @@ function OptionForm({
               }
               status={
                 v.label.trim() === ""
-                  ? { type: "error", message: "Enter a value or remove it." }
+                  ? { type: "error", message: t("products.option_value_blank") }
                   : isRepeated(i)
-                    ? { type: "error", message: "This option already has this value." }
+                    ? { type: "error", message: t("products.option_value_repeated") }
                     : undefined
               }
               statusVariant="detached"
               width={240}
             />
             <IconButton
-              label={`Move ${v.label || "value"} up`}
-              tooltip="Move up"
+              label={t("products.option_value_move_up", value)}
+              tooltip={t("products.move_up")}
               size="sm"
               variant="ghost"
               icon={<ArrowUpIcon width={14} />}
@@ -299,8 +320,8 @@ function OptionForm({
               onClick={() => moveValue(i, i - 1)}
             />
             <IconButton
-              label={`Move ${v.label || "value"} down`}
-              tooltip="Move down"
+              label={t("products.option_value_move_down", value)}
+              tooltip={t("products.move_down")}
               size="sm"
               variant="ghost"
               icon={<ArrowDownIcon width={14} />}
@@ -308,20 +329,25 @@ function OptionForm({
               onClick={() => moveValue(i, i + 1)}
             />
             <IconButton
-              label={`Remove ${v.label || "value"}`}
-              tooltip="Remove value"
+              label={t("products.option_value_remove", value)}
+              tooltip={t("products.option_value_remove_tooltip")}
               size="sm"
               variant="ghost"
               icon={<TrashIcon width={14} />}
               onClick={() => setValues(option.values.filter((x) => x.key !== v.key))}
             />
           </HStack>
-        ))}
+          );
+        })}
         <TextInput
-          label={`Add values to ${option.name || "this option"}`}
+          label={t("products.option_add_values_label", named)}
           isLabelHidden
           size="sm"
-          placeholder={option.values.length === 0 ? "S, M, L" : "Add a value"}
+          placeholder={
+            option.values.length === 0
+              ? t("products.option_add_values_placeholder_first")
+              : t("products.option_add_values_placeholder")
+          }
           value={option.adding}
           onChange={(adding) =>
             // A pasted or typed comma adds what's before it.
@@ -342,9 +368,9 @@ function OptionForm({
       </VStack>
 
       <HStack gap={2}>
-        <Button label="Done" variant="secondary" size="sm" onClick={onDone} />
+        <Button label={t("common.done")} variant="secondary" size="sm" onClick={onDone} />
         <Button
-          label="Remove option"
+          label={t("products.option_remove")}
           variant="ghost"
           size="sm"
           icon={<TrashIcon width={16} />}

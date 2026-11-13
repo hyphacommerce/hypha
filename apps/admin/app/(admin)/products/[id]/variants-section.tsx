@@ -23,6 +23,8 @@ import { useEffect, useState, useTransition } from "react";
 import { VariantFieldsCell } from "@/components/custom-fields/variant-fields";
 import type { Definition } from "@/lib/custom-fields";
 import { incomingLabel } from "@/lib/inventory";
+import type { TFor } from "@/lib/messages";
+import { useT } from "@/lib/use-t";
 
 import {
   type Stock,
@@ -84,6 +86,7 @@ export function VariantsSection({
   variantFields?: { definitions: Definition[]; scopes: readonly string[] | null };
   onChange: (change: Partial<Draft>) => void;
 }) {
+  const t = useT<"products">();
   const [isAdding, setIsAdding] = useState(false);
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -98,7 +101,7 @@ export function VariantsSection({
   const images = product.media.filter((item) => item.kind === "image");
   const rows = kept(draft);
   const missing = missingCombinations(draft);
-  const title = (v: VariantDraft) => variantTitle(draft, v) ?? "Default";
+  const title = (v: VariantDraft) => variantTitle(draft, v) ?? t("common.default");
   const needle = filter.trim().toLowerCase();
   const shown = needle
     ? rows.filter((v) => `${title(v)} ${v.sku}`.toLowerCase().includes(needle))
@@ -122,7 +125,7 @@ export function VariantsSection({
       return next;
     });
   const createMissing = () => {
-    const result = withAllCombinations(draft);
+    const result = withAllCombinations(draft, t);
     if ("error" in result) {
       setMessage({ status: "error", text: result.error, variants: draft.variants });
       return;
@@ -132,7 +135,7 @@ export function VariantsSection({
     setMessage({
       variants: result.draft.variants,
       status: "success",
-      text: `Added ${added === 1 ? "a variant" : `${added} variants`} priced like the first: check their prices, then save.`,
+      text: t("products.variants_added", { count: added }),
     });
   };
 
@@ -144,7 +147,7 @@ export function VariantsSection({
             key: "select",
             header: (
               <CheckboxInput
-                label="Select all shown variants"
+                label={t("products.variants_select_all")}
                 isLabelHidden
                 size="sm"
                 value={
@@ -166,7 +169,7 @@ export function VariantsSection({
             resizable: false,
             renderCell: ({ variant }: Row) => (
               <CheckboxInput
-                label={`Select ${title(variant)}`}
+                label={t("products.variant_select", { variant: title(variant) })}
                 isLabelHidden
                 size="sm"
                 value={selected.has(variant.key)}
@@ -178,7 +181,7 @@ export function VariantsSection({
       : []),
     {
       key: "variant",
-      header: "Variant",
+      header: t("common.variant"),
       width: proportional(2, { minWidth: 120 }),
       renderCell: ({ variant }) => (
         <HStack gap={2} vAlign="center">
@@ -194,11 +197,11 @@ export function VariantsSection({
     },
     {
       key: "sku",
-      header: "SKU",
+      header: t("common.sku"),
       width: proportional(1.5, { minWidth: 96 }),
       renderCell: ({ variant }) => (
         <TextInput
-          label={`SKU of ${title(variant)}`}
+          label={t("products.variant_sku_label", { variant: title(variant) })}
           isLabelHidden
           size="sm"
           value={variant.sku}
@@ -210,11 +213,11 @@ export function VariantsSection({
     },
     {
       key: "price",
-      header: `Price (${currency})`,
+      header: t("products.variants_column_price", { currency }),
       width: proportional(1, { minWidth: 84 }),
       renderCell: ({ variant }) => (
         <TextInput
-          label={`Price of ${title(variant)} in ${currency}`}
+          label={t("products.variant_price_label", { variant: title(variant), currency })}
           isLabelHidden
           size="sm"
           value={variant.price}
@@ -225,11 +228,11 @@ export function VariantsSection({
     },
     {
       key: "compare_at",
-      header: `Compare-at (${currency})`,
+      header: t("products.variants_column_compare_at", { currency }),
       width: proportional(1, { minWidth: 84 }),
       renderCell: ({ variant }) => (
         <TextInput
-          label={`Compare-at price of ${title(variant)} in ${currency}`}
+          label={t("products.variant_compare_at_label", { variant: title(variant), currency })}
           isLabelHidden
           size="sm"
           value={variant.compareAt}
@@ -241,11 +244,11 @@ export function VariantsSection({
     },
     {
       key: "weight",
-      header: "Weight (g)",
+      header: t("products.variants_column_weight"),
       width: proportional(1, { minWidth: 72 }),
       renderCell: ({ variant }) => (
         <TextInput
-          label={`Weight of ${title(variant)} in grams`}
+          label={t("products.variant_weight_label", { variant: title(variant) })}
           isLabelHidden
           size="sm"
           value={variant.weight}
@@ -257,13 +260,13 @@ export function VariantsSection({
     },
     {
       key: "ships",
-      header: "Ships",
+      header: t("products.variants_column_ships"),
       width: pixel(64),
       resizable: false,
       align: "center",
       renderCell: ({ variant }) => (
         <CheckboxInput
-          label={`${title(variant)} is shipped`}
+          label={t("products.variant_ships_label", { variant: title(variant) })}
           isLabelHidden
           size="sm"
           value={variant.ships}
@@ -275,7 +278,7 @@ export function VariantsSection({
       ? [
           {
             key: "stock",
-            header: "Stock",
+            header: t("products.variants_column_stock"),
             width: pixel(112),
             resizable: false,
             renderCell: ({ variant }: Row) => {
@@ -290,7 +293,7 @@ export function VariantsSection({
                 />
               ) : (
                 <Text type="supporting" color="secondary">
-                  After saving
+                  {t("products.variants_after_saving")}
                 </Text>
               );
             },
@@ -301,7 +304,7 @@ export function VariantsSection({
       ? [
           {
             key: "fields",
-            header: "Fields",
+            header: t("products.variants_column_fields"),
             width: pixel(96),
             resizable: false,
             renderCell: ({ variant }: Row) =>
@@ -315,7 +318,7 @@ export function VariantsSection({
                 />
               ) : (
                 <Text type="supporting" color="secondary">
-                  After saving
+                  {t("products.variants_after_saving")}
                 </Text>
               ),
           },
@@ -323,14 +326,18 @@ export function VariantsSection({
       : []),
     {
       key: "remove",
-      header: <span className="visually-hidden">Remove</span>,
+      header: <span className="visually-hidden">{t("common.remove")}</span>,
       width: pixel(52),
       resizable: false,
       align: "end",
       renderCell: ({ variant }) => (
         <IconButton
-          label={`Remove ${title(variant)}`}
-          tooltip={rows.length === 1 ? "A product keeps at least one variant." : "Remove variant"}
+          label={t("products.variant_remove", { variant: title(variant) })}
+          tooltip={
+            rows.length === 1
+              ? t("products.keeps_one_variant")
+              : t("products.variant_remove_tooltip")
+          }
           size="sm"
           variant="ghost"
           icon={<TrashIcon width={16} />}
@@ -347,11 +354,12 @@ export function VariantsSection({
         <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Variants{rows.length > 1 ? ` (${rows.length})` : ""}
+              {rows.length > 1
+                ? t("products.variants_title_count", { count: rows.length })
+                : t("common.variants")}
             </Text>
             <Text type="supporting" color="secondary">
-              Base prices in {currency}, before markets and price lists adjust them. A compare-at
-              price shows struck through beside the price, when it&apos;s higher.
+              {t("products.variants_hint", { currency })}
             </Text>
           </VStack>
           {hasOptions && (
@@ -360,17 +368,17 @@ export function VariantsSection({
                 <Button
                   label={
                     missing === null
-                      ? "Create all variants"
-                      : `Create ${missing === 1 ? "the missing variant" : `${missing} missing variants`}`
+                      ? t("products.variants_create_all")
+                      : t("products.variants_create_missing", { count: missing })
                   }
                   variant="primary"
                   size="sm"
-                  tooltip="A variant for every combination of values that doesn't have one."
+                  tooltip={t("products.variants_create_tooltip")}
                   onClick={createMissing}
                 />
               )}
               <Button
-                label="Add variant"
+                label={t("products.variant_add")}
                 variant="secondary"
                 size="sm"
                 icon={<PlusIcon width={16} />}
@@ -386,9 +394,9 @@ export function VariantsSection({
 
         {rows.length > FILTER_FROM && (
           <TextInput
-            label="Filter variants"
+            label={t("products.variants_filter_label")}
             isLabelHidden
-            placeholder="Filter by value or SKU"
+            placeholder={t("products.variants_filter_placeholder")}
             startIcon={<MagnifyingGlassIcon width={16} />}
             size="sm"
             value={filter}
@@ -418,7 +426,11 @@ export function VariantsSection({
           idKey="key"
           columns={columns}
         />
-        {shown.length === 0 && <Text color="secondary">No variant matches “{filter.trim()}”.</Text>}
+        {shown.length === 0 && (
+          <Text color="secondary">
+            {t("products.variants_no_match", { filter: filter.trim() })}
+          </Text>
+        )}
       </VStack>
       {isAdding && (
         <AddVariantDialog
@@ -451,6 +463,7 @@ function BulkBar({
   onRemove: () => void;
   onClear: () => void;
 }) {
+  const t = useT<"products">();
   const [price, setPrice] = useState("");
   const [weight, setWeight] = useState("");
 
@@ -463,20 +476,20 @@ function BulkBar({
       }}
     >
       <HStack gap={3} vAlign="center" wrap="wrap">
-        <Text weight="medium">{count === 1 ? "1 selected" : `${count} selected`}</Text>
+        <Text weight="medium">{t("common.selected_count", { count })}</Text>
         <HStack gap={1} vAlign="center">
           <TextInput
-            label={`Price for the selected variants in ${currency}`}
+            label={t("products.variants_bulk_price_label", { currency })}
             isLabelHidden
             size="sm"
-            placeholder={`Price (${currency})`}
+            placeholder={t("products.variants_column_price", { currency })}
             value={price}
             onChange={setPrice}
             onEnter={() => price.trim() && onSet({ price })}
             width={130}
           />
           <Button
-            label="Set price"
+            label={t("products.variants_bulk_set_price")}
             size="sm"
             variant="secondary"
             isDisabled={price.trim() === ""}
@@ -485,32 +498,32 @@ function BulkBar({
         </HStack>
         <HStack gap={1} vAlign="center">
           <TextInput
-            label="Weight for the selected variants in grams"
+            label={t("products.variants_bulk_weight_label")}
             isLabelHidden
             size="sm"
-            placeholder="Weight (g)"
+            placeholder={t("products.variants_column_weight")}
             value={weight}
             onChange={setWeight}
             onEnter={() => onSet({ weight })}
             width={110}
           />
           <Button
-            label="Set weight"
+            label={t("products.variants_bulk_set_weight")}
             size="sm"
             variant="secondary"
             onClick={() => onSet({ weight })}
           />
         </HStack>
         <Button
-          label="Remove"
+          label={t("common.remove")}
           size="sm"
           variant="ghost"
           icon={<TrashIcon width={16} />}
           isDisabled={!canRemove}
-          tooltip={canRemove ? undefined : "A product keeps at least one variant."}
+          tooltip={canRemove ? undefined : t("products.keeps_one_variant")}
           onClick={onRemove}
         />
-        <Button label="Clear selection" size="sm" variant="ghost" onClick={onClear} />
+        <Button label={t("products.variants_bulk_clear")} size="sm" variant="ghost" onClick={onClear} />
       </HStack>
     </div>
   );
@@ -530,6 +543,7 @@ function VariantImage({
   title: string;
   images: Item[];
 }) {
+  const t = useT<"products">();
   const [isPicking, setIsPicking] = useState(false);
   const image = images.find((item) => item.asset_id === saved?.media_asset_id);
   return (
@@ -540,9 +554,9 @@ function VariantImage({
         label={
           saved
             ? image
-              ? `Change the image of ${title}`
-              : `Choose an image for ${title}`
-            : `Save ${title} before choosing its image`
+              ? t("products.variant_image_change", { variant: title })
+              : t("products.variant_image_choose", { variant: title })
+            : t("products.variant_image_unsaved", { variant: title })
         }
         onClick={saved ? () => setIsPicking(true) : undefined}
         className="variant-thumbnail"
@@ -575,14 +589,15 @@ function StockCell({
   stock?: Stock;
   locations: Location[];
 }) {
+  const t = useT<"products">();
   const [isEditing, setIsEditing] = useState(false);
   return (
     <>
       <Button
-        label={stockLabel(stock)}
+        label={stockLabel(stock, t)}
         size="sm"
         variant="ghost"
-        tooltip={`Stock of ${title}`}
+        tooltip={t("products.stock_of", { variant: title })}
         onClick={() => setIsEditing(true)}
       />
       {isEditing && (
@@ -600,11 +615,11 @@ function StockCell({
 }
 
 /** "12 in stock", "Untracked", or "Stock" when it hasn't been read. */
-function stockLabel(stock?: Stock): string {
-  if (!stock) return "Stock";
-  if (stock.id == null || !stock.tracked) return "Untracked";
+function stockLabel(stock: Stock | undefined, t: TFor<"products">): string {
+  if (!stock) return t("products.variants_column_stock");
+  if (stock.id == null || !stock.tracked) return t("products.stock_untracked");
   const available = stock.levels.reduce((n, level) => n + level.available, 0);
-  return `${available} in stock`;
+  return t("products.stock_available", { count: available });
 }
 
 /**
@@ -626,6 +641,7 @@ function StockDialog({
   locations: Location[];
   onClose: () => void;
 }) {
+  const t = useT<"products">();
   const [stock, setStock] = useState<Stock | undefined>(initial);
   const [form, setForm] = useState(() => formOf(initial, locations));
   const [error, setError] = useState<string>();
@@ -651,7 +667,7 @@ function StockDialog({
       const typed = form.counts[location.id] ?? "";
       const onHand = Number(typed);
       if (form.tracked && (typed.trim() === "" || !Number.isInteger(onHand))) {
-        setError(`Enter the count at ${location.name} as a whole number.`);
+        setError(t("products.stock_error_count", { location: location.name }));
         return;
       }
       const expected = stock.levels.find((l) => l.location === location.id)?.on_hand ?? null;
@@ -676,38 +692,41 @@ function StockDialog({
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={480} purpose="form">
       <DialogHeader
-        title={`Stock of ${title}`}
-        subtitle="Saved at once, apart from the product's other changes."
+        title={t("products.stock_of", { variant: title })}
+        subtitle={t("products.stock_dialog_subtitle")}
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
         <CheckboxInput
-          label="Track stock"
-          description="Untracked variants are always sellable."
+          label={t("products.stock_track")}
+          description={t("products.stock_track_description")}
           value={form.tracked}
           onChange={(tracked) => setForm((before) => ({ ...before, tracked }))}
         />
         {form.tracked && (
           <>
             <CheckboxInput
-              label="Keep selling when it's out of stock"
+              label={t("products.stock_continue_selling")}
               value={form.continueSelling}
               onChange={(continueSelling) => setForm((before) => ({ ...before, continueSelling }))}
             />
             {locations.length === 0 ? (
-              <Text color="secondary">The store has no locations to keep stock at.</Text>
+              <Text color="secondary">{t("products.stock_no_locations")}</Text>
             ) : (
               locations.map((location) => {
                 const level = stock?.levels.find((l) => l.location === location.id);
                 return (
                   <NumberInput
                     key={location.id}
-                    label={`On hand at ${location.name}`}
+                    label={t("products.stock_on_hand", { location: location.name })}
                     description={
                       [
                         level && level.reserved > 0
-                          ? `${level.reserved} reserved for orders, ${level.available} available.`
+                          ? t("products.stock_reserved", {
+                              reserved: level.reserved,
+                              available: level.available,
+                            })
                           : null,
                         level && incomingLabel(level) ? `${incomingLabel(level)}.` : null,
                       ]
@@ -735,9 +754,9 @@ function StockDialog({
               })
             )}
             <TextInput
-              label="Note"
+              label={t("common.note")}
               isOptional
-              description="Why the counts changed, for the stock history."
+              description={t("products.stock_note_description")}
               value={form.note}
               onChange={(note) => setForm((before) => ({ ...before, note }))}
             />
@@ -746,14 +765,14 @@ function StockDialog({
         <HStack gap={2} hAlign="end">
           {stock?.id != null && (
             <Button
-              label="History"
+              label={t("products.stock_history")}
               variant="ghost"
               href={`/inventory/${stock.id}?product=${productId}`}
             />
           )}
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label="Save stock"
+            label={t("products.stock_save")}
             variant="primary"
             isLoading={isPending}
             isDisabled={!stock || isLoading}
@@ -793,6 +812,7 @@ function VariantImageDialog({
   images: Item[];
   onClose: () => void;
 }) {
+  const t = useT<"products">();
   const [chosen, setChosen] = useState<string | null>(variant.media_asset_id ?? null);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -800,20 +820,20 @@ function VariantImageDialog({
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={560}>
       <DialogHeader
-        title={`Image for ${title}`}
-        subtitle="One of the product's images."
+        title={t("products.variant_image_title", { variant: title })}
+        subtitle={t("products.variant_image_subtitle")}
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
         {images.length === 0 ? (
-          <Text color="secondary">Add images to the product first, in Media above.</Text>
+          <Text color="secondary">{t("products.variant_image_none")}</Text>
         ) : (
           <Grid columns={{ minWidth: 110 }} gap={2}>
             {images.map((item) => (
               <SelectableCard
                 key={item.asset_id}
-                label={item.alt ?? "Product image"}
+                label={item.alt ?? t("products.variant_image_alt")}
                 isSelected={chosen === item.asset_id}
                 onChange={(isSelected) => setChosen(isSelected ? item.asset_id : null)}
                 padding={0}
@@ -826,9 +846,9 @@ function VariantImageDialog({
           </Grid>
         )}
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label={chosen ? "Use this image" : "Show no image"}
+            label={chosen ? t("products.variant_image_use") : t("products.variant_image_clear")}
             variant="primary"
             isLoading={isPending}
             isDisabled={chosen === (variant.media_asset_id ?? null)}
@@ -859,6 +879,7 @@ function AddVariantDialog({
   onAdd: (change: Partial<Draft>) => void;
   onClose: () => void;
 }) {
+  const t = useT<"products">();
   // A value typed but not yet entered can be chosen too.
   const [draft] = useState(() => withTypedValues(current));
   const [selections, setSelections] = useState<Record<string, string>>({});
@@ -887,33 +908,41 @@ function AddVariantDialog({
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={480} purpose="form">
       <DialogHeader
-        title="Add variant"
-        subtitle="It's saved with the rest of your changes."
+        title={t("products.variant_add")}
+        subtitle={t("products.variant_add_subtitle")}
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={4} padding={4}>
         {draft.options.map((option) => (
           <Selector
             key={option.key}
-            label={option.name || "Option"}
-            placeholder={`Choose a ${(option.name || "value").toLowerCase()}`}
+            label={option.name || t("products.variant_add_option_fallback")}
+            placeholder={t("products.variant_add_choose", {
+              named: option.name ? "yes" : "no",
+              option: option.name.toLowerCase(),
+            })}
             options={valuesOf(option).map((value) => ({ value: value.key, label: value.label }))}
             value={selections[option.key]}
             onChange={(value) => setSelections((before) => ({ ...before, [option.key]: value }))}
           />
         ))}
-        {isTaken && <Banner status="warning" title="A variant already has these values." />}
-        <TextInput label="SKU" isOptional value={sku} onChange={setSku} onEnter={submit} />
+        {isTaken && <Banner status="warning" title={t("products.variant_add_taken")} />}
+        <TextInput label={t("common.sku")} isOptional value={sku} onChange={setSku} onEnter={submit} />
         <TextInput
-          label={`Price (${currency})`}
+          label={t("products.variants_column_price", { currency })}
           placeholder="18.00"
           value={price}
           onChange={setPrice}
           onEnter={submit}
         />
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
-          <Button label="Add variant" variant="primary" isDisabled={!isComplete} onClick={submit} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
+          <Button
+            label={t("products.variant_add")}
+            variant="primary"
+            isDisabled={!isComplete}
+            onClick={submit}
+          />
         </HStack>
       </VStack>
     </Dialog>

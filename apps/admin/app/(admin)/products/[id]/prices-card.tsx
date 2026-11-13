@@ -22,11 +22,11 @@ import {
 } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
-import { useEffect, useEffectEvent, useState, useTransition } from "react";
+import { type ReactNode, useEffect, useEffectEvent, useState, useTransition } from "react";
 
-import { useCurrencies } from "@/components/currencies";
-import { formatMoney } from "@/lib/format";
 import { candidateReason } from "@/lib/price-lists";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { type ProductPrices, productPrices } from "../actions";
 
@@ -58,6 +58,7 @@ export function PricesCard({
   /** "M / Blue" by variant ID; null for a product without options. */
   variantTitles: Record<string, string | null>;
 }) {
+  const t = useT<"products">();
   const [prices, setPrices] = useState(initial);
   const [quantity, setQuantity] = useState("1");
   const [group, setGroup] = useState(GUEST);
@@ -90,41 +91,42 @@ export function PricesCard({
         <HStack gap={3} hAlign="between" vAlign="end" wrap="wrap">
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Prices
+              {t("products.prices_title")}
             </Text>
             <Text type="supporting" color="secondary">
-              What shoppers in each market pay now: the lowest live price among the market&apos;s
-              price lists, or the base price where none prices a variant.
+              {t("products.prices_hint")}
             </Text>
           </VStack>
           <HStack gap={3} vAlign="end" wrap="wrap">
             {groups.length > 0 && (
               <Selector
-                label="Customer"
-                description="Price lists for a group count once its customers sign in."
-                options={[{ value: GUEST, label: "Not signed in" }, ...groups]}
+                label={t("common.customer")}
+                description={t("products.prices_customer_description")}
+                options={[{ value: GUEST, label: t("products.prices_guest") }, ...groups]}
                 value={group}
                 onChange={setGroup}
                 width={220}
               />
             )}
             <TextInput
-              label="Quantity"
-              description="Of each variant, for quantity breaks."
+              label={t("common.quantity")}
+              description={t("products.prices_quantity_description")}
               value={quantity}
               onChange={setQuantity}
               status={
-                wanted === null ? { type: "error", message: "A whole number from 1." } : undefined
+                wanted === null
+                  ? { type: "error", message: t("products.prices_quantity_error") }
+                  : undefined
               }
               isLoading={isPending}
               width={160}
             />
-            <Switch label="Show every list" value={isWhyShown} onChange={setIsWhyShown} />
+            <Switch label={t("products.prices_show_every_list")} value={isWhyShown} onChange={setIsWhyShown} />
           </HStack>
         </HStack>
         {error && <Banner status="error" title={error} />}
         {prices.markets.length === 0 ? (
-          <Text color="secondary">No market sells it yet: add it to a market&apos;s catalog.</Text>
+          <Text color="secondary">{t("products.prices_no_market")}</Text>
         ) : (
           <div
             className="pending-content"
@@ -160,7 +162,8 @@ function MarketTable({
   variantTitles: Record<string, string | null>;
   isWhyShown: boolean;
 }) {
-  const currencies = useCurrencies();
+  const t = useT<"products">();
+  const format = useFormat();
   return (
     <VStack gap={2}>
       <HStack gap={2} vAlign="center" wrap="wrap">
@@ -168,17 +171,19 @@ function MarketTable({
           {name}
         </Link>
         <Text type="supporting" color="secondary">
-          {market.currency} ·{" "}
-          {market.prices_include_tax ? "prices include tax" : "prices exclude tax"}
+          {t("products.prices_market_facts", {
+            currency: market.currency,
+            tax: market.prices_include_tax ? "included" : "excluded",
+          })}
         </Text>
       </HStack>
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHeaderCell>Variant</TableHeaderCell>
-            <TableHeaderCell>Price</TableHeaderCell>
-            <TableHeaderCell>Set by</TableHeaderCell>
-            <TableHeaderCell>Quantity breaks</TableHeaderCell>
+            <TableHeaderCell>{t("common.variant")}</TableHeaderCell>
+            <TableHeaderCell>{t("common.price")}</TableHeaderCell>
+            <TableHeaderCell>{t("products.prices_column_set_by")}</TableHeaderCell>
+            <TableHeaderCell>{t("products.prices_column_breaks")}</TableHeaderCell>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -186,22 +191,22 @@ function MarketTable({
             const winner = v.candidates.find((c) => c.price_list === v.price_list);
             return (
               <TableRow key={v.variant}>
-                <TableCell>{variantTitles[v.variant] ?? "Default"}</TableCell>
+                <TableCell>{variantTitles[v.variant] ?? t("common.default")}</TableCell>
                 <TableCell>
                   {v.problem ? (
                     <Text color="secondary">{v.problem.message}</Text>
                   ) : v.price ? (
                     <HStack gap={2} vAlign="center" wrap="wrap">
-                      <Text weight="medium">{formatMoney(v.price, currencies)}</Text>
+                      <Text weight="medium">{format.money(v.price)}</Text>
                       {v.compare_at_price && (
                         <Text color="secondary">
-                          <s>{formatMoney(v.compare_at_price, currencies)}</s>
+                          <s>{format.money(v.compare_at_price)}</s>
                         </Text>
                       )}
-                      {v.on_sale && <Badge label="On sale" variant="pink" />}
+                      {v.on_sale && <Badge label={t("products.prices_on_sale")} variant="pink" />}
                     </HStack>
                   ) : (
-                    <Text color="secondary">—</Text>
+                    <Text color="secondary">{t("common.empty_value")}</Text>
                   )}
                 </TableCell>
                 <TableCell>
@@ -211,33 +216,53 @@ function MarketTable({
                         {winner?.name ?? v.price_list}
                       </Link>
                     ) : (
-                      <Text color="secondary">Base price</Text>
+                      <Text color="secondary">{t("products.prices_base")}</Text>
                     )}
                     {isWhyShown &&
                       v.candidates
                         .filter((c) => c.price_list !== v.price_list)
-                        .map((c) => (
-                          <Text key={c.price_list} type="supporting" color="secondary">
-                            <Link href={`/markets/price-lists/${c.price_list}`}>{c.name}</Link>
-                            {c.price ? ` (${formatMoney(c.price, currencies)})` : ""}:{" "}
-                            {candidateReason(c.result, c.phase)}
-                          </Text>
-                        ))}
+                        .map((c) => {
+                          const link = (chunks: ReactNode, key: string) => (
+                            <Link key={key} href={`/markets/price-lists/${c.price_list}`}>
+                              {chunks}
+                            </Link>
+                          );
+                          const reason = candidateReason(c.result, c.phase);
+                          return (
+                            <Text key={c.price_list} type="supporting" color="secondary">
+                              {c.price
+                                ? t.rich("products.prices_candidate_priced", {
+                                    link,
+                                    name: c.name,
+                                    price: format.money(c.price),
+                                    reason,
+                                  })
+                                : t.rich("products.prices_candidate", {
+                                    link,
+                                    name: c.name,
+                                    reason,
+                                  })}
+                            </Text>
+                          );
+                        })}
                     {isWhyShown && v.candidates.length === 0 && (
                       <Text type="supporting" color="secondary">
-                        The market has no price lists.
+                        {t("products.prices_no_lists")}
                       </Text>
                     )}
                   </VStack>
                 </TableCell>
                 <TableCell>
                   {v.price_breaks.length === 0 ? (
-                    <Text color="secondary">—</Text>
+                    <Text color="secondary">{t("common.empty_value")}</Text>
                   ) : (
                     <VStack gap={0}>
                       {v.price_breaks.map((b) => (
                         <Text key={b.min_quantity} type="supporting">
-                          {formatMoney(b.price, currencies)} each from {b.min_quantity}
+                          {t("products.prices_break", {
+                            price: format.money(b.price),
+                            quantity: b.min_quantity,
+                          })}
                         </Text>
                       ))}
                     </VStack>

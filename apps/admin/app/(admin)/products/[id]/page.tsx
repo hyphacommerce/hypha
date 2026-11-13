@@ -12,18 +12,12 @@ import { DateTime } from "@/components/date-time";
 import { type Crumb, PageHeader } from "@/components/page-header";
 import { CardSkeleton, DetailSkeleton } from "@/components/skeletons";
 import { ProductStatusBadge } from "@/components/status";
-import { type Currencies, formatMoney } from "@/lib/format";
 import { loadExtensions } from "@/lib/app-extensions";
 import { definitionsOf } from "@/lib/custom-fields-server";
-import {
-  describe,
-  isMissingScope,
-  loadCurrencies,
-  loaded,
-  requireStaff,
-  sessionClient,
-} from "@/lib/hypha";
+import { type Format, getFormat } from "@/lib/get-format";
+import { describe, isMissingScope, loaded, requireStaff, sessionClient } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
+import type { T } from "@/lib/messages";
 
 import type { Stock } from "../actions";
 import { MediaSection } from "./media-section";
@@ -37,8 +31,6 @@ type Product = AdminSchemas["ProductResponse"];
  * page's one read stays small. */
 const STOCK_PRELOAD = 500;
 
-const BACK: Crumb = { label: "Products", href: "/products" };
-
 /**
  * A product. Details, content, publishing, categories, options and variants are one draft
  * saved with a bar; status, stock and media act at once. The media section, which has
@@ -46,19 +38,20 @@ const BACK: Crumb = { label: "Products", href: "/products" };
  * once; the product streams in behind a skeleton of the page.
  */
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+  const [{ id }, t] = await Promise.all([params, getT()]);
+  const back: Crumb = { label: t("common.products"), href: "/products" };
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={1320}>
-        <Suspense fallback={<DetailSkeleton back={BACK} />}>
-          <ProductDetail id={id} />
+        <Suspense fallback={<DetailSkeleton back={back} />}>
+          <ProductDetail id={id} back={back} />
         </Suspense>
       </VStack>
     </Section>
   );
 }
 
-async function ProductDetail({ id }: { id: string }) {
+async function ProductDetail({ id, back }: { id: string; back: Crumb }) {
   const client = await sessionClient();
   const [
     product,
@@ -66,7 +59,7 @@ async function ProductDetail({ id }: { id: string }) {
     categories,
     locations,
     inventory,
-    currencies,
+    format,
     extensions,
     productDefinitions,
     variantDefinitions,
@@ -83,7 +76,7 @@ async function ProductDetail({ id }: { id: string }) {
     // Alongside the product rather than after it: one round trip less, at the price of
     // a read that goes unused for the rare product with more variants than we preload.
     client.GET("/admin/products/{id}/inventory", { params: { path: { id } } }),
-    loadCurrencies(),
+    getFormat(),
     // What installed apps add to a product.
     loadExtensions(),
     // Its custom fields and its variants': none shown without
@@ -100,30 +93,30 @@ async function ProductDetail({ id }: { id: string }) {
     <>
       <PageHeader
         title={product.title}
-        back={BACK}
+        back={back}
         badges={<ProductStatusBadge status={product.status} t={t} />}
         actions={<StatusActions id={product.id} title={product.title} status={product.status} />}
       />
 
       <ProductEditor
         product={product}
-        summary={<SummaryCard product={product} currencies={currencies} />}
+        summary={<SummaryCard product={product} t={t} format={format} />}
         channels={channels.data?.items}
         media={<MediaSection id={product.id} media={product.media} />}
         identifiers={
           <Card>
-            <MetadataList title="Identifiers">
-              <MetadataListItem label="Product ID">
+            <MetadataList title={t("products.identifiers")}>
+              <MetadataListItem label={t("products.product_id")}>
                 <Text type="supporting" color="secondary">
                   {product.id}
                 </Text>
               </MetadataListItem>
-              <MetadataListItem label="Created">
+              <MetadataListItem label={t("common.created")}>
                 <Text type="supporting">
                   <DateTime value={product.created_at} />
                 </Text>
               </MetadataListItem>
-              <MetadataListItem label="Last changed">
+              <MetadataListItem label={t("products.last_changed")}>
                 <Text type="supporting">
                   <DateTime value={product.updated_at} />
                 </Text>
@@ -165,18 +158,19 @@ async function ProductDetail({ id }: { id: string }) {
  */
 async function ProductPrices({ product }: { product: Product }) {
   const client = await sessionClient();
-  const [prices, markets, groups] = await Promise.all([
+  const [prices, markets, groups, t] = await Promise.all([
     client.GET("/admin/products/{id}/prices", { params: { path: { id: product.id } } }),
     client.GET("/admin/markets"),
     // Without `customers:read`, none: the card prices for guests only.
     client.GET("/admin/customer-groups"),
+    getT(),
   ]);
   if (!prices.data) {
     if (isMissingScope(prices)) return null;
     return (
       <Banner
         status="error"
-        title="The product's prices couldn't be read"
+        title={t("products.prices_unreadable_title")}
         description={prices.error ? await describe(prices.error) : undefined}
       />
     );
@@ -200,36 +194,35 @@ function stockOf(product: Product, items: Stock[]): Record<string, Stock> {
 }
 
 /** At a glance: what status means for shoppers, how many variants, what they cost. */
-function SummaryCard({ product, currencies }: { product: Product; currencies: Currencies }) {
+function SummaryCard({ product, t, format }: { product: Product; t: T; format: Format }) {
   const amounts = product.variants.map((v) => v.price.amount);
   const currency = product.variants[0]?.price.currency ?? "EUR";
   const low = Math.min(...amounts);
   const high = Math.max(...amounts);
-  const price = (amount: number) => formatMoney({ amount, currency }, currencies);
-  const status = {
-    active: "Shoppers can buy it in the channels it's published to.",
-    draft: "Only staff see it. Make it active to sell it.",
-    archived: "Hidden from shoppers and from the default product list.",
-  }[product.status];
+  const price = (amount: number) => format.money({ amount, currency });
 
   return (
     <Card>
       <VStack gap={3}>
         <Text type="display-3" as="h2">
-          Summary
+          {t("common.summary")}
         </Text>
         <Text type="supporting" color="secondary">
-          {status}
+          {t(`products.summary_status_${product.status}`)}
         </Text>
         <MetadataList>
-          <MetadataListItem label="Variants">
-            <Text>{product.variants.length}</Text>
+          <MetadataListItem label={t("common.variants")}>
+            <Text>{format.number(product.variants.length)}</Text>
           </MetadataListItem>
-          <MetadataListItem label="Price">
-            <Text>{low === high ? price(low) : `${price(low)} – ${price(high)}`}</Text>
+          <MetadataListItem label={t("common.price")}>
+            <Text>
+              {low === high
+                ? price(low)
+                : t("products.price_range", { min: price(low), max: price(high) })}
+            </Text>
           </MetadataListItem>
-          <MetadataListItem label="Media">
-            <Text>{product.media.length}</Text>
+          <MetadataListItem label={t("products.media")}>
+            <Text>{format.number(product.media.length)}</Text>
           </MetadataListItem>
         </MetadataList>
       </VStack>
