@@ -12,19 +12,17 @@ import { Token } from "@astryxdesign/core/Token";
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { useState } from "react";
 
-import type { KeyIn } from "@/lib/messages";
 import { useFormat } from "@/lib/use-format";
 import { useT } from "@/lib/use-t";
 
 import { type Draft, type OptionDraft, newKey, orphaned, variantTitle } from "./draft";
 
-/** Names offered for a new option, the ones most products use. */
-const COMMON_NAMES: KeyIn<"products">[] = [
-  "products.option_common_size",
-  "products.option_common_color",
-  "products.option_common_material",
-  "products.option_common_style",
-];
+/**
+ * Names offered for a new option, the ones most products use. Not translated: a click
+ * writes the word into the option's name, which is stored content in the store's
+ * language, not the staff member's.
+ */
+const COMMON_NAMES = ["Size", "Color", "Material", "Style"];
 
 /** Labels typed or pasted into "Add values", split on commas and new lines. */
 const splitLabels = (text: string) =>
@@ -267,13 +265,13 @@ function OptionForm({
           <Text type="supporting" color="secondary">
             {t("products.option_common")}
           </Text>
-          {COMMON_NAMES.map((key) => (
+          {COMMON_NAMES.map((name) => (
             <Button
-              key={key}
-              label={t(key)}
+              key={name}
+              label={name}
               size="sm"
               variant="ghost"
-              onClick={() => onChange((d) => ({ ...d, name: t(key) }))}
+              onClick={() => onChange((d) => ({ ...d, name }))}
             />
           ))}
         </HStack>
