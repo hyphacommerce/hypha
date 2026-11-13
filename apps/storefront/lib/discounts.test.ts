@@ -371,7 +371,6 @@ test("promotion badges list each title once, at most two", () => {
 test("an English page shows a discount's summary as the API wrote it", () => {
   assert.equal(discountSentence(t, welcome, 2), "10% off everything");
   assert.equal(discountSentence(t, freeShipping, 2), "Free shipping on orders over €50");
-  assert.equal(discountSentence(de, welcome, 2), "10% off everything");
   assert.equal(discountSentence(t, { ...welcome, summary: "" }, 2), null);
 });
 
@@ -379,6 +378,9 @@ test("another language never shows the API's English summary", () => {
   // A reward on items isn't worded: its title says it.
   assert.equal(discountSentence(sr, welcome, 2), null);
   assert.equal(discountSentence(sr, freeShipping, 2), "Besplatna dostava");
+  // German content reads the English catalog: its words would be English too.
+  assert.equal(discountSentence(de, welcome, 2), null);
+  assert.equal(discountSentence(de, freeShipping, 2), null);
 });
 
 /** A sentence with its no-break spaces (Serbian money: "5,00 €") written as spaces. */
@@ -433,7 +435,7 @@ test("a product's promotion summaries show on an English page only", () => {
     { title: "Volume", summary: "" },
   ];
   assert.deepEqual(summarisedPromotions(t, promos), [promos[0]]);
-  assert.deepEqual(summarisedPromotions(de, promos), [promos[0]]);
+  assert.deepEqual(summarisedPromotions(de, promos), []);
   assert.deepEqual(summarisedPromotions(sr, promos), []);
 });
 

@@ -411,10 +411,13 @@ function notEligible(t: TFor<"discounts">, code: string, condition: string): str
   }
 }
 
-/** Whether a page in `language` reads the English catalog: the API's sentences (a
- * discount's `summary`) are English, so only such a page shows them as they are. */
-function readsEnglish(language: string): boolean {
-  return translated(language) === undefined;
+/** Whether a page in `language` is in English: the API's sentences (a discount's
+ * `summary`) are English, so only such a page shows them as they are. A page in a
+ * language without a catalog (`de`) reads the English catalog for its chrome, but its
+ * content is in that language: an English sentence under a German title would be
+ * neither. */
+function isEnglish(language: string): boolean {
+  return language.toLowerCase().split("-")[0] === "en";
 }
 
 /** The one amount `amounts` (by market) has in `currency`, or `null` when there's none
@@ -431,8 +434,9 @@ function amountIn(amounts: Readonly<Record<string, Money>>, currency: string): M
 
 /**
  * What an applied discount gave, as a sentence in the page's language: the API's
- * `summary` on an English page, else one built from its reward where that reads simply
- * (off the order, off shipping), else `null`, leaving its title to say it. A reward on
+ * `summary` on an English page, else, in a language with a catalog, one built from its
+ * reward where that reads simply (off the order, off shipping), else `null`, leaving its
+ * title to say it. A reward on
  * items is never worded: a "buy X get Y" or a tier reads as a plain percentage off them.
  */
 export function discountSentence(
@@ -440,7 +444,9 @@ export function discountSentence(
   a: Pick<Application, "summary" | "value" | "target" | "amount">,
   digits: number,
 ): string | null {
-  if (readsEnglish(t.language)) return a.summary === "" ? null : a.summary;
+  if (isEnglish(t.language)) return a.summary === "" ? null : a.summary;
+  // No catalog of its own: the sentence would be the English catalog's.
+  if (translated(t.language) === undefined) return null;
   const currency = a.amount.currency;
   const money = (m: Money) => formatMoney(m, digits, t.locale);
   const { value, target } = a;
@@ -485,7 +491,7 @@ export function summarisedPromotions(
   t: TFor<"discounts">,
   promotions: readonly Promotion[],
 ): Promotion[] {
-  return readsEnglish(t.language) ? promotions.filter((p) => p.summary) : [];
+  return isEnglish(t.language) ? promotions.filter((p) => p.summary) : [];
 }
 
 /** The badges a product shows for its promotions: each title once, at most `max`. */
