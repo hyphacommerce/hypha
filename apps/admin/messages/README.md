@@ -298,7 +298,11 @@ generated module, so nobody is shown a raw key; that a shipped language is compl
 CI's rule (`i18n:check` fails for a missing key), not something the admin needs to run. Astryx's own
 strings follow by themselves: the index adds Astryx's shipped catalog for the language
 (`messages/astryx.generated.ts`, `lib/astryx-locales.ts`; `sr-Latn` reads Astryx's
-Cyrillic one through `serbianLatin`).
+Cyrillic one through `serbianLatin`). Where Astryx's catalog lacks keys its English has
+(its 0.7 Serbian has no rich text editor, comments or emoji picker), the admin translates
+them in `astryx-messages/<tag>.json` (flat, Astryx's full keys, ICU like ours), merged over
+Astryx's; `i18n:check` lists every Astryx key a shipped language still lacks, so an Astryx
+upgrade that adds strings fails it until they're translated there.
 
 ## The pseudo-language
 
@@ -313,7 +317,9 @@ never sent to the API.
 
 - `pnpm --filter admin i18n:check` (CI): the generated index is in step, every message is
   valid ICU, keys are snake_case, no language has a key English lacks or other
-  placeholders than English's, every shipped language is complete.
+  placeholders than English's, every shipped language is complete, and so are Astryx's
+  strings for it (Astryx's catalog with `astryx-messages/<tag>.json` over it, against
+  Astryx's English).
 - `i18n/no-literal-text` (in `pnpm lint`; the rule is `scripts/oxlint-i18n.mjs`, shared
   with the storefront) on the whole admin (`adminTranslated` in the root `vite.config.ts`:
   `app/**`, `components/**`, `resources/**`): no literal text between

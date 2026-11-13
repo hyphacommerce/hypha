@@ -12,3 +12,13 @@ export const ASTRYX_LOADERS: Readonly<
   "sr-Latn": () => import("@astryxdesign/core/locales/sr-SP.generated.js"),
   "en-XA": () => import("@astryxdesign/core/locales/pseudo.generated.js"),
 };
+
+/**
+ * The admin's own translations of the Astryx strings a language's shipped catalog lacks
+ * (`astryx-messages/<language>.json`), merged over it.
+ */
+export const ASTRYX_SUPPLEMENTS: Readonly<
+  Record<string, () => Promise<{ default: AstryxCatalog }>>
+> = {
+  "sr-Latn": () => import("../astryx-messages/sr-Latn.json"),
+};
