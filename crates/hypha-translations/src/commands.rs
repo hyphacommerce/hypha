@@ -7,9 +7,16 @@ use hypha_core::{
 use crate::{
     catalog::{ResourceKind, ResourceRef},
     error::TranslationError,
-    repo::{HasTranslations, TranslationFilter, TranslationKey, TranslationRepo, keys},
+    repo::{
+        HasTranslations, TranslationFilter, TranslationKey, TranslationRepo, TranslationSourceRepo,
+        keys,
+    },
     source::Source,
     translation::{FieldInput, Translation},
+    worklist::{
+        Inheritance, ProgressLanguage, TranslationProgress, TranslationState, WorkItem,
+        WorklistFilter, source_digests,
+    },
 };
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -83,6 +90,86 @@ pub async fn get_translations<S: HasTranslations>(
     Ok(ports.translations().for_resource(resource).await?)
 }
 
+/// The kinds a list shows the caller: `kind` alone (refused without its read scopes), or
+/// every kind whose resources they read, in the catalog's order.
+fn readable_kinds(ctx: &Ctx, kind: Option<ResourceKind>) -> Result<Vec<ResourceKind>, AuthError> {
+    ctx.require(Scope::TranslationsRead)?;
+    Ok(match kind {
+        Some(kind) => {
+            require_read(ctx, kind)?;
+            vec![kind]
+        }
+        None => ResourceKind::ALL
+            .into_iter()
+            .filter(|kind| require_read(ctx, *kind).is_ok())
+            .collect(),
+    })
+}
+
+/// A page of the resources with text to translate, by their state in `language`
+/// (`state`, or every state): what's left to translate, for the kinds the caller may read
+/// (`kind` alone, or every kind whose resources they read). In the catalog's order of
+/// kinds, then by resource ID. Each item counts what a regional language inherits from
+/// its base among the store's `languages`.
+pub async fn translation_worklist<S: HasTranslations>(
+    ctx: &Ctx,
+    ports: &S,
+    kind: Option<ResourceKind>,
+    language: Language,
+    languages: StoreLanguages<'_>,
+    state: Option<TranslationState>,
+    page: PageRequest<ResourceRef>,
+) -> Result<Page<WorkItem>, CommandError> {
+    let filter = WorklistFilter {
+        kinds: readable_kinds(ctx, kind)?,
+        inherits: Inheritance::of(&language, languages.default, languages.others),
+        language,
+        state,
+    };
+    Ok(ports.translations().worklist(&filter, page).await?)
+}
+
+/// How far each of the store's other languages covers the text of the kinds the caller
+/// may read (`kind` alone, or every kind whose resources they read), in fields, a
+/// regional one counting what it inherits from its base, and how many of those kinds'
+/// resources are yet to be counted.
+pub async fn translation_progress<S: HasTranslations>(
+    ctx: &Ctx,
+    ports: &S,
+    kind: Option<ResourceKind>,
+    languages: StoreLanguages<'_>,
+) -> Result<TranslationProgress, CommandError> {
+    let kinds = readable_kinds(ctx, kind)?;
+    let counted: Vec<ProgressLanguage> = languages
+        .others
+        .iter()
+        .map(|language| ProgressLanguage {
+            language: language.clone(),
+            inherits: Inheritance::of(language, languages.default, languages.others),
+        })
+        .collect();
+    let repo = ports.translations();
+    Ok(TranslationProgress {
+        languages: repo.progress(&kinds, &counted).await?,
+        pending: repo.pending(&kinds).await?,
+    })
+}
+
+/// Writes `resource`'s digests from `source`, the resource as the host read it now
+/// (`None`: it's gone, and its digests go). Idempotent: what's written is what the
+/// resource is when it runs. Not a command: the host's handler and job call it.
+pub async fn sync_sources<S: HasTranslations>(
+    ports: &S,
+    resource: ResourceRef,
+    source: Option<&Source>,
+) -> Result<(), RepoError> {
+    let digests = source.map(source_digests).unwrap_or_default();
+    ports
+        .translations()
+        .replace_sources(resource, &digests)
+        .await
+}
+
 /// A page of the store's translations, of the kinds the caller may read: `kind` alone,
 /// or every kind whose resources they read.
 pub async fn list_translations<S: HasTranslations>(
@@ -92,19 +179,8 @@ pub async fn list_translations<S: HasTranslations>(
     language: Option<Language>,
     page: PageRequest<TranslationKey>,
 ) -> Result<Page<Translation>, CommandError> {
-    ctx.require(Scope::TranslationsRead)?;
-    let kinds = match kind {
-        Some(kind) => {
-            require_read(ctx, kind)?;
-            vec![kind]
-        }
-        None => ResourceKind::ALL
-            .into_iter()
-            .filter(|kind| require_read(ctx, *kind).is_ok())
-            .collect(),
-    };
     let filter = TranslationFilter {
-        kinds: Some(kinds),
+        kinds: Some(readable_kinds(ctx, kind)?),
         language,
     };
     Ok(ports.translations().list(&filter, page).await?)
@@ -127,6 +203,55 @@ pub async fn put_translation<S: HasTranslations>(
     source: Option<&Source>,
     fields: BTreeMap<String, FieldInput>,
 ) -> Result<Option<Translation>, CommandError> {
+    write_translation(
+        ctx,
+        ports,
+        resource,
+        language,
+        languages,
+        source,
+        |t, source| t.replace(source, fields.clone()),
+    )
+    .await
+}
+
+/// Changes only the fields of a resource's translation into `language` that `fields`
+/// names: a value sets one (blank removes it), `None` removes it, and every field left
+/// out stays. Creates the translation when there's none; one left with no field is
+/// deleted (`None`). Otherwise as `put_translation`.
+pub async fn patch_translation<S: HasTranslations>(
+    ctx: &Ctx,
+    ports: &S,
+    resource: ResourceRef,
+    language: &str,
+    languages: StoreLanguages<'_>,
+    source: Option<&Source>,
+    fields: BTreeMap<String, Option<FieldInput>>,
+) -> Result<Option<Translation>, CommandError> {
+    write_translation(
+        ctx,
+        ports,
+        resource,
+        language,
+        languages,
+        source,
+        |t, source| t.patch(source, fields.clone()),
+    )
+    .await
+}
+
+/// One write of a translation: `edit` applied to the stored one (or a new one), then
+/// inserted, updated or deleted when it's left with no field. Starts over from the
+/// stored one when another write got in first.
+async fn write_translation<S: HasTranslations>(
+    ctx: &Ctx,
+    ports: &S,
+    resource: ResourceRef,
+    language: &str,
+    languages: StoreLanguages<'_>,
+    source: Option<&Source>,
+    edit: impl Fn(&mut Translation, &Source) -> Result<bool, TranslationError>,
+) -> Result<Option<Translation>, CommandError> {
     require_write(ctx, resource.kind)?;
     let language = Language::new(language)?;
     let source = source.ok_or(CommandError::ResourceNotFound(resource))?;
@@ -144,7 +269,7 @@ pub async fn put_translation<S: HasTranslations>(
         let is_new = stored.is_none();
         let mut translation =
             stored.unwrap_or_else(|| Translation::new(resource, language.clone()));
-        if !translation.replace(source, fields.clone())? {
+        if !edit(&mut translation, source)? {
             return Ok((!is_new).then_some(translation));
         }
         let written = if translation.is_empty() {
@@ -160,8 +285,8 @@ pub async fn put_translation<S: HasTranslations>(
                 .map(|()| Some(translation))
         };
         match written {
-            // Someone wrote the same translation in between: this write replaces the
-            // fields whole, so it starts over from theirs.
+            // Someone wrote the same translation in between: the edit starts over from
+            // theirs, so a replace replaces it and a patch keeps what it left out.
             Err(RepoError::StaleVersion | RepoError::Duplicate(keys::TRANSLATION))
                 if attempt < ATTEMPTS => {}
             other => return Ok(other?),

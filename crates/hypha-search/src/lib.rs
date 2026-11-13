@@ -1,5 +1,5 @@
 //! Search and the storefront's product listing, the workflow: documents built from
-//! products, prices and stock per market (`build_documents`), the `SearchIndexer` event
+//! products, prices and stock per market and language (`build_documents`), the `SearchIndexer` event
 //! handler that queues what to rebuild, the `sync` job that rebuilds it, and searching the
 //! market a shopper's country belongs to (`search`).
 //!
@@ -13,7 +13,7 @@ pub mod fields;
 pub mod handler;
 pub mod sync;
 
-pub use build::build_documents;
+pub use build::{InLanguage, Placement, build_documents};
 pub use commands::{
     CommandError, DEFAULT_OPTION_FACETS, Found, SearchInput, search, update_search_settings,
 };

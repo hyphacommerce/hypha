@@ -27,7 +27,7 @@ pub use events::{
     PriceListCreated, PriceListDeleted, PriceListEnded, PriceListStarted, PricesRemoved, PricesSet,
 };
 pub use filter::{FixedPriceFilter, PriceListFilter, PriceListSort};
-pub use market::{Market, MarketSnapshot};
+pub use market::{Market, MarketSnapshot, offered_languages};
 pub use price_list::{
     Adjustment, AppliesTo, Audience, CompareAtMode, EntryProblem, FixedPrice, PriceBreak,
     PriceList, PriceListDraft, PriceListKind, PriceListPhase, PriceListSnapshot, PriceListStatus,

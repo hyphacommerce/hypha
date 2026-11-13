@@ -1,0 +1,8 @@
+{
+  "subject": "Order {number} confirmed",
+  "preheader": "Thanks for your order. Here's what you ordered and what happens next.",
+  "heading": "Thanks for your order",
+  "received": "We've received your order {number} and we're getting it ready. We'll email you again when it ships.",
+  "placed": "Placed {date}",
+  "text_placed": "Order {number}, placed {date}"
+}

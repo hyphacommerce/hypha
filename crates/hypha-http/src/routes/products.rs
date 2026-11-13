@@ -41,6 +41,7 @@ use crate::{
     media::Media,
     patch,
     state::{AppState, SharedState, Storage},
+    translations::translated_values,
 };
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -155,7 +156,11 @@ impl ProductMediaResponse {
     }
 
     /// The item with the asset's alt text as `overlay` translates it.
-    async fn translated(asset: &Asset, media: &Media, overlay: &Overlay) -> Result<Self, ApiError> {
+    pub(super) async fn translated(
+        asset: &Asset,
+        media: &Media,
+        overlay: &Overlay,
+    ) -> Result<Self, ApiError> {
         let of_asset = asset_resource(asset);
         Ok(Self {
             asset_id: asset.id(),
@@ -923,7 +928,9 @@ impl StorefrontProductResponse {
                             Some(o) => o.sellable,
                             None => Some(0),
                         },
-                        custom_fields: fields.json_of(v.id().as_uuid()),
+                        custom_fields: translated_values(fields, v.id().as_uuid(), |d| {
+                            text.text(&keys::custom_field::variant_value(v.id(), d))
+                        }),
                     }
                 })
                 .collect(),
@@ -931,7 +938,9 @@ impl StorefrontProductResponse {
             sold_in_country: sold,
             currency: market.map(|m| m.currency()),
             prices_include_tax: market.map(|m| m.prices_include_tax()),
-            custom_fields: fields.json_of(p.id().as_uuid()),
+            custom_fields: translated_values(fields, p.id().as_uuid(), |d| {
+                text.text(&keys::custom_field::value(d))
+            }),
             promotions: promotions
                 .into_iter()
                 .map(|p| p.translated(overlay))
@@ -948,8 +957,9 @@ pub struct ProductCountryParams {
     /// variants. Without it, the product comes without prices.
     country: Option<String>,
     /// The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
-    /// `country`'s market offers (`/storefront/countries`): without it, or with one the
-    /// market doesn't offer, the market's default answers. Without `country`, out of the
+    /// `country`'s market offers (`/storefront/countries`): one it doesn't offer is
+    /// tried without its region (`de` for `de-AT`), and without it, or with one still
+    /// not offered, the market's default answers. Without `country`, out of the
     /// store's default and the languages it has published, the store's default
     /// otherwise. `Content-Language` names the one served. Text without a translation
     /// stays in the store's default language.

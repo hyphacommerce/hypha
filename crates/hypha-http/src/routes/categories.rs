@@ -31,6 +31,7 @@ use crate::{
     media::Media,
     patch,
     state::{SharedState, Storage},
+    translations::translated_values,
 };
 
 /// A category in the admin's tree: what a list of categories shows, with its children.
@@ -725,7 +726,9 @@ pub async fn fetch_by_handle_storefront<S: Storage>(
         .pop();
     let of_category = category_resource(c);
     let response = StorefrontCategoryResponse {
-        custom_fields: fields.json_of(owner),
+        custom_fields: translated_values(&fields, owner, |d| {
+            overlay.text(of_category, &keys::custom_field::value(d))
+        }),
         id: c.id(),
         name: translated_name(c, &overlay).to_string(),
         handle: c.handle().as_str().to_string(),

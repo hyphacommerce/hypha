@@ -1,7 +1,7 @@
 use hypha_core::{
     Actor, AddressError, AddressFormats, AddressId, AddressParts, AuthError, Clock, Ctx,
-    CustomerGroupId, CustomerId, Email, EmailError, ErrorCode, Handle, IdGenerator, Keyset, Page,
-    PageRequest, RepoError, Scope, report_duplicate,
+    CustomerGroupId, CustomerId, Email, EmailError, ErrorCode, Handle, IdGenerator, Keyset,
+    Language, Page, PageRequest, RepoError, Scope, report_duplicate,
 };
 use thiserror::Error;
 
@@ -86,13 +86,15 @@ pub async fn create_customer<R: CustomerRepo, I: IdGenerator>(
     Ok(customer)
 }
 
-/// The customer with `email`, created (with no names) if there is none yet. How checkout
-/// turns a guest into a customer.
+/// The customer with `email`, created (with no names, reading `language`) if there is none
+/// yet; an existing customer is returned as they are. How a shopper asking for a sign-in
+/// code becomes a customer.
 pub async fn find_or_create_customer<R: CustomerRepo, I: IdGenerator>(
     ctx: &Ctx,
     customers: &R,
     ids: &I,
     email: &Email,
+    language: Option<&Language>,
 ) -> Result<Customer, CommandError> {
     ctx.require(Scope::CustomersWrite)?;
 
@@ -100,6 +102,7 @@ pub async fn find_or_create_customer<R: CustomerRepo, I: IdGenerator>(
         return Ok(existing);
     }
     let mut customer = Customer::new(CustomerId::from_uuid(ids.new_uuid()), email.clone());
+    customer.set_language(language.cloned())?;
     match customers.insert(&mut customer).await {
         Ok(()) => Ok(customer),
         // Another checkout created them first: theirs is the customer.
@@ -143,6 +146,9 @@ pub struct UpdateCustomer {
     pub first_name: Option<Option<String>>,
     pub last_name: Option<Option<String>>,
     pub phone: Option<Option<String>>,
+    /// The language they read, as the host held it to the store's languages; `Some(None)`
+    /// goes back to the store's default.
+    pub language: Option<Option<Language>>,
 }
 
 pub async fn update_customer<R: CustomerRepo>(
@@ -162,6 +168,9 @@ pub async fn update_customer<R: CustomerRepo>(
     }
     if let Some(phone) = input.phone {
         customer.set_phone(phone)?;
+    }
+    if let Some(language) = input.language {
+        customer.set_language(language)?;
     }
     let Some(email) = input.email else {
         customers.update(&mut customer).await?;

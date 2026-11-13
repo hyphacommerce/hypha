@@ -178,7 +178,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           targets: wasm32-unknown-unknown
-      - run: cargo install worker-build --locked
+      # worker-build follows the `worker` crate: 0.9 refuses a build on worker 0.8.
+      - run: cargo install worker-build@0.8.7 --locked
       - name: Build the API for Workers
         working-directory: crates/hypha-host-workers
         run: worker-build --release

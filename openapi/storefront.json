@@ -122,6 +122,17 @@
           "id": {
             "$ref": "#/components/schemas/CustomerId"
           },
+          "language": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Language",
+                "description": "The language they read (a BCP 47 tag): their latest checkout's, or as they set it\n(`PATCH /storefront/account`). What emails that aren't about one order use; `null`\nfor the store's default."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "last_name": {
             "type": [
               "string",
@@ -211,11 +222,21 @@
             "description": "Whether the first line is expected to hold a house number.",
             "type": "boolean"
           },
+          "label_keys": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LabelKeyOrNull"
+            },
+            "description": "Each label's key, by field, for the same fields as `labels` (`province: \"state\"`,\n`postal_code: \"zip_code\"`): what a form in another language translates the label\nby. `null` for a label outside the set, which is then shown as `labels` has it.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
           "labels": {
             "additionalProperties": {
               "type": "string"
             },
-            "description": "Each field's label, by field (\"State\", \"ZIP code\"). English for now.",
+            "description": "Each field's label, by field (\"State\", \"ZIP code\"), in English.",
             "propertyNames": {
               "type": "string"
             },
@@ -261,6 +282,7 @@
           "rows",
           "required",
           "labels",
+          "label_keys",
           "postal_code",
           "regions",
           "house_number_required",
@@ -604,8 +626,18 @@
             "type": "string"
           },
           "message": {
-            "description": "Plain text for the shopper.",
+            "description": "Plain text for the shopper, in English when the message is built in: a client\nshowing another language words it from `code` and `params`.",
             "type": "string"
+          },
+          "params": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MessageParamsDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "path": {
             "description": "An RFC 9535 JSONPath into this response, from a closed set: `$` (the cart),\n`$.email`, `$.shipping_address`, `$.shipping_address.<field>`,\n`$.shipping_groups[<i>]` (the group and its chosen option) or `$.lines[<i>]`. Show\nthe message by that field; one a client doesn't place goes at the top.",
@@ -769,6 +801,17 @@
           },
           "id": {
             "$ref": "#/components/schemas/CartId"
+          },
+          "language": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Language",
+                "description": "The language the shopper chose for the cart (`PUT …/language`), as kept: `null`\nfollows the market's default. A storefront's answer is in the language the cart\nreads in now, which `Content-Language` names; the admin's is in the store's."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "lines": {
             "items": {
@@ -1048,6 +1091,13 @@
           "country": {
             "description": "Where the cart ships to; picks the market and the tax rates.",
             "type": "string"
+          },
+          "language": {
+            "description": "The language the shopper reads the cart in (a BCP 47 tag), out of those the\nmarket offers (`/storefront/countries`): one not offered is tried without its\nregion (`de` for `de-AT`), else the market's default is kept. Absent, the cart\nfollows the market's default. The order is placed in it.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -1551,7 +1601,7 @@
             "type": "string"
           },
           "label": {
-            "description": "The merchant's label, if they set one.",
+            "description": "The merchant's label, if they set one, in the response's language. Without one, an\noption facet's is the option's name in the response's language where that differs\nfrom the name as stored (as this page's results write it); `null` otherwise.",
             "type": [
               "string",
               "null"
@@ -1580,14 +1630,14 @@
             "type": "integer"
           },
           "label": {
-            "description": "What to show for it: a `choice` field's label, \"Yes\" or \"No\" for a `boolean` field;\n`null` for every other facet, whose value is its own label.",
+            "description": "What to show for it: a `choice` field's label and an option value's, in the\nresponse's language, where they differ from `value`; \"Yes\" or \"No\" for a `boolean`\nfield; `null` otherwise, the value being its own label.",
             "type": [
               "string",
               "null"
             ]
           },
           "value": {
-            "description": "As `filter` takes it: a `choice` field's value is its key, a `boolean` field's\n`true` or `false`.",
+            "description": "As `filter` takes it, as stored in every language: a `choice` field's value is its\nkey, a `boolean` field's `true` or `false`, an option's value its label in the\nstore's own language.",
             "type": "string"
           }
         },
@@ -1647,6 +1697,53 @@
           "unavailable"
         ],
         "type": "object"
+      },
+      "LabelKeyDto": {
+        "description": "What a field's label says, by meaning: a closed set for a client to translate labels\nby, the English `labels` being one rendering of it. Values are added, never renamed.\n\nKnown values: `first_name`, `last_name`, `company`, `address1`, `address2`, `street_and_house_number`, `full_address`, `additional_address`, `city`, `city_town`, `city_ward_town_village`, `ward`, `district`, `suburb`, `area`, `region`, `province`, `state`, `state_territory`, `county`, `prefecture`, `emirate`, `governorate`, `department`, `postal_code`, `postcode`, `zip_code`, `pin_code`, `phone`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "first_name",
+          "last_name",
+          "company",
+          "address1",
+          "address2",
+          "street_and_house_number",
+          "full_address",
+          "additional_address",
+          "city",
+          "city_town",
+          "city_ward_town_village",
+          "ward",
+          "district",
+          "suburb",
+          "area",
+          "region",
+          "province",
+          "state",
+          "state_territory",
+          "county",
+          "prefecture",
+          "emirate",
+          "governorate",
+          "department",
+          "postal_code",
+          "postcode",
+          "zip_code",
+          "pin_code",
+          "phone"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "LabelKeyOrNull": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/LabelKeyDto",
+            "description": "A label's key, or `null` for a label outside the set."
+          },
+          {
+            "type": "null"
+          }
+        ]
       },
       "Language": {
         "description": "A BCP 47 language tag: a language, then optionally a script, region and variants (`en`, `en-GB`, `sr-Latn`). Responses show it in canonical case.",
@@ -1817,11 +1914,30 @@
           }
         ]
       },
+      "LocalizedTitleResponse": {
+        "description": "A title as the buyer read it, in the order's language.",
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
       "LoginCodeRequest": {
         "additionalProperties": false,
         "properties": {
           "email": {
             "type": "string"
+          },
+          "language": {
+            "description": "The language the shopper reads the storefront in (a BCP 47 tag), out of the store's\ndefault and published languages: one it doesn't offer is tried without its region,\nthen counts as none asked; never an error. The code's email is written in it when\nthe customer has no language of their own, and a customer created now keeps it.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -1848,6 +1964,51 @@
         ],
         "pattern": "^mkt_[0-9a-f]{32}$",
         "type": "string"
+      },
+      "MessageParamsDto": {
+        "description": "What a client needs to word a built-in cart message or an address problem from its\n`code` in the shopper's language, rather than show the English `message`. Absent where\nthere's nothing to say: a checkout rule's or a validation app's message (worded by\nwhoever wrote it), a built-in one that needs no data, a message stored before params.\nFields are added, never renamed. By code:\n\n- `required`, `unknown_region`: `field`.\n- `too_long`: `field`, `max`.\n- `invalid_format`: `field`, and `example` where the country gives one.\n- `region_mismatch`: `field` (`postal_code`), `region` (the code the address names) and\n  `region_name`.\n- `house_number_missing`: `field` (`line1`).\n- `apartment_missing`: `field` (`line2`).\n- `address_corrections_suggested`, `address_ambiguous`, `address_undeliverable`,\n  `validation_unavailable`: none (a suggested address is the cart's\n  `shipping_address_check.suggested`).\n\nA field's label in the country's words is the address format's `label_keys`, but for\n`country`, which forms show apart from the address's own fields.",
+        "properties": {
+          "example": {
+            "example": "90210",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "field": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AddressFieldDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "max": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "region": {
+            "example": "NY",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "region_name": {
+            "example": "New York",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
       },
       "MessageSourceDto": {
         "description": "Who said it: the address's format, the store's verification app, one of the merchant's\ncheckout rules, or a validation app.",
@@ -2318,6 +2479,17 @@
           "discount": {
             "$ref": "#/components/schemas/DiscountId"
           },
+          "localized": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LocalizedTitleResponse",
+                "description": "`title` as the buyer read it, in the order's `language`, where it reads\ndifferently; `null` otherwise, and on a storefront's answer, whose `title` is the\nbuyer's already."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "summary": {
             "description": "The sentence the shopper saw at checkout, kept as it was.",
             "type": "string"
@@ -2699,7 +2871,7 @@
       },
       "PostalAddressRequest": {
         "additionalProperties": false,
-        "description": "Sent: last name, first line and city required, text trimmed, at most 255 characters\nper field. A cart's or a location's address is also checked against its country's\nformat (`GET …/address-formats/{country}`): its required fields, the postal code's\nshape, the region (a name, alternate name or code, stored as the code where the\ncountry lists regions). Every problem comes back at once as `422 invalid_address`\nwith `details.problems: [{field, code, message}]`.",
+        "description": "Sent: last name, first line and city required, text trimmed, at most 255 characters\nper field. A cart's or a location's address is also checked against its country's\nformat (`GET …/address-formats/{country}`): its required fields, the postal code's\nshape, the region (a name, alternate name or code, stored as the code where the\ncountry lists regions). Every problem comes back at once as `422 invalid_address`\nwith `details.problems: [{field, code, message, params}]` (`params` as a cart\nmessage's).",
         "properties": {
           "city": {
             "type": "string"
@@ -3020,6 +3192,16 @@
           },
           "message": {
             "type": "string"
+          },
+          "params": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MessageParamsDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -3149,6 +3331,7 @@
         "type": "object"
       },
       "SearchOption": {
+        "description": "An option of the variant shown, in the response's language. (Filters take the value\nas stored: the `option.<name>` facet's `value`.)",
         "properties": {
           "name": {
             "type": "string"
@@ -3333,6 +3516,22 @@
             ]
           }
         },
+        "type": "object"
+      },
+      "SetLanguageRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "language": {
+            "description": "A BCP 47 tag, held to the cart's market like `language` on create: what it\nresolves to is kept. `null` goes back to following the market's default.\nRequired, `null` included.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "language"
+        ],
         "type": "object"
       },
       "SetMarketingRequest": {
@@ -3933,6 +4132,17 @@
           "id": {
             "$ref": "#/components/schemas/OrderId"
           },
+          "language": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Language",
+                "description": "The language the buyer checked out in, which its names are in (`Content-Language`\ntoo); `null` for orders placed before orders had one, in the store's default."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "lines": {
             "items": {
               "$ref": "#/components/schemas/StorefrontOrderLineResponse"
@@ -4498,6 +4708,13 @@
               "null"
             ]
           },
+          "language": {
+            "description": "The language they read (a BCP 47 tag), out of those the store publishes: one it\ndoesn't is tried without its region, else the store's default is kept. `null`\ngoes back to the store's default.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "last_name": {
             "type": [
               "string",
@@ -4738,7 +4955,7 @@
             "publishable_key": []
           }
         ],
-        "summary": "Changes the customer's names and phone (the admin's rules: `409 customer_erased`\nonce erased).",
+        "summary": "Changes the customer's names, phone and language (the admin's rules: `409 customer_erased`\nonce erased).",
         "tags": [
           "account"
         ],
@@ -5675,7 +5892,15 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Content-Language": {
+                "description": "The language the response is in.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -7044,6 +7269,12 @@
             },
             "description": "Created",
             "headers": {
+              "Content-Language": {
+                "description": "The language the response is in.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Idempotent-Replayed": {
                 "description": "`true` when this answer replays an earlier request with the same `Idempotency-Key`.",
                 "schema": {
@@ -7179,7 +7410,15 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Content-Language": {
+                "description": "The language the response is in.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -7292,6 +7531,12 @@
             },
             "description": "Created",
             "headers": {
+              "Content-Language": {
+                "description": "The language the response is in.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Idempotent-Replayed": {
                 "description": "`true` when this answer replays an earlier request with the same `Idempotency-Key`.",
                 "schema": {
@@ -7447,7 +7692,15 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Content-Language": {
+                "description": "The language the response is in.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -7596,7 +7849,15 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Content-Language": {
+                "description": "The language the response is in.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -7705,7 +7966,15 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Content-Language": {
+                "description": "The language the response is in.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -7812,6 +8081,153 @@
         ]
       }
     },
+    "/storefront/carts/{id}/language": {
+      "put": {
+        "operationId": "storefront.carts.set_language",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CartId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetLanguageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Content-Language": {
+                "description": "The language the response is in.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "publishable_key": []
+          }
+        ],
+        "summary": "Sets the language the shopper reads the cart in, held to what its market offers (a tag\nnot offered tries its language, then the market's default, which is what's kept);\n`null` follows the market's default. Answers the cart in it.",
+        "tags": [
+          "carts"
+        ],
+        "x-hypha-scopes": [
+          "carts:write"
+        ]
+      }
+    },
     "/storefront/carts/{id}/lines": {
       "post": {
         "operationId": "storefront.carts.add",
@@ -7858,6 +8274,12 @@
             },
             "description": "OK",
             "headers": {
+              "Content-Language": {
+                "description": "The language the response is in.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Idempotent-Replayed": {
                 "description": "`true` when this answer replays an earlier request with the same `Idempotency-Key`.",
                 "schema": {
@@ -8001,7 +8423,15 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Content-Language": {
+                "description": "The language the response is in.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -8116,7 +8546,15 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Content-Language": {
+                "description": "The language the response is in.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -8255,7 +8693,15 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Content-Language": {
+                "description": "The language the response is in.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -8543,7 +8989,15 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Content-Language": {
+                "description": "The language the response is in.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -8672,7 +9126,15 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Content-Language": {
+                "description": "The language the response is in.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -8771,7 +9233,15 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Content-Language": {
+                "description": "The language the response is in.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -8900,7 +9370,15 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Content-Language": {
+                "description": "The language the response is in.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -9017,7 +9495,15 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Content-Language": {
+                "description": "The language the response is in.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -9139,7 +9625,7 @@
         "operationId": "storefront.categories.list",
         "parameters": [
           {
-            "description": "The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those\n`country`'s market offers (`/storefront/countries`): without it, or with one the\nmarket doesn't offer, the market's default answers. Without `country`, out of the\nstore's default and the languages it has published, the store's default\notherwise. `Content-Language` names the one served. Text without a translation\nstays in the store's default language.",
+            "description": "The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those\n`country`'s market offers (`/storefront/countries`): one it doesn't offer is\ntried without its region (`de` for `de-AT`), and without it, or with one still\nnot offered, the market's default answers. Without `country`, out of the\nstore's default and the languages it has published, the store's default\notherwise. `Content-Language` names the one served. Text without a translation\nstays in the store's default language.",
             "in": "query",
             "name": "language",
             "required": false,
@@ -9246,7 +9732,7 @@
             }
           },
           {
-            "description": "The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those\n`country`'s market offers (`/storefront/countries`): without it, or with one the\nmarket doesn't offer, the market's default answers. Without `country`, out of the\nstore's default and the languages it has published, the store's default\notherwise. `Content-Language` names the one served. Text without a translation\nstays in the store's default language.",
+            "description": "The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those\n`country`'s market offers (`/storefront/countries`): one it doesn't offer is\ntried without its region (`de` for `de-AT`), and without it, or with one still\nnot offered, the market's default answers. Without `country`, out of the\nstore's default and the languages it has published, the store's default\notherwise. `Content-Language` names the one served. Text without a translation\nstays in the store's default language.",
             "in": "query",
             "name": "language",
             "required": false,
@@ -9430,7 +9916,7 @@
             }
           },
           {
-            "description": "The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those\n`country`'s market offers (`/storefront/countries`): without it, or with one the\nmarket doesn't offer, the market's default answers. Without `country`, out of the\nstore's default and the languages it has published, the store's default\notherwise. `Content-Language` names the one served. Text without a translation\nstays in the store's default language.",
+            "description": "The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those\n`country`'s market offers (`/storefront/countries`): one it doesn't offer is\ntried without its region (`de` for `de-AT`), and without it, or with one still\nnot offered, the market's default answers. Without `country`, out of the\nstore's default and the languages it has published, the store's default\notherwise. `Content-Language` names the one served. Text without a translation\nstays in the store's default language.",
             "in": "query",
             "name": "language",
             "required": false,
@@ -9553,7 +10039,15 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Content-Language": {
+                "description": "The language the response is in.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -9644,7 +10138,7 @@
             }
           },
           {
-            "description": "The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those\n`country`'s market offers (`/storefront/countries`): without it, or with one the\nmarket doesn't offer, the market's default answers. Without `country`, out of the\nstore's default and the languages it has published, the store's default\notherwise. `Content-Language` names the one served. Text without a translation\nstays in the store's default language.",
+            "description": "The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those\n`country`'s market offers (`/storefront/countries`): one it doesn't offer is\ntried without its region (`de` for `de-AT`), and without it, or with one still\nnot offered, the market's default answers. Without `country`, out of the\nstore's default and the languages it has published, the store's default\notherwise. `Content-Language` names the one served. Text without a translation\nstays in the store's default language.",
             "in": "query",
             "name": "language",
             "required": false,
@@ -9759,7 +10253,7 @@
             }
           },
           {
-            "description": "The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those\n`country`'s market offers (`/storefront/countries`): without it, or with one the\nmarket doesn't offer, the market's default answers. Without `country`, out of the\nstore's default and the languages it has published, the store's default\notherwise. `Content-Language` names the one served. Text without a translation\nstays in the store's default language.",
+            "description": "The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those\n`country`'s market offers (`/storefront/countries`): one it doesn't offer is\ntried without its region (`de` for `de-AT`), and without it, or with one still\nnot offered, the market's default answers. Without `country`, out of the\nstore's default and the languages it has published, the store's default\notherwise. `Content-Language` names the one served. Text without a translation\nstays in the store's default language.",
             "in": "query",
             "name": "language",
             "required": false,
@@ -9887,9 +10381,18 @@
             }
           },
           {
-            "description": "Words to find in titles, vendors, types, tags, SKUs, option values and\ndescriptions; each must start a word. Absent lists every product.",
+            "description": "Words to find in titles, vendors, types, tags, SKUs, option values and\ndescriptions, as `language` writes them; each must start a word. Absent lists\nevery product.",
             "in": "query",
             "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The language to search and answer in (a BCP 47 tag, `de`, `pt-BR`), out of those\n`country`'s market offers (`/storefront/countries`): one it doesn't offer is tried\nwithout its region (`de` for `de-AT`), and without it, or with one still not\noffered, the market's default answers. `Content-Language` names the one served.\nFilters and facet values stay as stored in every language; facets label them in\nthis one.",
+            "in": "query",
+            "name": "language",
             "required": false,
             "schema": {
               "type": "string"
@@ -9987,7 +10490,15 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Content-Language": {
+                "description": "The language the response is in.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -10045,7 +10556,7 @@
             "publishable_key": []
           }
         ],
-        "summary": "Searches the products the shopper's market sells, priced and stocked there; without `q`,\nthe market's product listing. Pages go at most 1,000 results deep. With a search app set\n(`search_app` in the settings), the app chooses and orders the results (`search.query`)\nand Hypha shows its own prices and stock for them; `price` is then `null`. When the app\nfails, the built-in engine answers.",
+        "summary": "Searches the products the shopper's market sells, priced and stocked there, in the\nlanguage asked for; without `q`, the market's product listing. Pages go at most 1,000\nresults deep. With a search app set (`search_app` in the settings), the app chooses and\norders the results (`search.query`) and Hypha shows its own prices and stock for them;\n`price` is then `null`. When the app fails, the built-in engine answers.",
         "tags": [
           "search"
         ],
@@ -10059,7 +10570,7 @@
         "operationId": "storefront.stores.fetch",
         "parameters": [
           {
-            "description": "The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those\n`country`'s market offers (`/storefront/countries`): without it, or with one the\nmarket doesn't offer, the market's default answers. Without `country`, out of the\nstore's default and the languages it has published, the store's default\notherwise. `Content-Language` names the one served. Text without a translation\nstays in the store's default language.",
+            "description": "The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those\n`country`'s market offers (`/storefront/countries`): one it doesn't offer is\ntried without its region (`de` for `de-AT`), and without it, or with one still\nnot offered, the market's default answers. Without `country`, out of the\nstore's default and the languages it has published, the store's default\notherwise. `Content-Language` names the one served. Text without a translation\nstays in the store's default language.",
             "in": "query",
             "name": "language",
             "required": false,

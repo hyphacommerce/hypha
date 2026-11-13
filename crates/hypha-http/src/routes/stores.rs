@@ -2,6 +2,7 @@ use axum::{Json, extract::State};
 use hypha_core::{Ctx, Currency, Email, Language, Scope, StoreId, Timezone};
 use hypha_inventory::{HasStockMovements, StockMovementRepo};
 use hypha_markets::{HasMarkets, MarketRepo};
+use hypha_notifications::{HasNotificationTemplates, NotificationTemplateRepo};
 use hypha_purchasing::{HasPurchaseOrders, PurchaseOrderRepo};
 use hypha_stores::{
     LanguageInput, MarketLanguages, Store, StoreLanguage, UpdateStore, get_store, update_store,
@@ -233,11 +234,13 @@ pub async fn update<S: Storage>(
     };
     // Every translation is one from the default language, which fixes it; checked like
     // the currency, before the write.
-    // Only translations into the languages the store keeps count: the others go with
-    // their language (and may still be there, waiting for that cleanup).
-    let has_translations = match req.default_language {
-        Some(_) => {
-            let kept: Vec<Language> = match &req.languages {
+    // Translations into a language the request removes from the store altogether don't
+    // count: they go with it (and may still be there, waiting for that cleanup). Those
+    // into the new default do: the cleanup keeps only listed languages, so a swap of the
+    // default with a listed language would delete every translation into it.
+    let has_translations = match &req.default_language {
+        Some(default) => {
+            let mut remaining: Vec<Language> = match &req.languages {
                 Some(languages) => languages
                     .iter()
                     .filter_map(|l| Language::new(&l.language).ok())
@@ -249,7 +252,15 @@ pub async fn update<S: Storage>(
                     .map(|l| l.language.clone())
                     .collect(),
             };
-            ports.translations().any_in(&kept).await?
+            // An invalid tag is refused by the command.
+            remaining.extend(Language::new(default).ok());
+            // A merchant's email template for another language is one too: the default
+            // language is the `''` row, so the new default's row would never be read.
+            let templates = ports.notification_templates().list().await?;
+            ports.translations().any_in(&remaining).await?
+                || templates
+                    .iter()
+                    .any(|t| t.locale().is_some_and(|l| remaining.contains(l)))
         }
         None => false,
     };
@@ -333,7 +344,9 @@ pub async fn fetch_storefront<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let params = query.parse()?;
     let store = store_for(&state, &ctx, &ports).await?;
-    let served = language::served_in(&state, &ports, &params).await?;
+    // The store read once: the language is chosen from the same one.
+    let market = language::market_in(&ports, &params).await?;
+    let served = language::ServedLanguage::of(params.language.as_deref(), &store, market.as_ref());
     let of_store = ResourceRef::new(ResourceKind::Store, state.store.as_uuid());
     let overlay = served.overlay(&ports, &[of_store]).await?;
     let response = StorefrontStoreResponse {
