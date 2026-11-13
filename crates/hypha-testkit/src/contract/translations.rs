@@ -336,6 +336,26 @@ async fn overlay_falls_back<S: HasTranslations>(ports: &S) {
         .unwrap();
     assert_eq!(german.text(product(1), "title"), Some("Tasse"));
     assert_eq!(Overlay::none().text(product(1), "title"), None);
+
+    // What a reader is shown: the translation, else the source it hands over.
+    assert_eq!(austrian.text_or(product(1), "title", "Mug"), "Häferl");
+    assert_eq!(
+        austrian.text_or(product(1), "description", "<p>Mug</p>"),
+        "<p>Mug</p>"
+    );
+    assert_eq!(
+        austrian.optional(product(1), "title", Some("Mug")),
+        Some("Häferl")
+    );
+    assert_eq!(
+        austrian.optional(product(1), "description", Some("x")),
+        Some("x")
+    );
+    // A field the resource lacks now has nothing to show, translated or not.
+    assert_eq!(austrian.optional(product(1), "title", None), None);
+    assert!(austrian.translates(product(1)));
+    assert!(!austrian.translates(product(9)));
+    assert!(!Overlay::none().translates(product(1)));
 }
 
 async fn lists<S: HasTranslations>(ports: &S) {

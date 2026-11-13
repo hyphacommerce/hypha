@@ -15,7 +15,8 @@ use super::{
 };
 use crate::{
     error::ApiError,
-    extract::{Caller, JsonBody, Storefront},
+    extract::{Caller, JsonBody, Query, Storefront},
+    language::{self, LanguageParams, Localized},
     patch,
     state::{AppState, SharedState, Storage},
 };
@@ -314,25 +315,42 @@ pub struct StorefrontStoreResponse {
     default_language: Language,
 }
 
-/// The store's public details.
+/// The store's public details, its description in `language`.
 #[utoipa::path(
     get,
     path = "/storefront/store",
-    responses((status = 200, description = "OK", body = StorefrontStoreResponse)),
+    params(LanguageParams),
+    responses((
+        status = 200,
+        description = "OK",
+        body = StorefrontStoreResponse,
+        headers(("Content-Language" = String, description = "The language the response is in.")),
+    )),
     extensions(("x-hypha-scopes" = json!(["stores:read"]))),
 )]
 pub async fn fetch_storefront<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
-) -> Result<Json<StorefrontStoreResponse>, ApiError> {
+    query: Query<LanguageParams>,
+) -> Result<Localized<StorefrontStoreResponse>, ApiError> {
+    use hypha_translations::{ResourceKind, ResourceRef, fields as keys};
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let store = read_store(&state, &ctx, ports).await?;
-    Ok(Json(StorefrontStoreResponse {
+    let params = query.parse()?;
+    let store = store_for(&state, &ctx, &ports).await?;
+    // The store read once: the language is chosen from the same one.
+    let market = language::market_in(&ports, &params).await?;
+    let served = language::ServedLanguage::of(params.language.as_deref(), &store, market.as_ref());
+    let of_store = ResourceRef::new(ResourceKind::Store, state.store.as_uuid());
+    let overlay = served.overlay(&ports, &[of_store]).await?;
+    let response = StorefrontStoreResponse {
         name: store.name().to_string(),
-        description: store.description().map(str::to_string),
+        description: overlay
+            .optional(of_store, keys::store::DESCRIPTION, store.description())
+            .map(str::to_string),
         contact_email: store.contact_email().cloned(),
         default_language: store.default_language().clone(),
-    }))
+    };
+    Ok(served.respond(response))
 }
 
 /// The store's details: through the request's `ports` when the storage keeps the
@@ -374,12 +392,21 @@ pub(crate) async fn store_as_system<S: Storage>(
     state: &AppState<S>,
     ports: &S::Ports<'_>,
 ) -> Result<Store, ApiError> {
-    let ctx = Ctx::system();
+    store_for(state, &Ctx::system(), ports).await
+}
+
+/// The store's details for `ctx`, keeping `ports`: through them when they hold the
+/// directory, else through the directory beside them.
+pub(crate) async fn store_for<S: Storage>(
+    state: &AppState<S>,
+    ctx: &Ctx,
+    ports: &S::Ports<'_>,
+) -> Result<Store, ApiError> {
     Ok(match state.storage.directory_in(ports) {
-        Some(directory) => get_store(&ctx, directory, state.store).await?,
+        Some(directory) => get_store(ctx, directory, state.store).await?,
         None => {
             let directory = state.storage.directory().await?;
-            get_store(&ctx, &directory, state.store).await?
+            get_store(ctx, &directory, state.store).await?
         }
     })
 }

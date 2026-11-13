@@ -13,6 +13,7 @@ use hypha_categories::{
 use hypha_core::{AssetId, CategoryId, ProductId};
 use hypha_merchandising::{category_image, set_category_image};
 use hypha_products::{HasProducts, get_product, get_products};
+use hypha_translations::{Overlay, ResourceKind, ResourceRef, fields as keys};
 use serde::{Deserialize, Serialize};
 
 use hypha_custom_fields::{CallerKind, FieldsRead, OwnerType};
@@ -20,12 +21,13 @@ use hypha_custom_fields::{CallerKind, FieldsRead, OwnerType};
 use super::{
     custom_fields::{self, CustomFieldValues, FieldParams},
     page::{ListQuery, PageParams, PageResponse},
-    products::{ProductMediaResponse, StatusDto, media_items},
+    products::{ProductMediaResponse, StatusDto, asset_resources, media_items, media_items_in},
     stamp_times,
 };
 use crate::{
     error::ApiError,
-    extract::{Caller, JsonBody, PathId, Storefront},
+    extract::{Caller, JsonBody, PathId, Query, Storefront},
+    language::{self, LanguageParams, Localized},
     media::Media,
     patch,
     state::{SharedState, Storage},
@@ -574,16 +576,46 @@ pub struct StorefrontCategoryNode {
 fn storefront_nodes(
     tree: &CategoryTree,
     parent: Option<CategoryId>,
+    overlay: &Overlay,
 ) -> Vec<StorefrontCategoryNode> {
     tree.children(parent)
         .into_iter()
         .map(|c| StorefrontCategoryNode {
             id: c.id(),
-            name: c.name().to_string(),
+            name: translated_name(c, overlay).to_string(),
             handle: c.handle().as_str().to_string(),
-            children: storefront_nodes(tree, Some(c.id())),
+            children: storefront_nodes(tree, Some(c.id()), overlay),
         })
         .collect()
+}
+
+fn category_resource(category: &Category) -> ResourceRef {
+    ResourceRef::new(ResourceKind::Category, category.id().as_uuid())
+}
+
+/// Every category of `tree` under `parent`, as a response's overlay names them.
+fn tree_resources(tree: &CategoryTree, parent: Option<CategoryId>, found: &mut Vec<ResourceRef>) {
+    for category in tree.children(parent) {
+        found.push(category_resource(category));
+        tree_resources(tree, Some(category.id()), found);
+    }
+}
+
+fn translated_name<'a>(category: &'a Category, overlay: &'a Overlay) -> &'a str {
+    overlay.text_or(
+        category_resource(category),
+        keys::category::NAME,
+        category.name(),
+    )
+}
+
+/// `CategoryRef` for a storefront read: the name as `overlay` translates it.
+fn translated_ref(category: &Category, overlay: &Overlay) -> CategoryRef {
+    CategoryRef {
+        id: category.id(),
+        name: translated_name(category, overlay).to_string(),
+        handle: category.handle().as_str().to_string(),
+    }
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -593,21 +625,33 @@ pub struct StorefrontCategoryTreeResponse {
     items: Vec<StorefrontCategoryNode>,
 }
 
-/// The categories a storefront shows, as a tree (navigation menus).
+/// The categories a storefront shows, as a tree (navigation menus), named in `language`.
 #[utoipa::path(
     get,
     path = "/storefront/categories",
-    responses((status = 200, description = "OK", body = StorefrontCategoryTreeResponse)),
+    params(LanguageParams),
+    responses((
+        status = 200,
+        description = "OK",
+        body = StorefrontCategoryTreeResponse,
+        headers(("Content-Language" = String, description = "The language the response is in.")),
+    )),
     extensions(("x-hypha-scopes" = json!(["products:read"]))),
 )]
 pub async fn list_storefront<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
-) -> Result<Json<StorefrontCategoryTreeResponse>, ApiError> {
+    query: Query<LanguageParams>,
+) -> Result<Localized<StorefrontCategoryTreeResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
+    let params = query.parse()?;
     let tree = shown_categories(&ctx, &ports).await?;
-    Ok(Json(StorefrontCategoryTreeResponse {
-        items: storefront_nodes(&tree, None),
+    let served = language::served_in(&state, &ports, &params).await?;
+    let mut resources = Vec::new();
+    tree_resources(&tree, None, &mut resources);
+    let overlay = served.overlay(&ports, &resources).await?;
+    Ok(served.respond(StorefrontCategoryTreeResponse {
+        items: storefront_nodes(&tree, None, &overlay),
     }))
 }
 
@@ -629,31 +673,44 @@ pub struct StorefrontCategoryResponse {
     custom_fields: CustomFieldValues,
 }
 
-/// A category page: the category by handle, with its ancestors and shown children. Its
-/// products come through `/storefront/search?category=…`. A hidden category (or one under a
-/// hidden one) is `404 category_not_found`.
+/// A category page: the category by handle, with its ancestors and shown children, in
+/// `language`. Its products come through `/storefront/search?category=…`. A hidden
+/// category (or one under a hidden one) is `404 category_not_found`.
 #[utoipa::path(
     get,
     path = "/storefront/categories/by-handle/{handle}",
-    params(("handle" = String, Path, description = "The category's handle.", example = "shirts")),
-    responses((status = 200, description = "OK", body = StorefrontCategoryResponse)),
+    params(
+        ("handle" = String, Path, description = "The category's handle.", example = "shirts"),
+        LanguageParams
+    ),
+    responses((
+        status = 200,
+        description = "OK",
+        body = StorefrontCategoryResponse,
+        headers(("Content-Language" = String, description = "The language the response is in.")),
+    )),
     extensions(("x-hypha-scopes" = json!(["products:read"]))),
 )]
 pub async fn fetch_by_handle_storefront<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
     PathId(handle): PathId<String>,
-) -> Result<Json<StorefrontCategoryResponse>, ApiError> {
+    query: Query<LanguageParams>,
+) -> Result<Localized<StorefrontCategoryResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
+    let params = query.parse()?;
     let view = get_shown_category_by_handle(&ctx, &ports, &handle).await?;
-    let image = match category_image(&ctx, &ports, &view.category).await? {
-        Some(asset) => media_items(std::slice::from_ref(&asset), state.media.as_deref())
-            .await?
-            .pop(),
-        None => None,
-    };
+    let served = language::served_in(&state, &ports, &params).await?;
+    let image = category_image(&ctx, &ports, &view.category).await?;
     let c = &view.category;
     let owner = c.id().as_uuid();
+    let resources: Vec<ResourceRef> = std::iter::once(c)
+        .chain(&view.ancestors)
+        .chain(&view.children)
+        .map(category_resource)
+        .chain(asset_resources(image.as_slice()))
+        .collect();
+    let overlay = served.overlay(&ports, &resources).await?;
     let fields = custom_fields::read(
         &ctx,
         &CallerKind::Storefront,
@@ -663,14 +720,33 @@ pub async fn fetch_by_handle_storefront<S: Storage>(
         None,
     )
     .await?;
-    Ok(Json(StorefrontCategoryResponse {
+    let image = media_items_in(image.as_slice(), state.media.as_deref(), &overlay)
+        .await?
+        .pop();
+    let of_category = category_resource(c);
+    let response = StorefrontCategoryResponse {
         custom_fields: fields.json_of(owner),
         id: c.id(),
-        name: c.name().to_string(),
+        name: translated_name(c, &overlay).to_string(),
         handle: c.handle().as_str().to_string(),
-        description: c.description().map(|d| d.as_html().to_string()),
+        description: overlay
+            .optional(
+                of_category,
+                keys::category::DESCRIPTION,
+                c.description().map(|d| d.as_html()),
+            )
+            .map(str::to_string),
         image,
-        ancestors: view.ancestors.iter().map(CategoryRef::from).collect(),
-        children: view.children.iter().map(CategoryRef::from).collect(),
-    }))
+        ancestors: view
+            .ancestors
+            .iter()
+            .map(|a| translated_ref(a, &overlay))
+            .collect(),
+        children: view
+            .children
+            .iter()
+            .map(|child| translated_ref(child, &overlay))
+            .collect(),
+    };
+    Ok(served.respond(response))
 }

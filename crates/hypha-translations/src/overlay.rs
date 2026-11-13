@@ -67,4 +67,27 @@ impl Overlay {
             .iter()
             .find_map(|t| t.text(key))
     }
+
+    /// `resource`'s field `key` as a reader is shown it: its translation, else
+    /// `source`, the text as stored.
+    pub fn text_or<'a>(&'a self, resource: ResourceRef, key: &str, source: &'a str) -> &'a str {
+        self.text(resource, key).unwrap_or(source)
+    }
+
+    /// `text_or` for a field the resource may lack: `None` without a source, whatever
+    /// a translation still holds for it.
+    pub fn optional<'a>(
+        &'a self,
+        resource: ResourceRef,
+        key: &str,
+        source: Option<&'a str>,
+    ) -> Option<&'a str> {
+        source.map(|source| self.text_or(resource, key, source))
+    }
+
+    /// Whether anything of `resource` is translated: `false` lets a reader of many
+    /// fields skip asking for each.
+    pub fn translates(&self, resource: ResourceRef) -> bool {
+        self.translations.contains_key(&resource)
+    }
 }
