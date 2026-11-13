@@ -4,7 +4,7 @@ import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { revalidatePath } from "next/cache";
 
 import { describe, sessionClient } from "@/lib/hypha";
-import { type Problem, problemOf } from "@/lib/notifications";
+import { type Problem, problemOf, templateQuery } from "@/lib/notifications";
 
 /** The outcome of an edit: a message to show, if it failed. */
 export type Result = { error?: string };
@@ -20,11 +20,6 @@ export type Sources = { subject: string; html: string; text: string | null };
 
 /** Where a template's sources come from: whose, and in which language. */
 export type SourcesFrom = { language: string; origin: string };
-
-/** The `?language=` of a template's routes: none for the store's content language. */
-function inLanguage(language: string | null) {
-  return language ? { language } : {};
-}
 
 type Rendered = AdminSchemas["RenderedNotificationResponse"];
 
@@ -67,7 +62,7 @@ export async function saveTemplate(
 ): Promise<TemplateResult & { from?: SourcesFrom }> {
   const client = await sessionClient();
   const { data, error } = await client.PUT("/admin/notification-templates/{key}", {
-    params: { path: { key }, query: inLanguage(language) },
+    params: { path: { key }, query: templateQuery(language) },
     body: body(key, sources),
   });
   if (error) return { error: await describe(error), problem: problemOf(error.details) };
@@ -85,7 +80,7 @@ export async function revertTemplate(
 ): Promise<Result & { sources?: Sources; from?: SourcesFrom }> {
   const client = await sessionClient();
   const { data, error } = await client.DELETE("/admin/notification-templates/{key}", {
-    params: { path: { key }, query: inLanguage(language) },
+    params: { path: { key }, query: templateQuery(language) },
   });
   if (error) return { error: await describe(error) };
   refresh();

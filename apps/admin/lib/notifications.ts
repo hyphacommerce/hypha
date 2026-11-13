@@ -31,6 +31,14 @@ export function templateLanguage(
   return others.find((tag) => sameTag(tag, asked)) ?? null;
 }
 
+/**
+ * The `?language=` of a template's routes: none for the store's content language, whose
+ * template is the one read and written without it.
+ */
+export function templateQuery(language: string | null): { language?: string } {
+  return language ? { language } : {};
+}
+
 /** A template's editor, in `language` (`null`: the store's content language). */
 export function templateHref(key: string, language: string | null): string {
   const path = `/settings/notifications/${encodeURIComponent(key)}`;

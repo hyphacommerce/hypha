@@ -21,7 +21,7 @@ import { useToast } from "@astryxdesign/core/Toast";
 import { Tooltip } from "@astryxdesign/core/Tooltip";
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { useRouter } from "next/navigation";
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 
 import { type StoreLanguage, languageLabel } from "@/lib/languages";
 import type { TFor } from "@/lib/messages";
@@ -140,6 +140,8 @@ export function TemplateEditor({
   // The pending preview's timer, and the newest request: an older answer is dropped.
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const latest = useRef(0);
+  // Another language remounts the editor: a preview still waiting is the old one's.
+  useEffect(() => () => clearTimeout(timer.current), []);
 
   const isDirty = !same(draft, saved);
   const orderId = ORDER_ID.test(order.trim()) ? order.trim() : null;
@@ -211,8 +213,9 @@ export function TemplateEditor({
 
   const toggleEnabled = async (enabled: boolean) => {
     const result = await setTemplateEnabled(key, enabled);
-    setError(result.error);
-    if (!result.error) setIsEnabled(enabled);
+    // A failure is shown; a success leaves another edit's problem where it is.
+    if (result.error) setError(result.error);
+    else setIsEnabled(enabled);
   };
 
   const canSend = sender !== "log";
@@ -222,308 +225,322 @@ export function TemplateEditor({
   const shownFrom = sourcesLine(t, from, languageName);
 
   return (
-    <VStack gap={4}>
-      <div className="save-bar">
-        <HStack gap={3} hAlign="between" vAlign="center" wrap="wrap">
-          <HStack gap={2} vAlign="center">
-            {isCustomized ? (
-              <Badge label={t("notifications.template_customized")} variant="info" />
-            ) : (
-              <Badge label={t("common.default")} variant="neutral" />
-            )}
-            {!isEnabled && <Badge label={t("common.off")} variant="warning" />}
-            <Text weight="medium">
-              {isDirty ? t("common.unsaved_changes") : t("notifications.editor_no_unsaved_changes")}
-            </Text>
-          </HStack>
-          {canWrite && (
-            <HStack gap={2} wrap="wrap">
-              {isCustomized && (
-                <Button
-                  label={t("notifications.editor_revert")}
-                  variant="ghost"
-                  onClick={() => setIsReverting(true)}
-                />
+    // While another language loads, nothing here acts on the one being left.
+    <div style={isSwitching ? { opacity: 0.6, pointerEvents: "none" } : undefined}>
+      <VStack gap={4}>
+        <div className="save-bar">
+          <HStack gap={3} hAlign="between" vAlign="center" wrap="wrap">
+            <HStack gap={2} vAlign="center">
+              {isCustomized ? (
+                <Badge label={t("notifications.template_customized")} variant="info" />
+              ) : (
+                <Badge label={t("common.default")} variant="neutral" />
               )}
-              {isDirty && <Button label={t("common.discard")} variant="ghost" onClick={discard} />}
-              <Tooltip
-                content={
-                  canSend
-                    ? t("notifications.editor_send_test_tooltip")
-                    : t("notifications.editor_send_test_logged")
-                }
-              >
-                <span>
-                  <Button
-                    label={t("notifications.editor_send_test")}
-                    variant="secondary"
-                    isDisabled={!canSend}
-                    isLoading={isSending}
-                    onClick={sendTest}
-                  />
-                </span>
-              </Tooltip>
-              <Button
-                label={t("common.save")}
-                variant="primary"
-                isDisabled={!isDirty}
-                isLoading={isSaving}
-                onClick={save}
-              />
+              {!isEnabled && <Badge label={t("common.off")} variant="warning" />}
+              <Text weight="medium">
+                {isDirty
+                  ? t("common.unsaved_changes")
+                  : t("notifications.editor_no_unsaved_changes")}
+              </Text>
             </HStack>
+            {canWrite && (
+              <HStack gap={2} wrap="wrap">
+                {isCustomized && (
+                  <Button
+                    label={t("notifications.editor_revert")}
+                    variant="ghost"
+                    onClick={() => setIsReverting(true)}
+                  />
+                )}
+                {isDirty && (
+                  <Button label={t("common.discard")} variant="ghost" onClick={discard} />
+                )}
+                <Tooltip
+                  content={
+                    canSend
+                      ? t("notifications.editor_send_test_tooltip")
+                      : t("notifications.editor_send_test_logged")
+                  }
+                >
+                  <span>
+                    <Button
+                      label={t("notifications.editor_send_test")}
+                      variant="secondary"
+                      isDisabled={!canSend}
+                      isLoading={isSending}
+                      onClick={sendTest}
+                    />
+                  </span>
+                </Tooltip>
+                <Button
+                  label={t("common.save")}
+                  variant="primary"
+                  isDisabled={!isDirty}
+                  isLoading={isSaving}
+                  onClick={save}
+                />
+              </HStack>
+            )}
+          </HStack>
+          {error && (
+            <div style={{ marginTop: 12 }}>
+              <Banner
+                status="error"
+                title={error}
+                onDismiss={() => {
+                  setError(undefined);
+                  setProblem(undefined);
+                }}
+              />
+            </div>
           )}
-        </HStack>
-        {error && (
-          <div style={{ marginTop: 12 }}>
-            <Banner
-              status="error"
-              title={error}
-              onDismiss={() => {
-                setError(undefined);
-                setProblem(undefined);
-              }}
-            />
-          </div>
+        </div>
+
+        {template.problem && !isDirty && (
+          <Banner
+            status="error"
+            title={t("notifications.editor_broken_title")}
+            description={t("notifications.editor_broken_description", {
+              problem: describeProblem(t, template.problem),
+            })}
+          />
         )}
-      </div>
+        {isLayout && (
+          <Banner
+            status="info"
+            title={t("notifications.editor_layout_title")}
+            description={t("notifications.editor_layout_description")}
+          />
+        )}
 
-      {template.problem && !isDirty && (
-        <Banner
-          status="error"
-          title={t("notifications.editor_broken_title")}
-          description={t("notifications.editor_broken_description", {
-            problem: describeProblem(t, template.problem),
-          })}
-        />
-      )}
-      {isLayout && (
-        <Banner
-          status="info"
-          title={t("notifications.editor_layout_title")}
-          description={t("notifications.editor_layout_description")}
-        />
-      )}
-
-      <Card>
-        <VStack gap={4}>
-          <HStack gap={4} vAlign="end" wrap="wrap">
-            {languages && (
-              <Selector
-                label={t("notifications.language_label")}
-                options={[languages.content, ...languages.others.map((l) => l.language)].map(
-                  (tag) => ({
-                    value: tag,
-                    label:
-                      tag === languages.content
-                        ? t("notifications.language_option_content", {
-                            language: languageLabel(format, tag),
-                          })
-                        : languages.others.some((l) => l.language === tag && !l.published)
-                          ? t("notifications.language_option_unpublished", {
+        <Card>
+          <VStack gap={4}>
+            <HStack gap={4} vAlign="end" wrap="wrap">
+              {languages && (
+                <Selector
+                  label={t("notifications.language_label")}
+                  options={[languages.content, ...languages.others.map((l) => l.language)].map(
+                    (tag) => ({
+                      value: tag,
+                      label:
+                        tag === languages.content
+                          ? t("notifications.language_option_content", {
                               language: languageLabel(format, tag),
                             })
-                          : languageLabel(format, tag),
-                  }),
-                )}
-                value={language ?? languages.content}
-                onChange={(tag) =>
-                  // The same page in another language: replaced in place, never a push.
-                  startSwitching(() =>
-                    router.replace(templateHref(key, tag === languages.content ? null : tag)),
-                  )
-                }
-                hasSearch={languages.others.length > 8}
-                isLoading={isSwitching}
-                isDisabled={isDirty}
-                disabledMessage={t("notifications.language_locked")}
-                width={320}
-              />
-            )}
-            <VStack gap={0.5}>
-              {shownFrom && <Text type="supporting">{shownFrom}</Text>}
-              {language !== null && !isCustomized && (
-                <Text type="supporting" color="secondary">
-                  {t("notifications.sources_fallback", { language: languageName(language) })}
-                </Text>
-              )}
-            </VStack>
-          </HStack>
-          {template.can_disable &&
-            (language === null ? (
-              <Switch
-                label={t("notifications.sending_label")}
-                description={languages ? t("notifications.sending_description") : undefined}
-                value={isEnabled}
-                isDisabled={!canWrite}
-                changeAction={toggleEnabled}
-              />
-            ) : (
-              <Text type="supporting" color="secondary">
-                {t("notifications.sending_other_language", { language: contentName ?? "" })}
-              </Text>
-            ))}
-        </VStack>
-      </Card>
-
-      <div
-        className="template-columns"
-        style={isSwitching ? { opacity: 0.6, pointerEvents: "none" } : undefined}
-      >
-        <VStack gap={4}>
-          <Card>
-            <VStack gap={4}>
-              {!isLayout && (
-                <TextInput
-                  label={t("notifications.editor_subject_label")}
-                  description={t("notifications.editor_subject_description")}
-                  value={draft.subject}
-                  status={
-                    problem?.part === "subject"
-                      ? { type: "error", message: problem.message }
-                      : undefined
+                          : languages.others.some((l) => l.language === tag && !l.published)
+                            ? t("notifications.language_option_unpublished", {
+                                language: languageLabel(format, tag),
+                              })
+                            : languageLabel(format, tag),
+                    }),
+                  )}
+                  value={language ?? languages.content}
+                  onChange={(tag) =>
+                    // The same page in another language: replaced in place, never a push.
+                    startSwitching(() =>
+                      router.replace(templateHref(key, tag === languages.content ? null : tag), {
+                        scroll: false,
+                      }),
+                    )
                   }
-                  onChange={(subject) => edit({ subject })}
+                  hasSearch={languages.others.length > 8}
+                  isLoading={isSwitching}
+                  isDisabled={isDirty}
+                  disabledMessage={t("notifications.language_locked")}
+                  width={320}
                 />
               )}
-              <VStack gap={1}>
-                <Text type="label">{t("notifications.editor_html_label")}</Text>
-                {!isLayout && (
+              <VStack gap={0.5}>
+                {shownFrom && <Text type="supporting">{shownFrom}</Text>}
+                {language !== null && !isCustomized && (
                   <Text type="supporting" color="secondary">
-                    {t("notifications.editor_html_hint")}
+                    {t("notifications.sources_fallback", { language: languageName(language) })}
                   </Text>
                 )}
-                <CodeEditor
-                  label={t("notifications.editor_html_source")}
-                  language="html"
-                  value={draft.html}
-                  onChange={(html) => edit({ html })}
-                  errorAt={lineIn(problem, isLayout ? "layout" : "html") ?? lineIn(problem, "html")}
-                  minHeight={360}
-                />
               </VStack>
-              {!isLayout && (
-                <VStack gap={2}>
-                  <Switch
-                    label={t("notifications.editor_text_switch")}
-                    description={t("notifications.editor_text_switch_description")}
-                    value={textEditor}
-                    onChange={(isOn) => edit({ text: isOn ? (rendered?.text ?? "") : null })}
+            </HStack>
+            {template.can_disable &&
+              (language === null ? (
+                <Switch
+                  label={t("notifications.sending_label")}
+                  description={languages ? t("notifications.sending_description") : undefined}
+                  value={isEnabled}
+                  isDisabled={!canWrite}
+                  changeAction={toggleEnabled}
+                />
+              ) : (
+                <Text type="supporting" color="secondary">
+                  {t("notifications.sending_other_language", { language: contentName ?? "" })}
+                </Text>
+              ))}
+          </VStack>
+        </Card>
+
+        <div className="template-columns">
+          <VStack gap={4}>
+            <Card>
+              <VStack gap={4}>
+                {!isLayout && (
+                  <TextInput
+                    label={t("notifications.editor_subject_label")}
+                    description={t("notifications.editor_subject_description")}
+                    value={draft.subject}
+                    status={
+                      problem?.part === "subject"
+                        ? { type: "error", message: problem.message }
+                        : undefined
+                    }
+                    onChange={(subject) => edit({ subject })}
                   />
-                  {textEditor && (
-                    <CodeEditor
-                      label={t("notifications.editor_text_source")}
-                      language="text"
-                      value={draft.text ?? ""}
-                      onChange={(text) => edit({ text })}
-                      errorAt={lineIn(problem, "text")}
-                      minHeight={200}
+                )}
+                <VStack gap={1}>
+                  <Text type="label">{t("notifications.editor_html_label")}</Text>
+                  {!isLayout && (
+                    <Text type="supporting" color="secondary">
+                      {t("notifications.editor_html_hint")}
+                    </Text>
+                  )}
+                  <CodeEditor
+                    label={t("notifications.editor_html_source")}
+                    language="html"
+                    value={draft.html}
+                    onChange={(html) => edit({ html })}
+                    errorAt={
+                      lineIn(problem, isLayout ? "layout" : "html") ?? lineIn(problem, "html")
+                    }
+                    minHeight={360}
+                  />
+                </VStack>
+                {!isLayout && (
+                  <VStack gap={2}>
+                    <Switch
+                      label={t("notifications.editor_text_switch")}
+                      description={t("notifications.editor_text_switch_description")}
+                      value={textEditor}
+                      onChange={(isOn) => edit({ text: isOn ? (rendered?.text ?? "") : null })}
                     />
+                    {textEditor && (
+                      <CodeEditor
+                        label={t("notifications.editor_text_source")}
+                        language="text"
+                        value={draft.text ?? ""}
+                        onChange={(text) => edit({ text })}
+                        errorAt={lineIn(problem, "text")}
+                        minHeight={200}
+                      />
+                    )}
+                  </VStack>
+                )}
+              </VStack>
+            </Card>
+            <VariablesPanel variables={variables} />
+          </VStack>
+
+          <Card>
+            <VStack gap={3}>
+              <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
+                <HStack gap={2} vAlign="center">
+                  <Text type="display-3" as="h2">
+                    {t("notifications.preview_title")}
+                  </Text>
+                  {isPreviewing && (
+                    <Spinner size="sm" aria-label={t("notifications.preview_rendering")} />
+                  )}
+                </HStack>
+                <SegmentedControl
+                  label={t("notifications.preview_width")}
+                  size="sm"
+                  value={width}
+                  onChange={setWidth}
+                >
+                  <SegmentedControlItem
+                    value="desktop"
+                    label={t("notifications.preview_desktop")}
+                  />
+                  <SegmentedControlItem value="mobile" label={t("notifications.preview_mobile")} />
+                  <SegmentedControlItem value="text" label={t("notifications.preview_text")} />
+                </SegmentedControl>
+              </HStack>
+              {canReadOrders && !isStaffAccount && (
+                <TextInput
+                  label={t("notifications.preview_order_label")}
+                  description={t("notifications.preview_order_description")}
+                  isOptional
+                  placeholder={ORDER_ID_EXAMPLE}
+                  value={order}
+                  status={
+                    order.trim() !== "" && !orderId
+                      ? { type: "warning", message: t("notifications.preview_order_invalid") }
+                      : undefined
+                  }
+                  onChange={chooseOrder}
+                />
+              )}
+              {rendered ? (
+                <VStack gap={2}>
+                  {!isLayout && (
+                    <Text weight="medium">
+                      {t("notifications.preview_subject", { subject: rendered.subject })}
+                    </Text>
+                  )}
+                  {problem && (
+                    <Text type="supporting" color="secondary">
+                      {t("notifications.preview_last_working")}
+                    </Text>
+                  )}
+                  {width === "text" ? (
+                    <pre className="email-text">{rendered.text}</pre>
+                  ) : (
+                    <div className="email-frame">
+                      {/* No scripts, forms or same-origin access: just the email. */}
+                      <iframe
+                        title={t("notifications.preview_frame_title")}
+                        sandbox=""
+                        srcDoc={rendered.html}
+                        style={{ width: width === "mobile" ? 375 : "100%" }}
+                      />
+                    </div>
                   )}
                 </VStack>
+              ) : (
+                <Text color="secondary">
+                  {problem
+                    ? t("notifications.preview_fix_problem")
+                    : t("notifications.preview_none")}
+                </Text>
               )}
             </VStack>
           </Card>
-          <VariablesPanel variables={variables} />
-        </VStack>
+        </div>
 
-        <Card>
-          <VStack gap={3}>
-            <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
-              <HStack gap={2} vAlign="center">
-                <Text type="display-3" as="h2">
-                  {t("notifications.preview_title")}
-                </Text>
-                {isPreviewing && (
-                  <Spinner size="sm" aria-label={t("notifications.preview_rendering")} />
-                )}
-              </HStack>
-              <SegmentedControl
-                label={t("notifications.preview_width")}
-                size="sm"
-                value={width}
-                onChange={setWidth}
-              >
-                <SegmentedControlItem value="desktop" label={t("notifications.preview_desktop")} />
-                <SegmentedControlItem value="mobile" label={t("notifications.preview_mobile")} />
-                <SegmentedControlItem value="text" label={t("notifications.preview_text")} />
-              </SegmentedControl>
-            </HStack>
-            {canReadOrders && !isStaffAccount && (
-              <TextInput
-                label={t("notifications.preview_order_label")}
-                description={t("notifications.preview_order_description")}
-                isOptional
-                placeholder={ORDER_ID_EXAMPLE}
-                value={order}
-                status={
-                  order.trim() !== "" && !orderId
-                    ? { type: "warning", message: t("notifications.preview_order_invalid") }
-                    : undefined
-                }
-                onChange={chooseOrder}
-              />
-            )}
-            {rendered ? (
-              <VStack gap={2}>
-                {!isLayout && (
-                  <Text weight="medium">
-                    {t("notifications.preview_subject", { subject: rendered.subject })}
-                  </Text>
-                )}
-                {problem && (
-                  <Text type="supporting" color="secondary">
-                    {t("notifications.preview_last_working")}
-                  </Text>
-                )}
-                {width === "text" ? (
-                  <pre className="email-text">{rendered.text}</pre>
-                ) : (
-                  <div className="email-frame">
-                    {/* No scripts, forms or same-origin access: just the email. */}
-                    <iframe
-                      title={t("notifications.preview_frame_title")}
-                      sandbox=""
-                      srcDoc={rendered.html}
-                      style={{ width: width === "mobile" ? 375 : "100%" }}
-                    />
-                  </div>
-                )}
-              </VStack>
-            ) : (
-              <Text color="secondary">
-                {problem ? t("notifications.preview_fix_problem") : t("notifications.preview_none")}
-              </Text>
-            )}
-          </VStack>
-        </Card>
-      </div>
-
-      {isReverting && (
-        <RevertDialog
-          templateKey={key}
-          language={language}
-          description={
-            language !== null && contentName !== undefined
-              ? t("notifications.revert_dialog_description_language", {
-                  language: languageName(language),
-                  content: contentName,
-                })
-              : t("notifications.revert_dialog_description")
-          }
-          onClose={() => setIsReverting(false)}
-          onReverted={(sources, reverted) => {
-            setSaved(sources);
-            setDraft(sources);
-            setIsCustomized(false);
-            if (reverted) setFrom(reverted);
-            setProblem(undefined);
-            setError(undefined);
-            schedulePreview(sources, orderId);
-            toast({ body: t("notifications.editor_reverted_toast") });
-          }}
-        />
-      )}
-    </VStack>
+        {isReverting && (
+          <RevertDialog
+            templateKey={key}
+            language={language}
+            description={
+              language !== null
+                ? t("notifications.revert_dialog_description_language", {
+                    language: languageName(language),
+                  })
+                : languages
+                  ? t("notifications.revert_dialog_description_content")
+                  : t("notifications.revert_dialog_description")
+            }
+            onClose={() => setIsReverting(false)}
+            onReverted={(sources, reverted) => {
+              setSaved(sources);
+              setDraft(sources);
+              setIsCustomized(false);
+              if (reverted) setFrom(reverted);
+              setProblem(undefined);
+              setError(undefined);
+              schedulePreview(sources, orderId);
+              toast({ body: t("notifications.editor_reverted_toast") });
+            }}
+          />
+        )}
+      </VStack>
+    </div>
   );
 }
 

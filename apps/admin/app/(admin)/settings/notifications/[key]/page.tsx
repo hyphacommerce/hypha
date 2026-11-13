@@ -18,6 +18,7 @@ import {
   templateDescription,
   templateLanguage,
   templateName,
+  templateQuery,
 } from "@/lib/notifications";
 
 import { TemplateEditor } from "./template-editor";
@@ -77,7 +78,7 @@ async function Template({
     language,
     saved: loaded(
       await client.GET("/admin/notification-templates/{key}", {
-        params: { path: { key }, query: language ? { language } : {} },
+        params: { path: { key }, query: templateQuery(language) },
       }),
     ),
   });

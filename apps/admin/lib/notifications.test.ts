@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { isTranslated, templateHref, templateLanguage } from "./notifications.ts";
+import { isTranslated, templateHref, templateLanguage, templateQuery } from "./notifications.ts";
 
 test("buyer templates and the layout are written per language", () => {
   assert.equal(isTranslated("buyer"), true);
@@ -25,6 +25,11 @@ test("no language, the content language or one the store lacks is the content la
   assert.equal(templateLanguage("en", ["sr-Latn"]), null);
   assert.equal(templateLanguage("fr", ["sr-Latn"]), null);
   assert.equal(templateLanguage("sr", ["sr-Latn"]), null);
+});
+
+test("a template's routes name the language only when it isn't the content language", () => {
+  assert.deepEqual(templateQuery(null), {});
+  assert.deepEqual(templateQuery("sr-Latn"), { language: "sr-Latn" });
 });
 
 test("a template's editor names its language only when it isn't the content language", () => {

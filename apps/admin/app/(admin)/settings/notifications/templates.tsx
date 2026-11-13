@@ -23,7 +23,12 @@ import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { useState } from "react";
 
 import type { KeyIn } from "@/lib/messages";
-import { describeProblem, templateDescription, templateName } from "@/lib/notifications";
+import {
+  describeProblem,
+  templateDescription,
+  templateHref,
+  templateName,
+} from "@/lib/notifications";
 import { useFormat } from "@/lib/use-format";
 import { useT } from "@/lib/use-t";
 
@@ -190,7 +195,7 @@ function TemplateRow({
             label={canWrite ? t("common.edit") : t("common.view")}
             variant="ghost"
             size="sm"
-            href={`/settings/notifications/${template.key}`}
+            href={templateHref(template.key, null)}
           />
         </HStack>
       </TableCell>
