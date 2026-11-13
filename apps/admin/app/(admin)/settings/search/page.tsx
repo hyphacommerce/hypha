@@ -24,8 +24,8 @@ export default async function SearchSettingsPage() {
       <VStack gap={5} maxWidth={1280}>
         <PageHeader
           back={settingsCrumb(t)}
-          title="Search"
-          description="The filters and listings shoppers get on your storefront's search and category pages."
+          title={t("common.search")}
+          description={t("settings.search_description")}
         />
         <Suspense fallback={<FormSkeleton cards={4} />}>
           <SearchSettings />

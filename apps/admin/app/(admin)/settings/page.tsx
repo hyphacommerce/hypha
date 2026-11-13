@@ -22,16 +22,15 @@ export default async function SettingsPage() {
   return (
     <Section padding={6}>
       <VStack gap={6} maxWidth={960}>
-        <PageHeader
-          title="Settings"
-          description="How the store runs, who works on it, and what connects to it."
-        />
+        <PageHeader title={t("common.settings")} description={t("settings.index_description")} />
         {groups.length === 0 && (
           <Banner
             status="info"
-            title="Your role has no settings to open"
-            description="Ask the store owner if you need access. Your own account is always under Your account."
-            endContent={<Button label="Your account" variant="secondary" href="/account" />}
+            title={t("settings.index_empty_title")}
+            description={t("settings.index_empty_description")}
+            endContent={
+              <Button label={t("common.your_account")} variant="secondary" href="/account" />
+            }
           />
         )}
         {groups.map((group) => (

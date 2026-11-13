@@ -21,8 +21,8 @@ export default async function PaymentsSettingsPage() {
       <VStack gap={5} maxWidth={960}>
         <PageHeader
           back={settingsCrumb(t)}
-          title="Payments"
-          description="How shoppers pay at checkout. With manual methods, like cash on delivery or a bank transfer, you collect the money yourself and mark the order paid."
+          title={t("payments.settings_title")}
+          description={t("payments.settings_description")}
         />
         <Suspense fallback={<CardSkeleton lines={5} />}>
           <PaymentMethods />
@@ -34,7 +34,8 @@ export default async function PaymentsSettingsPage() {
 
 async function PaymentMethods() {
   const client = await sessionClient();
-  const [me, methods, markets, channelName, paymentApps] = await Promise.all([
+  const [t, me, methods, markets, channelName, paymentApps] = await Promise.all([
+    getT(),
     requireStaff(),
     loadPaymentMethods(),
     client.GET("/admin/markets"),
@@ -45,8 +46,8 @@ async function PaymentMethods() {
     return (
       <Banner
         status="info"
-        title="Your role can't see payment methods"
-        description="Ask the store owner for the payments:read scope."
+        title={t("payments.settings_no_access_title")}
+        description={t("payments.settings_no_access_description")}
       />
     );
   }
@@ -55,8 +56,8 @@ async function PaymentMethods() {
       {!methods.some((m) => m.enabled) && (
         <Banner
           status="warning"
-          title="Checkout is refused until a payment method is enabled"
-          description="Carts with something to pay can't be checked out. Add a method below, or turn one on."
+          title={t("payments.settings_none_enabled_title")}
+          description={t("payments.settings_none_enabled_description")}
         />
       )}
       <PaymentMethodsCard

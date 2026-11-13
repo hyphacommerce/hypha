@@ -19,8 +19,8 @@ export default async function ChannelsSettingsPage() {
       <VStack gap={5} maxWidth={960}>
         <PageHeader
           back={settingsCrumb(t)}
-          title="Channels"
-          description="Where your products are sold: your online store, AI agents, or anywhere else. A product is sold in the channels it's published to, from its page."
+          title={t("common.channels")}
+          description={t("settings.channels_description")}
         />
         <Suspense fallback={<CardSkeleton lines={4} />}>
           <Channels />

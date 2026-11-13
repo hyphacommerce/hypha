@@ -23,23 +23,22 @@ import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { KeyIcon, PencilSquareIcon } from "@heroicons/react/24/outline";
 import { useState, useTransition } from "react";
 
-import { type ChannelKind, createChannel, createStorefrontKey, renameChannel } from "./actions";
 import { DateTime } from "@/components/date-time";
+import { useT } from "@/lib/use-t";
+
+import { type ChannelKind, createChannel, createStorefrontKey, renameChannel } from "./actions";
 
 type Channel = AdminSchemas["ChannelResponse"];
 
-const KINDS: { value: ChannelKind; label: string; description: string }[] = [
-  { value: "online_store", label: "Online store", description: "A storefront you run." },
-  { value: "agentic", label: "AI agents", description: "Shopping agents, through UCP." },
-  { value: "custom", label: "Custom", description: "Anywhere else: a marketplace, a kiosk." },
-];
+const KINDS: ChannelKind[] = ["online_store", "agentic", "custom"];
 
-/** A kind's label; one this admin doesn't know yet reads as custom. */
-function kindLabel(kind: string): string {
-  return KINDS.find((k) => k.value === kind)?.label ?? "Custom";
+/** The kind `value` names, if it's one this admin knows. */
+function knownKind(value: string): ChannelKind | undefined {
+  return KINDS.find((kind) => kind === value);
 }
 
 export function ChannelsCard({ channels }: { channels: Channel[] }) {
+  const t = useT<"settings">();
   const [editing, setEditing] = useState<Channel | "new">();
   const [keyFor, setKeyFor] = useState<Channel>();
 
@@ -49,20 +48,24 @@ export function ChannelsCard({ channels }: { channels: Channel[] }) {
         <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Channels
+              {t("common.channels")}
             </Text>
             <Text type="supporting" color="secondary">
-              A storefront sells through the channel its publishable key belongs to.
+              {t("settings.channels_card_description")}
             </Text>
           </VStack>
-          <Button label="Add channel" variant="secondary" onClick={() => setEditing("new")} />
+          <Button
+            label={t("settings.channels_add")}
+            variant="secondary"
+            onClick={() => setEditing("new")}
+          />
         </HStack>
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHeaderCell>Channel</TableHeaderCell>
-              <TableHeaderCell>Kind</TableHeaderCell>
-              <TableHeaderCell>Created</TableHeaderCell>
+              <TableHeaderCell>{t("common.channel")}</TableHeaderCell>
+              <TableHeaderCell>{t("settings.channels_column_kind")}</TableHeaderCell>
+              <TableHeaderCell>{t("common.created")}</TableHeaderCell>
               <TableHeaderCell>
                 <span />
               </TableHeaderCell>
@@ -80,7 +83,10 @@ export function ChannelsCard({ channels }: { channels: Channel[] }) {
                   </VStack>
                 </TableCell>
                 <TableCell>
-                  <Badge label={kindLabel(channel.kind)} />
+                  {/* A kind this admin doesn't know yet reads as custom. */}
+                  <Badge
+                    label={t(`settings.channel_kind_${knownKind(channel.kind) ?? "custom"}`)}
+                  />
                 </TableCell>
                 <TableCell>
                   <Text color="secondary">
@@ -90,18 +96,18 @@ export function ChannelsCard({ channels }: { channels: Channel[] }) {
                 <TableCell>
                   <HStack gap={1} hAlign="end">
                     <IconButton
-                      label={`Rename ${channel.name}`}
+                      label={t("settings.channel_rename", { name: channel.name })}
                       icon={<PencilSquareIcon />}
                       size="sm"
                       variant="ghost"
                       onClick={() => setEditing(channel)}
                     />
                     <IconButton
-                      label={`New storefront key for ${channel.name}`}
+                      label={t("settings.channel_new_key_for", { name: channel.name })}
                       icon={<KeyIcon />}
                       size="sm"
                       variant="ghost"
-                      tooltip="New storefront key"
+                      tooltip={t("settings.channel_new_key")}
                       onClick={() => setKeyFor(channel)}
                     />
                   </HStack>
@@ -124,6 +130,7 @@ export function ChannelsCard({ channels }: { channels: Channel[] }) {
 
 /** Adds a channel, or renames one (`channel`): its kind can't change. */
 function ChannelDialog({ channel, onClose }: { channel?: Channel; onClose: () => void }) {
+  const t = useT<"settings">();
   const [name, setName] = useState(channel?.name ?? "");
   const [kind, setKind] = useState<ChannelKind>("online_store");
   const [error, setError] = useState<string>();
@@ -144,36 +151,44 @@ function ChannelDialog({ channel, onClose }: { channel?: Channel; onClose: () =>
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={480} purpose="form">
       <DialogHeader
-        title={channel ? `Rename ${channel.name}` : "Add channel"}
-        subtitle={channel ? undefined : "It sells nothing until you publish products to it."}
+        title={
+          channel
+            ? t("settings.channel_dialog_title_rename", { name: channel.name })
+            : t("settings.channel_dialog_title_add")
+        }
+        subtitle={channel ? undefined : t("settings.channel_dialog_subtitle")}
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
         <TextInput
-          label="Name"
-          description="Shown to staff. Unique, ignoring case."
-          placeholder="Outlet"
+          label={t("common.name")}
+          description={t("settings.channel_name_description")}
+          placeholder={t("settings.channel_name_placeholder")}
           value={name}
           onChange={setName}
           onEnter={submit}
         />
         {!channel && (
           <Selector
-            label="Kind"
-            description="What the channel is for. Can't change later."
-            options={KINDS}
+            label={t("settings.channel_kind_label")}
+            description={t("settings.channel_kind_description")}
+            options={KINDS.map((value) => ({
+              value,
+              label: t(`settings.channel_kind_${value}`),
+              description: t(`settings.channel_kind_${value}_description`),
+            }))}
             value={kind}
             onChange={(value) => {
-              const picked = KINDS.find((k) => k.value === value);
-              if (picked) setKind(picked.value);
+              const picked = knownKind(value);
+              if (picked) setKind(picked);
             }}
           />
         )}
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label={channel ? "Save" : "Add channel"}
+            label={channel ? t("common.save") : t("settings.channel_dialog_submit_add")}
             variant="primary"
             isLoading={isPending}
             isDisabled={!isComplete}
@@ -187,6 +202,8 @@ function ChannelDialog({ channel, onClose }: { channel?: Channel; onClose: () =>
 
 /** Creates a publishable key for the channel and shows it. */
 function KeyDialog({ channel, onClose }: { channel: Channel; onClose: () => void }) {
+  const t = useT<"settings">();
+  // The key's name is stored: English whatever the staff member's language.
   const [name, setName] = useState(`${channel.name} storefront`);
   const [token, setToken] = useState<string>();
   const [error, setError] = useState<string>();
@@ -204,11 +221,9 @@ function KeyDialog({ channel, onClose }: { channel: Channel; onClose: () => void
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={560} purpose="form">
       <DialogHeader
-        title={`Storefront key for ${channel.name}`}
+        title={t("settings.channel_key_title", { name: channel.name })}
         subtitle={
-          token
-            ? "Copy it now: it isn't shown again. It's publishable, so it can sit in a storefront's code."
-            : "A publishable key: storefronts read and sell what this channel publishes with it."
+          token ? t("settings.channel_key_subtitle_created") : t("settings.channel_key_subtitle")
         }
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
@@ -217,16 +232,21 @@ function KeyDialog({ channel, onClose }: { channel: Channel; onClose: () => void
         {token ? (
           <CodeBlock code={token} />
         ) : (
-          <TextInput label="Key name" value={name} onChange={setName} onEnter={submit} />
+          <TextInput
+            label={t("settings.channel_key_name_label")}
+            value={name}
+            onChange={setName}
+            onEnter={submit}
+          />
         )}
         <HStack gap={2} hAlign="end">
           {token ? (
-            <Button label="Done" variant="primary" onClick={onClose} />
+            <Button label={t("common.done")} variant="primary" onClick={onClose} />
           ) : (
             <>
-              <Button label="Cancel" variant="ghost" onClick={onClose} />
+              <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
               <Button
-                label="Create key"
+                label={t("settings.channel_key_create")}
                 variant="primary"
                 isLoading={isPending}
                 isDisabled={!name.trim()}

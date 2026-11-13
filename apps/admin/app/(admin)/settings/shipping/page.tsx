@@ -20,8 +20,8 @@ export default async function ShippingSettingsPage() {
       <VStack gap={5} maxWidth={960}>
         <PageHeader
           back={settingsCrumb(t)}
-          title="Shipping"
-          description="Zones are the countries you ship to; each offers its options at checkout."
+          title={t("common.shipping")}
+          description={t("shipping.page_description")}
         />
         <Suspense fallback={<FormSkeleton cards={2} />}>
           <Shipping />

@@ -27,26 +27,31 @@ import { AddressFields } from "@/components/address-fields";
 import { useCurrencies } from "@/components/currencies";
 import { ProductPicker } from "@/components/product-picker";
 import {
-  CONDITION_TYPES,
-  type ConditionForm,
-  FIELDS,
-  FLAGS,
-  PATHS,
-  type RuleForm,
-  type RuleOptions,
-  type TestResult,
-  VERDICTS,
-  blankCondition,
-  marketCurrencies,
-  toBody,
-} from "@/lib/checkout-rules";
-import {
   ADDRESS_FIELDS,
   type AddressFormat,
   type AddressValues,
   type FieldProblems,
   asField,
 } from "@/lib/address";
+import {
+  CONDITION_TYPES,
+  type ConditionForm,
+  type RuleForm,
+  type RuleOptions,
+  type TestResult,
+  blankCondition,
+  conditionTypeOptions,
+  fieldOptions,
+  flagLabel,
+  flagOptions,
+  marketCurrencies,
+  pathOptions,
+  toBody,
+  verdictLabel,
+  verdictOptions,
+} from "@/lib/checkout-rules";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { type RuleProblems, createRule, tryAddress, updateRule } from "./actions";
 
@@ -72,6 +77,7 @@ export function RuleEditor({
   productNames: Record<string, string>;
   canWrite: boolean;
 }) {
+  const t = useT<"checkout">();
   const router = useRouter();
   const currencies = useCurrencies();
   const [form, setForm] = useState(initial);
@@ -113,16 +119,16 @@ export function RuleEditor({
         <Card>
           <VStack gap={4}>
             <TextInput
-              label="Name"
-              description="For staff; shoppers see the message."
+              label={t("common.name")}
+              description={t("checkout.editor_name_description")}
               value={form.name}
               onChange={(name) => set({ name })}
               isDisabled={!canWrite}
               status={at("name")}
             />
             <Switch
-              label="Enabled"
-              description="Off: carts don't show it, and the test below still tries it."
+              label={t("common.enabled")}
+              description={t("checkout.editor_enabled_description")}
               value={form.enabled}
               onChange={(enabled) => set({ enabled })}
               isDisabled={!canWrite}
@@ -133,10 +139,10 @@ export function RuleEditor({
         <Card>
           <VStack gap={4}>
             <Text type="display-3" as="h2">
-              Where it applies
+              {t("checkout.editor_applies_title")}
             </Text>
             <SegmentedControl
-              label="Shipping countries"
+              label={t("checkout.editor_countries_mode")}
               value={form.countriesMode}
               onChange={(mode) => {
                 if (mode === "all" || mode === "include" || mode === "exclude") {
@@ -144,13 +150,19 @@ export function RuleEditor({
                 }
               }}
             >
-              <SegmentedControlItem value="all" label="Every country" />
-              <SegmentedControlItem value="include" label="Only these" />
-              <SegmentedControlItem value="exclude" label="All but these" />
+              <SegmentedControlItem value="all" label={t("checkout.editor_countries_all")} />
+              <SegmentedControlItem
+                value="include"
+                label={t("checkout.editor_countries_include")}
+              />
+              <SegmentedControlItem
+                value="exclude"
+                label={t("checkout.editor_countries_exclude")}
+              />
             </SegmentedControl>
             {form.countriesMode !== "all" && (
               <MultiSelector
-                label="Countries"
+                label={t("common.countries")}
                 options={options.countries}
                 value={form.countries}
                 onChange={(countries) => set({ countries })}
@@ -160,8 +172,8 @@ export function RuleEditor({
               />
             )}
             <MultiSelector
-              label="Markets"
-              placeholder="Every market"
+              label={t("common.markets")}
+              placeholder={t("checkout.editor_every_market")}
               options={options.markets}
               value={form.markets}
               onChange={(markets) => set({ markets })}
@@ -169,8 +181,8 @@ export function RuleEditor({
               status={at("applies_to.markets")}
             />
             <MultiSelector
-              label="Channels"
-              placeholder="Every channel"
+              label={t("common.channels")}
+              placeholder={t("checkout.editor_every_channel")}
               options={options.channels}
               value={form.channels}
               onChange={(channels) => set({ channels })}
@@ -178,9 +190,9 @@ export function RuleEditor({
               status={at("applies_to.channels")}
             />
             <MultiSelector
-              label="Shipping options"
-              description="Chosen: only while the shopper has one of them chosen, and the message shows under the options."
-              placeholder="Any option"
+              label={t("checkout.editor_shipping_options")}
+              description={t("checkout.editor_shipping_options_description")}
+              placeholder={t("checkout.editor_any_option")}
               options={options.shippingOptions}
               value={form.shippingOptions}
               onChange={(shippingOptions) => set({ shippingOptions })}
@@ -195,11 +207,10 @@ export function RuleEditor({
           <VStack gap={4}>
             <VStack gap={1}>
               <Text type="display-3" as="h2">
-                Conditions
+                {t("checkout.editor_conditions_title")}
               </Text>
               <Text type="supporting" color="secondary">
-                All of them must hold. A condition on the address waits until the shopper enters
-                one.
+                {t("checkout.editor_conditions_description")}
               </Text>
             </VStack>
             {problems.conditions && <Banner status="error" title={problems.conditions} />}
@@ -222,7 +233,7 @@ export function RuleEditor({
             {canWrite && (
               <HStack>
                 <Button
-                  label="Add condition"
+                  label={t("checkout.editor_condition_add")}
                   variant="secondary"
                   isDisabled={form.conditions.length >= MAX_CONDITIONS}
                   onClick={() => set({ conditions: [...form.conditions, blankCondition()] })}
@@ -235,21 +246,21 @@ export function RuleEditor({
         <Card>
           <VStack gap={4}>
             <Text type="display-3" as="h2">
-              What the shopper is told
+              {t("checkout.editor_outcome_title")}
             </Text>
             <SegmentedControl
-              label="Outcome"
+              label={t("checkout.editor_outcome")}
               value={form.severity}
               onChange={(severity) => {
                 if (severity === "error" || severity === "warning") set({ severity });
               }}
             >
-              <SegmentedControlItem value="error" label="Error: blocks checkout" />
-              <SegmentedControlItem value="warning" label="Warning: only shown" />
+              <SegmentedControlItem value="error" label={t("checkout.editor_outcome_error")} />
+              <SegmentedControlItem value="warning" label={t("checkout.editor_outcome_warning")} />
             </SegmentedControl>
             <TextArea
-              label="Message"
-              description="Plain text, shown under the field. Say what to do."
+              label={t("checkout.editor_message")}
+              description={t("checkout.editor_message_description")}
               maxLength={300}
               rows={2}
               value={form.message}
@@ -258,16 +269,16 @@ export function RuleEditor({
               status={at("outcome.message")}
             />
             <Selector
-              label="Shown under"
-              options={PATHS}
+              label={t("checkout.editor_path")}
+              options={pathOptions(t)}
               value={form.path}
               onChange={(path) => set({ path })}
               isDisabled={!canWrite}
               status={at("outcome.path")}
             />
             <TextInput
-              label="Code"
-              description="For storefronts and apps: snake_case, like po_box_not_allowed. Empty is rule."
+              label={t("common.code")}
+              description={t("checkout.editor_code_description")}
               isOptional
               value={form.code}
               onChange={(code) => set({ code })}
@@ -281,9 +292,9 @@ export function RuleEditor({
           <VStack gap={3}>
             {error && <Banner status="error" title={error} />}
             <HStack gap={2} hAlign="end">
-              <Button label="Cancel" variant="ghost" href="/settings/checkout" />
+              <Button label={t("common.cancel")} variant="ghost" href="/settings/checkout" />
               <Button
-                label={id ? "Save rule" : "Create rule"}
+                label={id ? t("checkout.editor_save") : t("checkout.editor_create")}
                 variant="primary"
                 isLoading={isPending}
                 isDisabled={form.name.trim() === "" || form.message.trim() === ""}
@@ -330,6 +341,7 @@ function ConditionRow({
   onRemove: () => void;
   onNamed: (names: Record<string, string>) => void;
 }) {
+  const t = useT<"checkout">();
   const [isPicking, setPicking] = useState(false);
   const path = `conditions[${index}]`;
   const type = c.type;
@@ -344,11 +356,15 @@ function ConditionRow({
         <HStack gap={2} vAlign="end">
           <div style={{ flex: "1 1 auto" }}>
             <Selector
-              label={index === 0 ? "When" : "And"}
-              options={CONDITION_TYPES}
+              label={
+                index === 0
+                  ? t("checkout.editor_condition_when")
+                  : t("checkout.editor_condition_and")
+              }
+              options={conditionTypeOptions(t)}
               value={type}
               onChange={(value) => {
-                const next = CONDITION_TYPES.find((t) => t.value === value);
+                const next = CONDITION_TYPES.find((kind) => kind.value === value);
                 if (next) onChange({ type: next.value });
               }}
               isDisabled={isDisabled}
@@ -357,7 +373,7 @@ function ConditionRow({
           </div>
           {canRemove && (
             <IconButton
-              label={`Remove condition ${index + 1}`}
+              label={t("checkout.editor_condition_remove", { number: index + 1 })}
               icon={<TrashIcon />}
               variant="ghost"
               onClick={onRemove}
@@ -366,8 +382,8 @@ function ConditionRow({
         </HStack>
         {isField && (
           <Selector
-            label="Field"
-            options={FIELDS}
+            label={t("checkout.editor_field")}
+            options={fieldOptions(t)}
             value={c.field}
             onChange={(field) => onChange({ field })}
             isDisabled={isDisabled}
@@ -376,15 +392,15 @@ function ConditionRow({
         {(type === "field_matches" || type === "field_not_matches") && (
           <>
             <TextInput
-              label="Pattern"
-              description="A regular expression, like \bbox\b. It may match anywhere in the field."
+              label={t("checkout.editor_pattern")}
+              description={t("checkout.editor_pattern_description")}
               value={c.pattern}
               onChange={(pattern) => onChange({ pattern })}
               isDisabled={isDisabled}
               status={at(`${path}.pattern`)}
             />
             <Switch
-              label="Ignore case"
+              label={t("checkout.editor_ignore_case")}
               value={c.caseInsensitive}
               onChange={(caseInsensitive) => onChange({ caseInsensitive })}
               isDisabled={isDisabled}
@@ -393,8 +409,8 @@ function ConditionRow({
         )}
         {(type === "field_contains" || type === "field_not_contains") && (
           <TextArea
-            label="Text"
-            description="One per line; case doesn't matter."
+            label={t("checkout.editor_text")}
+            description={t("checkout.editor_text_description")}
             rows={3}
             value={c.values}
             onChange={(values) => onChange({ values })}
@@ -404,7 +420,7 @@ function ConditionRow({
         )}
         {(type === "field_longer_than" || type === "field_shorter_than") && (
           <TextInput
-            label="Characters"
+            label={t("checkout.editor_characters")}
             value={c.length}
             onChange={(length) => onChange({ length })}
             isDisabled={isDisabled}
@@ -414,8 +430,8 @@ function ConditionRow({
         {isPostal && (
           <Grid columns={{ minWidth: 160, repeat: "fit" }} gap={3}>
             <TextArea
-              label="Starting with"
-              description="One per line: 35"
+              label={t("checkout.editor_postal_prefixes")}
+              description={t("checkout.editor_postal_prefixes_description")}
               rows={3}
               value={c.prefixes}
               onChange={(prefixes) => onChange({ prefixes })}
@@ -423,8 +439,8 @@ function ConditionRow({
               status={at(`${path}.prefixes`)}
             />
             <TextArea
-              label="Ranges"
-              description="One per line: 35000-35999"
+              label={t("checkout.editor_postal_ranges")}
+              description={t("checkout.editor_postal_ranges_description")}
               rows={3}
               value={c.ranges}
               onChange={(ranges) => onChange({ ranges })}
@@ -432,8 +448,8 @@ function ConditionRow({
               status={at(`${path}.ranges`)}
             />
             <TextArea
-              label="Exactly"
-              description="One per line"
+              label={t("checkout.editor_postal_codes")}
+              description={t("checkout.editor_postal_codes_description")}
               rows={3}
               value={c.codes}
               onChange={(codes) => onChange({ codes })}
@@ -444,8 +460,8 @@ function ConditionRow({
         )}
         {(type === "region_in" || type === "region_not_in") && (
           <TextArea
-            label="Region codes"
-            description="One per line, as the address form stores them: CA, NY, M."
+            label={t("checkout.editor_region_codes")}
+            description={t("checkout.editor_region_codes_description")}
             rows={3}
             value={c.regions}
             onChange={(regions) => onChange({ regions })}
@@ -455,8 +471,8 @@ function ConditionRow({
         )}
         {(type === "address_is" || type === "address_is_not") && (
           <Selector
-            label="What"
-            options={FLAGS}
+            label={t("checkout.editor_flag")}
+            options={flagOptions(t)}
             value={c.flag}
             onChange={(flag) => onChange({ flag })}
             isDisabled={isDisabled}
@@ -464,9 +480,9 @@ function ConditionRow({
         )}
         {type === "verification_is" && (
           <MultiSelector
-            label="Verdicts"
-            description="Needs a verification app; without one, no verdict holds."
-            options={VERDICTS}
+            label={t("checkout.editor_verdicts")}
+            description={t("checkout.editor_verdicts_description")}
+            options={verdictOptions(t)}
             value={c.verdicts}
             onChange={(verdicts) => onChange({ verdicts })}
             triggerDisplay="labels"
@@ -476,9 +492,9 @@ function ConditionRow({
         {isCart && (
           <>
             <MultiSelector
-              label="Categories"
-              description="A product in a category below one counts too."
-              placeholder="No category"
+              label={t("common.categories")}
+              description={t("checkout.editor_categories_description")}
+              placeholder={t("checkout.editor_no_category")}
               options={options.categories}
               value={c.categories}
               onChange={(categories) => onChange({ categories })}
@@ -487,10 +503,10 @@ function ConditionRow({
               status={at(`${path}.categories`)}
             />
             <VStack gap={2}>
-              <Text weight="medium">Products</Text>
+              <Text weight="medium">{t("common.products")}</Text>
               {c.products.length === 0 ? (
                 <Text type="supporting" color="secondary">
-                  None chosen.
+                  {t("checkout.editor_products_none")}
                 </Text>
               ) : (
                 <HStack gap={1} wrap="wrap">
@@ -502,14 +518,14 @@ function ConditionRow({
               {!isDisabled && (
                 <HStack gap={2}>
                   <Button
-                    label="Choose products"
+                    label={t("checkout.editor_products_choose")}
                     variant="secondary"
                     size="sm"
                     onClick={() => setPicking(true)}
                   />
                   {c.products.length > 0 && (
                     <Button
-                      label="Clear"
+                      label={t("common.clear")}
                       variant="ghost"
                       size="sm"
                       onClick={() => onChange({ products: [] })}
@@ -520,7 +536,7 @@ function ConditionRow({
             </VStack>
             {isPicking && (
               <ProductPicker
-                title="Choose products"
+                title={t("checkout.editor_products_picker_title")}
                 isAlreadyIn={(p) => c.products.includes(p.id)}
                 onConfirm={async (picked) => {
                   onNamed(Object.fromEntries(picked.map((p) => [p.id, p.title])));
@@ -550,14 +566,14 @@ function ConditionRow({
               <Banner status="error" title={at(`${path}.amounts`)?.message ?? ""} />
             ) : (
               <Text type="supporting" color="secondary">
-                One amount per currency; a cart in a currency left empty doesn&apos;t match.
+                {t("checkout.editor_amounts_hint")}
               </Text>
             )}
           </VStack>
         )}
         {isWeight && (
           <TextInput
-            label="Grams"
+            label={t("checkout.editor_grams")}
             value={c.grams}
             onChange={(grams) => onChange({ grams })}
             isDisabled={isDisabled}
@@ -615,6 +631,7 @@ function TryPanel({
    * lookup). */
   canVerify: boolean;
 }) {
+  const t = useT<"checkout">();
   const currencies = useCurrencies();
   const [country, setCountry] = useState(initialFormat?.country ?? "");
   // The country's form: its fields, labels, required fields and regions.
@@ -673,15 +690,14 @@ function TryPanel({
       <VStack gap={4}>
         <VStack gap={1}>
           <Text type="display-3" as="h2">
-            Try an address
+            {t("checkout.try_title")}
           </Text>
           <Text type="supporting" color="secondary">
-            What a cart would show with this rule as it is in the form, beside your other enabled
-            rules and the address&apos;s format. Nothing is saved.
+            {t("checkout.try_description")}
           </Text>
         </VStack>
         <Selector
-          label="Country"
+          label={t("common.country")}
           options={options.countries}
           value={country || undefined}
           onChange={chooseCountry}
@@ -699,10 +715,10 @@ function TryPanel({
             />
           </div>
         )}
-        <TextInput label="Email" isOptional value={email} onChange={setEmail} />
+        <TextInput label={t("common.email")} isOptional value={email} onChange={setEmail} />
         {options.markets.length > 0 && (
           <Selector
-            label="Market"
+            label={t("common.market")}
             isOptional
             options={options.markets}
             value={market}
@@ -711,7 +727,7 @@ function TryPanel({
         )}
         {options.shippingOptions.length > 0 && (
           <Selector
-            label="Chosen shipping option"
+            label={t("checkout.try_shipping_option")}
             isOptional
             options={options.shippingOptions}
             value={option}
@@ -720,14 +736,19 @@ function TryPanel({
         )}
         {canVerify && (
           <Switch
-            label="Ask the verification app"
-            description="Its verdict and flags, for rules that read them. Costs a lookup."
+            label={t("checkout.try_verify")}
+            description={t("checkout.try_verify_description")}
             value={verify}
             onChange={setVerify}
           />
         )}
         <HStack>
-          <Button label="Try it" variant="secondary" isLoading={isPending} onClick={run} />
+          <Button
+            label={t("checkout.try_run")}
+            variant="secondary"
+            isLoading={isPending}
+            onClick={run}
+          />
         </HStack>
         {error && <Banner status="error" title={error} />}
         {result && <TryResult result={result} />}
@@ -737,37 +758,42 @@ function TryPanel({
 }
 
 function TryResult({ result }: { result: TestResult }) {
+  const t = useT<"checkout">();
+  const format = useFormat();
   if (result.problems.length > 0) {
     return (
       <Banner
         status="error"
-        title="A cart would refuse this address"
+        title={t("checkout.try_refused_title")}
         description={result.problems.map((p) => p.message).join(" ")}
       />
     );
   }
   const flags = Object.entries(result.flags ?? {})
     .filter(([, on]) => on)
-    .map(([flag]) => FLAGS.find((f) => f.value === flag)?.label ?? flag);
+    .map(([flag]) => flagLabel(t, flag));
   const verification = result.verification;
   return (
     <VStack gap={3}>
       {verification && (
         <Text type="supporting" color="secondary">
-          Verification:{" "}
-          {(
-            VERDICTS.find((v) => v.value === verification.verdict)?.label ?? verification.verdict
-          ).toLowerCase()}
-          {verification.failure ? ` (${verification.failure})` : ""}.
+          {verification.failure
+            ? t("checkout.try_verification_failed", {
+                verdict: verdictLabel(t, verification.verdict).toLocaleLowerCase(format.locale),
+                failure: verification.failure,
+              })
+            : t("checkout.try_verification", {
+                verdict: verdictLabel(t, verification.verdict).toLocaleLowerCase(format.locale),
+              })}
         </Text>
       )}
       {flags.length > 0 && (
         <Text type="supporting" color="secondary">
-          The address reads as {flags.join(", ")}.
+          {t("checkout.try_flags", { flags: format.list(flags, "unit") })}
         </Text>
       )}
       {result.messages.length === 0 ? (
-        <Banner status="success" title="No messages: checkout would go on." />
+        <Banner status="success" title={t("checkout.try_no_messages")} />
       ) : (
         result.messages.map((m) => (
           <Banner
@@ -775,7 +801,11 @@ function TryResult({ result }: { result: TestResult }) {
             key={`${m.source.type}:${"rule" in m.source ? m.source.rule : ""}:${m.code}:${m.path}`}
             status={m.severity === "error" ? "error" : "warning"}
             title={m.message}
-            description={`${m.severity === "error" ? "Blocks checkout" : "Warning"} · ${m.path}${m.draft ? " · this rule" : ""}`}
+            description={[
+              m.severity === "error" ? t("checkout.try_blocks") : t("checkout.try_warning"),
+              m.path,
+              ...(m.draft ? [t("checkout.try_this_rule")] : []),
+            ].join(" · ")}
           />
         ))
       )}
