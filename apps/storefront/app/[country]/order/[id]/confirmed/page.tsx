@@ -11,17 +11,21 @@ import { redirect } from "next/navigation";
 import { ReloadCart } from "@/components/cart/cart-provider";
 import { OrderDetails } from "@/components/order-details";
 import { api, countryOf } from "@/lib/api";
+import { pageT } from "@/lib/i18n";
 import { link, orderTokenCookie } from "@/lib/site";
 
 /** Per request: it reads the shopper's order with their token. */
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = { title: "Order confirmed" };
-
 type Props = {
   params: Promise<{ country: string; id: string }>;
   searchParams: Promise<{ token?: string | string[] }>;
 };
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const t = await pageT((await params).country);
+  return { title: t("order.confirmed_meta_title") };
+}
 
 /**
  * An order's confirmation: read with the order's access token, kept in an httpOnly
@@ -37,7 +41,7 @@ export default async function OrderConfirmedPage({ params, searchParams }: Props
   if (typeof given === "string" && given) {
     redirect(`/order/${encodeURIComponent(id)}?token=${encodeURIComponent(given)}`);
   }
-  const country = await countryOf(folder);
+  const [country, t] = await Promise.all([countryOf(folder), pageT(folder)]);
   const code = country.country;
   const token = (await cookies()).get(orderTokenCookie(id))?.value;
   const order = token
@@ -52,9 +56,11 @@ export default async function OrderConfirmedPage({ params, searchParams }: Props
     return (
       <EmptyState
         headingLevel={1}
-        title="We can't show this order"
-        description="Open it from the link in your order confirmation email."
-        actions={<Button label="Back to the shop" href={link(code, "/")} variant="primary" />}
+        title={t("order.cant_show_title")}
+        description={t("order.cant_show_description")}
+        actions={
+          <Button label={t("common.back_to_shop")} href={link(code, "/")} variant="primary" />
+        }
       />
     );
   }
@@ -66,20 +72,21 @@ export default async function OrderConfirmedPage({ params, searchParams }: Props
       <VStack gap={2}>
         <HStack gap={3} vAlign="center" wrap="wrap">
           <Heading level={1} type="display-2">
-            Thank you
+            {t("order.thank_you")}
           </Heading>
-          <Badge label={`Order #${order.number}`} />
+          <Badge label={t("order.number", { number: order.number })} />
         </HStack>
         <Text type="large" color="secondary">
-          Your order is placed. We'll write to {order.email} about it.
+          {t("order.placed_note", { email: order.email })}
         </Text>
       </VStack>
       <OrderDetails
+        t={t}
         order={order}
         country={country}
         after={
           <div>
-            <Button label="Keep shopping" href={link(code, "/")} variant="primary" />
+            <Button label={t("common.keep_shopping")} href={link(code, "/")} variant="primary" />
           </div>
         }
       />

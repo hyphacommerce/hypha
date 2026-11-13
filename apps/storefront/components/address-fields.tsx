@@ -22,7 +22,8 @@ import {
   type FieldProblems,
   asField,
 } from "@/lib/address";
-import { type PlacedMessages, statusOf } from "@/lib/messages";
+import { type PlacedMessages, statusOf } from "@/lib/cart-messages";
+import { useT } from "@/lib/use-t";
 
 /** The fields a form sends, `country` apart (it's the page's). */
 type Field = Exclude<AddressField, "country">;
@@ -51,12 +52,13 @@ export function AddressFields({
    * offers no suggestions. */
   onFill?: (values: Partial<AddressValues>, problems: FieldProblems) => void;
 }) {
+  const t = useT<"address">();
   const required = new Set(format.required);
   const status = (field: Field) => {
     const problem = problems?.[field];
     if (problem) return { type: "error" as const, message: problem };
     if (tried && required.has(field) && values[field].trim() === "") {
-      return { type: "error" as const, message: "Required" };
+      return { type: "error" as const, message: t("common.required") };
     }
     return statusOf(messages?.[field]);
   };
@@ -98,7 +100,9 @@ export function AddressFields({
           value={values.province || undefined}
           onChange={(value) => onChange("province", value)}
           hasSearch={format.regions.length > 12}
-          placeholder={`Choose a ${label.toLowerCase()}`}
+          placeholder={t("address.choose_region", {
+            label: label.toLocaleLowerCase(t.language),
+          })}
           status={status(field)}
         />
       );

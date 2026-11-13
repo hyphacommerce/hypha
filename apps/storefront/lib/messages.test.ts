@@ -1,75 +1,81 @@
 import assert from "node:assert/strict";
+import { readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
 
-import { type CartMessage, blockedBy, placeMessages, placeOf, statusOf } from "./messages.ts";
+import { createTranslator, pickNamespaces } from "@hyphacommerce/i18n";
 
-const message = (path: string, severity = "warning", text = "Check this"): CartMessage => ({
-  severity,
-  code: "house_number_missing",
-  path,
-  message: text,
-  source: { type: "format" },
+import { PSEUDO, SHARED_NAMESPACES, en, isKey, loadMessages, writtenIn } from "./messages.ts";
+
+/** The keys of a language's catalog files, as the catalog check reads them. */
+function keysOnDisk(language: string): string[] {
+  const folder = new URL(`../messages/${language}/`, import.meta.url);
+  return readdirSync(folder)
+    .filter((file) => file.endsWith(".json"))
+    .flatMap((file) => {
+      const messages: unknown = JSON.parse(readFileSync(new URL(file, folder), "utf8"));
+      return Object.keys(Object(messages)).map((key) => `${file.slice(0, -5)}.${key}`);
+    })
+    .toSorted();
+}
+
+test("every catalog file is imported: a namespace added to a folder is one the app reads", async () => {
+  assert.deepEqual(Object.keys(en).toSorted(), keysOnDisk("en"));
+  assert.deepEqual(Object.keys(await loadMessages("sr-Latn")).toSorted(), keysOnDisk("sr-Latn"));
 });
 
-test("a field's path places the message under that field", () => {
-  assert.deepEqual(placeOf("$.shipping_address.line1"), { at: "field", field: "line1" });
+test("English is the catalog for a language without one", async () => {
+  assert.equal(await loadMessages("en"), en);
+  assert.equal(await loadMessages("de"), en);
 });
 
-test("an index path places the message by its group or line", () => {
-  assert.deepEqual(placeOf("$.shipping_groups[0]"), { at: "group", index: 0 });
-  assert.deepEqual(placeOf("$.lines[12]"), { at: "line", index: 12 });
+test("Serbian in Latin script has every English message", async () => {
+  const messages = await loadMessages("sr-Latn");
+  assert.deepEqual(Object.keys(messages).toSorted(), Object.keys(en).toSorted());
+  assert.equal(messages["cart.title"], "Korpa");
 });
 
-test("an unknown path isn't placed", () => {
-  assert.equal(placeOf("$.shipping_address.street"), undefined);
-  assert.equal(placeOf("$.lines[01]"), undefined);
-  assert.equal(placeOf("$.payment_method"), undefined);
+test("a language with a region reads its language's catalog", async () => {
+  assert.equal(await loadMessages("sr-Latn-RS"), await loadMessages("sr-Latn"));
 });
 
-test("the cart's messages and unknown ones go to the top", () => {
-  const placed = placeMessages([message("$"), message("$.somewhere_new")]);
-  assert.equal(placed.top.length, 2);
+test("a page is formatted in the language its catalog is written in", () => {
+  assert.equal(writtenIn("sr-Latn"), "sr-Latn");
+  assert.equal(writtenIn("sr-Latn-RS"), "sr-Latn-RS");
+  // Plain Serbian formats in Cyrillic: beside the Latin catalog, Latin it is.
+  assert.equal(writtenIn("sr"), "sr-Latn");
+  assert.equal(writtenIn("en-GB"), "en-GB");
+  assert.equal(writtenIn("de"), "de");
 });
 
-test("messages are grouped by where they're shown", () => {
-  const placed = placeMessages([
-    message("$.email"),
-    message("$.shipping_address"),
-    message("$.shipping_address.postal_code"),
-    message("$.shipping_groups[1]"),
-    message("$.lines[0]"),
+test("Serbian counts one, few and other", async () => {
+  const t = createTranslator("sr-Latn", await loadMessages("sr-Latn"));
+  const total = (count: number) => t("listing.total", { count });
+  assert.deepEqual([1, 2, 5, 21, 22].map(total), [
+    "1 proizvod",
+    "2 proizvoda",
+    "5 proizvoda",
+    "21 proizvod",
+    "22 proizvoda",
   ]);
-  assert.equal(placed.email.length, 1);
-  assert.equal(placed.address.length, 1);
-  assert.equal(placed.fields.postal_code?.length, 1);
-  assert.equal(placed.groups[1]?.length, 1);
-  assert.equal(placed.lines[0]?.length, 1);
-  assert.equal(placed.top.length, 0);
+  assert.equal(t("header.cart_count", { count: 0 }), "Korpa");
+  assert.equal(t("header.cart_count", { count: 3 }), "Korpa, 3 artikla");
+  assert.equal(t("header.cart_count", { count: 5 }), "Korpa, 5 artikala");
 });
 
-test("a field shows its first error before its warnings", () => {
-  const status = statusOf([
-    message("$.shipping_address.line1", "warning", "Add a house number"),
-    message("$.shipping_address.line1", "error", "No PO boxes"),
-  ]);
-  assert.deepEqual(status, { type: "error", message: "No PO boxes" });
+test("the pseudo-language accents English and keeps its placeholders", async () => {
+  const t = createTranslator(PSEUDO, await loadMessages(PSEUDO));
+  assert.notEqual(t("cart.title"), en["cart.title"]);
+  assert.match(t("checkout.pay", { total: "€10.00" }), /€10\.00/);
 });
 
-test("a severity this build doesn't know shows as a warning", () => {
-  assert.deepEqual(statusOf([message("$.email", "notice", "Hi")]), {
-    type: "warning",
-    message: "Hi",
-  });
+test("no page is sent the errors or the checkout's messages unasked", () => {
+  const sent = Object.keys(pickNamespaces(en, SHARED_NAMESPACES));
+  assert.ok(sent.length > 0);
+  assert.ok(!sent.some((key) => /^(errors|checkout|account|order)\./.test(key)));
 });
 
-test("a blocked checkout's messages come from its details", () => {
-  const error = {
-    code: "checkout_blocked",
-    details: { messages: [message("$.shipping_groups[0]", "error"), { path: 1 }] },
-  };
-  assert.deepEqual(blockedBy(error), [message("$.shipping_groups[0]", "error")]);
-});
-
-test("another error blocks nothing", () => {
-  assert.deepEqual(blockedBy({ code: "total_changed", details: { messages: [] } }), []);
+test("a key built from an API value is checked against the catalog", () => {
+  assert.equal(isKey("order.payment_paid"), true);
+  assert.equal(isKey("order.payment_something_new"), false);
+  assert.equal(isKey("toString"), false);
 });

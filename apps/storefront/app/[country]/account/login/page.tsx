@@ -4,11 +4,19 @@ import { redirect } from "next/navigation";
 import { SignInForm } from "@/components/account/sign-in-form";
 import { sessionToken } from "@/lib/account";
 import { countryOf, loadStore } from "@/lib/api";
+import { pageT } from "@/lib/i18n";
 import { link } from "@/lib/site";
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = { title: "Sign in" };
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ country: string }>;
+}): Promise<Metadata> {
+  const t = await pageT((await params).country);
+  return { title: t("account.login_meta_title") };
+}
 
 /** A query value, if it was given once. */
 function one(value: string | string[] | undefined): string {

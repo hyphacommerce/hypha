@@ -11,10 +11,12 @@ import { ProductGrid } from "@/components/product-grid";
 import { countryOf, fieldContext, loadProduct } from "@/lib/api";
 import { elementsFor } from "@/lib/app-elements";
 import { presentFields } from "@/lib/custom-fields";
+import { countryName } from "@/lib/format";
+import { pageT } from "@/lib/i18n";
 import { relatedProducts } from "@/lib/listing-data";
 import { pageMetadata } from "@/lib/metadata";
 import { breadcrumbLd, plainText, productLd } from "@/lib/seo";
-import { absolute, link } from "@/lib/site";
+import { absolute, link, segmentCountry } from "@/lib/site";
 
 import { ProductForm } from "./product-form";
 
@@ -37,7 +39,7 @@ async function load(handle: string, country: string) {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { country, handle } = await params;
-  const code = country.toUpperCase();
+  const code = segmentCountry(country);
   const product = await load(handle, code);
   const image = product.media.find((m) => m.kind === "image");
   return pageMetadata({
@@ -57,18 +59,24 @@ export default async function ProductPage({ params }: Props) {
   const { country: folder, handle } = await params;
   // Both at once: the folder is the country's code (the proxy lets only sold-to
   // countries' folders through), and an unknown one 404s either way.
-  const [country, product, appBlocks] = await Promise.all([
+  const [country, product, appBlocks, t] = await Promise.all([
     countryOf(folder),
-    load(handle, folder.toUpperCase()),
+    load(handle, segmentCountry(folder)),
     // What installed apps show on a product: elements, loaded in the browser, so the
     // page stays static.
     elementsFor("product.block"),
+    pageT(folder),
   ]);
   const code = country.country;
   // The merchant's custom fields, formatted here so the form shows the selected
   // variant's over the product's without formatting in the browser.
   const [context, related] = await Promise.all([
-    fieldContext(country, product.custom_fields, ...product.variants.map((v) => v.custom_fields)),
+    fieldContext(
+      country,
+      t,
+      product.custom_fields,
+      ...product.variants.map((v) => v.custom_fields),
+    ),
     relatedProducts(product, code),
   ]);
   const url = absolute(link(code, `/p/${product.handle}`));
@@ -84,12 +92,12 @@ export default async function ProductPage({ params }: Props) {
       <JsonLd data={productLd(product, url, country.minor_units)} />
       <JsonLd
         data={breadcrumbLd([
-          { name: "Home", url: absolute(link(code, "/")) },
+          { name: t("common.home"), url: absolute(link(code, "/")) },
           { name: product.title, url },
         ])}
       />
       <Breadcrumbs variant="supporting">
-        <BreadcrumbItem href={link(code, "/")}>Home</BreadcrumbItem>
+        <BreadcrumbItem href={link(code, "/")}>{t("common.home")}</BreadcrumbItem>
         <BreadcrumbItem isCurrent>{product.title}</BreadcrumbItem>
       </Breadcrumbs>
       {product.sold_in_country === false ? (
@@ -99,8 +107,10 @@ export default async function ProductPage({ params }: Props) {
           </Heading>
           <Banner
             status="warning"
-            title={`Not sold in ${country.name}`}
-            description="Switch currency at the top to shop where it is sold."
+            title={t("product.not_sold_in", {
+              country: countryName(code, country.name, t.locale),
+            })}
+            description={t("product.switch_currency")}
           />
         </VStack>
       ) : (
@@ -109,8 +119,9 @@ export default async function ProductPage({ params }: Props) {
       <AppElements elements={appBlocks} props={{ productId: product.id }} />
       {related.length > 0 && (
         <VStack gap={4} paddingBlockStart={6}>
-          <Heading level={2}>You may also like</Heading>
+          <Heading level={2}>{t("product.also_like")}</Heading>
           <ProductGrid
+            t={t}
             hits={related}
             digits={country.minor_units}
             productBase={link(code, "/p")}

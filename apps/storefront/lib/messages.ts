@@ -1,114 +1,130 @@
-// A cart's messages (`messages` on every cart, `details.messages` of a `checkout_blocked`)
-// placed by their path: under an address field, the address, the email, a shipping group,
-// a line, or at the top for the cart and any path this build doesn't place. Safe on both
-// sides: no API calls here.
+// The storefront's own strings: `messages/<language>/<namespace>.json`, flat ICU
+// MessageFormat. English is the source: its keys type every translator, so a key that
+// isn't there doesn't compile. Safe on both sides: catalogs are plain data.
 
-import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
+import {
+  type KeysOf,
+  type Messages,
+  type NamespaceKeys,
+  type Translator,
+  matchLanguage,
+  mergeCatalogs,
+  pseudo,
+} from "@hyphacommerce/i18n";
 
-import { type AddressField, asField } from "./address.ts";
+import account from "../messages/en/account.json" with { type: "json" };
+import address from "../messages/en/address.json" with { type: "json" };
+import cart from "../messages/en/cart.json" with { type: "json" };
+import checkout from "../messages/en/checkout.json" with { type: "json" };
+import common from "../messages/en/common.json" with { type: "json" };
+import discounts from "../messages/en/discounts.json" with { type: "json" };
+import errors from "../messages/en/errors.json" with { type: "json" };
+import footer from "../messages/en/footer.json" with { type: "json" };
+import header from "../messages/en/header.json" with { type: "json" };
+import home from "../messages/en/home.json" with { type: "json" };
+import listing from "../messages/en/listing.json" with { type: "json" };
+import order from "../messages/en/order.json" with { type: "json" };
+import product from "../messages/en/product.json" with { type: "json" };
+import sale from "../messages/en/sale.json" with { type: "json" };
+import search from "../messages/en/search.json" with { type: "json" };
 
-export type CartMessage = StorefrontSchemas["CartMessageResponse"];
+import { PSEUDO } from "./pseudo.ts";
 
-/** How a message is shown: an error stops checkout, anything else is a warning. */
-export function tone(message: CartMessage): "error" | "warning" {
-  return message.severity === "error" ? "error" : "warning";
-}
-
-/** Where a message's path points, or `undefined` for a path this build doesn't know. */
-export type Place =
-  | { at: "cart" }
-  | { at: "email" }
-  | { at: "address" }
-  | { at: "field"; field: AddressField }
-  | { at: "group"; index: number }
-  | { at: "line"; index: number };
-
-export function placeOf(path: string): Place | undefined {
-  if (path === "$") return { at: "cart" };
-  if (path === "$.email") return { at: "email" };
-  if (path === "$.shipping_address") return { at: "address" };
-  const field = /^\$\.shipping_address\.([a-z0-9_]+)$/.exec(path);
-  if (field) {
-    const known = asField(field[1]);
-    return known ? { at: "field", field: known } : undefined;
-  }
-  const indexed = /^\$\.(shipping_groups|lines)\[(0|[1-9][0-9]*)\]$/.exec(path);
-  if (indexed) {
-    const index = Number(indexed[2]);
-    return indexed[1] === "lines" ? { at: "line", index } : { at: "group", index };
-  }
-  return undefined;
-}
-
-/** A cart's messages by where they're shown. */
-export type PlacedMessages = {
-  /** The cart's own and any this build doesn't place: shown at the top. */
-  top: CartMessage[];
-  email: CartMessage[];
-  /** About the address as a whole. */
-  address: CartMessage[];
-  fields: Partial<Record<AddressField, CartMessage[]>>;
-  /** By the shipping group's index in the cart's `shipping_groups`. */
-  groups: Record<number, CartMessage[]>;
-  /** By the line's index in the cart's `lines`. */
-  lines: Record<number, CartMessage[]>;
+const namespaces = {
+  account,
+  address,
+  cart,
+  checkout,
+  common,
+  discounts,
+  errors,
+  footer,
+  header,
+  home,
+  listing,
+  order,
+  product,
+  sale,
+  search,
 };
 
-export function placeMessages(messages: readonly CartMessage[]): PlacedMessages {
-  const placed: PlacedMessages = {
-    top: [],
-    email: [],
-    address: [],
-    fields: {},
-    groups: {},
-    lines: {},
-  };
-  for (const message of messages) {
-    const place = placeOf(message.path);
-    switch (place?.at) {
-      case "email":
-        placed.email.push(message);
-        break;
-      case "address":
-        placed.address.push(message);
-        break;
-      case "field":
-        (placed.fields[place.field] ??= []).push(message);
-        break;
-      case "group":
-        (placed.groups[place.index] ??= []).push(message);
-        break;
-      case "line":
-        (placed.lines[place.index] ??= []).push(message);
-        break;
-      default:
-        placed.top.push(message);
-    }
+export const en = mergeCatalogs(namespaces);
+
+/** Every message: `cart.title`, `checkout.pay`, … */
+export type Key = KeysOf<typeof en>;
+
+/** A catalog file's name: `cart`, `checkout`, … */
+export type Namespace = keyof typeof namespaces;
+
+/** The keys of the namespaces `N`. */
+export type KeyIn<N extends Namespace> = NamespaceKeys<typeof en, N>;
+
+/** A translator of every message: what server code has. */
+export type T = Translator<Key>;
+
+/**
+ * A translator of the namespaces `N` at least: what a function or a component shared by
+ * servers and browsers asks for, so a browser's translator, which has only the
+ * namespaces its page was sent, can be passed where it's enough.
+ */
+export type TFor<N extends Namespace> = Translator<KeyIn<N>>;
+
+/**
+ * The namespaces every page's client components read (the header, the cart drawer,
+ * product cards, listings, the product form), sent to the browser with every page. The
+ * rest stay on the server unless a route sends them: checkout and the account do, for
+ * their forms (`components/messages.tsx`).
+ */
+export const SHARED_NAMESPACES = [
+  "common",
+  "header",
+  "cart",
+  "discounts",
+  "product",
+  "listing",
+] as const satisfies readonly Namespace[];
+
+export type SharedNamespace = (typeof SHARED_NAMESPACES)[number];
+
+export { PSEUDO };
+
+/** The languages with a catalog, English apart. */
+const TRANSLATED = ["sr-Latn"] as const;
+
+/** The translated catalog `language` reads, if there's one: its own, or the nearest
+ * (`sr-Latn-RS` and plain `sr` both read `sr-Latn`). */
+export function translated(language: string): string | undefined {
+  return matchLanguage([language], TRANSLATED);
+}
+
+/**
+ * The language a page in `language` is written and formatted in: the language itself,
+ * unless its catalog is another's. A store in plain `sr` reads the `sr-Latn` catalog, so
+ * its dates and names are Latin too: `sr` alone would format them in Cyrillic beside
+ * Latin words.
+ */
+export function writtenIn(language: string): string {
+  const catalog = translated(language);
+  if (catalog === undefined) return language;
+  return language.toLowerCase().startsWith(catalog.toLowerCase()) ? language : catalog;
+}
+
+/**
+ * A language's catalog, loaded when a request asks for it: the language's own, or the
+ * nearest one there is. English for a language without one; a translator falls back to
+ * English key by key for what a catalog lacks.
+ */
+export async function loadMessages(language: string): Promise<Messages> {
+  if (language === PSEUDO) return pseudo(en);
+  switch (translated(language)) {
+    case "sr-Latn":
+      return (await import("../messages/sr-Latn.ts")).default;
+    default:
+      return en;
   }
-  return placed;
 }
 
-/** The first of a field's messages as an input's status, errors before warnings. */
-export function statusOf(
-  messages: readonly CartMessage[] | undefined,
-): { type: "error" | "warning"; message: string } | undefined {
-  const first = messages?.find((m) => tone(m) === "error") ?? messages?.[0];
-  return first ? { type: tone(first), message: first.message } : undefined;
-}
-
-/** The messages of a `checkout_blocked` refusal; none for another error. */
-export function blockedBy(error: { code: string; details?: unknown }): CartMessage[] {
-  if (error.code !== "checkout_blocked") return [];
-  const details = error.details;
-  if (typeof details !== "object" || details === null) return [];
-  const list: unknown = Reflect.get(details, "messages");
-  if (!Array.isArray(list)) return [];
-  return list.filter(isMessage);
-}
-
-function isMessage(item: unknown): item is CartMessage {
-  if (typeof item !== "object" || item === null) return false;
-  return ["severity", "code", "path", "message"].every(
-    (key) => typeof Reflect.get(item, key) === "string",
-  );
+/** Whether `key` is a message: for keys built from the API's values (a status). */
+export function isKey(key: string): key is Key {
+  return Object.hasOwn(en, key);
 }

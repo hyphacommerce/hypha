@@ -10,25 +10,35 @@ import { AccountShell } from "@/components/account/account-shell";
 import { SignOutButtons } from "@/components/account/forms";
 import { SignInForm } from "@/components/account/sign-in-form";
 import { CustomFields } from "@/components/custom-fields";
-import { PLACED_DATE } from "@/components/order-details";
+import { statusLabel } from "@/components/order-details";
 import { SiteLink } from "@/components/site-link";
 import { accountApi, loadAccount } from "@/lib/account";
 import { countryOf, fieldContext, loadStore } from "@/lib/api";
 import { presentFields } from "@/lib/custom-fields";
+import { formatDate } from "@/lib/format";
+import { pageT } from "@/lib/i18n";
 import { formatMoney } from "@/lib/money";
 import { link } from "@/lib/site";
 
 /** Per request: the shopper's own account. */
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = { title: "Account" };
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ country: string }>;
+}): Promise<Metadata> {
+  const t = await pageT((await params).country);
+  return { title: t("account.meta_title") };
+}
 
 /**
  * The account: the sign-in form without a session, otherwise the overview with the
  * latest orders and the way to each section.
  */
 export default async function AccountPage({ params }: { params: Promise<{ country: string }> }) {
-  const country = await countryOf((await params).country);
+  const folder = (await params).country;
+  const [country, t] = await Promise.all([countryOf(folder), pageT(folder)]);
   const code = country.country;
   const to = (path: string) => link(code, path);
   const account = await loadAccount();
@@ -38,14 +48,19 @@ export default async function AccountPage({ params }: { params: Promise<{ countr
   const client = (await accountApi())!;
   const [orders, context] = await Promise.all([
     client.GET("/storefront/account/orders", { params: { query: { limit: 5 } } }),
-    fieldContext(country, account.custom_fields),
+    fieldContext(country, t, account.custom_fields),
   ]);
   const recent = orders.data?.items ?? [];
   const name = [account.first_name, account.last_name].filter(Boolean).join(" ");
   const fields = presentFields("customer", account.custom_fields, context);
   return (
     <AccountShell
-      title={name ? `Hi ${account.first_name ?? name}` : "Your account"}
+      t={t}
+      title={
+        name
+          ? t("account.greeting", { name: account.first_name ?? name })
+          : t("account.your_account")
+      }
       current="/account"
       link={to}
     >
@@ -53,28 +68,32 @@ export default async function AccountPage({ params }: { params: Promise<{ countr
         <Card padding={5}>
           <VStack gap={4}>
             <HStack hAlign="between" vAlign="center">
-              <Heading level={2}>Recent orders</Heading>
-              {recent.length > 0 && <SiteLink href={to("/account/orders")}>All orders</SiteLink>}
+              <Heading level={2}>{t("account.recent_orders")}</Heading>
+              {recent.length > 0 && (
+                <SiteLink href={to("/account/orders")}>{t("account.all_orders")}</SiteLink>
+              )}
             </HStack>
             {recent.length === 0 ? (
-              <Text color="secondary">No orders yet.</Text>
+              <Text color="secondary">{t("account.no_orders")}</Text>
             ) : (
               <VStack gap={3}>
                 {recent.map((o) => (
                   <HStack key={o.id} hAlign="between" vAlign="center" wrap="wrap" gap={2}>
                     <VStack gap={0}>
-                      <SiteLink href={to(`/account/orders/${o.id}`)}>Order #{o.number}</SiteLink>
+                      <SiteLink href={to(`/account/orders/${o.id}`)}>
+                        {t("order.number", { number: o.number })}
+                      </SiteLink>
                       <Text type="supporting" color="secondary">
-                        {PLACED_DATE.format(new Date(o.placed_at))}
+                        {formatDate(o.placed_at, t.locale)}
                       </Text>
                     </VStack>
                     <HStack gap={2} vAlign="center">
                       {o.cancelled_at ? (
-                        <Badge label="Cancelled" />
+                        <Badge label={t("order.cancelled")} />
                       ) : (
-                        <Badge label={o.fulfillment_status.replace(/_/g, " ")} />
+                        <Badge label={statusLabel(t, "fulfillment", o.fulfillment_status)} />
                       )}
-                      <Text>{formatMoney(o.total, country.minor_units)}</Text>
+                      <Text>{formatMoney(o.total, country.minor_units, t.locale)}</Text>
                     </HStack>
                   </HStack>
                 ))}
@@ -85,11 +104,11 @@ export default async function AccountPage({ params }: { params: Promise<{ countr
         <VStack gap={4}>
           <Card padding={5}>
             <VStack gap={2}>
-              <Heading level={2}>Details</Heading>
+              <Heading level={2}>{t("account.details")}</Heading>
               <Text>{account.email}</Text>
               {name && <Text color="secondary">{name}</Text>}
               {account.phone && <Text color="secondary">{account.phone}</Text>}
-              <SiteLink href={to("/account/profile")}>Edit profile</SiteLink>
+              <SiteLink href={to("/account/profile")}>{t("account.edit_profile")}</SiteLink>
             </VStack>
           </Card>
           {fields.length > 0 && (

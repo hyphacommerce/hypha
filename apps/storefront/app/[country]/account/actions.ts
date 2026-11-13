@@ -13,12 +13,16 @@ import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 import { type ActionResult } from "@/app/[country]/actions";
 import { accountApi, forgetSession, rememberSession, sessionToken } from "@/lib/account";
 import { api, refusedWith, shopperApi } from "@/lib/api";
+import { actionT } from "@/lib/i18n";
 import { cartId, link } from "@/lib/site";
 
 export type AddressInput = StorefrontSchemas["AddressRequest"];
 
-function refused(error: { code: string; error: string; details?: unknown }): ActionResult {
-  return refusedWith(error);
+async function refused(
+  country: string,
+  error: { code: string; error: string; details?: unknown },
+): Promise<ActionResult> {
+  return refusedWith(await actionT(country), error);
 }
 
 /** `value` trimmed, or `null` for a blank optional field. */
@@ -40,7 +44,7 @@ export async function requestCode(country: string, email: string): Promise<Actio
   const { error } = await (
     await shopperApi()
   ).POST("/storefront/auth/code", { body: { email: email.trim() } });
-  if (error) return refused(error);
+  if (error) return refused(country, error);
   return undefined;
 }
 
@@ -52,7 +56,7 @@ export async function signIn(country: string, email: string, code: string): Prom
   const { data, error } = await client.POST("/storefront/auth/login", {
     body: { email: email.trim(), code: code.replace(/\s+/g, "") },
   });
-  if (error) return refused(error);
+  if (error) return refused(country, error);
   await rememberSession(data.token, data.expires_at);
   redirect(link(country, "/account"));
 }
@@ -88,7 +92,7 @@ export async function updateProfile(
       phone: optional(input.phone),
     },
   });
-  if (error) return refused(error);
+  if (error) return refused(country, error);
   refresh();
   return undefined;
 }
@@ -106,7 +110,7 @@ export async function saveAddress(
         body,
       })
     : await client.POST("/storefront/account/addresses", { body });
-  if (error) return refused(error);
+  if (error) return refused(country, error);
   refresh();
   return undefined;
 }
@@ -116,7 +120,7 @@ export async function removeAddress(country: string, address: string): Promise<A
   const { error } = await client.DELETE("/storefront/account/addresses/{address_id}", {
     params: { path: { address_id: address } },
   });
-  if (error) return refused(error);
+  if (error) return refused(country, error);
   refresh();
   return undefined;
 }
@@ -132,7 +136,7 @@ export async function setMarketing(
     params: { path: { channel } },
     body: { state: subscribed ? "subscribed" : "unsubscribed" },
   });
-  if (error) return refused(error);
+  if (error) return refused(country, error);
   refresh();
   return undefined;
 }
@@ -140,7 +144,7 @@ export async function setMarketing(
 export async function requestErasure(country: string): Promise<ActionResult> {
   const client = await signedIn(country);
   const { error } = await client.POST("/storefront/account/erasure");
-  if (error) return refused(error);
+  if (error) return refused(country, error);
   refresh();
   return undefined;
 }
@@ -148,7 +152,7 @@ export async function requestErasure(country: string): Promise<ActionResult> {
 export async function cancelErasure(country: string): Promise<ActionResult> {
   const client = await signedIn(country);
   const { error } = await client.DELETE("/storefront/account/erasure");
-  if (error) return refused(error);
+  if (error) return refused(country, error);
   refresh();
   return undefined;
 }

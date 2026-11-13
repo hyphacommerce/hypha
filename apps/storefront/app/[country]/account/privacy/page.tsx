@@ -9,45 +9,53 @@ import { redirect } from "next/navigation";
 
 import { AccountShell } from "@/components/account/account-shell";
 import { ErasureControls } from "@/components/account/forms";
-import { PLACED_DATE } from "@/components/order-details";
 import { loadAccount } from "@/lib/account";
 import { countryOf } from "@/lib/api";
+import { formatDate } from "@/lib/format";
+import { pageT } from "@/lib/i18n";
 import { link } from "@/lib/site";
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = { title: "Privacy" };
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ country: string }>;
+}): Promise<Metadata> {
+  const t = await pageT((await params).country);
+  return { title: t("account.privacy_meta_title") };
+}
 
 /** The person's data: download it, or ask for it to be erased. */
 export default async function PrivacyPage({ params }: { params: Promise<{ country: string }> }) {
-  const country = await countryOf((await params).country);
+  const folder = (await params).country;
+  const [country, t] = await Promise.all([countryOf(folder), pageT(folder)]);
   const code = country.country;
   const to = (path: string) => link(code, path);
   const account = await loadAccount();
   if (!account) redirect(to("/account"));
   return (
-    <AccountShell title="Privacy" current="/account/privacy" link={to}>
+    <AccountShell t={t} title={t("account.privacy")} current="/account/privacy" link={to}>
       <Grid columns={{ minWidth: 320, repeat: "fit" }} gap={6}>
         <Card padding={5}>
           <VStack gap={3}>
-            <Heading level={2}>Your data</Heading>
-            <Text color="secondary">
-              Everything we hold about you, as one file: your details, addresses, marketing choices,
-              orders, payments and the emails we sent you.
-            </Text>
+            <Heading level={2}>{t("account.your_data")}</Heading>
+            <Text color="secondary">{t("account.your_data_description")}</Text>
             <div>
-              <Button label="Download my data" variant="secondary" href={to("/account/export")} />
+              <Button
+                label={t("account.download_data")}
+                variant="secondary"
+                href={to("/account/export")}
+              />
             </div>
           </VStack>
         </Card>
         <Card padding={5}>
           <VStack gap={3}>
-            <Heading level={2}>Erase your data</Heading>
+            <Heading level={2}>{t("account.erase_title")}</Heading>
             <ErasureControls
               country={code}
-              dueAt={
-                account.erasure_due_at ? PLACED_DATE.format(new Date(account.erasure_due_at)) : null
-              }
+              dueAt={account.erasure_due_at ? formatDate(account.erasure_due_at, t.locale) : null}
             />
           </VStack>
         </Card>

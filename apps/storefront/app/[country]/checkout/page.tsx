@@ -16,7 +16,9 @@ import { loadAccount } from "@/lib/account";
 import { api, countryOf, loadAddressFormat } from "@/lib/api";
 import { Price } from "@/components/price";
 import { linePrice, readCartDiscounts, shippingPrice } from "@/lib/discounts";
-import { placeMessages } from "@/lib/messages";
+import { placeMessages } from "@/lib/cart-messages";
+import { countryName } from "@/lib/format";
+import { pageT } from "@/lib/i18n";
 import { formatMoney } from "@/lib/money";
 import { cartId, link } from "@/lib/site";
 
@@ -34,7 +36,14 @@ import {
 /** Per request: it reads the shopper's cart or query. */
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = { title: "Checkout" };
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ country: string }>;
+}): Promise<Metadata> {
+  const t = await pageT((await params).country);
+  return { title: t("checkout.meta_title") };
+}
 
 /**
  * Checkout on one page: contact and shipping address, a shipping option per
@@ -49,7 +58,8 @@ export default async function CheckoutPage({
   params: Promise<{ country: string }>;
   searchParams: Promise<{ payment?: string | string[] }>;
 }) {
-  const country = await countryOf((await params).country);
+  const folder = (await params).country;
+  const [country, t] = await Promise.all([countryOf(folder), pageT(folder)]);
   const code = country.country;
   const digits = country.minor_units;
   const id = await cartId(code);
@@ -96,12 +106,12 @@ export default async function CheckoutPage({
   const closed = pays && payment.data !== undefined && methods.length === 0;
   const ready = detailsDone && cart.fully_available && shippingDone && paymentDone;
   const missing = !detailsDone
-    ? "Enter your details first."
+    ? t("checkout.details_first")
     : !cart.fully_available
-      ? "Something in your cart can't be bought: check your cart."
+      ? t("checkout.cart_unavailable")
       : !shippingDone
-        ? "Choose how your order ships."
-        : "Choose how you'll pay.";
+        ? t("checkout.choose_shipping")
+        : t("checkout.choose_payment");
   // The "Place order" key, one per render of this page (`PlaceOrder`): made here on the
   // server, per request, and sent down as a prop, so the browser never makes its own.
   const attempt = crypto.randomUUID();
@@ -111,14 +121,14 @@ export default async function CheckoutPage({
     <CheckoutPayment country={code} total={total} attempt={attempt}>
       <VStack gap={6}>
         <Heading level={1} type="display-2">
-          Checkout
+          {t("checkout.title")}
         </Heading>
         <CartMessages messages={messages.top} />
         <Grid columns={{ minWidth: 360, repeat: "fit" }} gap={8}>
           <VStack gap={8}>
             <DetailsForm
               country={code}
-              countryName={country.name}
+              countryName={countryName(code, country.name, t.locale)}
               format={format}
               saved={detailsDone}
               messages={messages}
@@ -146,10 +156,10 @@ export default async function CheckoutPage({
               <VStack gap={3}>
                 <Divider />
                 <Text type="large" weight="bold">
-                  Delivery
+                  {t("checkout.delivery")}
                 </Text>
                 {!address ? (
-                  <Text color="secondary">Enter your address to see the options.</Text>
+                  <Text color="secondary">{t("checkout.address_first")}</Text>
                 ) : (
                   offers.map((group, index) => {
                     const at = cart.shipping_groups.findIndex((g) => g.id === group.group);
@@ -159,13 +169,18 @@ export default async function CheckoutPage({
                         key={group.group}
                         country={code}
                         group={group.group}
-                        heading={offers.length > 1 ? `Shipment ${index + 1}` : undefined}
+                        heading={
+                          offers.length > 1
+                            ? t("checkout.shipment_number", { number: index + 1 })
+                            : undefined
+                        }
                         selected={chosen?.selected?.option}
                         problem={Boolean(chosen?.problem)}
                         messages={messages.groups[at]}
                         offers={group.offers.map((offer) => {
                           // "Free" when a shipping discount takes all of it.
                           const price = shippingPrice(
+                            t,
                             offer.amount_after_discounts,
                             offer.amount,
                             digits,
@@ -173,7 +188,11 @@ export default async function CheckoutPage({
                           return {
                             option: offer.option,
                             label: offer.estimate
-                              ? `${offer.name} (${offer.estimate.min_days}–${offer.estimate.max_days} days)`
+                              ? t("checkout.offer_estimate", {
+                                  name: offer.name,
+                                  min: offer.estimate.min_days,
+                                  max: offer.estimate.max_days,
+                                })
                               : offer.name,
                             price: price.text,
                             was: price.was,
@@ -190,15 +209,13 @@ export default async function CheckoutPage({
                 <VStack gap={3}>
                   <Divider />
                   <Text type="large" weight="bold">
-                    Payment
+                    {t("checkout.payment")}
                   </Text>
                   {closed ? (
-                    <Text color="secondary">This store can't take orders right now.</Text>
+                    <Text color="secondary">{t("checkout.store_closed")}</Text>
                   ) : !detailsDone || !shippingDone ? (
                     <Text color="secondary">
-                      {detailsDone
-                        ? "Choose how your order ships first."
-                        : "Enter your details first."}
+                      {detailsDone ? t("checkout.shipping_first") : t("checkout.details_first")}
                     </Text>
                   ) : (
                     <PaymentChoice
@@ -230,11 +247,12 @@ export default async function CheckoutPage({
           <div className="shop-sticky">
             <Card padding={5}>
               <VStack gap={4}>
-                <Heading level={2}>Order summary</Heading>
+                <Heading level={2}>{t("checkout.order_summary")}</Heading>
                 {cart.lines.map((line, index) => {
                   const shown =
                     line.status === "priced"
                       ? linePrice(
+                          t,
                           line,
                           discounts.lines[line.variant],
                           discounts.applications,
@@ -244,14 +262,16 @@ export default async function CheckoutPage({
                   return (
                     <VStack key={line.variant} gap={2}>
                       <SummaryLine
+                        t={t}
                         quantity={line.quantity}
-                        title={line.product_title ?? "A product no longer sold"}
+                        title={line.product_title ?? t("common.product_gone")}
                         image={lineImage(line.image)}
                         variant={line.variant_title}
                         notes={shown?.notes}
                         total={
                           shown ? (
                             <Price
+                              t={t}
                               price={shown.price}
                               compareAt={shown.compareAt}
                               digits={digits}
@@ -266,12 +286,14 @@ export default async function CheckoutPage({
                   );
                 })}
                 <CodeStates
+                  t={t}
                   codes={discounts.codes}
                   applications={discounts.applications}
                   digits={digits}
                 />
                 <Divider />
                 <Totals
+                  t={t}
                   subtotal={cart.subtotal}
                   shipping={cart.shipping_total}
                   tax={cart.tax_total}
@@ -284,14 +306,16 @@ export default async function CheckoutPage({
                 {closed ? (
                   <Banner
                     status="warning"
-                    title="This store can't take orders right now"
-                    description="There's no way to pay for this order yet. Please try again later."
+                    title={t("checkout.store_closed_title")}
+                    description={t("checkout.store_closed_description")}
                   />
                 ) : online ? (
                   <PayButton
                     ready={ready}
                     missing={missing}
-                    label={`Pay ${formatMoney(cart.total, digits)}`}
+                    label={t("checkout.pay", {
+                      total: formatMoney(cart.total, digits, t.locale),
+                    })}
                   />
                 ) : (
                   <PlaceOrder

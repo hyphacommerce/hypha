@@ -15,6 +15,7 @@
     "build": "vite build",
     "start": "vite preview",
     "test": "node --test lib/*.test.ts",
+    "i18n:check": "hypha-i18n-check messages --complete sr-Latn",
     "typecheck": "node scripts/clean-next-types.mjs && tsc --noEmit",
     "theme:build": "astryx theme build theme/shopTheme.ts --out theme/shop.css",
     "theme:check": "astryx theme build theme/shopTheme.ts --out theme/shop.css --check"
@@ -24,6 +25,7 @@
     "@astryxdesign/theme-neutral": "0.7.3",
     "@heroicons/react": "2.2.0",
     "@hyphacommerce/app": "workspace:*",
+    "@hyphacommerce/i18n": "workspace:*",
     "@hyphacommerce/sdk": "workspace:*",
     "@hyphacommerce/storefront-elements": "workspace:*",
     "@stylexjs/stylex": "0.19.1",

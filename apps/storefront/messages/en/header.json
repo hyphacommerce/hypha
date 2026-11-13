@@ -1,0 +1,14 @@
+{
+  "store_nav": "Store",
+  "menu": "Menu",
+  "search": "Search",
+  "account": "Account",
+  "cart": "Cart",
+  "cart_count": "{count, plural, =0 {Cart} one {Cart, # item} other {Cart, # items}}",
+  "subcategories": "{category} subcategories",
+  "categories": "Categories",
+  "all_products": "All products",
+  "currency": "Currency",
+  "search_for": "Search for “{words}”",
+  "search_placeholder": "Search products"
+}

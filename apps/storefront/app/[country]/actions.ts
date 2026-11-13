@@ -5,7 +5,8 @@
 // checkout and account are static (ISR), so they never read the cookie: the header and
 // the cart drawer read the cart through `loadCart` once the page is in the browser,
 // and the cart's actions answer with the cart, for the drawer to show. The forms take
-// typed input and get the shopper's message back when the API refused.
+// typed input and get the shopper's message back when the API refused, in the page's
+// language (`actionT`).
 
 import { refresh } from "next/cache";
 import { cookies } from "next/headers";
@@ -20,6 +21,7 @@ import { formatRange } from "@/lib/money";
 import { COUNTRY_COOKIE } from "@/lib/routing";
 import { paymentElementModule } from "@/lib/app-elements";
 import { checkOutCart } from "@/lib/checkout";
+import { actionT } from "@/lib/i18n";
 import { accountApi, forgetSession, sessionHeaders } from "@/lib/account";
 import { cartId, forgetCart, link, mode, rememberCart } from "@/lib/site";
 
@@ -34,8 +36,8 @@ export type CartResult = { cart: Cart | null; error?: string };
 
 type ApiError = { code: string; error: string; details?: unknown };
 
-function refused(error: ApiError): ActionResult {
-  return refusedWith(error);
+async function refused(country: string, error: ApiError): Promise<ActionResult> {
+  return refusedWith(await actionT(country), error);
 }
 
 /** `value` trimmed, or `null` for a blank optional field. */
@@ -143,7 +145,11 @@ export async function addToCart(input: {
     result = await add(await newCart(input.country));
   }
   const { data, error } = result;
-  if (error) return { cart: await loadCart(input.country), error: describe(error) };
+  if (error)
+    return {
+      cart: await loadCart(input.country),
+      error: describe(await actionT(input.country), error),
+    };
   return { cart: data };
 }
 
@@ -164,7 +170,11 @@ export async function setQuantity(input: {
           body: { quantity: Math.floor(input.quantity) },
         })
       : await client.DELETE("/storefront/carts/{id}/lines/{variant}", { params: { path } });
-  if (error) return { cart: await loadCart(input.country), error: describe(error) };
+  if (error)
+    return {
+      cart: await loadCart(input.country),
+      error: describe(await actionT(input.country), error),
+    };
   return { cart: data ?? (await loadCart(input.country)) };
 }
 
@@ -178,14 +188,21 @@ export async function applyDiscountCode(input: {
   const id = await cartId(input.country);
   if (!id) return { cart: null };
   const code = input.code.trim();
-  if (code === "") return { cart: await loadCart(input.country), error: "Enter a code." };
+  if (code === "") {
+    const t = await actionT(input.country);
+    return { cart: await loadCart(input.country), error: t("discounts.enter_code") };
+  }
   // The shopper's address goes on: the API limits code entry per client.
   const client = await shopperApi();
   const { data, error } = await client.POST("/storefront/carts/{id}/discount-codes", {
     params: { path: { id } },
     body: { code },
   });
-  if (error) return { cart: await loadCart(input.country), error: describe(error) };
+  if (error)
+    return {
+      cart: await loadCart(input.country),
+      error: describe(await actionT(input.country), error),
+    };
   return { cart: data ?? (await loadCart(input.country)) };
 }
 
@@ -200,7 +217,11 @@ export async function removeDiscountCode(input: {
   const { data, error } = await client.DELETE("/storefront/carts/{id}/discount-codes/{code}", {
     params: { path: { id, code: input.code } },
   });
-  if (error) return { cart: await loadCart(input.country), error: describe(error) };
+  if (error)
+    return {
+      cart: await loadCart(input.country),
+      error: describe(await actionT(input.country), error),
+    };
   return { cart: data ?? (await loadCart(input.country)) };
 }
 
@@ -220,7 +241,7 @@ export async function saveDetails(
     params: { path: { id } },
     body: { email: details.email.trim() },
   });
-  if (email.error) return refused(email.error);
+  if (email.error) return refused(country, email.error);
   // "Email me with news and offers": checkout records the consent when it's
   // ticked; unticked never unsubscribes anyone.
   if (email.data.marketing_opt_in !== marketingOptIn) {
@@ -228,7 +249,7 @@ export async function saveDetails(
       params: { path: { id } },
       body: { opt_in: marketingOptIn },
     });
-    if (marketing.error) return refused(marketing.error);
+    if (marketing.error) return refused(country, marketing.error);
   }
   const address = await client.PUT("/storefront/carts/{id}/shipping-address", {
     params: { path: { id } },
@@ -247,7 +268,7 @@ export async function saveDetails(
       },
     },
   });
-  if (address.error) return refused(address.error);
+  if (address.error) return refused(country, address.error);
   // The page re-renders in this action's answer: no second request to refresh it.
   refresh();
 }
@@ -263,7 +284,7 @@ export async function selectShipping(input: {
     params: { path: { id, group_id: input.group } },
     body: { option: input.option },
   });
-  if (error) return refused(error);
+  if (error) return refused(input.country, error);
   refresh();
 }
 
@@ -277,7 +298,7 @@ export async function selectPaymentMethod(input: {
     params: { path: { id } },
     body: { payment_method: input.method },
   });
-  if (error) return refused(error);
+  if (error) return refused(input.country, error);
   refresh();
 }
 
@@ -364,12 +385,12 @@ export async function startCartPayment(input: {
     ) {
       refresh();
     }
-    return { ...none, error: describe(error) };
+    return { ...none, error: describe(await actionT(input.country), error) };
   }
   const next = data.next_action ?? null;
   return {
     nextAction: next,
-    error: data.payment_error ? describe(data.payment_error) : null,
+    error: data.payment_error ? describe(await actionT(input.country), data.payment_error) : null,
     module: next?.type === "client_widget" ? await paymentElementModule(next.element) : null,
     committed: false,
   };
@@ -411,13 +432,14 @@ export async function suggest(country: string, q: string): Promise<Suggestion[]>
   if (text === "") return [];
   const known = (await loadCountries()).find((c) => c.country === country);
   if (!known) return [];
+  const { locale } = await actionT(country);
   const { data } = await api().GET("/storefront/search", {
     params: { query: { country, q: text, sort: "relevance", limit: 5 } },
   });
   return (data?.items ?? []).map((hit) => ({
     id: hit.listing,
     title: hit.title,
-    price: formatRange(hit.listing_price.min, hit.listing_price.max, known.minor_units),
+    price: formatRange(hit.listing_price.min, hit.listing_price.max, known.minor_units, locale),
     href: link(country, `/p/${hit.handle}`),
     image: hit.image?.kind === "image" ? (hit.image.thumbnail_url ?? hit.image.url) : null,
   }));
@@ -504,6 +526,7 @@ export async function listingPage(input: {
   const params: Record<string, string[]> = {};
   for (const [key, value] of new URLSearchParams(input.query)) (params[key] ??= []).push(value);
   return readListingPage({
+    t: await actionT(input.country),
     country: input.country,
     digits: known?.minor_units ?? 2,
     params,

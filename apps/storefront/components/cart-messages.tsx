@@ -4,7 +4,7 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { VStack } from "@astryxdesign/core/Stack";
 
-import { type CartMessage, tone } from "@/lib/messages";
+import { type CartMessage, tone } from "@/lib/cart-messages";
 
 export function CartMessages({
   messages,

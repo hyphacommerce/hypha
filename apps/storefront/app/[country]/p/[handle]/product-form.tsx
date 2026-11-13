@@ -40,6 +40,7 @@ import { type FieldEntry, withVariant } from "@/lib/custom-fields";
 import { readPromotions } from "@/lib/discounts";
 import { breakLabel, sortedBreaks, unitPriceFor } from "@/lib/prices";
 import { hasSessionFlag } from "@/lib/session-flag";
+import { useT } from "@/lib/use-t";
 
 type Product = StorefrontSchemas["StorefrontProductResponse"];
 type Variant = StorefrontSchemas["StorefrontVariantResponse"];
@@ -104,6 +105,7 @@ export function ProductForm({
 }) {
   // Start on the first variant that can be bought, else the first.
   const start = product.variants.find((v) => v.available) ?? product.variants[0];
+  const t = useT();
   const cart = useCart();
   const [selections, setSelections] = useState<string[]>(start?.selections ?? []);
   const [wanted, setQuantity] = useState(1);
@@ -187,12 +189,12 @@ export function ProductForm({
   );
 
   const label = !variant
-    ? "This combination isn't sold"
+    ? t("product.combination_not_sold")
     : !variant.available
-      ? "Sold out"
+      ? t("common.sold_out")
       : room === 0
-        ? "All in stock are in your cart"
-        : "Add to cart";
+        ? t("product.all_in_cart")
+        : t("product.add_to_cart");
 
   return (
     <Grid columns={{ minWidth: 340, repeat: "fit" }} gap={8}>
@@ -226,7 +228,7 @@ export function ProductForm({
             {images.map((m, i) => (
               <AspectRatio key={m.asset_id} ratio={1}>
                 <SelectableCard
-                  label={m.alt ?? `Image ${i + 1}`}
+                  label={m.alt ?? t("product.image_number", { number: i + 1 })}
                   isSelected={i === shown}
                   onChange={() => showImage(i)}
                   variant="transparent"
@@ -256,6 +258,7 @@ export function ProductForm({
             <HStack gap={2} vAlign="center" wrap="wrap">
               {unit ? (
                 <Price
+                  t={t}
                   price={unit}
                   compareAt={unitCompareAt}
                   digits={digits}
@@ -263,11 +266,15 @@ export function ProductForm({
                   weight="semibold"
                 />
               ) : null}
-              {unit && breaks.length > 0 && <Text type="supporting">each</Text>}
-              {product.prices_include_tax === false && <Text type="supporting">plus tax</Text>}
-              {variant?.on_sale && <SaleBadge />}
+              {unit && breaks.length > 0 && <Text type="supporting">{t("product.each")}</Text>}
+              {product.prices_include_tax === false && (
+                <Text type="supporting">{t("product.plus_tax")}</Text>
+              )}
+              {variant?.on_sale && <SaleBadge t={t} />}
               <PromotionBadges promotions={promotions} />
-              {variant && !variant.available && <Badge label="Sold out" variant="neutral" />}
+              {variant && !variant.available && (
+                <Badge label={t("common.sold_out")} variant="neutral" />
+              )}
             </HStack>
             {promotions
               .filter((p) => p.summary)
@@ -277,7 +284,12 @@ export function ProductForm({
                 </Text>
               ))}
             {variant?.price && breaks.length > 0 && (
-              <VStack as="ul" gap={1} aria-label="Quantity prices" className="shop-breaks">
+              <VStack
+                as="ul"
+                gap={1}
+                aria-label={t("product.quantity_prices")}
+                className="shop-breaks"
+              >
                 {breaks.map((b) => (
                   <li key={b.min_quantity}>
                     <Text
@@ -285,7 +297,7 @@ export function ProductForm({
                       color={b.min_quantity <= lineQuantity ? "primary" : "secondary"}
                       weight={b.min_quantity <= lineQuantity ? "medium" : undefined}
                     >
-                      {breakLabel(b, digits)}
+                      {breakLabel(t, b, digits)}
                     </Text>
                   </li>
                 ))}
@@ -296,11 +308,17 @@ export function ProductForm({
           {product.options.map((option, index) => (
             <VStack key={option.id} gap={2}>
               <Text type="label">
-                {option.name}
-                {": "}
-                <Text type="label" color="secondary">
-                  {option.values.find((v) => v.id === selections[index])?.label ?? "Choose"}
-                </Text>
+                {t.rich("product.option_value", {
+                  option: option.name,
+                  value:
+                    option.values.find((v) => v.id === selections[index])?.label ??
+                    t("product.choose"),
+                  chosen: (chunks, key) => (
+                    <Text key={key} type="label" color="secondary">
+                      {chunks}
+                    </Text>
+                  ),
+                })}
               </Text>
               <HStack gap={2} wrap="wrap">
                 {option.values.map((value) => {
@@ -308,7 +326,11 @@ export function ProductForm({
                   return (
                     <SelectableCard
                       key={value.id}
-                      label={enabled ? value.label : `${value.label} (unavailable)`}
+                      label={
+                        enabled
+                          ? value.label
+                          : t("product.value_unavailable", { label: value.label })
+                      }
                       isSelected={selections[index] === value.id}
                       isDisabled={!enabled}
                       onChange={() => pick(index, value.id)}
@@ -331,10 +353,10 @@ export function ProductForm({
 
           <VStack gap={3}>
             <VStack gap={2}>
-              <Text type="label">Quantity</Text>
+              <Text type="label">{t("product.quantity")}</Text>
               <HStack gap={1} vAlign="center">
                 <Button
-                  label="Fewer"
+                  label={t("product.fewer")}
                   variant="ghost"
                   isIconOnly
                   icon={<Icon icon={MinusIcon} size="sm" />}
@@ -343,7 +365,7 @@ export function ProductForm({
                 />
                 <div style={{ width: 88 }}>
                   <NumberInput
-                    label="Quantity"
+                    label={t("product.quantity")}
                     isLabelHidden
                     value={quantity}
                     onChange={(q) => setQuantity(Math.min(room, Math.max(1, q || 1)))}
@@ -354,7 +376,7 @@ export function ProductForm({
                   />
                 </div>
                 <Button
-                  label="More"
+                  label={t("product.more")}
                   variant="ghost"
                   isIconOnly
                   icon={<Icon icon={PlusIcon} size="sm" />}
@@ -363,7 +385,9 @@ export function ProductForm({
                 />
               </HStack>
               {variant?.available && stock != null && stock <= 5 && (
-                <Text type="supporting">{stock === 0 ? "None left" : `Only ${stock} left`}</Text>
+                <Text type="supporting">
+                  {stock === 0 ? t("product.none_left") : t("product.only_left", { count: stock })}
+                </Text>
               )}
             </VStack>
             <Button
@@ -382,7 +406,10 @@ export function ProductForm({
             <Divider />
             {product.description && (
               <>
-                <Collapsible value="description" trigger={<Heading level={3}>Description</Heading>}>
+                <Collapsible
+                  value="description"
+                  trigger={<Heading level={3}>{t("product.description")}</Heading>}
+                >
                   <div
                     className="shop-prose"
                     // Sanitised by the API (scripts, styles and event attributes removed).
@@ -393,16 +420,25 @@ export function ProductForm({
               </>
             )}
             {hasDetails && (
-              <Collapsible value="details" trigger={<Heading level={3}>Details</Heading>}>
+              <Collapsible
+                value="details"
+                trigger={<Heading level={3}>{t("product.details")}</Heading>}
+              >
                 <VStack gap={3}>
                   <VStack gap={1}>
-                    {product.vendor && <Text>Brand: {product.vendor}</Text>}
-                    {product.product_type && <Text>Type: {product.product_type}</Text>}
-                    {variant?.title && <Text>Variant: {variant.title}</Text>}
+                    {product.vendor && (
+                      <Text>{t("product.brand", { vendor: product.vendor })}</Text>
+                    )}
+                    {product.product_type && (
+                      <Text>{t("product.type", { type: product.product_type })}</Text>
+                    )}
+                    {variant?.title && (
+                      <Text>{t("product.variant", { title: variant.title })}</Text>
+                    )}
                     {product.tags.length > 0 && (
                       <HStack gap={1} wrap="wrap">
-                        {product.tags.map((t) => (
-                          <Badge key={t} label={t} variant="neutral" />
+                        {product.tags.map((tag) => (
+                          <Badge key={tag} label={tag} variant="neutral" />
                         ))}
                       </HStack>
                     )}

@@ -19,6 +19,7 @@ import { Suspense, startTransition, useEffect, useRef, useState, useTransition }
 import { listingPage } from "@/app/[country]/actions";
 import { type ListingState, changed, nextPage, previousPage, sortOf } from "@/lib/listing";
 import type { ListingPage } from "@/lib/listing-data";
+import { useT } from "@/lib/use-t";
 
 import { FacetPanel, ListingToolbar, go } from "./listing-controls";
 import { ProductGrid } from "./product-grid";
@@ -87,6 +88,7 @@ export function Listing({
   initial: ListingPage;
   initialQuery: string;
 }) {
+  const t = useT();
   // The page the server rendered is for `initialQuery`; the URL's own comes once the
   // page is in the browser (`QueryWatch`).
   const [query, setQuery] = useState(initialQuery);
@@ -138,9 +140,9 @@ export function Listing({
         {watch}
         <Banner
           status="warning"
-          title="This listing couldn't be shown"
+          title={t("listing.error_title")}
           description={page.error}
-          endContent={<Button label="Start again" href={base} size="sm" />}
+          endContent={<Button label={t("listing.start_again")} href={base} size="sm" />}
         />
       </>
     );
@@ -161,7 +163,7 @@ export function Listing({
   return (
     <div className="shop-listing" ref={top}>
       {watch}
-      <aside className="shop-listing-facets" aria-label="Filters">
+      <aside className="shop-listing-facets" aria-label={t("listing.filters")}>
         <FacetPanel {...controls} />
       </aside>
       <VStack gap={5}>
@@ -169,14 +171,12 @@ export function Listing({
         <div className="shop-listing-results" aria-busy={isBusy} data-busy={isBusy || undefined}>
           {page.items.length === 0 ? (
             <EmptyState
-              title="No products here"
-              description={
-                narrowed ? "Nothing matches these filters." : "Nothing is for sale here yet."
-              }
+              title={t("listing.empty_title")}
+              description={narrowed ? t("listing.empty_filtered") : t("listing.empty")}
               actions={
                 narrowed ? (
                   <Button
-                    label="Clear filters"
+                    label={t("listing.clear_filters")}
                     clickAction={() =>
                       go(base, changed(state, { filters: [], min: undefined, max: undefined }))
                     }
@@ -186,6 +186,7 @@ export function Listing({
             />
           ) : (
             <ProductGrid
+              t={t}
               hits={page.items}
               digits={digits}
               productBase={productBase}
@@ -198,12 +199,12 @@ export function Listing({
         {(previous || next) && (
           <HStack gap={2} hAlign="center">
             <Button
-              label="Previous"
+              label={t("listing.previous")}
               clickAction={previous ? () => turn(previous) : undefined}
               isDisabled={!previous}
             />
             <Button
-              label="Next"
+              label={t("listing.next")}
               clickAction={next ? () => turn(nextPage(state, next)) : undefined}
               isDisabled={!next}
             />

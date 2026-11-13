@@ -16,6 +16,7 @@ import { EnvelopeIcon, KeyIcon } from "@heroicons/react/24/outline";
 import { useState, useTransition } from "react";
 
 import { requestCode, signIn } from "@/app/[country]/account/actions";
+import { useT } from "@/lib/use-t";
 
 export function SignInForm({
   country,
@@ -28,6 +29,7 @@ export function SignInForm({
   initialEmail?: string;
   initialCode?: string;
 }) {
+  const t = useT<"account">();
   const [email, setEmail] = useState(initialEmail);
   const [code, setCode] = useState(initialCode);
   const [step, setStep] = useState<"email" | "code">(initialEmail ? "code" : "email");
@@ -61,12 +63,14 @@ export function SignInForm({
           <div className="shop-sign-in-copy">
             <VStack gap={1} hAlign="center">
               <Heading level={1} type="display-3">
-                {step === "email" ? `Sign in to ${storeName}` : "Check your email"}
+                {step === "email"
+                  ? t("account.sign_in_to", { store: storeName })
+                  : t("account.check_email")}
               </Heading>
               <Text color="secondary">
                 {step === "email"
-                  ? "Enter your email and we'll send you a six-digit code. No password needed."
-                  : `We sent a code to ${email.trim()}. The email says how long it works.`}
+                  ? t("account.enter_email")
+                  : t("account.code_sent", { email: email.trim() })}
               </Text>
             </VStack>
           </div>
@@ -81,7 +85,7 @@ export function SignInForm({
               <VStack gap={4}>
                 <TextInput
                   size="lg"
-                  label="Email"
+                  label={t("account.email")}
                   type="email"
                   isRequired
                   hasAutoFocus
@@ -90,7 +94,7 @@ export function SignInForm({
                 />
                 {error && <Banner status="error" title={error} />}
                 <Button
-                  label="Send me a code"
+                  label={t("account.send_code")}
                   variant="primary"
                   size="lg"
                   type="submit"
@@ -110,7 +114,7 @@ export function SignInForm({
               <VStack gap={4}>
                 <TextInput
                   size="lg"
-                  label="Code"
+                  label={t("account.code")}
                   autoComplete="one-time-code"
                   isRequired
                   hasAutoFocus
@@ -119,7 +123,7 @@ export function SignInForm({
                 />
                 {error && <Banner status="error" title={error} />}
                 <Button
-                  label="Sign in"
+                  label={t("account.sign_in")}
                   variant="primary"
                   size="lg"
                   type="submit"
@@ -128,7 +132,7 @@ export function SignInForm({
                 />
                 <HStack gap={2} hAlign="center" wrap="wrap">
                   <Button
-                    label="Use another email"
+                    label={t("account.use_another_email")}
                     variant="ghost"
                     size="sm"
                     clickAction={() => {
@@ -138,7 +142,7 @@ export function SignInForm({
                     }}
                   />
                   <Button
-                    label="Send a new code"
+                    label={t("account.send_new_code")}
                     variant="ghost"
                     size="sm"
                     isLoading={pending}
@@ -150,8 +154,7 @@ export function SignInForm({
           )}
           <div className="shop-sign-in-note">
             <Text type="supporting" color="secondary">
-              New here? Signing in creates your account. Your orders, addresses and preferences will
-              be waiting next time.
+              {t("account.new_here")}
             </Text>
           </div>
         </VStack>
