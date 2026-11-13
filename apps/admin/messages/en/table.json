@@ -14,7 +14,7 @@
   "view_label": "View",
   "view_custom": "Custom",
   "filters": "Filters",
-  "filters_count": "Filters ({count})",
+  "filters_count": "Filters ({count, number})",
   "filters_refused": "These filters can't be used",
-  "page_status": "Page {page} · {count} shown"
+  "page_status": "Page {page, number} · {count, number} shown"
 }

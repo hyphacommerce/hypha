@@ -28,7 +28,7 @@
   "products_category_placeholder": "Choose a category",
   "products_category_add_hint": "Products already in it stay as they are.",
   "orders_mark_paid": "Mark as paid",
-  "orders_mark_paid_count": "Mark as paid ({count})",
+  "orders_mark_paid_count": "Mark as paid ({count, number})",
   "orders_mark_paid_title": "Mark {count, plural, one {# order} other {# orders}} as paid?",
   "orders_mark_paid_description": "Use this for money you collected yourself: cash on delivery, a bank transfer. Paid, cancelled and other orders in the selection are left as they are.",
   "orders_marked_paid": "Marked paid: {count, plural, one {# order} other {# orders}}",

@@ -19,7 +19,7 @@
   "option_offer": "Offer {name}",
   "option_backup": "Backup",
   "option_backup_description": "Offered only when every rate app option of this zone fails, so an outage doesn't stop sales.",
-  "option_delivery_days": "{min}–{max} days",
+  "option_delivery_days": "{min, number}–{max, number} days",
   "option_delivery_invalid": "Enter delivery days as whole numbers, like 2 and 4.",
   "option_name_description": "What shoppers see.",
   "option_name_placeholder": "Standard",

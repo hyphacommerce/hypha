@@ -20,7 +20,7 @@ The app-side files and their exports are named as in the storefront:
 | `lib/messages.ts` | `en`, `Key`, `Namespace`, `KeyIn<N>`, `T`, `TFor<N>`, `SHARED_NAMESPACES`, `loadMessages(language)`, `pick`, `isKey` | values on the server, types anywhere |
 | `lib/i18n.ts` | `getT(language?)` | server components, actions, route handlers |
 | `lib/use-t.ts` | `useT<N>()`, `useLanguage()` | client components |
-| `lib/keys.ts` | `hasKey(t, key)` | anywhere |
+| `lib/keys.ts` | `hasKey(t, key)`, `labelOr(t, key, fallback)` | anywhere |
 | `lib/pseudo.ts` | `PSEUDO` (`"en-XA"`) | anywhere |
 | `lib/get-format.ts` | `getFormat()` | server, behind the login |
 | `lib/use-format.ts` | `useFormat()` | client components |
@@ -35,25 +35,24 @@ language's catalog as a chunk the browser caches (`components/i18n-provider.tsx`
 `lib/catalogs.ts`). The typed surface is the same: `useT()` knows the shared namespaces,
 `useT<"orders">()` adds one.
 
-## Extracting an area
+## Adding a screen
 
-1. **Put the area's English in its namespace file**, `messages/en/<namespace>.json`. The
-   namespaces already exist (empty) for every area, so nothing else needs registering:
-   `account`, `agents`, `api_keys`, `apps`, `categories`, `checkout`, `custom_fields`,
-   `customers`, `discounts`, `home`, `inventory`, `markets`, `media`, `notifications`,
-   `orders`, `payments`, `price_lists`, `products`, `purchasing`, `settings`, `setup`,
-   `shipping`, `staff`, `suppliers`, `transfers`. Use only your area's files.
+Every area is extracted: the whole admin reads its words from these catalogs, and literal
+text in JSX is a lint error everywhere (`app/**`, `components/**`, `resources/**`).
+
+1. **Put the screen's English in its area's namespace file**, `messages/en/<namespace>.json`:
+   `account`, `agents`, `api_keys`, `apps`, `bulk`, `categories`, `checkout`,
+   `custom_fields`, `customers`, `discounts`, `home`, `inventory`, `markets`, `media`,
+   `notifications`, `orders`, `payments`, `price_lists`, `products`, `purchasing`,
+   `settings`, `setup`, `shipping`, `staff`, `suppliers`, `transfers`.
    A new namespace is a new file plus `pnpm --filter admin i18n:index`, which rewrites the
-   two generated modules (committed; `i18n:check` fails while they're stale). No list is
+   generated modules (committed; `i18n:check` fails while they're stale). No list is
    edited by hand.
-2. **Replace the literals** with `t("<namespace>.<key>")` (below).
-3. **Replace hard-coded formats** (`toLocaleString("en")`, `new Intl.…("en-GB")`,
-   `formatMoney(x, currencies)`) with the `Format` helpers (below).
-4. **Add the area's folders to `adminTranslated`** in the root `vite.config.ts`: one line
-   per folder, sorted. From then on literal text in their JSX is a lint error.
-5. `pnpm --filter admin i18n:check`, `pnpm fmt`, `pnpm lint`, `pnpm lint:react`,
+2. **Write** `t("<namespace>.<key>")` where the words go (below), and the `Format` helpers
+   where something is formatted (below).
+3. `pnpm --filter admin i18n:check`, `pnpm fmt`, `pnpm lint`, `pnpm lint:react`,
    `pnpm typecheck`, `pnpm --filter admin test`.
-6. Look at the area in the pseudo-language (below): anything still in plain letters
+4. Look at the screen in the pseudo-language (below): anything still in plain letters
    didn't come from a catalog.
 
 ## Keys
@@ -75,7 +74,18 @@ language's catalog as a chunk the browser caches (`components/i18n-provider.tsx`
   between languages. `"{count} of {total} shipped"`, not `t("x") + " of " + …`.
 - Reuse `common.*` for the bare vocabulary (below). A sentence is its area's own, even
   when it reads like one elsewhere.
-- English wording stays exactly as it is today.
+- **One key, one role.** A key is shared only by uses that play the same part: the label
+  of a row's edit button everywhere (`common.edit_named`), a status wherever it's named
+  (its badge, a filter's option). Two uses that happen to read the same in English (a
+  button "Edit address" and a dialog titled "Edit address", a nav entry and its page's
+  title) keep a key each: another language may word, inflect or capitalise them apart.
+- **Text that is saved as store content stays a fixed English constant**, never a
+  message: the name and shopper message a checkout rule preset starts with, the setup
+  wizard's default names ("Standard", "Storefront", "Cash on delivery"), a discount
+  template's title, an option's suggested name. Content is in the store's language,
+  whatever the staff member's is, and a constant keeps a French-speaking employee from
+  writing French into an English store. The label that *offers* such a default is a
+  message; what gets saved isn't.
 
 ## Writing messages (ICU MessageFormat)
 
@@ -94,8 +104,12 @@ language's catalog as a chunk the browser caches (`components/i18n-provider.tsx`
   number, formatted for the language. Put the whole phrase inside each branch.
 - **Braces and angle brackets** that are meant literally are quoted with apostrophes:
   `'{order}'`, `'<'`. A plain apostrophe (`can't`) needs nothing.
-- **Numbers** given as numbers are formatted for the language (`{count}` with 1234 shows
-  "1,234"). Pass a string to show something as it is (an ID, a code).
+- **Numbers**: a plain placeholder is **not** formatted (`{count}` with 1234 shows
+  "1234"). Only `#` inside a plural and `{count, number}` are written for the language
+  ("1,234", "1.234", "1 234"). So a count, a quantity or a limit that isn't the plural's
+  own `#` is `{max, number}`: `"At most {max, number} products."`. A plain `{x}` is for
+  what is shown as it is: a string, an ID, an order number, a number already formatted
+  (`format.number`, `format.money`).
 - **Money and dates** are formatted first and passed in as strings:
   `t("orders.total_line", { total: format.money(order.total) })`.
 
@@ -199,6 +213,7 @@ const format = useFormat();       // client
 | `format.unitCost({amount, currency})` | `"€4.125"` |
 | `format.dateTime(rfc3339, "long" \| "short")` | `"15 Oct 2026, 09:30 CEST"` / `"15 Oct, 09:30"`, in the store's time zone |
 | `format.date(rfc3339, "long" \| "short")` | a calendar date kept as noon UTC: `"11 Nov 2026"` / `"11 Nov"` |
+| `format.weekday(date)` | the day a moment falls on in the store's time zone: `"Thursday 22 October"` |
 | `format.list(items, "conjunction" \| "disjunction" \| "unit")` | `"A, B and C"` / `"A, B or C"` / `"A, B, C"` |
 | `format.plural(count)` | `"one"`, `"few"`, `"other"`… (messages use ICU plurals instead) |
 | `format.bytes(bytes)` | `"1.4 MB"` |
@@ -211,20 +226,19 @@ const format = useFormat();       // client
   (`components/date-time.tsx`) do the dates.
 - `getFormat()` and `useFormat()` already hold the currency table and the store's time
   zone, so `formatMoney(x, currencies)` becomes `format.money(x)`.
-- **Don't call the old functions without a locale**: `formatMoney(x, currencies)`,
-  `formatUnitCost`, `formatDateTime`, `formatBytes` (`lib/format.ts`) and `countryName`,
-  `countryLabel`, `countryOptions`, `currencyOptions` (`lib/regions.ts`) called without
-  their last argument write English and are `@deprecated`: in an extracted folder that's
-  a lint error (`typescript/no-deprecated`). Move each call to `format.*`, or pass the
-  locale where a plain function is what's needed.
 - Before the login there's no store: `createFormat(t.locale)` formats numbers and dates
   (UTC), not money.
-- `lib/regions.ts`' `countryName`, `countryOptions` and `currencyOptions` take the locale
-  last: pass `format.locale`.
+- `lib/regions.ts`' `countryName`, `countryLabel`, `countryOptions` and `currencyOptions`
+  take the locale last, and it's required: pass `format.locale`. Nothing formats without
+  one.
 - `Intl` used to compute (which calendar day a time falls on in a zone), not to show, is
   arithmetic: it keeps its fixed locale.
 - The time zone is the store's, as before; the language only changes how a time is written.
-- Parsing what someone typed (`parseMoney`) accepts `.` and `,` in every language.
+- Parsing what someone typed (`parseMoney`, the price grid's `parseAmount`) accepts `.`
+  and `,` in every language, and what a grid or a CSV file holds is written the same for
+  everyone: only the messages about it are translated. A parser's caller that shows no
+  message asks without a translator (`amountOf`, `percentOf`, `breaksOf` in
+  `lib/price-grid/`).
 
 ## What isn't translated
 
@@ -282,7 +296,8 @@ never sent to the API.
   valid ICU, keys are snake_case, no language has a key English lacks or other
   placeholders than English's, every shipped language is complete.
 - `i18n/no-literal-text` (in `pnpm lint`; the rule is `scripts/oxlint-i18n.mjs`, shared
-  with the storefront) on the files listed in `adminTranslated`: no literal text between
+  with the storefront) on the whole admin (`adminTranslated` in the root `vite.config.ts`:
+  `app/**`, `components/**`, `resources/**`): no literal text between
   tags or in the props people read (`READ_PROPS` there: `label`, `title`, `description`,
   `placeholder`, `subtitle`, `tooltip`, `actionLabel`, `submitLabel`, `confirmLabel`,
   `cancelLabel`, `addLabel`, `searchLabel`, `alreadyInLabel`, `emptyBootstrapText`,
@@ -290,7 +305,7 @@ never sent to the API.
   `aria-label`, `aria-description`). A component of yours with another text prop: name
   it one of these, or tell whoever owns the rule. It sees JSX only, so strings in
   objects and actions are yours to find.
-- `typescript/no-deprecated` on the same files: no format function that names no locale.
+- `typescript/no-deprecated` on the same files: nothing deprecated is called.
 - TypeScript: `t("orders.titel")` doesn't compile.
 
 ## `common`: the shared vocabulary
@@ -300,30 +315,42 @@ instead of adding the same word to an area's file.
 
 | Keys | |
 | --- | --- |
-| Actions | `save`, `save_changes`, `cancel`, `close`, `done`, `delete`, `remove`, `discard`, `edit`, `add`, `create`, `update`, `apply`, `confirm`, `continue`, `back`, `next`, `previous`, `skip`, `retry` ("Try again"), `reload`, `refresh`, `search`, `clear`, `reset`, `filter`, `sort`, `select`, `select_all`, `choose`, `change`, `view`, `open`, `show`, `hide`, `show_more`, `show_less`, `more`, `load_more`, `sign_in`, `sign_out`, `turn_on`, `turn_off`, `actions`, `copy`, `duplicate`, `download`, `upload`, `import`, `export`, `print`, `send`, `resend`, `enable`, `disable`, `archive`, `unarchive`, `learn_more` |
-| Progress | `saving`, `saved`, `deleting`, `loading`, `copied` |
+| Actions | `save`, `save_changes`, `cancel`, `close`, `done`, `delete`, `remove`, `discard`, `edit`, `add`, `create`, `update`, `apply`, `confirm`, `continue`, `back`, `next`, `previous`, `skip`, `retry` ("Try again"), `reload`, `refresh`, `search`, `clear`, `reset`, `filter`, `sort`, `select`, `select_all`, `choose`, `change`, `view`, `view_all`, `open`, `show`, `hide`, `show_more`, `show_less`, `more`, `load_more`, `sign_in`, `sign_out`, `turn_on`, `turn_off`, `actions`, `copy`, `duplicate`, `download`, `upload`, `import`, `export`, `print`, `send`, `resend`, `enable`, `disable`, `archive`, `unarchive`, `learn_more`, `revoke`, `approve`, `move_up`, `move_down`, `pick_from_library` |
+| A row's buttons (`{name}`) | `edit_named`, `remove_named`, `delete_named_label`, `move_up_named`, `move_down_named` |
+| Sort options | `sort_newest`, `sort_oldest`, `sort_name_asc`, `sort_name_desc` |
+| Placeholders | `choose_location`, `choose_country`, `choose_currency`, `choose_variant`, `every_market`, `every_channel` |
+| Progress | `saving`, `saved`, `saved_notice` ("Saved.", a banner), `deleting`, `loading`, `copied` |
 | States | `enabled`, `disabled`, `on`, `off`, `yes`, `no`, `none`, `all`, `any`, `other`, `optional`, `required`, `default`, `unknown`, `active`, `inactive`, `draft`, `archived`, `not_set`, `empty_value` ("—") |
-| Fields | `name`, `title`, `description`, `status`, `type`, `code`, `key`, `id`, `handle`, `email`, `phone`, `password`, `address`, `country`, `countries`, `currency`, `language`, `time_zone`, `date`, `time`, `created`, `updated`, `note`, `notes`, `details`, `settings`, `summary` |
-| Money and lines | `total`, `subtotal`, `quantity`, `price`, `amount`, `tax`, `shipping`, `discount`, `sku` |
+| Phases of a schedule | `phase_active`, `phase_scheduled`, `phase_expired`, `phase_draft` (price lists and discounts: `phaseBadge`, `phaseOptions` in `lib/price-lists.ts`) |
+| Fields | `name`, `title`, `description`, `status`, `type`, `kind`, `code`, `key`, `id`, `handle`, `email`, `phone`, `password`, `address`, `country`, `countries`, `currency`, `language`, `time_zone`, `date`, `time`, `created`, `updated`, `note`, `notes`, `details`, `settings`, `summary`, `reference`, `scopes`, `visibility`, `identifiers`, `customer_groups` |
+| Address fields | `first_name`, `last_name`, `company`, `address_line2`, `city`, `postal_code`, `region_or_province` |
+| Money and lines | `total`, `subtotal`, `quantity`, `price`, `amount`, `tax`, `shipping`, `discount`, `sku`, `sku_named` (`{sku}`), `no_sku` |
 | Things | `product(s)`, `variant(s)`, `category`/`categories`, `order(s)`, `customer(s)`, `market(s)`, `channel(s)`, `location(s)`, `supplier`, `app(s)`, `role`, `home`, `your_account` |
-| Phrases | `something_went_wrong`, `try_again_later`, `reload_the_page`, `no_results`, `nothing_here_yet`, `cannot_be_undone`, `unsaved_changes`, `leave_without_saving`, `delete_named` (`{name}`), `items_count` (`{count}`), `selected_count` (`{count}`), `and_more` (`{count}`) |
+| Phrases | `something_went_wrong`, `try_again_later`, `reload_the_page`, `no_results`, `nothing_here_yet`, `cannot_be_undone`, `unsaved_changes`, `leave_without_saving`, `check_highlighted_fields`, `delete_named` (`{name}`, a dialog's title), `items_count`, `selected_count`, `and_more`, `countries_count`, `categories_count`, `variants_count` (`{count}`) |
 
 Other shared namespaces: `nav` (the side nav, settings index, account menu), `shell` (the
 command palette), `errors` (API error codes), `auth` (login, invite, reset, two-factor),
 `table` (the resource table, pager, filters), `components` (pickers, dialogs, the save
 bar, address fields, status badges, skeleton labels, app extensions), `global_error`.
-Reuse a `components.*` or `table.*` string only from the component it belongs to.
+Reuse a `components.*` or `table.*` string only from the component it belongs to: a
+status's name comes from `components/status.tsx` (`statusOptions(family, statuses, t)`
+for a filter, `statusLabel` for a tab), so a filter never names a status other than its
+badge does.
 
-## The closing step
+## Helpers that say something
 
-When the last area is extracted:
+A function that builds text takes the translator, always: none has an English fallback.
 
-1. `adminTranslated` in the root `vite.config.ts` becomes `apps/admin/app/**`,
-   `apps/admin/components/**` and `apps/admin/resources/**`.
-2. Delete the `@deprecated` overloads in `lib/format.ts` (`formatMoney`, `formatUnitCost`,
-   `formatDateTime`, `formatBytes`) and `lib/regions.ts` (`countryName`, `countryLabel`,
-   `countryOptions`, `currencyOptions`), and the `ENGLISH` default with them, so the
-   locale is a required argument. `pnpm lint` lists any caller left
-   (`pnpm exec vp lint apps/admin -D typescript/no-deprecated` shows them today).
-3. Fold into `common` the words areas duplicated, and drop keys nothing reads.
-4. Read every page once in the pseudo-language.
+| Helper | For |
+| --- | --- |
+| `labelOr(t, key, fallback)` (`lib/keys.ts`) | a label by an API value, the value itself for one this build doesn't know |
+| `statusOptions`, `statusLabel` (`components/status.tsx`) | a status as its badge names it |
+| `phaseBadge(phase, t)`, `phaseOptions(t)` (`lib/price-lists.ts`) | a price list's or a discount's phase |
+| `settingsCrumb(t)`, `appsCrumb(t)`, `agentsCrumb(t)` (`lib/navigation.ts`) | a breadcrumb's way back |
+| `describe(error)`, `describeWith(t, error)` | an API error's sentence |
+| `parseAmount(text, digits, currency, t)`, `parsePercent`, `parseBreaks` (`lib/price-grid/`) | typed prices, with the problem in `t`'s language |
+
+## Before a second language ships
+
+Read every page once in the pseudo-language, and in the new one: the lint rule sees JSX
+only, so text built in objects, actions and `lib/` is checked by eye.

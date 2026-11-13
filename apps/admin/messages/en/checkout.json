@@ -131,7 +131,7 @@
   "editor_condition_add": "Add condition",
   "editor_condition_when": "When",
   "editor_condition_and": "And",
-  "editor_condition_remove": "Remove condition {number}",
+  "editor_condition_remove": "Remove condition {number, number}",
   "editor_field": "Field",
   "editor_pattern": "Pattern",
   "editor_pattern_description": "A regular expression, like \\bbox\\b. It may match anywhere in the field.",

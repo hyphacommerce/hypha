@@ -110,7 +110,7 @@
   "order_cancelled": "This order is cancelled.",
   "order_has_fulfillments": "Take back the order's shipments first, then cancel it.",
   "over_fulfilled": "That's more than is left to ship.",
-  "over_fulfilled_left": "That's more than is left to ship: {left} of that item.",
+  "over_fulfilled_left": "That's more than is left to ship: {left, number} of that item.",
   "owner_role_fixed": "The owner role always has every scope; it can't be changed.",
   "password_too_long": "The password can be at most 128 characters.",
   "password_too_short": "Use at least 8 characters for the password.",

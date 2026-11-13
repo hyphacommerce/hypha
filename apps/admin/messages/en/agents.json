@@ -151,7 +151,7 @@
   "activity_operation": "Operation",
   "activity_mode": "Mode",
   "activity_took": "Took",
-  "activity_duration": "{duration} ms",
+  "activity_duration": "{duration, number} ms",
   "activity_when": "When",
   "activity_empty_title": "No calls yet",
   "activity_empty_description": "Every operation the agent calls shows up here, reads too, kept for 30 days.",
