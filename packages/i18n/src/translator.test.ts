@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { mergeCatalogs } from "./catalogs.ts";
+import { mergeCatalogs, pickNamespaces } from "./catalogs.ts";
 import { type Messages, type Missing, createTranslator } from "./translator.ts";
 
 const en = {
@@ -227,6 +227,21 @@ test("keys are typed from the catalogs", () => {
   assert.equal(german("checkout.pay"), "Pay");
   // @ts-expect-error -- not a key of the source catalog
   assert.equal(german("cart.nope"), "cart.nope");
+});
+
+test("pickNamespaces keeps the namespaces named, typed by them", () => {
+  const merged = mergeCatalogs({
+    cart: { title: "Your cart" },
+    cartoon: { title: "Not the cart" },
+    checkout: { pay: "Pay" },
+    common: { close: "Close" },
+  });
+  const picked = pickNamespaces(merged, ["cart", "common"]);
+  assert.deepEqual(picked, { "cart.title": "Your cart", "common.close": "Close" });
+  const t = createTranslator("en", picked);
+  assert.equal(t("common.close"), "Close");
+  // @ts-expect-error -- checkout wasn't picked
+  assert.equal(t("checkout.pay"), "checkout.pay");
 });
 
 test("mergeCatalogs prefixes each key with its namespace", () => {

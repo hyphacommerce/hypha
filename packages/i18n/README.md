@@ -143,6 +143,53 @@ export function CartCount({ count }: { count: number }) {
 }
 ```
 
+### Only the namespaces a route needs
+
+The whole catalog shouldn't go to the browser. The root layout hands over the
+namespaces every page's client components read; a nested layout adds its routes' own.
+A provider inside another of the same language adds its messages to the outer one's:
+
+```tsx
+// lib/messages.ts
+export const SHARED = ["common", "cart"] as const;
+```
+
+```tsx
+// app/layout.tsx
+const messages = { ...en, ...(await loadMessages(language)) };
+
+<I18nProvider language={language} messages={pickNamespaces(messages, SHARED)}>
+  {children}
+</I18nProvider>;
+```
+
+```tsx
+// app/checkout/layout.tsx
+<I18nProvider language={language} messages={pickNamespaces(messages, ["checkout"])}>
+  {children}
+</I18nProvider>
+```
+
+A client component names the namespaces it reads, so a key from one its layouts don't
+provide doesn't compile:
+
+```ts
+// lib/use-t.ts
+"use client";
+import { useT as useAnyT } from "@hyphacommerce/i18n/react";
+import type { NamespaceKeys, Translator } from "@hyphacommerce/i18n";
+
+import type { SHARED, en } from "./messages.ts";
+
+type Namespace = keyof … // the app's namespaces: "cart" | "checkout" | "common" | …
+/** `useT()` for the shared namespaces, `useT("checkout")` for those and checkout's. */
+export function useT<N extends Namespace = never>(
+  ..._namespaces: N[]
+): Translator<NamespaceKeys<typeof en, (typeof SHARED)[number] | N>> {
+  return useAnyT();
+}
+```
+
 `useLanguage()` answers the provider's language. Under the provider a message that
 can't be formatted shows its key and is logged, never thrown.
 
@@ -154,6 +201,7 @@ can't be formatted shows its key and is logged, never thrown.
 | `matchLanguage(wanted, available)` | the wanted language the app has, in `available`'s spelling (below); `undefined` for none |
 | `directionOf(language)` | `"rtl"` for Arabic, Hebrew, Persian, Urdu and the like (a script in the tag decides), else `"ltr"` |
 | `localeOf(language, country?)` | the formatting locale: `de` + `CH` → `de-CH`; a tag with a region keeps it |
+| `withEnglish(locale)` | `[locale, "en"]` (`["en"]` for English): the list to give every `Intl.*` formatter, so a runtime without the locale's data formats as English, not as its own default, and server and browser agree. The translator does the same |
 | `parseLocaleSegment(segment)` | a storefront URL's first segment: `de` → `{country: "de"}`, `en-de` → `{language: "en", country: "de"}`, `sr-latn-rs` → `{language: "sr-Latn", country: "rs"}`; `undefined` for anything else |
 | `formatLocaleSegment({language?, country})` | its inverse, lower-cased |
 | `canonicalLanguage(tag)` | the tag as BCP 47 spells it (`sr-latn` → `sr-Latn`), or `undefined` |
@@ -185,6 +233,14 @@ const messages = process.env.NODE_ENV === "development" && language === "en-XA" 
 
 `en-XA` is the app's own name for it, in development only: it's no language of any
 store, so it must never be sent to the API (ask the API in English while showing it).
+
+## Serbian in Latin script
+
+`serbianLatin(messages)` (and `toSerbianLatin(text)`) writes a catalog's Serbian Cyrillic
+in Serbian Latin, letter for letter (`љ` → `lj`, `њ` → `nj`, `џ` → `dž`; `Љубав` →
+`Ljubav`, `ЉУБАВ` → `LJUBAV`), leaving Latin text, ICU syntax, placeholders and tags as
+they are. For a library that ships Serbian in Cyrillic only while the app shows
+`sr-Latn`: `serbianLatin(theLibrarysSerbianCatalog)` goes to its provider.
 
 ## The check
 

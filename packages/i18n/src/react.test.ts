@@ -95,6 +95,32 @@ test("a message that can't be formatted shows its key and is logged", () => {
   assert.equal(errors[0]?.[0], "i18n: cart.count (en)");
 });
 
+function Both(): ReactNode {
+  const t = useT();
+  return createElement("p", null, `${t("cart.title")} / ${t("checkout.pay")} / ${t("shared")}`);
+}
+
+/** `Both` under an English provider and, inside it, one of `language`. */
+function nested(language: string): string {
+  return renderToStaticMarkup(
+    createElement(
+      I18nProvider,
+      { language: "en", messages: { "cart.title": "Your cart", shared: "outer" } },
+      createElement(
+        I18nProvider,
+        { language, messages: { "checkout.pay": "Pay", shared: "inner" } },
+        createElement(Both),
+      ),
+    ),
+  );
+}
+
+test("a nested provider adds its messages to the outer one's", () => {
+  assert.equal(nested("en"), "<p>Your cart / Pay / inner</p>");
+  // Another language starts over: the outer messages aren't its own.
+  assert.equal(nested("de"), "<p>cart.title / Pay / inner</p>");
+});
+
 test("the hooks need a provider", () => {
   assert.throws(
     () => renderToStaticMarkup(createElement(Cart, { count: 1 })),

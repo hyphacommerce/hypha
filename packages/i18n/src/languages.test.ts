@@ -9,6 +9,7 @@ import {
   matchLanguage,
   parseAcceptLanguage,
   parseLocaleSegment,
+  withEnglish,
 } from "./languages.ts";
 
 test("parseAcceptLanguage orders by q, then by position", () => {
@@ -146,6 +147,22 @@ test("localeOf without a country is the language", () => {
 test("localeOf returns what isn't a tag, or has no usable country, as given", () => {
   assert.equal(localeOf("not a tag", "DE"), "not a tag");
   assert.equal(localeOf("de", "Germany"), "de");
+});
+
+test("withEnglish: the locale, then English", () => {
+  assert.deepEqual(withEnglish("de-CH"), ["de-CH", "en"]);
+  assert.deepEqual(withEnglish("sr-Latn"), ["sr-Latn", "en"]);
+  assert.deepEqual(withEnglish("en-GB"), ["en-GB", "en"]);
+});
+
+test("withEnglish: English once", () => {
+  assert.deepEqual(withEnglish("en"), ["en"]);
+  assert.deepEqual(withEnglish("EN"), ["en"]);
+});
+
+test("withEnglish: a formatter without the locale's data formats as English", () => {
+  assert.equal(new Intl.NumberFormat(withEnglish("tlh")).format(1234.5), "1,234.5");
+  assert.equal(new Intl.NumberFormat(withEnglish("de")).format(1234.5), "1.234,5");
 });
 
 test("parseLocaleSegment: a country alone", () => {

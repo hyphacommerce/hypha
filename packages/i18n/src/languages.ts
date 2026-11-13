@@ -141,6 +141,15 @@ export function localeOf(language: string, country?: string): string {
   }
 }
 
+/**
+ * The locale list every `Intl.*` formatter takes: the locale, then English. A runtime
+ * without the locale's data then formats as English rather than as its own default,
+ * which differs between a server and a browser.
+ */
+export function withEnglish(locale: string): string[] {
+  return locale.toLowerCase() === "en" ? ["en"] : [locale, "en"];
+}
+
 /** What a storefront URL's first segment names. */
 export interface LocaleSegment {
   /** The language, when the segment names one: otherwise the market's default. */
