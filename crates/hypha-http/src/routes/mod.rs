@@ -484,6 +484,7 @@ macro_rules! route_table {
             [storefront, DELETE, "/storefront/carts/{id}/lines/{variant}", carts::remove_line],
             [storefront, PUT, "/storefront/carts/{id}/email", carts::set_email],
             [storefront, PUT, "/storefront/carts/{id}/marketing", carts::set_marketing],
+            [storefront, PUT, "/storefront/carts/{id}/language", carts::set_language],
             [storefront, POST, "/storefront/carts/{id}/discount-codes", carts::add_code],
             [storefront, DELETE, "/storefront/carts/{id}/discount-codes/{code}", carts::remove_code],
             [storefront, PUT, "/storefront/carts/{id}/shipping-address", carts::set_address],

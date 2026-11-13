@@ -37,7 +37,7 @@ fn lang(tag: &str) -> Language {
 fn source() -> Source {
     Source::new(vec![
         SourceField::new("title", Some("Mug")),
-        SourceField::new("description", None),
+        SourceField::new("description", Some("<p>A mug.</p>")),
         SourceField::new("name", Some("Mugs")),
     ])
 }

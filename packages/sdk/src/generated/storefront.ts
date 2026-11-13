@@ -20,7 +20,7 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Changes the customer's names and phone (the admin's rules: `409 customer_erased`
+         * Changes the customer's names, phone and language (the admin's rules: `409 customer_erased`
          *     once erased).
          */
         patch: operations["storefront.account.update"];
@@ -458,6 +458,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/storefront/carts/{id}/language": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Sets the language the shopper reads the cart in, held to what its market offers (a tag
+         *     not offered tries its language, then the market's default, which is what's kept);
+         *     `null` follows the market's default. Answers the cart in it.
+         */
+        put: operations["storefront.carts.set_language"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/storefront/carts/{id}/lines": {
         parameters: {
             query?: never;
@@ -863,6 +884,7 @@ export interface components {
             erasure_due_at?: string | null;
             first_name?: string | null;
             id: components["schemas"]["CustomerId"];
+            language?: components["schemas"]["Language"] | null;
             last_name?: string | null;
             phone?: string | null;
             /** @description Consent to marketing by SMS; needs a phone. */
@@ -1106,6 +1128,7 @@ export interface components {
             /** @description False when any line is unavailable; checkout should refuse such a cart. */
             fully_available: boolean;
             id: components["schemas"]["CartId"];
+            language?: components["schemas"]["Language"] | null;
             lines: components["schemas"]["LineResponse"][];
             /** @description Picked from the country when the cart was created; it sets the currency. */
             market: components["schemas"]["MarketId"];
@@ -1216,6 +1239,13 @@ export interface components {
         CreateCartRequest: {
             /** @description Where the cart ships to; picks the market and the tax rates. */
             country: string;
+            /**
+             * @description The language the shopper reads the cart in (a BCP 47 tag), out of those the
+             *     market offers (`/storefront/countries`): one not offered is tried without its
+             *     region (`de` for `de-AT`), else the market's default is kept. Absent, the cart
+             *     follows the market's default. The order is placed in it.
+             */
+            language?: string | null;
         };
         /**
          * @description An ISO 4217 currency code. Funds, precious metals and test codes (XDR, XAU, XXX) aren't accepted.
@@ -1491,6 +1521,10 @@ export interface components {
             /** @enum {string} */
             status: "unavailable";
         };
+        /** @description A title as the buyer read it, in the order's language. */
+        LocalizedTitleResponse: {
+            title: string;
+        };
         LoginCodeRequest: {
             email: string;
         };
@@ -1667,6 +1701,7 @@ export interface components {
             /** @description The code it came by, normalised; `null` for an automatic discount. */
             code?: string | null;
             discount: components["schemas"]["DiscountId"];
+            localized?: components["schemas"]["LocalizedTitleResponse"] | null;
             /** @description The sentence the shopper saw at checkout, kept as it was. */
             summary: string;
             target: components["schemas"]["DiscountTargetDto"];
@@ -2059,6 +2094,14 @@ export interface components {
             /** @description `null` clears it. */
             email?: string | null;
         };
+        SetLanguageRequest: {
+            /**
+             * @description A BCP 47 tag, held to the cart's market like `language` on create: what it
+             *     resolves to is kept. `null` goes back to following the market's default.
+             *     Required, `null` included.
+             */
+            language: string | null;
+        };
         SetMarketingRequest: {
             /** @description Whether the buyer wants news and offers by email. */
             opt_in: boolean;
@@ -2265,6 +2308,7 @@ export interface components {
             financial_status: components["schemas"]["FinancialStatusDto"];
             fulfillment_status: components["schemas"]["FulfillmentStatusDto"];
             id: components["schemas"]["OrderId"];
+            language?: components["schemas"]["Language"] | null;
             lines: components["schemas"]["StorefrontOrderLineResponse"][];
             market: components["schemas"]["MarketId"];
             /**
@@ -2457,6 +2501,12 @@ export interface components {
          */
         UpdateAccountRequest: {
             first_name?: string | null;
+            /**
+             * @description The language they read (a BCP 47 tag), out of those the store publishes: one it
+             *     doesn't is tried without its region, else the store's default is kept. `null`
+             *     goes back to the store's default.
+             */
+            language?: string | null;
             last_name?: string | null;
             phone?: string | null;
         };
@@ -3365,6 +3415,8 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -4411,6 +4463,8 @@ export interface operations {
             /** @description Created */
             201: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     /** @description `true` when this answer replays an earlier request with the same `Idempotency-Key`. */
                     "Idempotent-Replayed"?: string;
                     [name: string]: unknown;
@@ -4516,6 +4570,8 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -4590,6 +4646,8 @@ export interface operations {
             /** @description Created */
             201: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     /** @description `true` when this answer replays an earlier request with the same `Idempotency-Key`. */
                     "Idempotent-Replayed"?: string;
                     [name: string]: unknown;
@@ -4708,6 +4766,8 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -4825,6 +4885,8 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -4905,6 +4967,117 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CartResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "storefront.carts.set_language": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CartId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetLanguageRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -5015,6 +5188,8 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     /** @description `true` when this answer replays an earlier request with the same `Idempotency-Key`. */
                     "Idempotent-Replayed"?: string;
                     [name: string]: unknown;
@@ -5125,6 +5300,8 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -5229,6 +5406,8 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -5309,6 +5488,8 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -5532,6 +5713,8 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -5635,6 +5818,8 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -5706,6 +5891,8 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -5809,6 +5996,8 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -5890,6 +6079,8 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -5993,8 +6184,9 @@ export interface operations {
             query?: {
                 /**
                  * @description The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
-                 *     `country`'s market offers (`/storefront/countries`): without it, or with one the
-                 *     market doesn't offer, the market's default answers. Without `country`, out of the
+                 *     `country`'s market offers (`/storefront/countries`): one it doesn't offer is
+                 *     tried without its region (`de` for `de-AT`), and without it, or with one still
+                 *     not offered, the market's default answers. Without `country`, out of the
                  *     store's default and the languages it has published, the store's default
                  *     otherwise. `Content-Language` names the one served. Text without a translation
                  *     stays in the store's default language.
@@ -6066,8 +6258,9 @@ export interface operations {
             query?: {
                 /**
                  * @description The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
-                 *     `country`'s market offers (`/storefront/countries`): without it, or with one the
-                 *     market doesn't offer, the market's default answers. Without `country`, out of the
+                 *     `country`'s market offers (`/storefront/countries`): one it doesn't offer is
+                 *     tried without its region (`de` for `de-AT`), and without it, or with one still
+                 *     not offered, the market's default answers. Without `country`, out of the
                  *     store's default and the languages it has published, the store's default
                  *     otherwise. `Content-Language` names the one served. Text without a translation
                  *     stays in the store's default language.
@@ -6203,8 +6396,9 @@ export interface operations {
                 owner_type?: "product" | "variant" | "category" | "customer" | "order";
                 /**
                  * @description The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
-                 *     `country`'s market offers (`/storefront/countries`): without it, or with one the
-                 *     market doesn't offer, the market's default answers. Without `country`, out of the
+                 *     `country`'s market offers (`/storefront/countries`): one it doesn't offer is
+                 *     tried without its region (`de` for `de-AT`), and without it, or with one still
+                 *     not offered, the market's default answers. Without `country`, out of the
                  *     store's default and the languages it has published, the store's default
                  *     otherwise. `Content-Language` names the one served. Text without a translation
                  *     stays in the store's default language.
@@ -6288,6 +6482,8 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -6351,8 +6547,9 @@ export interface operations {
                 country?: string;
                 /**
                  * @description The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
-                 *     `country`'s market offers (`/storefront/countries`): without it, or with one the
-                 *     market doesn't offer, the market's default answers. Without `country`, out of the
+                 *     `country`'s market offers (`/storefront/countries`): one it doesn't offer is
+                 *     tried without its region (`de` for `de-AT`), and without it, or with one still
+                 *     not offered, the market's default answers. Without `country`, out of the
                  *     store's default and the languages it has published, the store's default
                  *     otherwise. `Content-Language` names the one served. Text without a translation
                  *     stays in the store's default language.
@@ -6439,8 +6636,9 @@ export interface operations {
                 country?: string;
                 /**
                  * @description The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
-                 *     `country`'s market offers (`/storefront/countries`): without it, or with one the
-                 *     market doesn't offer, the market's default answers. Without `country`, out of the
+                 *     `country`'s market offers (`/storefront/countries`): one it doesn't offer is
+                 *     tried without its region (`de` for `de-AT`), and without it, or with one still
+                 *     not offered, the market's default answers. Without `country`, out of the
                  *     store's default and the languages it has published, the store's default
                  *     otherwise. `Content-Language` names the one served. Text without a translation
                  *     stays in the store's default language.
@@ -6619,8 +6817,9 @@ export interface operations {
             query?: {
                 /**
                  * @description The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
-                 *     `country`'s market offers (`/storefront/countries`): without it, or with one the
-                 *     market doesn't offer, the market's default answers. Without `country`, out of the
+                 *     `country`'s market offers (`/storefront/countries`): one it doesn't offer is
+                 *     tried without its region (`de` for `de-AT`), and without it, or with one still
+                 *     not offered, the market's default answers. Without `country`, out of the
                  *     store's default and the languages it has published, the store's default
                  *     otherwise. `Content-Language` names the one served. Text without a translation
                  *     stays in the store's default language.

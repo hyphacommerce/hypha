@@ -41,6 +41,8 @@ mod checkout_rules;
 mod translations;
 // The language storefront reads are answered in.
 mod languages;
+// Carts, orders and customers in a language.
+mod cart_language;
 // Apps installed through OAuth, and personal data.
 mod app_extensions;
 // Apps' custom fields, synced with their manifests.
@@ -7310,6 +7312,30 @@ async fn an_app_collects_a_carts_payment_and_its_report_places_the_order() {
         points,
         ["payments.refund", "payments.capture", "payments.start"]
     );
+}
+
+#[tokio::test]
+async fn a_report_completes_its_checkout_on_the_one_connection_its_request_holds() {
+    // A pool of one: a report taking a second connection while it holds the first would
+    // wait for itself until the pool gave up, and place no order.
+    let app = app_configured("[database]\nmax_connections = 1\npool_timeout = \"2s\"").await;
+    let (base, _, _) = fake_app(&[("/start", 200, card_widget())]).await;
+    let (pk, cart_path) = cart_paying_by_card(&app, &base).await;
+    let (status, started) = send_as(
+        &app,
+        &pk,
+        "POST",
+        &format!("{cart_path}/payment"),
+        Some(r#"{"return_url":"https://shop.example/back"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    let payment = started["payment"].as_str().unwrap().to_string();
+
+    let (status, json) = report(&app, &payment, "evt_1", json!({"type": "authorized"})).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert!(json["order"].is_string(), "the order is placed: {json}");
+    assert_eq!(json["financial_status"], "authorized");
 }
 
 #[tokio::test]

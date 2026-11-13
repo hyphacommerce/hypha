@@ -195,6 +195,7 @@ fn line(n: u128, title: &str, variant: Option<&str>, quantity: u32, unit: i64) -
         compare_at_price: None,
         price_list: None,
         unit_cost: None,
+        localized: None,
     }
 }
 
@@ -252,6 +253,7 @@ fn world() -> InMemoryPorts {
             amount: Price::new(eur(490)).unwrap(),
             estimate_days: None,
             tax: None,
+            localized: None,
         }],
         lines,
         shipping_address: Some(address),
@@ -260,6 +262,7 @@ fn world() -> InMemoryPorts {
         shipping_total: eur(490),
         tax_total: eur(0),
         total: eur(11290),
+        language: None,
     })
     .unwrap();
     block_on(ports.orders.insert(&mut order)).unwrap();
@@ -273,6 +276,7 @@ fn world() -> InMemoryPorts {
         provider: ProviderKey::manual(),
         amount: eur(11290),
         instructions: Some("IBAN: HR12 1001 0051 8630 0016 0\nReference: 1001".to_string()),
+        localized: None,
     })
     .unwrap();
     block_on(ports.payments.insert(&mut payment)).unwrap();

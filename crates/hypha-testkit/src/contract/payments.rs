@@ -215,6 +215,7 @@ fn payment(n: u128, order: u128, method: u128) -> Payment {
         provider: ProviderKey::manual(),
         amount: eur(12_345),
         instructions: Some("IBAN HR12\nReference: #1001".to_string()),
+        localized: None,
     })
     .unwrap()
 }
@@ -229,6 +230,25 @@ async fn payment_round_trips<R: PaymentRepo>(repo: &R) {
     repo.insert(&mut bare).await.unwrap();
     assert_eq!(repo.get(bare.id()).await, Ok(Some(bare)));
     assert_eq!(repo.get(pid(99)).await, Ok(None));
+    // The method's name and instructions as the buyer read them, beside the store's.
+    let mut localized = Payment::new(NewPayment {
+        id: pid(3),
+        cart: Some(cid(1)),
+        order: Some(oid(1)),
+        method: Some(mid(1)),
+        method_name: Some("Bank transfer".to_string()),
+        provider: ProviderKey::manual(),
+        amount: eur(12_345),
+        instructions: Some("IBAN HR12\nReference: #1001".to_string()),
+        localized: Some(hypha_payments::LocalizedPayment {
+            method_name: Some("Überweisung".to_string()),
+            instructions: Some("IBAN HR12\nVerwendungszweck: #1001".to_string()),
+        }),
+    })
+    .unwrap();
+    repo.insert(&mut localized).await.unwrap();
+    assert!(localized.localized().is_some());
+    assert_eq!(repo.get(localized.id()).await, Ok(Some(localized)));
 }
 
 async fn payment_updates<R: PaymentRepo>(repo: &R) {
@@ -334,6 +354,7 @@ fn cart_payment(n: u128, cart: u128) -> Payment {
         provider: ProviderKey::new("app_pay").unwrap(),
         amount: eur(12_345),
         instructions: None,
+        localized: None,
     })
     .unwrap()
 }
@@ -431,6 +452,7 @@ async fn order_and_payment<S: HasOrders>(ports: &S) -> (hypha_orders::Order, Pay
         provider: ProviderKey::manual(),
         amount: o.total(),
         instructions: None,
+        localized: None,
     })
     .unwrap();
     (o, p)

@@ -4,9 +4,9 @@ use hypha_core::{
     AddressError, AddressFormats, AddressParts, AddressVerifier, AuthError, CartId, CategoryId,
     Clock, CountryCode, CountryError, Ctx, CustomerGroupId, CustomerId, Email, EmailError,
     ErrorCode, HasBatch, HasClock, HasIdempotency, IdGenerator, IdempotencyError,
-    IdempotencyRecord, IdempotencyRequest, Idempotent, MarketId, Money, MoneyError, ProductId,
-    Quantity, QuantityError, RepoError, Scope, ShippingGroupId, ShippingOptionId, StageIdempotency,
-    Timestamp, VariantId, VerifyContext, earlier_id, verify_address,
+    IdempotencyRecord, IdempotencyRequest, Idempotent, Language, MarketId, Money, MoneyError,
+    ProductId, Quantity, QuantityError, RepoError, Scope, ShippingGroupId, ShippingOptionId,
+    StageIdempotency, Timestamp, VariantId, VerifyContext, earlier_id, verify_address,
 };
 use hypha_customers::{CustomerGroupRepo, CustomerRepo, HasCustomerGroups, HasCustomers};
 use hypha_inventory::{HasInventoryItems, HasLocations, StockContext};
@@ -21,8 +21,8 @@ use hypha_tax::{HasTaxClasses, HasTaxRegions, TaxClassRepo, TaxContext, TaxRegio
 use thiserror::Error;
 
 use crate::{
-    Cart, CartError, CartRepo, HasCarts, LineError, LineStatus, PricedCart, Publication,
-    SelectedShipping, ShippingContext, StageCarts, StoredQuote, check_stock,
+    Cart, CartError, CartRepo, ContentLanguages, HasCarts, LineError, LineStatus, PricedCart,
+    Publication, SelectedShipping, ShippingContext, StageCarts, StoredQuote, check_stock,
     price_cart_with_shipping, price_line, shipping_after_discounts,
 };
 use hypha_channels::{ChannelRepo, HasChannels};
@@ -225,6 +225,9 @@ pub struct CreateCart {
     /// The signed-in customer the cart is for, with their email: the host passes the
     /// session's customer; a guest's cart has none.
     pub customer: Option<(CustomerId, Email)>,
+    /// The language the shopper reads in, as the host held it to what the country's
+    /// market offers; `None` follows the market's default.
+    pub language: Option<Language>,
 }
 
 /// Creates an empty cart shipping to `country`, in the market that sells there
@@ -260,6 +263,7 @@ pub async fn create_cart<S: IdempotentCartPorts, I: IdGenerator, C: Clock>(
     if input.customer.is_some() {
         cart.set_customer(input.customer)?;
     }
+    cart.set_language(input.language)?;
     // A new cart is empty: priced from the market just read, without reading it again.
     let priced = empty_reading::<ReadingOf<S>>(&cart, market).priced;
     match write_cart(
@@ -431,6 +435,24 @@ pub async fn set_cart_marketing<S: HasCarts + PricingPorts>(
 
     let mut cart = load_open_cart(ctx, ports, id).await?;
     cart.set_marketing_opt_in(opt_in)?;
+    let priced = reprice(ports, &cart).await?;
+    ports.carts().update(&mut cart).await?;
+    Ok(priced)
+}
+
+/// Sets the language the shopper reads the cart in; `None` goes back to the market's
+/// default. The caller holds it to what the cart's market offers (the host knows the
+/// store's languages; the cart doesn't).
+pub async fn set_cart_language<S: HasCarts + PricingPorts>(
+    ctx: &Ctx,
+    ports: &S,
+    id: CartId,
+    language: Option<Language>,
+) -> Result<PricedCart, CommandError> {
+    ctx.require(Scope::CartsWrite)?;
+
+    let mut cart = load_open_cart(ctx, ports, id).await?;
+    cart.set_language(language)?;
     let priced = reprice(ports, &cart).await?;
     ports.carts().update(&mut cart).await?;
     Ok(priced)
@@ -929,27 +951,44 @@ pub struct GroupOffers {
     pub after_discounts: Vec<Option<Money>>,
 }
 
+/// What `shipping_offers` answers: each group's offers, and the cart they were priced
+/// for, so a caller needn't read it again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShippingOffers {
+    /// The cart at current prices (`get_cart`'s, its market's languages included).
+    pub cart: PricedCart,
+    pub groups: Vec<GroupOffers>,
+}
+
 /// Every option the cart's zone offers its groups, priced: built-in rates computed,
-/// providers asked (each once, all at once). A provider that fails leaves its options out
-/// with the reason; it never fails the call.
+/// providers asked (each once, all at once) in the language the cart is read in
+/// (`languages`, the store's). A provider that fails leaves its options out with the
+/// reason; it never fails the call.
 pub async fn shipping_offers<S: HasCarts + PricingPorts, P: RateProvider>(
     ctx: &Ctx,
     ports: &S,
     rates: &P,
+    languages: &ContentLanguages,
     id: CartId,
-) -> Result<Vec<GroupOffers>, CommandError> {
+) -> Result<ShippingOffers, CommandError> {
     ctx.require(Scope::CartsRead)?;
     let cart = load_cart(ctx, ports, id).await?;
     let reading = read_cart(ports, &cart).await?;
-    group_offers(&cart, &reading, rates).await
+    let groups = group_offers(&cart, &reading, rates, languages).await?;
+    Ok(ShippingOffers {
+        cart: reading.priced,
+        groups,
+    })
 }
 
 /// Picks `option` for `group`, if the cart is offered it now. A provider's price is stored
-/// with the choice, as quoted.
+/// with the choice, as quoted. Providers are asked as `shipping_offers` asks them.
+#[allow(clippy::too_many_arguments)]
 pub async fn select_shipping<S: HasCarts + PricingPorts, P: RateProvider>(
     ctx: &Ctx,
     ports: &S,
     rates: &P,
+    languages: &ContentLanguages,
     clock: &impl Clock,
     id: CartId,
     group: ShippingGroupId,
@@ -961,7 +1000,7 @@ pub async fn select_shipping<S: HasCarts + PricingPorts, P: RateProvider>(
         return Err(CommandError::ShippingGroupNotFound(group));
     }
     let reading = read_cart(ports, &cart).await?;
-    let offered = group_offers(&cart, &reading, rates).await?;
+    let offered = group_offers(&cart, &reading, rates, languages).await?;
     let outcome = offered
         .iter()
         .flat_map(|g| &g.offers)
@@ -995,10 +1034,12 @@ pub async fn select_shipping<S: HasCarts + PricingPorts, P: RateProvider>(
 }
 
 /// The offers of each group of a priced cart. Needs an address and a zone for it.
+/// Providers are told the language the cart is read in (`ContentLanguages::told`).
 pub async fn group_offers<P: RateProvider, R: PromotionReading>(
     cart: &Cart,
     reading: &CartReading<R>,
     rates: &P,
+    languages: &ContentLanguages,
 ) -> Result<Vec<GroupOffers>, CommandError> {
     let groups = &reading.priced.shipping_groups;
     if groups.is_empty() {
@@ -1056,6 +1097,7 @@ pub async fn group_offers<P: RateProvider, R: PromotionReading>(
             destination: destination.clone(),
             items,
             subtotal,
+            language: languages.told(&reading.priced),
         };
         let offered = offers(zone, rates, &request).await;
         let after_discounts = offered

@@ -29,6 +29,23 @@ pub async fn cart_repo<R: CartRepo>(make: impl AsyncFn() -> R) {
     payment_method_round_trips(&make().await).await;
     scenario("cart: validation apps' answers round trip on insert and update, and clear");
     app_checks_round_trip(&make().await).await;
+    scenario("cart: the language round trips on insert and update, and clears");
+    language_round_trips(&make().await).await;
+}
+
+async fn language_round_trips<R: CartRepo>(repo: &R) {
+    let de = hypha_core::Language::new("de-AT").unwrap();
+    let mut c = cart(1);
+    c.set_language(Some(de.clone())).unwrap();
+    repo.insert(&mut c).await.unwrap();
+    assert_eq!(repo.get(c.id()).await, Ok(Some(c.clone())));
+    assert_eq!(
+        repo.get(c.id()).await.unwrap().unwrap().language(),
+        Some(&de)
+    );
+    c.set_language(None).unwrap();
+    repo.update(&mut c).await.unwrap();
+    assert_eq!(repo.get(c.id()).await.unwrap().unwrap().language(), None);
 }
 
 async fn app_checks_round_trip<R: CartRepo>(repo: &R) {

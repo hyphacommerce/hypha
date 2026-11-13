@@ -204,17 +204,23 @@ impl Market {
     /// it lists none. A language the store stopped offering since (the store's check and
     /// a market's write don't share a transaction) is left out rather than promised.
     pub fn offered_languages(&self, store_languages: &[Language]) -> Vec<Language> {
-        let offered: Vec<Language> = self
-            .languages
-            .iter()
-            .filter(|l| store_languages.contains(l))
-            .cloned()
-            .collect();
-        if offered.is_empty() {
-            return store_languages.first().cloned().into_iter().collect();
-        }
-        offered
+        offered_languages(&self.languages, store_languages)
     }
+}
+
+/// What a market listing `listed` offers shoppers, out of what the store offers
+/// (`servable`, its default first): the listed languages in order that the store still
+/// offers, or the store's default when none is left.
+pub fn offered_languages(listed: &[Language], servable: &[Language]) -> Vec<Language> {
+    let offered: Vec<Language> = listed
+        .iter()
+        .filter(|l| servable.contains(l))
+        .cloned()
+        .collect();
+    if offered.is_empty() {
+        return servable.first().cloned().into_iter().collect();
+    }
+    offered
 }
 
 /// Plain-data form of a `Market` for storage adapters.
@@ -388,6 +394,25 @@ mod tests {
             Err(MarketError::DuplicateLanguage(lang("en")))
         );
         assert_eq!(m.languages(), &[]);
+    }
+
+    #[test]
+    fn a_market_offers_what_it_lists_that_the_store_offers() {
+        assert_eq!(
+            offered_languages(
+                &[lang("de"), lang("fr"), lang("en")],
+                &[lang("en"), lang("de")]
+            ),
+            vec![lang("de"), lang("en")]
+        );
+    }
+
+    #[test]
+    fn a_market_listing_nothing_the_store_offers_offers_the_stores_default() {
+        let store = [lang("en"), lang("de")];
+        assert_eq!(offered_languages(&[lang("fr")], &store), vec![lang("en")]);
+        assert_eq!(offered_languages(&[], &store), vec![lang("en")]);
+        assert!(offered_languages(&[], &[]).is_empty());
     }
 
     #[test]
