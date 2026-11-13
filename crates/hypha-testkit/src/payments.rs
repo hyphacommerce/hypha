@@ -45,17 +45,23 @@ impl PaymentMethodRepo for InMemoryPaymentMethodRepo {
 
     async fn insert(&self, method: &mut PaymentMethod) -> Result<(), RepoError> {
         stamp_insert(method, self.outbox.now());
+        let events = method.take_events();
         self.methods.insert(
             method.id(),
             method,
             keys::PAYMENT_METHOD_ID,
             &no_unique_keys,
-        )
+        )?;
+        self.outbox.write(events, Some(method.version()));
+        Ok(())
     }
 
     async fn update(&self, method: &mut PaymentMethod) -> Result<(), RepoError> {
         stamp_update(method, self.outbox.now());
-        self.methods.update(method.id(), method, &no_unique_keys)
+        let events = method.take_events();
+        self.methods.update(method.id(), method, &no_unique_keys)?;
+        self.outbox.write(events, Some(method.version()));
+        Ok(())
     }
 
     async fn delete(&self, method: &mut PaymentMethod) -> Result<(), RepoError> {

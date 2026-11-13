@@ -5,17 +5,24 @@
 import type { StorefrontPaths, StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 import { unstable_cache } from "next/cache";
 
-import { api } from "./api";
+import { api, describe } from "./api";
 import { FRESH_SECONDS, TAGS } from "./cache-tags";
 import {
   ON_SALE,
   type ListingParams,
   type ListingState,
   readListing,
+  searchKey,
   sortOf,
   toMinor,
 } from "./listing";
+import type { T } from "./messages";
 import { rankRelated } from "./related";
+import type { Locale } from "./routing";
+
+/** Where a search is made: the page's country and its API language (`pageLocale`), never
+ * the translator's (`t.language`). */
+type Place = Pick<Locale, "country" | "language">;
 
 export type ListingPage = {
   state: ListingState;
@@ -40,7 +47,10 @@ type SearchResult =
 
 /** A search, as the API answers it: its results, or its refusal of the query (a stale
  * cursor, a bad filter: the listing says why). A failure (the API down, a 500, a rate
- * limit) throws instead, so the cached search below keeps nothing and asks again. */
+ * limit) throws instead, so the cached search below keeps nothing and asks again. With
+ * a `language`, hits' titles and options and facets' labels are in it (or in the market's
+ * default while it has no documents in it yet); facet values, which filters take, are the
+ * same in every language. */
 async function searchNow(query: SearchQuery): Promise<SearchResult> {
   const { data, error, response } = await api().GET("/storefront/search", {
     params: { query },
@@ -60,7 +70,7 @@ async function searchNow(query: SearchQuery): Promise<SearchResult> {
  */
 export function search(query: SearchQuery): Promise<SearchResult> {
   if (query.q?.trim()) return searchNow(query);
-  return unstable_cache(() => searchNow(query), ["search", JSON.stringify(query)], {
+  return unstable_cache(() => searchNow(query), searchKey(query), {
     tags: [TAGS.listings, TAGS.prices],
     revalidate: FRESH_SECONDS,
   })();
@@ -72,7 +82,9 @@ function major(amount: number, digits: number): string {
 }
 
 export async function readListingPage(input: {
-  country: string;
+  /** For the message when the API refuses the listing. */
+  t: T;
+  place: Place;
   digits: number;
   params: ListingParams;
   category?: string;
@@ -83,7 +95,8 @@ export async function readListingPage(input: {
   const filter =
     input.onSale && !state.filters.includes(ON_SALE) ? [...state.filters, ON_SALE] : state.filters;
   const { data, error } = await search({
-    country: input.country,
+    country: input.place.country,
+    language: input.place.language,
     q: state.q,
     filter,
     price_min: toMinor(state.min, input.digits),
@@ -94,7 +107,14 @@ export async function readListingPage(input: {
     limit: 24,
   });
   if (error) {
-    return { state, items: [], total: 0, facets: [], nextCursor: null, error: error.error };
+    return {
+      state,
+      items: [],
+      total: 0,
+      facets: [],
+      nextCursor: null,
+      error: describe(input.t, error),
+    };
   }
   return {
     state,
@@ -118,19 +138,21 @@ export async function readListingPage(input: {
 const RELATED = 4;
 
 /**
- * Products to show beside `product` in `country` (`rankRelated`): those sharing a tag,
+ * Products to show beside `product` in `place` (`rankRelated`): those sharing a tag,
  * its type or its maker, and the newest to fill up, from four cached searches made at
  * once. A search that fails leaves its part out: the shelf is extra, never the page's
- * failure.
+ * failure. Tags, types and makers aren't translated, so the product's own values filter
+ * the searches in any language.
  */
 export async function relatedProducts(
   product: { id: string; tags: string[]; product_type?: string | null; vendor?: string | null },
-  country: string,
+  place: Place,
 ): Promise<ListingPage["items"]> {
+  const { country, language } = place;
   const hits = (filter: string[] | null) =>
     filter === null
       ? Promise.resolve([])
-      : search({ country, filter, sort: "newest", limit: 12 }).then(
+      : search({ country, language, filter, sort: "newest", limit: 12 }).then(
           (r) => r.data?.items ?? [],
           () => [],
         );

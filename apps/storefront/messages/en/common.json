@@ -1,0 +1,17 @@
+{
+  "required": "Required",
+  "close": "Close",
+  "cancel": "Cancel",
+  "remove": "Remove",
+  "home": "Home",
+  "sale": "Sale",
+  "sold_out": "Sold out",
+  "was_now": "Was {was}, now {now}",
+  "keep_shopping": "Keep shopping",
+  "back_to_shop": "Back to the shop",
+  "yes": "Yes",
+  "no": "No",
+  "product_gone": "A product no longer sold",
+  "not_found_title": "Not found",
+  "not_found_description": "There's nothing here. It may have moved, or isn't sold here."
+}
