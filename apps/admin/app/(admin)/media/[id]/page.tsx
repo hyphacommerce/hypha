@@ -146,11 +146,7 @@ async function Asset({ id, back }: { id: string; back: Crumb }) {
             </MetadataListItem>
             {asset.width && asset.height ? (
               <MetadataListItem label={t("media.dimensions")}>
-                {/* Pixel counts as they are: no thousands separators. */}
-                {t("media.dimensions_value", {
-                  width: String(asset.width),
-                  height: String(asset.height),
-                })}
+                {t("media.dimensions_value", { width: asset.width, height: asset.height })}
               </MetadataListItem>
             ) : null}
             <MetadataListItem label={t("media.visibility")}>
