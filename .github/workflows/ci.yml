@@ -126,6 +126,9 @@ jobs:
       - run: pnpm --filter @hyphacommerce/cli test
       - run: pnpm --filter admin test
       - run: pnpm --filter storefront test
+      # The storefront's catalogs: ICU syntax, English's keys and placeholders, and
+      # Serbian complete.
+      - run: pnpm --filter storefront i18n:check
       - run: pnpm --filter admin theme:check
       - run: pnpm --filter storefront theme:check
       - run: pnpm typecheck
