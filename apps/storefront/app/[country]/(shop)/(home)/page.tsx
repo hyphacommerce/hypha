@@ -24,9 +24,11 @@ import { absolute, link } from "@/lib/site";
 
 type Hit = StorefrontSchemas["SearchHitResponse"];
 
-/** Static, refreshed at most every five minutes (the country layout's `revalidate`). */
+/** Static, refreshed at most every five minutes (the country layout's `revalidate`); in
+ * the page's API language (`pageLocale`). */
 async function shelf(query: {
   country: string;
+  language: string;
   sort: "newest" | "price_asc";
   limit: number;
   category?: string;
@@ -54,7 +56,7 @@ export async function generateMetadata({
   const { country: code, language } = await pageLocale(segment);
   const [categories, newest] = await Promise.all([
     loadCategories(code, language),
-    shelf({ country: code, sort: "newest", limit: 8 }),
+    shelf({ country: code, language, sort: "newest", limit: 8 }),
   ]);
   const lead = categories[0] ? await loadCategory(categories[0].handle, code, language) : null;
   return pageMetadata({ segment, path: "/", image: heroOf(lead, newest) });
@@ -113,13 +115,13 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
     pageT(folder),
     loadStore(code, language),
     loadCategories(code, language),
-    shelf({ country: code, sort: "newest", limit: 8 }),
-    shelf({ country: code, sort: "price_asc", limit: 4 }),
+    shelf({ country: code, language, sort: "newest", limit: 8 }),
+    shelf({ country: code, language, sort: "price_asc", limit: 4 }),
     loadCategories(code, language).then((all) =>
       Promise.all(
         all
           .slice(0, 3)
-          .map((c) => shelf({ country: code, sort: "newest", limit: 4, category: c.id })),
+          .map((c) => shelf({ country: code, language, sort: "newest", limit: 4, category: c.id })),
       ),
     ),
   ]);

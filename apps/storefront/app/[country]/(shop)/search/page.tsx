@@ -3,7 +3,7 @@ import { VStack } from "@astryxdesign/core/Stack";
 import type { Metadata } from "next";
 
 import { Listing } from "@/components/listing";
-import { countryOf } from "@/lib/api";
+import { countryOf, pageLocale } from "@/lib/api";
 import { pageT } from "@/lib/i18n";
 import type { ListingParams } from "@/lib/listing";
 import { readListingPage } from "@/lib/listing-data";
@@ -42,12 +42,15 @@ export default async function SearchPage({
   searchParams: Promise<ListingParams>;
 }) {
   const folder = (await params).country;
-  const [country, t] = await Promise.all([countryOf(folder), pageT(folder)]);
-  const code = country.country;
+  const [country, place, t] = await Promise.all([
+    countryOf(folder),
+    pageLocale(folder),
+    pageT(folder),
+  ]);
   const query = await searchParams;
   const page = await readListingPage({
     t,
-    country: code,
+    place,
     digits: country.minor_units,
     params: query,
   });

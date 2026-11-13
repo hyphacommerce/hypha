@@ -9,13 +9,13 @@ const translated = (kind: string, id = "x_1") => ({
   fields: ["title"],
 });
 
-test("a product's translation expires that product's pages", () => {
+test("a product's translation expires that product's pages and the listings", () => {
   assert.deepEqual(languageChange("translation.updated", translated("product", "prod_1")), {
-    tags: [],
+    tags: [TAGS.listings],
     products: ["prod_1"],
   });
   assert.deepEqual(languageChange("translation.deleted", translated("product", "prod_1")), {
-    tags: [],
+    tags: [TAGS.listings],
     products: ["prod_1"],
   });
 });
@@ -30,7 +30,7 @@ test("a category's translation expires the tree and every category page", () => 
 test("a definition's, the store's and anything else's translations", () => {
   assert.deepEqual(
     languageChange("translation.updated", translated("custom_field_definition"))?.tags,
-    [TAGS.fields],
+    [TAGS.fields, TAGS.listings],
   );
   assert.deepEqual(languageChange("translation.updated", translated("store"))?.tags, [TAGS.store]);
   assert.deepEqual(languageChange("translation.updated", translated("search_facet"))?.tags, [
@@ -43,7 +43,7 @@ test("a definition's, the store's and anything else's translations", () => {
 
 test("a product translation without an ID expires every product page", () => {
   assert.deepEqual(languageChange("translation.updated", { resource: { kind: "product" } }), {
-    tags: [TAGS.products],
+    tags: [TAGS.products, TAGS.listings],
     products: [],
   });
 });

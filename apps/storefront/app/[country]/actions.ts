@@ -499,10 +499,16 @@ export async function suggest(segment: string, q: string): Promise<Suggestion[]>
   const known = (await loadCountries()).find((c) => c.country === place.country);
   if (!known) return [];
   const { locale } = await actionT(segment);
-  // Search answers in the store's default language until it takes a `language`: the
-  // titles here aren't translated yet (`lib/listing-data.ts`).
   const { data } = await api().GET("/storefront/search", {
-    params: { query: { country: place.country, q: text, sort: "relevance", limit: 5 } },
+    params: {
+      query: {
+        country: place.country,
+        language: place.language,
+        q: text,
+        sort: "relevance",
+        limit: 5,
+      },
+    },
   });
   return (data?.items ?? []).map((hit) => ({
     id: hit.listing,
@@ -596,7 +602,7 @@ export async function listingPage(input: {
   for (const [key, value] of new URLSearchParams(input.query)) (params[key] ??= []).push(value);
   return readListingPage({
     t: await actionT(input.locale),
-    country: place.country,
+    place,
     digits: known?.minor_units ?? 2,
     params,
     category: input.category,

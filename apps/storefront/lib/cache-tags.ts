@@ -30,9 +30,10 @@ export type LanguageChange = { tags: string[]; products: string[] };
  * event. Every language of a resource is under the same tags (a read's language is in its
  * key, not its tags), so a translation expires the resource in all of them.
  *
- * - `translation.updated` / `.deleted`, by `data.resource.kind`: a product's page; a
- *   category's name and description show in the header's tree and on every category
- *   page; a field definition's names on every page that shows its values; the store's
+ * - `translation.updated` / `.deleted`, by `data.resource.kind`: a product's page and
+ *   the listings; a category's name and description show in the header's tree and on
+ *   every category page; a field definition's names on every page that shows its values
+ *   and in listings' facets; the store's
  *   description in every footer; a discount's title and an image's alt text on
  *   product pages; anything else (search facets' labels) in listings.
  * - `store.updated`: the store's details (name, description) and, for `languages` or
@@ -47,14 +48,16 @@ export function languageChange(
     case "translation.deleted": {
       const resource = (data.resource ?? {}) as { kind?: unknown; id?: unknown };
       switch (resource.kind) {
+        // Listings search in the page's language: a product's title and options, and a
+        // choice field's labels in the facets, show there too.
         case "product":
           return typeof resource.id === "string"
-            ? { tags: [], products: [resource.id] }
-            : { tags: [TAGS.products], products: [] };
+            ? { tags: [TAGS.listings], products: [resource.id] }
+            : { tags: [TAGS.products, TAGS.listings], products: [] };
         case "category":
           return { tags: [TAGS.categories], products: [] };
         case "custom_field_definition":
-          return { tags: [TAGS.fields], products: [] };
+          return { tags: [TAGS.fields, TAGS.listings], products: [] };
         case "store":
           return { tags: [TAGS.store], products: [] };
         // A promotion's title shows on product pages and listings; an image's alt text on

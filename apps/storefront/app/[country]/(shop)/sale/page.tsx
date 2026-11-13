@@ -5,7 +5,7 @@ import { Text } from "@astryxdesign/core/Text";
 import type { Metadata } from "next";
 
 import { Listing } from "@/components/listing";
-import { countryOf } from "@/lib/api";
+import { countryOf, pageLocale } from "@/lib/api";
 import { pageT } from "@/lib/i18n";
 import { readListingPage } from "@/lib/listing-data";
 import { pageMetadata } from "@/lib/metadata";
@@ -42,11 +42,14 @@ export async function generateMetadata({
  */
 export default async function SalePage({ params }: { params: Promise<{ country: string }> }) {
   const folder = (await params).country;
-  const [country, t] = await Promise.all([countryOf(folder), pageT(folder)]);
-  const code = country.country;
+  const [country, place, t] = await Promise.all([
+    countryOf(folder),
+    pageLocale(folder),
+    pageT(folder),
+  ]);
   const first = await readListingPage({
     t,
-    country: code,
+    place,
     digits: country.minor_units,
     params: {},
     onSale: true,
