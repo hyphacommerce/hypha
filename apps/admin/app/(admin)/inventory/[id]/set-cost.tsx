@@ -67,7 +67,7 @@ export function SetCost({
       />
       <Dialog isOpen={isOpen} onOpenChange={(open) => !open && close()} width={440} purpose="form">
         <DialogHeader
-          title={t("inventory.unit_cost")}
+          title={t("inventory.cost_dialog_title")}
           subtitle={t("inventory.cost_dialog_subtitle")}
           onOpenChange={(open) => !open && close()}
         />

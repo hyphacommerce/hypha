@@ -131,9 +131,9 @@ function Lines({ transfer, canEdit }: { transfer: Transfer; canEdit: boolean }) 
               <TableRow>
                 <TableHeaderCell>{t("common.variant")}</TableHeaderCell>
                 <TableHeaderCell>{t("common.quantity")}</TableHeaderCell>
-                {shipped && <TableHeaderCell>{t("transfers.status_received")}</TableHeaderCell>}
+                {shipped && <TableHeaderCell>{t("transfers.lines_received")}</TableHeaderCell>}
                 {shipped && <TableHeaderCell>{t("transfers.lost")}</TableHeaderCell>}
-                {shipped && <TableHeaderCell>{t("transfers.status_in_transit")}</TableHeaderCell>}
+                {shipped && <TableHeaderCell>{t("transfers.lines_in_transit")}</TableHeaderCell>}
                 {canEdit && <TableHeaderCell />}
               </TableRow>
             </TableHeader>
@@ -397,12 +397,12 @@ function Details({
             </MetadataListItem>
           )}
           {transfer.received_at && (
-            <MetadataListItem label={t("transfers.status_received")}>
+            <MetadataListItem label={t("transfers.fact_received")}>
               <DateTime value={transfer.received_at} />
             </MetadataListItem>
           )}
           {transfer.cancelled_at && (
-            <MetadataListItem label={t("transfers.status_cancelled")}>
+            <MetadataListItem label={t("transfers.fact_cancelled")}>
               <DateTime value={transfer.cancelled_at} />
             </MetadataListItem>
           )}
@@ -645,14 +645,14 @@ function ShipDialog({
             status="warning"
             title={t("transfers.ship_short_title")}
             description={t("transfers.ship_short_description", {
-              lines: format.list(short.map(transferLineLabel), "unit"),
+              lines: format.list(short.map(transferLineLabel)),
             })}
           />
         )}
         <HStack gap={2} hAlign="end">
           <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label={short.length > 0 ? t("transfers.ship_anyway") : t("transfers.ship")}
+            label={short.length > 0 ? t("transfers.ship_anyway") : t("transfers.ship_submit")}
             variant="primary"
             isLoading={isPending}
             onClick={() =>
@@ -740,14 +740,14 @@ function ReceiveDialog({ transfer, onClose }: { transfer: Transfer; onClose: () 
             status="error"
             title={t("transfers.receive_over_title")}
             description={t("transfers.receive_over_description", {
-              lines: format.list(over.map(transferLineLabel), "unit"),
+              lines: format.list(over.map(transferLineLabel)),
             })}
           />
         )}
         <HStack gap={2} hAlign="end">
           <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label={t("transfers.receive")}
+            label={t("transfers.receive_submit")}
             variant="primary"
             isLoading={isPending}
             isDisabled={lines.length === 0 || over.length > 0}

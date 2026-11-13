@@ -19,13 +19,7 @@ type Choices = Awaited<ReturnType<typeof purchaseOrderChoices>>;
  * Starts a draft: the supplier (active ones) and where the goods go. Lines, costs and
  * dates are added on its page. `supplier` preselects one (from a supplier's page).
  */
-export function NewPurchaseOrder({
-  supplier: preset,
-  label,
-}: {
-  supplier?: string;
-  label?: string;
-}) {
+export function NewPurchaseOrder({ supplier: preset }: { supplier?: string }) {
   const t = useT<"purchasing">();
   const [isOpen, setIsOpen] = useState(false);
   const [choices, setChoices] = useState<Choices>();
@@ -58,7 +52,7 @@ export function NewPurchaseOrder({
   };
   return (
     <>
-      <Button label={label ?? t("purchasing.new_title")} variant="primary" onClick={open} />
+      <Button label={t("purchasing.new_button")} variant="primary" onClick={open} />
       <Dialog isOpen={isOpen} onOpenChange={(o) => !o && close()} width={460} purpose="form">
         <DialogHeader
           title={t("purchasing.new_title")}

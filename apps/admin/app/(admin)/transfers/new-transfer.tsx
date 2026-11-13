@@ -45,7 +45,7 @@ export function NewTransfer() {
   const options = (locations ?? []).map((l) => ({ value: l.id, label: l.name }));
   return (
     <>
-      <Button label={t("transfers.new_title")} variant="primary" onClick={open} />
+      <Button label={t("transfers.new_button")} variant="primary" onClick={open} />
       <Dialog isOpen={isOpen} onOpenChange={(o) => !o && close()} width={460} purpose="form">
         <DialogHeader
           title={t("transfers.new_title")}

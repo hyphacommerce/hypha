@@ -106,13 +106,13 @@ function ReceiveDialog({
     return (
       <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={560}>
         <DialogHeader
-          title={t("purchasing.received")}
+          title={t("purchasing.received_dialog_title")}
           subtitle={t("purchasing.received_untracked_subtitle")}
           onOpenChange={(isOpen) => !isOpen && onClose()}
         />
         <VStack gap={4} padding={4}>
           {error && <Banner status="error" title={error} />}
-          <Text>{format.list(untracked.map(nameOf), "unit")}</Text>
+          <Text>{format.list(untracked.map(nameOf))}</Text>
           <Text type="supporting" color="secondary">
             {t("purchasing.received_track_hint")}
           </Text>
@@ -195,17 +195,16 @@ function ReceiveDialog({
             status="warning"
             title={t("purchasing.receive_over_title")}
             description={t("purchasing.receive_over_description", {
-              lines: format.list(
-                over.map((l) => lineLabel(l)),
-                "unit",
-              ),
+              lines: format.list(over.map((l) => lineLabel(l))),
             })}
           />
         )}
         <HStack gap={2} hAlign="end">
           <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label={over.length > 0 ? t("purchasing.receive_anyway") : t("purchasing.receive")}
+            label={
+              over.length > 0 ? t("purchasing.receive_anyway") : t("purchasing.receive_submit")
+            }
             variant="primary"
             isLoading={isPending}
             isDisabled={!location || lines.length === 0}

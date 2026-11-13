@@ -71,7 +71,7 @@ export function InventoryTable({
     {
       kind: "select",
       param: "below",
-      label: t("inventory.available"),
+      label: t("inventory.filter_available"),
       options: BELOW.map((n) => ({
         value: String(n),
         label:

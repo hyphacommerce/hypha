@@ -42,7 +42,7 @@ export function DeleteSupplier({ id, name }: { id: string; name: string }) {
         onOpenChange={(open) => !open && setIsAsking(false)}
         title={t("common.delete_named", { name })}
         description={t("suppliers.delete_dialog_description")}
-        actionLabel={t("suppliers.delete_supplier")}
+        actionLabel={t("suppliers.delete_dialog_action")}
         isActionLoading={isPending}
         onAction={() =>
           startTransition(async () => {

@@ -97,7 +97,7 @@ async function ItemDetails({
         }
       />
       <Card>
-        <MetadataList title={t("inventory.on_hand")}>
+        <MetadataList title={t("inventory.detail_on_hand_title")}>
           {item.levels.length === 0 ? (
             <Text color="secondary">{t("inventory.detail_no_levels")}</Text>
           ) : (

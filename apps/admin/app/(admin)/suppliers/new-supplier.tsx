@@ -52,7 +52,7 @@ export function NewSupplier({ currency: storeCurrency }: { currency: string | nu
       />
       <Dialog isOpen={isOpen} onOpenChange={(open) => !open && close()} width={440} purpose="form">
         <DialogHeader
-          title={t("suppliers.add_supplier")}
+          title={t("suppliers.new_title")}
           subtitle={t("suppliers.new_subtitle")}
           onOpenChange={(open) => !open && close()}
         />
@@ -76,7 +76,7 @@ export function NewSupplier({ currency: storeCurrency }: { currency: string | nu
           <HStack gap={2} hAlign="end">
             <Button label={t("common.cancel")} variant="ghost" onClick={close} />
             <Button
-              label={t("suppliers.add_supplier")}
+              label={t("suppliers.new_submit")}
               variant="primary"
               isLoading={isPending}
               isDisabled={!canSave}

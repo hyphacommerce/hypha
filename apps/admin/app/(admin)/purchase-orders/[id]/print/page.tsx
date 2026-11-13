@@ -75,7 +75,6 @@ async function PrintView({ id }: { id: string }) {
           {store?.contact_email && <Text color="secondary">{store.contact_email}</Text>}
         </VStack>
         <VStack gap={1}>
-          {/* Dates are chosen as days, at noon UTC: read as calendar dates. */}
           {po.ordered_at && (
             <Text>{t("purchasing.print_ordered", { date: format.date(po.ordered_at) })}</Text>
           )}

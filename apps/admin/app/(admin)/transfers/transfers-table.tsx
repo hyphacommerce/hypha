@@ -47,8 +47,8 @@ export function TransfersTable({
   const views: View[] = [
     { label: t("common.all"), params: {} },
     { label: t("transfers.view_drafts"), params: { status: ["draft"] } },
-    { label: t("transfers.status_in_transit"), params: { status: ["in_transit"] } },
-    { label: t("transfers.status_received"), params: { status: ["received"] } },
+    { label: t("transfers.view_in_transit"), params: { status: ["in_transit"] } },
+    { label: t("transfers.view_received"), params: { status: ["received"] } },
   ];
   const place = (id: string) => locations[id] ?? t("transfers.a_location");
   const columns: TableColumn<TransferSummary>[] = [

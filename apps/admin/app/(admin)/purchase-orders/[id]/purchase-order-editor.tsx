@@ -448,7 +448,7 @@ function LineDialog({
         <HStack gap={2} hAlign="end">
           <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label={line ? t("common.save") : t("purchasing.add_line")}
+            label={line ? t("common.save") : t("purchasing.line_add_submit")}
             variant="primary"
             isLoading={isPending}
             isDisabled={!quantityOk || !costOk}
@@ -638,7 +638,7 @@ function CostDialog({
   return (
     <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={480} purpose="form">
       <DialogHeader
-        title={cost ? t("purchasing.change_cost") : t("purchasing.add_cost")}
+        title={cost ? t("purchasing.change_cost") : t("purchasing.cost_dialog_title_add")}
         subtitle={t("purchasing.cost_dialog_subtitle")}
         onOpenChange={(open) => !open && onClose()}
       />
@@ -723,10 +723,10 @@ function SummaryCard({ po, canEdit }: { po: PurchaseOrder; canEdit: boolean }) {
     <Card>
       <VStack gap={3}>
         <MetadataList title={t("purchasing.totals_title")}>
-          <MetadataListItem label={t("purchasing.lines_title")}>
+          <MetadataListItem label={t("purchasing.totals_lines")}>
             <Text>{format.money(po.subtotal)}</Text>
           </MetadataListItem>
-          <MetadataListItem label={t("purchasing.costs_title")}>
+          <MetadataListItem label={t("purchasing.totals_costs")}>
             <Text>{format.money(po.costs_total)}</Text>
           </MetadataListItem>
           <MetadataListItem label={t("common.tax")}>

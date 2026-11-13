@@ -55,7 +55,7 @@ export function AdjustStock({
   return (
     <>
       <Button
-        label={t("inventory.adjust_title")}
+        label={t("inventory.adjust_button")}
         variant="secondary"
         isDisabled={locations.length === 0}
         onClick={() => setIsOpen(true)}
@@ -75,7 +75,7 @@ export function AdjustStock({
             onChange={setLocation}
           />
           <NumberInput
-            label={t("inventory.change")}
+            label={t("inventory.adjust_change")}
             description={t("inventory.adjust_change_description")}
             value={delta}
             onChange={(value) => setDelta(value ?? undefined)}
@@ -83,7 +83,7 @@ export function AdjustStock({
             width={160}
           />
           <Selector
-            label={t("inventory.reason")}
+            label={t("inventory.adjust_reason")}
             options={ADJUSTMENT_REASONS.map((value) => ({ value, label: reasonLabel(t, value) }))}
             value={reason}
             onChange={(value) => {

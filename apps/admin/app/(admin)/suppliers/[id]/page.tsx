@@ -17,7 +17,7 @@ import {
 } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
 import { hasScope } from "@/lib/navigation";
-import { type Supplier, daysLabel, termsLabel } from "@/lib/purchasing";
+import { type Supplier, termsLabel } from "@/lib/purchasing";
 
 import { NewPurchaseOrder } from "../../purchase-orders/new-purchase-order";
 import { PurchaseOrdersTable } from "../../purchase-orders/purchase-orders-table";
@@ -106,7 +106,9 @@ async function SupplierView({
         description={[
           supplier.currency,
           termsLabel(t, supplier.payment_terms),
-          t("suppliers.detail_lead_time", { days: daysLabel(t, supplier.lead_time_days) }),
+          supplier.lead_time_days == null
+            ? t("suppliers.detail_lead_time_none")
+            : t("suppliers.detail_lead_time", { count: supplier.lead_time_days }),
         ].join(" · ")}
         actions={canOrder && <NewPurchaseOrder supplier={supplier.id} />}
       />
