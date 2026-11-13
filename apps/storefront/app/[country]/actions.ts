@@ -78,6 +78,15 @@ function cartClosed(error: ApiError): boolean {
   return error.code === "cart_not_found" || error.code === "cart_completed";
 }
 
+/** A cart change that went through, answered with the cart. With `rerender` the page
+ * re-renders in the same answer (`refresh()`): a page that shows the cart from the
+ * server (checkout) follows a change made in the drawer. Other pages read the cart in
+ * the browser and don't ask: re-rendering them would be wasted work. */
+function changed(cart: Cart | null, rerender: boolean | undefined): CartResult {
+  if (rerender) refresh();
+  return { cart };
+}
+
 /** The cart in the cookie, or back to the (empty) cart page without one. */
 async function currentCart(place: Locale): Promise<string> {
   const id = await cartId(place.country);
@@ -147,6 +156,8 @@ export async function addToCart(input: {
   locale: string;
   variant: string;
   quantity: number;
+  /** Re-render the page with the change (`changed`). */
+  rerender?: boolean;
 }): Promise<CartResult> {
   const place = await pageLocale(input.locale);
   const body = { variant: input.variant, quantity: Math.max(1, Math.floor(input.quantity) || 1) };
@@ -165,7 +176,7 @@ export async function addToCart(input: {
       cart: await loadCart(input.locale),
       error: describe(await actionT(input.locale), error),
     };
-  return { cart: data };
+  return changed(data, input.rerender);
 }
 
 /** Sets a line's quantity (0 removes it), and answers with the cart. */
@@ -173,6 +184,8 @@ export async function setQuantity(input: {
   locale: string;
   variant: string;
   quantity: number;
+  /** Re-render the page with the change (`changed`). */
+  rerender?: boolean;
 }): Promise<CartResult> {
   const place = await pageLocale(input.locale);
   const id = await cartId(place.country);
@@ -191,7 +204,7 @@ export async function setQuantity(input: {
       cart: await loadCart(input.locale),
       error: describe(await actionT(input.locale), error),
     };
-  return { cart: data ?? (await loadCart(input.locale)) };
+  return changed(data ?? (await loadCart(input.locale)), input.rerender);
 }
 
 /** Adds a discount code to the cart, and answers with the cart. A code that's known but
@@ -200,6 +213,8 @@ export async function setQuantity(input: {
 export async function applyDiscountCode(input: {
   locale: string;
   code: string;
+  /** Re-render the page with the change (`changed`). */
+  rerender?: boolean;
 }): Promise<CartResult> {
   const place = await pageLocale(input.locale);
   const id = await cartId(place.country);
@@ -220,13 +235,15 @@ export async function applyDiscountCode(input: {
       cart: await loadCart(input.locale),
       error: describe(await actionT(input.locale), error),
     };
-  return { cart: data ?? (await loadCart(input.locale)) };
+  return changed(data ?? (await loadCart(input.locale)), input.rerender);
 }
 
 /** Takes a code off the cart, and answers with the cart. */
 export async function removeDiscountCode(input: {
   locale: string;
   code: string;
+  /** Re-render the page with the change (`changed`). */
+  rerender?: boolean;
 }): Promise<CartResult> {
   const place = await pageLocale(input.locale);
   const id = await cartId(place.country);
@@ -240,7 +257,7 @@ export async function removeDiscountCode(input: {
       cart: await loadCart(input.locale),
       error: describe(await actionT(input.locale), error),
     };
-  return { cart: data ?? (await loadCart(input.locale)) };
+  return changed(data ?? (await loadCart(input.locale)), input.rerender);
 }
 
 export type Details = AddressValues & { email: string };
