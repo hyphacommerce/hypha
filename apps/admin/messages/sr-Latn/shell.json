@@ -1,0 +1,18 @@
+{
+  "command_open": "Pretražite admin",
+  "command_tooltip": "Idi na… (⌘K)",
+  "command_empty": "Unesite naziv stranice",
+  "command_group_go_to": "Idi na",
+  "command_group_settings": "Podešavanja",
+  "command_group_create": "Kreiraj",
+  "command_new_product": "Novi proizvod",
+  "command_new_market": "Novo tržište",
+  "command_account_keywords": "lozinka,šifra,dvofaktorska,2fa,profil,nalog,password,two-factor,profile",
+  "error_stale_title": "Dostupna je nova verzija admina",
+  "error_stale_description": "Učitavanje… Ako ova stranica ostane, učitajte je ponovo.",
+  "error_description": "Na ovoj stranici je došlo do problema.",
+  "not_found_title": "Stranica nije pronađena",
+  "not_found_description": "Na ovoj adresi nema ničega.",
+  "forbidden_title": "Vaša uloga ne može da otvori ovu stranicu",
+  "forbidden_description": "Potreban je pristup koji vaša uloga nema. Zamolite vlasnika prodavnice da ga doda vašoj ulozi. Vaš nalog je uvek dostupan pod stavkom Vaš nalog."
+}
