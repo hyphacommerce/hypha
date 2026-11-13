@@ -196,6 +196,7 @@ fn find_or_create_creates_a_guest_once() {
         &world.customers,
         &world.ids,
         &ana,
+        None,
     ))
     .unwrap();
     let found = block_on(find_or_create_customer(
@@ -203,10 +204,37 @@ fn find_or_create_creates_a_guest_once() {
         &world.customers,
         &world.ids,
         &ana,
+        None,
     ))
     .unwrap();
     assert_eq!(found, created);
     assert_eq!(created.first_name(), None);
+}
+
+#[test]
+fn find_or_create_gives_a_new_customer_the_language_but_not_an_existing_one() {
+    let world = World::new();
+    let german = hypha_core::Language::new("de").unwrap();
+    let created = block_on(find_or_create_customer(
+        &Ctx::system(),
+        &world.customers,
+        &world.ids,
+        &email("lena@example.de"),
+        Some(&german),
+    ))
+    .unwrap();
+    assert_eq!(created.language(), Some(&german));
+    let existing = world.create("ana@example.hr").unwrap();
+    let found = block_on(find_or_create_customer(
+        &Ctx::system(),
+        &world.customers,
+        &world.ids,
+        &email("ana@example.hr"),
+        Some(&german),
+    ))
+    .unwrap();
+    assert_eq!(found.language(), None);
+    assert_eq!(found, existing);
 }
 
 #[test]
@@ -218,7 +246,8 @@ fn find_or_create_finds_an_existing_customer() {
             &Ctx::system(),
             &world.customers,
             &world.ids,
-            &email("ana@example.hr")
+            &email("ana@example.hr"),
+            None,
         )),
         Ok(existing)
     );
@@ -237,7 +266,8 @@ fn find_or_create_losing_a_race_returns_the_winner() {
             &Ctx::system(),
             &repo,
             &SequentialIds::default(),
-            &email("ana@example.hr")
+            &email("ana@example.hr"),
+            None,
         )),
         Ok(winner)
     );
@@ -418,6 +448,7 @@ fn add_address_rejects_an_invalid_address() {
                 field: AddressField::City,
                 code: AddressProblemCode::Required,
                 message: "Enter a city".to_string(),
+                params: hypha_core::MessageParams::field(AddressField::City),
             }
         ])))
     );

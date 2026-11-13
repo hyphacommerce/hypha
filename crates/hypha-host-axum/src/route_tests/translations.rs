@@ -93,6 +93,7 @@ async fn a_products_translation_is_written_read_and_goes_outdated() {
         (&title["source"], &title["format"], &title["max_length"]),
         (&json!("mug"), &json!("text"), &json!(255))
     );
+    assert_eq!(title["min_length"], Value::Null);
     assert_eq!(title["translations"], json!({}));
     assert_eq!(
         (
@@ -432,6 +433,7 @@ async fn every_kind_has_its_fields() {
             "owner_type": "product", "key": "material",
             "name": "Material", "type": "choice",
             "validations": {"choices": [{"key": "wool", "label": "Wool"}]},
+            "access": {"admin": "read_write", "storefront": "read"},
         }),
     )
     .await;
@@ -540,7 +542,17 @@ async fn every_kind_has_its_fields() {
         ["facets.vendor.label", "facets.option.size.label"]
     );
 
-    // Deleting what no event names takes its translations along.
+    // A second option, removed from its zone on its own below.
+    let express = json!({
+        "name": "Express", "code": "express",
+        "rate": {"type": "builtin", "basis": "subtotal", "tables": [
+            {"currency": "EUR", "tiers": [{"amount": 990}]}
+        ]},
+    });
+    let zone = created(&format!("{zone_path}/options"), express).await;
+    let express = zone["options"][1]["id"].as_str().unwrap().to_string();
+    translated("shipping_option", &express, "name", "Express").await;
+
     let listed = async || {
         let (_, page) = send(&app, "GET", "/admin/translations?limit=100", None).await;
         page["items"]
@@ -559,32 +571,34 @@ async fn every_kind_has_its_fields() {
             "payment_method",
             "search_facet",
             "shipping_option",
-            "store"
-        ]
-    );
-    let (status, _) = send(
-        &app,
-        "DELETE",
-        &format!("/admin/payment-methods/{}", id(&method)),
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-    let (status, _) = send(&app, "DELETE", &zone_path, None).await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-    assert_eq!(
-        listed().await,
-        [
-            "category",
-            "checkout_rule",
-            "custom_field_definition",
-            "search_facet",
+            "shipping_option",
             "store"
         ]
     );
 
-    // And what an event names goes when the event is delivered.
+    // What's deleted takes its translations along once its event is delivered: an
+    // option removed from its zone, a zone with its options, a payment method, …
+    let (status, body) = send(
+        &app,
+        "DELETE",
+        &format!("{zone_path}/options/{express}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    assert_eq!(
+        listed()
+            .await
+            .iter()
+            .filter(|k| *k == "shipping_option")
+            .count(),
+        1,
+        "the removed option's went"
+    );
     for uri in [
+        format!("/admin/payment-methods/{}", id(&method)),
+        zone_path.clone(),
         format!("/admin/categories/{}", id(&category)),
         format!("/admin/checkout-rules/{}", id(&rule)),
         format!("/admin/custom-field-definitions/{}", id(&definition)),
@@ -594,6 +608,77 @@ async fn every_kind_has_its_fields() {
     }
     hypha_http::jobs::dispatch(&app.state).await.unwrap();
     assert_eq!(listed().await, ["search_facet", "store"]);
+}
+
+#[tokio::test]
+async fn a_definition_shoppers_never_read_has_nothing_to_translate() {
+    let app = app().await;
+    in_four_languages(&app).await;
+    let (status, definition) = send(
+        &app,
+        "POST",
+        "/admin/custom-field-definitions",
+        Some(
+            &json!({
+                "owner_type": "product", "key": "bin", "name": "Bin", "type": "text",
+                "description": "Where it's shelved.",
+            })
+            .to_string(),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{definition}");
+    let uri = format!(
+        "/admin/custom-field-definitions/{}",
+        definition["id"].as_str().unwrap()
+    );
+    let path = format!(
+        "/admin/translations/custom_field_definition/{}",
+        definition["id"].as_str().unwrap()
+    );
+    // Staff-only: the admin shows its source, so nothing of it is translated, and the
+    // worklist has nothing of it to do.
+    let (status, view) = send(&app, "GET", &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    assert!(keys(&view).is_empty(), "{view}");
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    let id = definition["id"].as_str().unwrap();
+    let to_do = async || {
+        let page = worklist(
+            &app,
+            "kind=custom_field_definition&language=de&state=missing",
+        )
+        .await;
+        ids(&page).iter().map(|i| i.to_string()).collect::<Vec<_>>()
+    };
+    assert_eq!(to_do().await, Vec::<String>::new());
+
+    // Shown on the storefront, it has its fields.
+    let (status, body) = send(
+        &app,
+        "PATCH",
+        &uri,
+        Some(r#"{"access":{"admin":"read_write","storefront":"read"}}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, view) = send(&app, "GET", &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    assert_eq!(keys(&view), ["name", "description"]);
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    assert_eq!(to_do().await, [id]);
+
+    // Staff-only again, it leaves the worklist.
+    let (status, body) = send(
+        &app,
+        "PATCH",
+        &uri,
+        Some(r#"{"access":{"admin":"read_write","storefront":"none"}}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    assert_eq!(to_do().await, Vec::<String>::new());
 }
 
 #[tokio::test]
@@ -619,6 +704,7 @@ async fn translations_are_listed_by_kind_and_language_in_pages() {
     let path = format!("/admin/translations/store/{store}");
     let (status, _) = translate(&app, &path, "de", &fields(&[("description", "Tassen")])).await;
     assert_eq!(status, StatusCode::OK);
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
 
     let list = async |query: &str| {
         let (status, page) = send(&app, "GET", &format!("/admin/translations{query}"), None).await;
@@ -633,6 +719,12 @@ async fn translations_are_listed_by_kind_and_language_in_pages() {
         json!({
             "resource": {"kind": "store", "id": store},
             "language": "de",
+            // The description has text, the emails' footer none.
+            "state": "complete",
+            "total": 1,
+            "missing": 0,
+            "outdated": 0,
+            "inherited": 0,
             "fields": ["description"],
             "created_at": all["items"][3]["created_at"],
             "updated_at": all["items"][3]["updated_at"],
@@ -821,4 +913,671 @@ async fn the_default_language_doesnt_swap_with_a_translated_one() {
     let (status, store) = send(&app, "PATCH", "/admin/store", Some(swap)).await;
     assert_eq!(status, StatusCode::OK, "{store}");
     assert_eq!(store["default_language"], "de");
+}
+
+/// A page of the worklist: each item's resource ID, state and counts.
+async fn worklist(app: &TestApp, query: &str) -> Value {
+    let (status, page) = send(app, "GET", &format!("/admin/translations?{query}"), None).await;
+    assert_eq!(status, StatusCode::OK, "{query}: {page}");
+    page
+}
+
+fn ids(page: &Value) -> Vec<&str> {
+    page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["resource"]["id"].as_str().unwrap())
+        .collect()
+}
+
+fn kinds(page: &Value) -> Vec<&str> {
+    page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["resource"]["kind"].as_str().unwrap())
+        .collect()
+}
+
+#[tokio::test]
+async fn the_worklist_lists_each_resource_by_its_state_in_a_language() {
+    let app = app().await;
+    in_four_languages(&app).await;
+    // UUIDv7: created in this order, listed in it.
+    let mug = create_product(&app, "mug").await;
+    let plate = create_product(&app, "plate").await;
+    let cup = create_product(&app, "cup").await;
+    for product in [&mug, &cup] {
+        let path = format!("/admin/translations/product/{product}");
+        let (status, body) = translate(&app, &path, "de", &fields(&[("title", "X")])).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+
+    // Only the title has text: the empty description counts for nothing.
+    let complete = worklist(&app, "kind=product&language=de&state=complete").await;
+    assert_eq!(ids(&complete), [mug.as_str(), cup.as_str()]);
+    let item = &complete["items"][0];
+    assert_eq!(
+        (
+            &item["state"],
+            &item["total"],
+            &item["missing"],
+            &item["outdated"]
+        ),
+        (&json!("complete"), &json!(1), &json!(0), &json!(0))
+    );
+    assert_eq!(item["inherited"], 0);
+    assert_eq!(item["language"], "de");
+    assert_eq!(item["fields"], json!(["title"]));
+    assert!(item["created_at"].is_string());
+
+    let missing = worklist(&app, "kind=product&language=de&state=missing").await;
+    assert_eq!(ids(&missing), [plate.as_str()]);
+    // A resource without a translation in the language is on it all the same.
+    assert_eq!(
+        (
+            &missing["items"][0]["fields"],
+            &missing["items"][0]["created_at"]
+        ),
+        (&json!([]), &Value::Null)
+    );
+
+    // The cup's title changes: its translation is outdated once the event is delivered.
+    let (status, body) = send(
+        &app,
+        "PATCH",
+        &format!("/admin/products/{cup}"),
+        Some(r#"{"title":"Cup"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        ids(&worklist(&app, "kind=product&language=de&state=outdated").await),
+        Vec::<&str>::new(),
+        "not yet delivered"
+    );
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    let outdated = worklist(&app, "kind=product&language=de&state=outdated").await;
+    assert_eq!(ids(&outdated), [cup.as_str()]);
+    assert_eq!(
+        (
+            &outdated["items"][0]["missing"],
+            &outdated["items"][0]["outdated"]
+        ),
+        (&json!(0), &json!(1))
+    );
+    // A description makes the mug's translation miss a field again.
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/admin/products/{mug}"),
+        Some(r#"{"description":"<p>A mug.</p>"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    let missing = worklist(&app, "kind=product&language=de&state=missing").await;
+    assert_eq!(ids(&missing), [mug.as_str(), plate.as_str()]);
+    assert_eq!(
+        (
+            &missing["items"][0]["total"],
+            &missing["items"][0]["missing"]
+        ),
+        (&json!(2), &json!(1))
+    );
+
+    // Paged, each page continuing the one before.
+    let first = worklist(&app, "kind=product&language=fr&state=missing&limit=2").await;
+    assert_eq!(ids(&first), [mug.as_str(), plate.as_str()]);
+    let cursor = first["next_cursor"].as_str().unwrap();
+    let second = worklist(
+        &app,
+        &format!("kind=product&language=fr&state=missing&limit=2&cursor={cursor}"),
+    )
+    .await;
+    assert_eq!(ids(&second), [cup.as_str()]);
+    assert_eq!(second["has_more"], false);
+
+    // Kinds in the catalog's order: products, then categories, not by name.
+    let (status, _) = send(
+        &app,
+        "POST",
+        "/admin/categories",
+        Some(r#"{"name":"Mugs","handle":"mugs","visible":true}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    let all = worklist(&app, "language=fr&state=missing&limit=100").await;
+    assert_eq!(
+        kinds(&all)[..4],
+        ["product", "product", "product", "category"]
+    );
+
+    // The translations there are, each with its state now.
+    let listed = worklist(&app, "kind=product&language=de").await;
+    let states: Vec<&Value> = listed["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| &i["state"])
+        .collect();
+    assert_eq!(states, [&json!("missing"), &json!("outdated")]);
+
+    let plain = worklist(&app, "limit=1").await;
+    let cursor = plain["next_cursor"].as_str().unwrap().to_string();
+    for (query, status, expected) in [
+        ("state=missing", StatusCode::BAD_REQUEST, "invalid_query"),
+        (
+            "language=en&state=missing",
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "translation_into_default_language",
+        ),
+        (
+            "language=es&state=missing",
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "language_not_listed",
+        ),
+        (
+            "language=de&state=done",
+            StatusCode::BAD_REQUEST,
+            "invalid_query",
+        ),
+        (
+            &*format!("language=de&state=missing&cursor={cursor}"),
+            StatusCode::BAD_REQUEST,
+            "invalid_cursor",
+        ),
+    ] {
+        let (got, body) = send(&app, "GET", &format!("/admin/translations?{query}"), None).await;
+        assert_eq!((got, code(&body)), (status, expected), "{query}");
+    }
+}
+
+#[tokio::test]
+async fn progress_counts_each_languages_fields() {
+    let app = app().await;
+    in_four_languages(&app).await;
+    let mug = create_product(&app, "mug").await;
+    let plate = create_product(&app, "plate").await;
+    for (product, language) in [(&mug, "de"), (&plate, "de"), (&mug, "fr")] {
+        let path = format!("/admin/translations/product/{product}");
+        let (status, _) = translate(&app, &path, language, &fields(&[("title", "X")])).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/admin/products/{plate}"),
+        Some(r#"{"title":"Plate","description":"<p>A plate.</p>"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+
+    let (status, progress) = send(
+        &app,
+        "GET",
+        "/admin/translations/progress?kind=product",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{progress}");
+    // Three fields with text: the mug's title, the plate's title and description.
+    assert_eq!(
+        progress,
+        json!({
+            "default_language": "en",
+            "languages": [
+                {"language": "de", "total": 3, "translated": 2, "outdated": 1, "missing": 1, "inherited": 0},
+                // Untranslated, but shoppers read German's two titles.
+                {"language": "de-AT", "total": 3, "translated": 0, "outdated": 0, "missing": 3, "inherited": 2},
+                {"language": "fr", "total": 3, "translated": 1, "outdated": 0, "missing": 2, "inherited": 0},
+            ],
+            "pending": 0,
+        })
+    );
+    let (status, all) = send(&app, "GET", "/admin/translations/progress", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(all["languages"].as_array().unwrap().len(), 3);
+
+    // Only the kinds the caller reads.
+    let reader = key(
+        &app,
+        json!({"kind": "secret", "name": "Reader", "scopes": ["translations:read"]}),
+    )
+    .await;
+    let (status, body) = send_as(
+        &app,
+        &reader,
+        "GET",
+        "/admin/translations/progress?kind=product",
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "missing_scope")
+    );
+    let (status, body) = send_as(&app, &reader, "GET", "/admin/translations/progress", None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["languages"][0]["total"], 0);
+    let (status, body) = send(
+        &app,
+        "GET",
+        "/admin/translations/progress?kind=variant",
+        None,
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::BAD_REQUEST, "invalid_query")
+    );
+}
+
+#[tokio::test]
+async fn a_patch_changes_only_the_fields_it_names() {
+    let app = app().await;
+    in_four_languages(&app).await;
+    let product = create_product(&app, "mug").await;
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/admin/products/{product}"),
+        Some(r#"{"description":"<p>A mug.</p>"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let path = format!("/admin/translations/product/{product}/de");
+    let patch = |body: Value| {
+        let (app, path) = (&app, &path);
+        async move { send(app, "PATCH", path, Some(&body.to_string())).await }
+    };
+
+    // The first patch creates the translation; the next keeps what it leaves out.
+    let (status, view) = patch(json!({"fields": {"title": {"value": "Tasse"}}})).await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    assert_eq!(view["translations"][0]["translated"], 1);
+    let (status, view) = patch(json!({"fields": {
+        "description": {"value": "<p>Eine Tasse.</p>"},
+    }}))
+    .await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    assert_eq!(
+        field(&view, "title")["translations"]["de"]["value"],
+        "Tasse"
+    );
+    assert_eq!(view["translations"][0]["translated"], 2);
+    let event = outbox_events(&app).await.pop().unwrap();
+    assert_eq!(
+        (event.event_type.as_str(), &event.data["fields"]),
+        ("translation.updated", &json!(["description"]))
+    );
+
+    // A digest that isn't the source's now is refused, and nothing changes.
+    let stale = "0".repeat(64);
+    let (status, refused) = patch(json!({"fields": {
+        "title": {"value": "Becher", "source_digest": stale},
+    }}))
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(problems(&refused), [("title", "source_changed")]);
+    let (status, refused) = patch(json!({"fields": {"name": null}})).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(problems(&refused), [("name", "unknown_field")]);
+
+    // `null` removes a field; removing the last deletes the translation.
+    let (status, view) = patch(json!({"fields": {"title": null}})).await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    assert_eq!(field(&view, "title")["translations"], json!({}));
+    assert_eq!(
+        field(&view, "description")["translations"]["de"]["value"],
+        "<p>Eine Tasse.</p>"
+    );
+    let event = outbox_events(&app).await.pop().unwrap();
+    assert_eq!(event.data["fields"], json!(["title"]));
+    let (status, view) = patch(json!({"fields": {"description": null}})).await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    assert_eq!(view["translations"], json!([]));
+    let event = outbox_events(&app).await.pop().unwrap();
+    assert_eq!(event.event_type, "translation.deleted");
+
+    // The languages a PUT takes, and the body's shape.
+    let (status, body) = send(
+        &app,
+        "PATCH",
+        &format!("/admin/translations/product/{product}/en"),
+        Some(r#"{"fields":{"title":{"value":"Mug"}}}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "translation_into_default_language"
+        )
+    );
+    let (status, body) = patch(json!({"fields": {"title": "Tasse"}})).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let reader = key(
+        &app,
+        json!({"kind": "secret", "name": "Reader", "scopes": ["products:read", "translations:read"]}),
+    )
+    .await;
+    let (status, body) = send_as(
+        &app,
+        &reader,
+        "PATCH",
+        &path,
+        Some(r#"{"fields":{"title":{"value":"Tasse"}}}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "missing_scope")
+    );
+}
+
+#[tokio::test]
+async fn a_regional_language_counts_what_it_inherits_from_its_base() {
+    let app = app().await;
+    let body = r#"{"languages":[{"language":"de","published":true},{"language":"de-AT"},{"language":"en-GB"}]}"#;
+    let (status, store) = send(&app, "PATCH", "/admin/store", Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{store}");
+    let mug = create_product(&app, "mug").await;
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/admin/products/{mug}"),
+        Some(r#"{"description":"<p>A mug.</p>"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let path = format!("/admin/translations/product/{mug}");
+    let german = fields(&[("title", "Tasse"), ("description", "<p>Eine Tasse.</p>")]);
+    let (status, _) = translate(&app, &path, "de", &german).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = translate(&app, &path, "de-AT", &fields(&[("title", "Häferl")])).await;
+    assert_eq!(status, StatusCode::OK);
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+
+    // Austrian German misses the description, which shoppers read in German; British
+    // English inherits the source, every field it lacks.
+    let (status, progress) = send(
+        &app,
+        "GET",
+        "/admin/translations/progress?kind=product",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{progress}");
+    assert_eq!(
+        progress["languages"],
+        json!([
+            {"language": "de", "total": 2, "translated": 2, "outdated": 0, "missing": 0, "inherited": 0},
+            {"language": "de-AT", "total": 2, "translated": 1, "outdated": 0, "missing": 1, "inherited": 1},
+            {"language": "en-GB", "total": 2, "translated": 0, "outdated": 0, "missing": 2, "inherited": 2},
+        ])
+    );
+    let counts = |page: &Value| {
+        let item = &page["items"][0];
+        (item["missing"].clone(), item["inherited"].clone())
+    };
+    let missing = worklist(&app, "kind=product&language=de-AT&state=missing").await;
+    assert_eq!(ids(&missing), [mug.as_str()]);
+    assert_eq!(counts(&missing), (json!(1), json!(1)));
+    // `missing` is by the exact tag: the state stays missing.
+    assert_eq!(missing["items"][0]["state"], "missing");
+    let listed = worklist(&app, "kind=product&language=de-AT").await;
+    assert_eq!(counts(&listed), (json!(1), json!(1)));
+    let british = worklist(&app, "kind=product&language=en-GB&state=missing").await;
+    assert_eq!(counts(&british), (json!(2), json!(2)));
+
+    // German losing its description leaves Austrian German nothing to inherit there.
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("{path}/de"),
+        Some(r#"{"fields":{"description":null}}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let missing = worklist(&app, "kind=product&language=de-AT&state=missing").await;
+    assert_eq!(counts(&missing), (json!(1), json!(0)));
+}
+
+#[tokio::test]
+async fn progress_says_how_many_resources_are_still_being_counted() {
+    let app = app().await;
+    in_four_languages(&app).await;
+    create_product(&app, "mug").await;
+    create_product(&app, "plate").await;
+    let progress = async |query: &str| {
+        let (status, body) = send(
+            &app,
+            "GET",
+            &format!("/admin/translations/progress{query}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        body
+    };
+    // Their events not delivered, then queued as the migration queues what was there
+    // before the worklist: nothing counted yet, and the count says so.
+    sql(
+        &app,
+        "INSERT INTO translation_source_queue (resource_kind, resource_id)
+                   SELECT 'product', id FROM products
+         UNION ALL SELECT 'store', id FROM stores",
+    )
+    .await;
+    let before = progress("").await;
+    assert_eq!(before["pending"], 3, "{before}");
+    assert_eq!(before["languages"][0]["total"], 0);
+    let products = progress("?kind=product").await;
+    assert_eq!(
+        products["pending"], 2,
+        "only the kind asked for: {products}"
+    );
+
+    loop {
+        let ran = hypha_http::jobs::translation_sources(&app.state)
+            .await
+            .unwrap();
+        if ran.idle {
+            break;
+        }
+    }
+    let after = progress("?kind=product").await;
+    assert_eq!(after["pending"], 0, "{after}");
+    assert_eq!(
+        after["languages"][0]["total"], 2,
+        "the mug's and the plate's titles"
+    );
+}
+
+#[tokio::test]
+async fn every_kinds_text_is_followed_by_event() {
+    let app = app_with_media().await;
+    in_four_languages(&app).await;
+    let created = async |uri: &str, body: Value| {
+        let (status, json) = send(&app, "POST", uri, Some(&body.to_string())).await;
+        assert_eq!(status, StatusCode::CREATED, "{uri}: {json}");
+        json
+    };
+    let id = |json: &Value| json["id"].as_str().unwrap().to_string();
+    let counts = async |kind: &str, id: &str| {
+        let page = worklist(
+            &app,
+            &format!("kind={kind}&language=de&state=missing&limit=100"),
+        )
+        .await;
+        page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["resource"]["id"] == id)
+            .map(|i| i["total"].as_u64().unwrap())
+    };
+
+    let method = created(
+        "/admin/payment-methods",
+        json!({"provider": "manual", "name": "Cash on delivery"}),
+    )
+    .await;
+    let method = id(&method);
+    let zone = created(
+        "/admin/shipping-zones",
+        json!({"name": "Croatia", "countries": ["HR"]}),
+    )
+    .await;
+    let zone_path = format!("/admin/shipping-zones/{}", id(&zone));
+    let option = json!({
+        "name": "Standard", "code": "standard",
+        "rate": {"type": "builtin", "basis": "subtotal", "tables": [
+            {"currency": "EUR", "tiers": [{"amount": 490}]}
+        ]},
+    });
+    let zone = created(&format!("{zone_path}/options"), option).await;
+    let option = zone["options"][0]["id"].as_str().unwrap().to_string();
+    let asset = ready_png(&app).await;
+    let store = store_id(&app).await;
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    assert_eq!(counts("payment_method", &method).await, Some(1));
+    assert_eq!(counts("shipping_option", &option).await, Some(1));
+    // No alt, no description, no footer, no facets yet: nothing to translate.
+    assert_eq!(counts("asset", &asset).await, None);
+    assert_eq!(counts("store", &store).await, None);
+    assert_eq!(counts("search_facet", &store).await, None);
+
+    // Each change is followed: a method's instructions, an asset's alt, the store's
+    // description and its emails' footer, the facets' labels.
+    let changes = [
+        (
+            "PATCH",
+            format!("/admin/payment-methods/{method}"),
+            json!({"instructions": "Pay the courier."}),
+        ),
+        (
+            "PATCH",
+            format!("/admin/assets/{asset}"),
+            json!({"alt": "A mug"}),
+        ),
+        (
+            "PATCH",
+            "/admin/store".to_string(),
+            json!({"description": "Mugs."}),
+        ),
+        (
+            "PATCH",
+            "/admin/notification-settings".to_string(),
+            json!({"footer": "Ilica 1, Zagreb"}),
+        ),
+        (
+            "PATCH",
+            "/admin/search/settings".to_string(),
+            json!({"facets": [{"key": "vendor", "label": "Maker"}]}),
+        ),
+    ];
+    for (method, uri, body) in changes {
+        let (status, json) = send(&app, method, &uri, Some(&body.to_string())).await;
+        assert_eq!(status, StatusCode::OK, "{uri}: {json}");
+    }
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    assert_eq!(counts("payment_method", &method).await, Some(2));
+    assert_eq!(counts("asset", &asset).await, Some(1));
+    assert_eq!(counts("store", &store).await, Some(2));
+    assert_eq!(counts("search_facet", &store).await, Some(1));
+
+    // What's deleted leaves the worklist with its event.
+    for uri in [format!("/admin/payment-methods/{method}"), zone_path] {
+        let (status, body) = send(&app, "DELETE", &uri, None).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{uri}: {body}");
+    }
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    assert_eq!(counts("payment_method", &method).await, None);
+    assert_eq!(counts("shipping_option", &option).await, None);
+}
+
+#[tokio::test]
+async fn resources_queued_as_a_whole_are_read_again_by_the_job() {
+    let app = app().await;
+    in_four_languages(&app).await;
+    let mug = create_product(&app, "mug").await;
+    // Its events not delivered: as a product from before the worklist was.
+    let missing =
+        async || ids(&worklist(&app, "kind=product&language=de&state=missing").await).len();
+    assert_eq!(missing().await, 0);
+    // The plain list reads a resource without digests yet itself: its state isn't a
+    // guess.
+    let path = format!("/admin/translations/product/{mug}");
+    let (status, _) = translate(&app, &path, "fr", &fields(&[("title", "X")])).await;
+    assert_eq!(status, StatusCode::OK);
+    let listed = worklist(&app, "kind=product&language=fr").await;
+    assert_eq!(
+        (&listed["items"][0]["state"], &listed["items"][0]["total"]),
+        (&json!("complete"), &json!(1))
+    );
+    let uuid = mug.trim_start_matches("prod_");
+    sql(
+        &app,
+        &format!(
+            "INSERT INTO translation_source_queue (resource_kind, resource_id)
+             VALUES ('product', '{uuid}')"
+        ),
+    )
+    .await;
+    let ran = hypha_http::jobs::translation_sources(&app.state)
+        .await
+        .unwrap();
+    assert!(!ran.idle && !ran.more, "{ran:?}");
+    assert_eq!(missing().await, 1);
+    let ran = hypha_http::jobs::translation_sources(&app.state)
+        .await
+        .unwrap();
+    assert!(ran.idle, "the queue is empty: {ran:?}");
+
+    // A definition whose values were translated goes: every product is read again.
+    let (status, definition) = send(
+        &app,
+        "POST",
+        "/admin/custom-field-definitions",
+        Some(
+            &json!({"owner_type": "product", "key": "material", "name": "Material",
+                    "type": "text", "access": {"admin": "read_write", "storefront": "read"}})
+            .to_string(),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{definition}");
+    let (status, body) = send(
+        &app,
+        "PATCH",
+        &format!("/admin/products/{mug}/custom-fields"),
+        Some(r#"{"custom_fields":{"custom.material":"Stoneware"}}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    let total = async || {
+        worklist(&app, "kind=product&language=de&state=missing").await["items"][0]["total"].clone()
+    };
+    assert_eq!(total().await, 2, "the title and the material");
+    let definition = definition["id"].as_str().unwrap();
+    let (status, _) = send(
+        &app,
+        "DELETE",
+        &format!("/admin/custom-field-definitions/{definition}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    hypha_http::jobs::translation_sources(&app.state)
+        .await
+        .unwrap();
+    assert_eq!(total().await, 1);
 }

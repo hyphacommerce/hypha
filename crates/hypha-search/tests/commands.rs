@@ -1931,3 +1931,75 @@ fn a_language_whose_documents_are_not_built_yet_searches_another() {
     let found = w.search_in(&Ctx::system(), input("HR"), "de").unwrap();
     assert_eq!(found.language, lang("de"));
 }
+
+/// The built-in engine, counting how often a search asks which languages have documents.
+struct Asking<'a> {
+    inner: &'a InMemorySearchIndex,
+    asked: Cell<u32>,
+}
+
+impl hypha_search_index::SearchIndex for Asking<'_> {
+    async fn replace(
+        &self,
+        market: MarketId,
+        products: &[ProductId],
+        documents: &[SearchDocument],
+    ) -> Result<(), hypha_search_index::IndexError> {
+        self.inner.replace(market, products, documents).await
+    }
+
+    async fn search(
+        &self,
+        query: &hypha_search_index::SearchQuery,
+    ) -> Result<hypha_search_index::SearchResults, hypha_search_index::IndexError> {
+        self.inner.search(query).await
+    }
+
+    async fn option_names(
+        &self,
+        market: MarketId,
+        channel: Option<hypha_core::ChannelId>,
+    ) -> Result<Vec<String>, hypha_search_index::IndexError> {
+        self.inner.option_names(market, channel).await
+    }
+
+    async fn count(&self) -> Result<u64, hypha_search_index::IndexError> {
+        self.inner.count().await
+    }
+
+    async fn has_documents(
+        &self,
+        market: MarketId,
+        language: &Language,
+    ) -> Result<bool, hypha_search_index::IndexError> {
+        self.asked.set(self.asked.get() + 1);
+        self.inner.has_documents(market, language).await
+    }
+}
+
+#[test]
+fn a_search_asks_which_languages_have_documents_only_when_it_found_nothing() {
+    let w = World::new();
+    german_croatia(&w);
+    w.settle();
+    let engine = Asking {
+        inner: &w.index,
+        asked: Cell::new(0),
+    };
+    let search_de = |input: SearchInput| {
+        block_on(search(&Ctx::system(), &w.ports, &engine, input, |_| {
+            (lang("de"), vec![lang("en")])
+        }))
+        .unwrap()
+    };
+    let found = search_de(input("HR"));
+    assert_eq!((found.language, found.results.total), (lang("de"), 2));
+    assert_eq!(engine.asked.get(), 0);
+    // Nothing found in a language with documents: asked once, and that's the answer.
+    let found = search_de(SearchInput {
+        q: Some("nothing".to_string()),
+        ..input("HR")
+    });
+    assert_eq!((found.language, found.results.total), (lang("de"), 0));
+    assert_eq!(engine.asked.get(), 1);
+}

@@ -8,7 +8,10 @@
 //! Writes, option names and counts are always the built-in engine's: it stays in sync (it's
 //! the fallback), and an app keeps its own index from webhooks.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use hypha_apps::{HasApps, HasExtensionEndpoints};
 use hypha_core::{AppKey, ChannelId, MarketId, ProductId};
@@ -45,6 +48,10 @@ pub struct AppSearch<'a, P, I> {
     pub endpoints: HostAppEndpoints<'a, P>,
     pub caller: HostExtensions<'a>,
     pub env: &'a HostEnv,
+    /// Whether the app answered the last search: it searched the language asked in its
+    /// own index, so the built-in index's documents don't decide a fallback
+    /// (`has_documents`). `false` to begin with.
+    pub answered: AtomicBool,
 }
 
 impl<P, I> AppSearch<'_, P, I>
@@ -110,6 +117,7 @@ where
     }
 
     async fn search(&self, query: &SearchQuery) -> Result<SearchResults, IndexError> {
+        self.answered.store(false, Ordering::Relaxed);
         let Some(app) = &self.app else {
             return self.built_in.search(query).await;
         };
@@ -121,7 +129,10 @@ where
             return self.built_in.search(query).await;
         }
         match self.ask(app, query).await {
-            Ok(results) => Ok(results),
+            Ok(results) => {
+                self.answered.store(true, Ordering::Relaxed);
+                Ok(results)
+            }
             Err(why) => {
                 tracing::warn!(%app, point = SearchQueryPoint::NAME, %why,
                     "search app failed; the built-in engine answers");
@@ -147,6 +158,9 @@ where
         market: MarketId,
         language: &hypha_core::Language,
     ) -> Result<bool, IndexError> {
+        if self.answered.load(Ordering::Relaxed) {
+            return Ok(true);
+        }
         self.built_in.has_documents(market, language).await
     }
 }

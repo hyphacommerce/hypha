@@ -99,9 +99,10 @@ pub const DEFAULT_OPTION_FACETS: usize = 5;
 /// Searches the market serving `input.country`, in the language `languages` chooses for
 /// it: the host's rule for which of the market's languages a read gets (so a search
 /// answers in the same one as the product it lists), then the market's other languages
-/// in order. The first is searched; while the market has no documents in it (it began to
-/// offer it, and the sync job hasn't built them yet), the first of the others that has
-/// any, so a listing doesn't go empty meanwhile. The facets counted are the merchant's
+/// in order. The first is searched; when that finds nothing and the market has no
+/// documents in it (it began to offer it, and the sync job hasn't built them yet), the
+/// first of the others that has any, so a listing doesn't go empty meanwhile. No others
+/// (a cursor's language, a market with one) searches the first alone. The facets counted are the merchant's
 /// (`SearchSettings::facets`), else product type, vendor, the market's most used options
 /// and tags.
 pub async fn search<
@@ -179,19 +180,9 @@ pub async fn search<
         }
     }
 
-    // A market offering one language always has its documents: no lookup.
-    let mut language = asked.clone();
-    if !others.is_empty() && !index.has_documents(market.id(), &asked).await? {
-        for other in others {
-            if index.has_documents(market.id(), &other).await? {
-                language = other;
-                break;
-            }
-        }
-    }
-    let query = SearchQuery {
+    let mut query = SearchQuery {
         market: market.id(),
-        language: language.clone(),
+        language: asked,
         channel: ctx.channel(),
         category: input.category,
         terms,
@@ -207,11 +198,26 @@ pub async fn search<
         offset: input.offset,
         limit,
     };
-    let results = index.search(&query).await?;
+    let mut results = index.search(&query).await?;
+    // Found nothing: the market may have no documents in the language yet. Asked only
+    // then, so a search that finds something is one round trip; an engine searching an
+    // index of its own (a search app) says it has them.
+    if results.total == 0
+        && !others.is_empty()
+        && !index.has_documents(market.id(), &query.language).await?
+    {
+        for other in others {
+            if index.has_documents(market.id(), &other).await? {
+                query.language = other;
+                results = index.search(&query).await?;
+                break;
+            }
+        }
+    }
     let (value_labels, choice_fields) = choice_labels(ports, &query.facets).await?;
     Ok(Found {
         market,
-        language,
+        language: query.language,
         results,
         labels,
         value_labels,

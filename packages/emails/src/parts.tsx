@@ -3,14 +3,19 @@
 
 import type { ReactNode } from "react";
 import { Button, Column, Link, Row, Section, Text } from "react-email";
+import type { T } from "./i18n.ts";
 import { For, If, v } from "./jinja.tsx";
 import { colours, muted, paragraph, preformatted, subheading } from "./styles.ts";
 
 /** "Hi Ana," with the customer's name, "Hi," without. */
-export function Greeting() {
+export function Greeting(props: { t: T }) {
+  const { t } = props;
   return (
-    <If test="customer and customer.name" otherwise={<Text style={paragraph}>Hi,</Text>}>
-      <Text style={paragraph}>Hi {v("customer.name")},</Text>
+    <If
+      test="customer and customer.name"
+      otherwise={<Text style={paragraph}>{t("common.greeting")}</Text>}
+    >
+      <Text style={paragraph}>{t("common.greeting_named", { name: v("customer.name") })}</Text>
     </If>
   );
 }
@@ -37,10 +42,10 @@ export function PrimaryButton(props: { href: string; children: ReactNode }) {
 }
 
 /** The order page's button, when the store set an order link. */
-export function OrderButton() {
+export function OrderButton(props: { t: T }) {
   return (
     <If test="order.url">
-      <PrimaryButton href={v("order.url")}>View your order</PrimaryButton>
+      <PrimaryButton href={v("order.url")}>{props.t("common.view_order")}</PrimaryButton>
     </If>
   );
 }
@@ -128,22 +133,23 @@ function TotalRow(props: { label: ReactNode; value: string; strong?: boolean }) 
  * of its own, or included in the total) and total, which add up; then the discounts they
  * already include, so none is taken off twice.
  */
-export function Totals() {
+export function Totals(props: { t: T }) {
+  const { t } = props;
   return (
     <Section style={{ marginTop: "12px" }}>
-      <TotalRow label="Subtotal" value={v("order.subtotal.formatted")} />
-      <TotalRow label="Shipping" value={v("order.shipping.formatted")} />
+      <TotalRow label={t("common.subtotal")} value={v("order.subtotal.formatted")} />
+      <TotalRow label={t("common.shipping")} value={v("order.shipping.formatted")} />
       <If test="not order.taxes_included">
-        <TotalRow label="Tax" value={v("order.tax.formatted")} />
+        <TotalRow label={t("common.tax")} value={v("order.tax.formatted")} />
       </If>
-      <TotalRow label="Total" value={v("order.total.formatted")} strong />
+      <TotalRow label={t("common.total")} value={v("order.total.formatted")} strong />
       <If test="order.taxes_included">
         <Text style={{ ...muted, textAlign: "right" }}>
-          Including {v("order.tax.formatted")} in taxes
+          {t("common.including_tax", { amount: v("order.tax.formatted") })}
         </Text>
       </If>
       <If test="order.discounts">
-        <Text style={{ ...muted, margin: "12px 0 0" }}>Discounts included above</Text>
+        <Text style={{ ...muted, margin: "12px 0 0" }}>{t("common.discounts_included")}</Text>
         <For each="discount in order.discounts">
           <TotalRow
             label={
@@ -174,10 +180,10 @@ function AddressPart(props: { name: string }) {
 }
 
 /** The shipping address, one part per line, and the shipping method. */
-export function Delivery() {
+export function Delivery(props: { t: T }) {
   return (
     <If test="order.shipping_address or order.shipping_method">
-      <Text style={subheading}>Delivery</Text>
+      <Text style={subheading}>{props.t("common.delivery")}</Text>
       <If test="order.shipping_address">
         <Text style={{ ...paragraph, margin: "0 0 8px" }}>
           <AddressPart name="name" />
@@ -206,10 +212,10 @@ export function Delivery() {
 }
 
 /** The payment method and its instructions (a bank transfer's details), line breaks kept. */
-export function Payment() {
+export function Payment(props: { t: T }) {
   return (
     <If test="order.payment">
-      <Text style={subheading}>Payment</Text>
+      <Text style={subheading}>{props.t("common.payment")}</Text>
       <Text style={{ ...paragraph, margin: "0 0 8px" }}>{v("order.payment.method")}</Text>
       <If test="order.payment.instructions">
         <Section
@@ -229,10 +235,10 @@ export function Payment() {
 }
 
 /** Each tracking number, with its carrier and a link to the carrier's page when there's one. */
-export function Tracking() {
+export function Tracking(props: { t: T }) {
   return (
     <If test="fulfillment.tracking">
-      <Text style={subheading}>Tracking</Text>
+      <Text style={subheading}>{props.t("common.tracking")}</Text>
       <For each="tracking in fulfillment.tracking">
         <Text style={{ ...paragraph, margin: "0 0 6px" }}>
           <If test="tracking.carrier" inline>
@@ -250,10 +256,10 @@ export function Tracking() {
 }
 
 /** A link written out, for clients that don't show the button. */
-export function PlainLink(props: { href: string }) {
+export function PlainLink(props: { t: T; href: string }) {
   return (
     <Text style={muted}>
-      If the button doesn't work, copy this link into your browser:
+      {props.t("common.plain_link")}
       <br />
       <Link href={props.href} style={{ color: v("brand.accent"), wordBreak: "break-all" }}>
         {props.href}

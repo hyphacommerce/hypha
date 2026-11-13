@@ -1,4 +1,4 @@
-Hi{% if customer and customer.name %} {{ customer.name }}{% endif %},
+{% if customer and customer.name %}Hi {{ customer.name }},{% else %}Hi,{% endif %}
 
 The tracking information for a shipment from your order {{ order.number }} has changed. Here are the latest details.
 {%- if fulfillment.tracking %}

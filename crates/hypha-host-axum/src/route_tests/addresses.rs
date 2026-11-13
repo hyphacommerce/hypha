@@ -18,6 +18,14 @@ async fn a_countrys_form_follows_its_format() {
     );
     assert_eq!(form["labels"]["province"], "State");
     assert_eq!(form["labels"]["postal_code"], "ZIP code");
+    assert_eq!(form["label_keys"]["province"], "state");
+    assert_eq!(form["label_keys"]["postal_code"], "zip_code");
+    assert_eq!(form["label_keys"]["line1"], "address1");
+    assert_eq!(
+        form["label_keys"].as_object().map(|keys| keys.len()),
+        form["labels"].as_object().map(|labels| labels.len()),
+        "a key for every label"
+    );
     assert_eq!(form["postal_code"], "required");
     assert_eq!(form["postal_code_example"], "90210");
     assert_eq!(form["regions"][0], json!({"code": "AL", "name": "Alabama"}));
@@ -81,6 +89,11 @@ async fn every_problem_comes_back_by_field() {
         json["details"]["problems"][2]["message"],
         "Enter a valid ZIP code, like 90210"
     );
+    assert_eq!(
+        json["details"]["problems"][2]["params"],
+        json!({"field": "postal_code", "example": "90210"}),
+        "enough to word it in another language"
+    );
 }
 
 #[tokio::test]
@@ -132,7 +145,8 @@ async fn a_location_address_is_checked() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{json}");
     assert_eq!(
         json["details"]["problems"],
-        json!([{"field": "postal_code", "code": "required", "message": "Enter a postal code"}])
+        json!([{"field": "postal_code", "code": "required", "message": "Enter a postal code",
+            "params": {"field": "postal_code"}}])
     );
 }
 
@@ -187,6 +201,7 @@ async fn a_missing_house_number_is_a_warning_on_the_cart() {
         "path": "$.shipping_address.line1",
         "message": "Add a house number",
         "source": {"type": "format"},
+        "params": {"field": "line1"},
     }]);
     assert_eq!(json["messages"], warning);
     let (_, read) = send_as(&app, &pk, "GET", &cart, None).await;
@@ -212,6 +227,13 @@ async fn warnings_dont_stop_checkout() {
     assert_eq!(status, StatusCode::CREATED, "{json}");
     let (_, read) = send_as(&app, &pk, "GET", &cart, None).await;
     assert_eq!(read["messages"], json!([]), "a checked-out cart has none");
+    let order = format!("/admin/orders/{}", json["id"].as_str().unwrap());
+    let (_, order) = send(&app, "GET", &order, None).await;
+    assert_eq!(
+        order["address_check"]["warnings"][0]["params"],
+        json!({"field": "line1"}),
+        "the order keeps the warning's params"
+    );
 }
 
 #[tokio::test]

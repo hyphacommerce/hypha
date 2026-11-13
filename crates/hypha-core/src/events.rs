@@ -82,6 +82,11 @@ impl Recorder {
         }
     }
 
+    /// Keeps the pending events `keep` takes, dropping the rest.
+    pub fn retain(&mut self, keep: impl FnMut(&PendingEvent) -> bool) {
+        self.0.retain(keep);
+    }
+
     pub fn pending(&self) -> &[PendingEvent] {
         &self.0
     }

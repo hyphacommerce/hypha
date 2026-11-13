@@ -1,10 +1,18 @@
-use std::{collections::HashMap, sync::Mutex};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::{
+        Mutex,
+        atomic::{AtomicI64, Ordering},
+    },
+};
 
 use hypha_core::{
     Language, Page, PageRequest, Recorded, RepoError, Versioned, stamp_insert, stamp_update,
 };
 use hypha_translations::{
-    ResourceRef, Translation, TranslationFilter, TranslationKey, TranslationRepo, keys,
+    FieldCounts, LanguageProgress, ProgressLanguage, QueuedSource, ResourceKind, ResourceRef,
+    SourceDigest, Translation, TranslationFilter, TranslationKey, TranslationRepo,
+    TranslationSourceRepo, WorkItem, WorklistFilter, keys,
 };
 
 use crate::{
@@ -16,6 +24,11 @@ use crate::{
 #[derive(Default)]
 pub struct InMemoryTranslations {
     rows: Mutex<HashMap<TranslationKey, Translation>>,
+    /// Each resource's digests, by key.
+    sources: Mutex<BTreeMap<ResourceRef, Vec<SourceDigest>>>,
+    /// The resources waiting to be read again, with their marks.
+    queue: Mutex<HashMap<ResourceRef, i64>>,
+    marks: AtomicI64,
     outbox: InMemoryOutbox,
 }
 
@@ -138,6 +151,188 @@ impl TranslationRepo for InMemoryTranslations {
             .lock()
             .unwrap()
             .retain(|key, _| languages.contains(&key.language));
+        Ok(())
+    }
+}
+
+impl InMemoryTranslations {
+    fn mark(&self) -> i64 {
+        self.marks.fetch_add(1, Ordering::Relaxed) + 1
+    }
+}
+
+impl TranslationSourceRepo for InMemoryTranslations {
+    async fn replace_sources(
+        &self,
+        resource: ResourceRef,
+        digests: &[SourceDigest],
+    ) -> Result<(), RepoError> {
+        let mut sources = self.sources.lock().unwrap();
+        if digests.is_empty() {
+            sources.remove(&resource);
+        } else {
+            let mut digests = digests.to_vec();
+            digests.sort();
+            sources.insert(resource, digests);
+        }
+        Ok(())
+    }
+
+    async fn sources(
+        &self,
+        resources: &[ResourceRef],
+    ) -> Result<Vec<(ResourceRef, SourceDigest)>, RepoError> {
+        let sources = self.sources.lock().unwrap();
+        Ok(sources
+            .iter()
+            .filter(|(resource, _)| resources.contains(resource))
+            .flat_map(|(resource, digests)| digests.iter().map(|d| (*resource, d.clone())))
+            .collect())
+    }
+
+    async fn worklist(
+        &self,
+        filter: &WorklistFilter,
+        page: PageRequest<ResourceRef>,
+    ) -> Result<Page<WorkItem>, RepoError> {
+        let sources = self.sources.lock().unwrap().clone();
+        let rows = self.rows.lock().unwrap();
+        let mut found = Vec::new();
+        // `BTreeMap` order is `ResourceRef`'s: the catalog's kinds, then the ID.
+        for (resource, digests) in sources {
+            if page.after.is_some_and(|after| resource <= after) {
+                continue;
+            }
+            let translation = rows
+                .get(&TranslationKey {
+                    resource,
+                    language: filter.language.clone(),
+                })
+                .cloned();
+            let base = filter.inherits.base().and_then(|base| {
+                rows.get(&TranslationKey {
+                    resource,
+                    language: base.clone(),
+                })
+            });
+            let counts = FieldCounts::of(
+                &digests,
+                translation.as_ref(),
+                filter.inherits.fallback(base),
+            );
+            if !filter.keeps(resource, &counts) {
+                continue;
+            }
+            found.push(WorkItem {
+                resource,
+                counts,
+                translation,
+            });
+            if found.len() > page.limit.get() as usize {
+                break;
+            }
+        }
+        Ok(Page::from_overfetch(found, page.limit))
+    }
+
+    async fn progress(
+        &self,
+        kinds: &[ResourceKind],
+        languages: &[ProgressLanguage],
+    ) -> Result<Vec<LanguageProgress>, RepoError> {
+        let sources = self.sources.lock().unwrap();
+        let rows = self.rows.lock().unwrap();
+        Ok(languages
+            .iter()
+            .map(|counted| {
+                let mut progress = LanguageProgress {
+                    language: counted.language.clone(),
+                    total: 0,
+                    translated: 0,
+                    outdated: 0,
+                    inherited: 0,
+                };
+                for (resource, digests) in sources.iter().filter(|(r, _)| kinds.contains(&r.kind)) {
+                    let of = |language: &Language| {
+                        rows.get(&TranslationKey {
+                            resource: *resource,
+                            language: language.clone(),
+                        })
+                    };
+                    let base = counted.inherits.base().and_then(of);
+                    let counts = FieldCounts::of(
+                        digests,
+                        of(&counted.language),
+                        counted.inherits.fallback(base),
+                    );
+                    progress.total += u64::from(counts.total);
+                    progress.translated += u64::from(counts.translated());
+                    progress.outdated += u64::from(counts.outdated);
+                    progress.inherited += u64::from(counts.inherited);
+                }
+                progress
+            })
+            .collect())
+    }
+
+    async fn queue(&self, resources: &[ResourceRef]) -> Result<(), RepoError> {
+        let mut queue = self.queue.lock().unwrap();
+        for resource in resources {
+            queue.insert(*resource, self.mark());
+        }
+        Ok(())
+    }
+
+    async fn queue_kind(&self, kind: ResourceKind) -> Result<(), RepoError> {
+        let resources: Vec<ResourceRef> = self
+            .sources
+            .lock()
+            .unwrap()
+            .keys()
+            .filter(|r| r.kind == kind)
+            .copied()
+            .collect();
+        self.queue(&resources).await
+    }
+
+    async fn pending(&self, kinds: &[ResourceKind]) -> Result<u64, RepoError> {
+        let queue = self.queue.lock().unwrap();
+        Ok(queue.keys().filter(|r| kinds.contains(&r.kind)).count() as u64)
+    }
+
+    async fn queued(&self, limit: u32) -> Result<Vec<QueuedSource>, RepoError> {
+        let mut queued: Vec<QueuedSource> = self
+            .queue
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(resource, mark)| QueuedSource {
+                resource: *resource,
+                mark: *mark,
+            })
+            .collect();
+        queued.sort_by_key(|q| q.mark);
+        queued.truncate(limit as usize);
+        Ok(queued)
+    }
+
+    async fn unqueue(&self, done: &[QueuedSource]) -> Result<(), RepoError> {
+        let mut queue = self.queue.lock().unwrap();
+        for q in done {
+            if queue.get(&q.resource) == Some(&q.mark) {
+                queue.remove(&q.resource);
+            }
+        }
+        Ok(())
+    }
+
+    async fn touch_queued(&self, resources: &[ResourceRef]) -> Result<(), RepoError> {
+        let mut queue = self.queue.lock().unwrap();
+        for resource in resources {
+            if queue.contains_key(resource) {
+                queue.insert(*resource, self.mark());
+            }
+        }
         Ok(())
     }
 }

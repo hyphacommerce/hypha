@@ -1,0 +1,8 @@
+{
+  "cancel_customer": "Requested by you",
+  "cancel_inventory": "Items unavailable",
+  "cancel_fraud": "Suspected fraud",
+  "cancel_declined": "Payment declined",
+  "cancel_staff": "Cancelled by the store",
+  "manual_payment": "Manual payment"
+}
