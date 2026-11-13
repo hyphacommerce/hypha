@@ -161,7 +161,6 @@ A resource's children live in its translation, addressed by their IDs:
 | `product` | `title`, `description`, `options.<opt_…>.name`, `option_values.<optval_…>.label` |
 | `category` | `name`, `description` |
 | `custom_field_definition` | `name`, `description`, `choices.<key>.label` |
-| `custom_field_value` (owner + definition) | `value` for `text`, `multiline_text`, `rich_text` |
 | `shipping_option` | `name` |
 | `payment_method` | `name`, `instructions` |
 | `discount` | `title` |
@@ -172,6 +171,14 @@ A resource's children live in its translation, addressed by their IDs:
 
 Variant titles aren't stored: they're joined from option value labels, so they come out
 translated.
+
+Custom field values are child fields of their owner's translation, not a kind of their
+own: `custom_fields.<cfdef_…>.value` on a product or category, and
+`variant_custom_fields.<var_…>.<cfdef_…>.value` on a product for its variants. One
+editor form per product, and the owner's events, cleanup and cache tags cover them.
+Only single `text`, `multiline_text` and `rich_text` values of definitions shoppers can
+read, not private and without a `pattern`, are translatable; each follows its
+definition's rules. Customers' and orders' values are never translated.
 
 The search facets live in one settings record, so their labels are one resource. A
 facet's key names its option (`option.Color`), so renaming the option orphans the
