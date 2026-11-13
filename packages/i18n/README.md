@@ -48,8 +48,11 @@ export async function loadMessages(language: string): Promise<Messages> {
 
 ## On the server
 
-Server components, route handlers and actions make a translator themselves. Wrap it in
-React's `cache` so a request compiles each message once:
+Server components, route handlers and actions make a translator themselves, with the
+English catalog as its `fallback`. Wrapped in React's `cache`, the components of one
+server render share a translator, so each message is compiled once per render. `cache`
+only remembers during a server render: an action or a route handler gets a new
+translator per call, which is fine (it compiles only the messages it reads).
 
 ```ts
 // lib/i18n.ts
@@ -99,16 +102,23 @@ React children. Each function gets a `key` for its element:
 ## In client components
 
 A server layout hands the request's catalog to the provider (plain data, so it crosses
-to the browser); client components under it call `useT()`:
+to the browser); client components under it call `useT()`. Merge the language over
+English on the server and pass that one catalog: `messages` plus `fallback` would
+serialise two catalogs into every page, where the merged one is the size of English.
 
 ```tsx
 // app/layout.tsx (a server component)
 import { I18nProvider } from "@hyphacommerce/i18n/react";
 
-<I18nProvider language={language} messages={await loadMessages(language)} fallback={en}>
+const messages = { ...en, ...(await loadMessages(language)) };
+
+<I18nProvider language={language} messages={messages}>
   {children}
 </I18nProvider>;
 ```
+
+The provider's `fallback` prop is there for a client component that builds its own
+catalogs; a server layout doesn't need it.
 
 ```tsx
 // lib/use-t.ts
@@ -139,12 +149,25 @@ can't be formatted shows its key and is logged, never thrown.
 | Function | What it answers |
 | --- | --- |
 | `parseAcceptLanguage(header)` | the header's languages, most wanted first; no `*`, nothing with `q=0` |
-| `matchLanguage(wanted, available)` | the first wanted language the app has, in `available`'s spelling: the exact tag, then without its last parts (`de-CH` → `de`); never wider (`de` isn't `de-CH`); `undefined` for none |
+| `matchLanguage(wanted, available)` | the wanted language the app has, in `available`'s spelling (below); `undefined` for none |
 | `directionOf(language)` | `"rtl"` for Arabic, Hebrew, Persian, Urdu and the like (a script in the tag decides), else `"ltr"` |
 | `localeOf(language, country?)` | the formatting locale: `de` + `CH` → `de-CH`; a tag with a region keeps it |
 | `parseLocaleSegment(segment)` | a storefront URL's first segment: `de` → `{country: "de"}`, `en-de` → `{language: "en", country: "de"}`, `sr-latn-rs` → `{language: "sr-Latn", country: "rs"}`; `undefined` for anything else |
 | `formatLocaleSegment({language?, country})` | its inverse, lower-cased |
 | `canonicalLanguage(tag)` | the tag as BCP 47 spells it (`sr-latn` → `sr-Latn`), or `undefined` |
+
+`matchLanguage` makes two passes over `wanted`. The first tries each tag exactly, then
+with its last parts taken off (`de-CH` → `de`, `sr-Latn-RS` → `sr-Latn` → `sr`). Only
+when that finds nothing for any wanted tag does the second widen: the first wanted tag
+whose language an available tag shares gets the first such tag (`sr` or `sr-RS` →
+`sr-Latn`, `de` → `de-AT`). So a match of the first kind for a later wanted tag beats a
+widened one for an earlier tag.
+
+A tag sent to the API as a `language` must be one of the API's own (the store's or the
+market's languages), picked with `matchLanguage(wanted, thoseLanguages)`: it answers in
+the list's spelling. Never send `canonicalLanguage`'s output, `parseAcceptLanguage`'s or
+`parseLocaleSegment`'s `language` as they are: they accept aliases and extensions
+(`iw`, `de-u-co-phonebk`) that the API's `Language` refuses.
 
 ## The pseudo-language
 
@@ -157,6 +180,9 @@ const messages = process.env.NODE_ENV === "development" && language === "en-XA" 
 // "Your cart" → "Ýööüüŕ çááŕţ"
 ```
 
+`en-XA` is the app's own name for it, in development only: it's no language of any
+store, so it must never be sent to the API (ask the API in English while showing it).
+
 ## The check
 
 ```
@@ -166,7 +192,8 @@ pnpm exec hypha-i18n-check messages [--source en] [--complete de]…
 Fails (exit 1) when a message isn't ICU MessageFormat, when a language has a key English
 lacks, when a message's placeholders or tags aren't English's for its key, or when a
 language named with `--complete` lacks a key. What every other language still lacks is
-printed and passes. It also reads `messages/<language>.json` files with full keys. The
+printed and passes. It also reads `messages/<language>.json` files with full keys, but
+a directory holds one layout or the other: both together are refused (exit 2). The
 same check as a function: `checkCatalogs` from `@hyphacommerce/i18n/check`.
 
 ## License

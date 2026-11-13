@@ -2,6 +2,7 @@
 // The source language (English) says which keys exist and what each takes; every other
 // language may be behind it, never beside it.
 
+import { type MessageFormatElement, TYPE } from "@formatjs/icu-messageformat-parser";
 import { IntlMessageFormat } from "intl-messageformat";
 
 export type ProblemCode =
@@ -45,18 +46,6 @@ export interface Placeholders {
   tags: string[];
 }
 
-// The parser's element types that matter here (its `TYPE` enum).
-const LITERAL = 0;
-const POUND = 7;
-const TAG = 8;
-
-interface Element {
-  type: number;
-  value?: unknown;
-  options?: Record<string, { value: Element[] }>;
-  children?: Element[];
-}
-
 /**
  * The placeholders and tags of an ICU message, in every branch of its plurals and
  * selects. Throws what the parser throws when it isn't one.
@@ -64,14 +53,18 @@ interface Element {
 export function placeholdersOf(message: string): Placeholders {
   const names = new Set<string>();
   const tags = new Set<string>();
-  const walk = (elements: Element[]): void => {
+  const walk = (elements: MessageFormatElement[]): void => {
     for (const element of elements) {
-      if (element.type === LITERAL || element.type === POUND) continue;
-      if (typeof element.value === "string") {
-        (element.type === TAG ? tags : names).add(element.value);
+      if (element.type === TYPE.literal || element.type === TYPE.pound) continue;
+      if (element.type === TYPE.tag) {
+        tags.add(element.value);
+        walk(element.children);
+        continue;
       }
-      if (element.children) walk(element.children);
-      for (const option of Object.values(element.options ?? {})) walk(option.value);
+      names.add(element.value);
+      if (element.type === TYPE.plural || element.type === TYPE.select) {
+        for (const option of Object.values(element.options)) walk(option.value);
+      }
     }
   };
   walk(new IntlMessageFormat(message, "en").getAst());

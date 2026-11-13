@@ -2,7 +2,8 @@
 // hypha-i18n-check <messages> [--source en] [--complete <language>]…
 //
 // Checks an app's catalogs: `<messages>/<language>/<namespace>.json` (keys become
-// `<namespace>.<key>`), or `<messages>/<language>.json` with full keys. Every message
+// `<namespace>.<key>`), or `<messages>/<language>.json` with full keys: one layout or
+// the other, never both in one directory. Every message
 // must be ICU MessageFormat; a language other than the source may only have the source's
 // keys, with the source's placeholders and tags. What each language still lacks is
 // printed, and fails only for a language named with --complete. Exits 1 on a failure,
@@ -23,14 +24,25 @@ class UsageError extends Error {}
 /** The catalogs under `dir`, by language. */
 async function readCatalogs(dir: string): Promise<Record<string, Record<string, unknown>>> {
   const catalogs: Record<string, Record<string, unknown>> = {};
-  const entries = await readdir(dir, { withFileTypes: true }).catch(() => {
+  const all = await readdir(dir, { withFileTypes: true }).catch(() => {
     throw new UsageError(`${dir} isn't a directory`);
   });
-  for (const entry of entries.toSorted((a, b) => a.name.localeCompare(b.name))) {
-    if (entry.name.startsWith(".")) continue;
+  const entries = all
+    .filter((entry) => !entry.name.startsWith("."))
+    .filter((entry) => entry.isDirectory() || entry.name.endsWith(".json"))
+    .toSorted((a, b) => a.name.localeCompare(b.name));
+  const folder = entries.find((entry) => entry.isDirectory());
+  const loose = entries.find((entry) => !entry.isDirectory());
+  if (folder && loose) {
+    throw new UsageError(
+      `${dir} mixes two layouts: ${folder.name}/ (a folder per language) and ${loose.name} (a file per language). Keep one.`,
+    );
+  }
+  for (const entry of entries) {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) {
-      const catalog = (catalogs[entry.name] ??= {});
+      const catalog: Record<string, unknown> = {};
+      catalogs[entry.name] = catalog;
       const files = (await readdir(path)).filter((name) => name.endsWith(".json")).toSorted();
       for (const file of files) {
         const namespace = file.slice(0, -".json".length);
@@ -38,9 +50,8 @@ async function readCatalogs(dir: string): Promise<Record<string, Record<string, 
           catalog[`${namespace}.${key}`] = message;
         }
       }
-    } else if (entry.name.endsWith(".json")) {
-      const language = entry.name.slice(0, -".json".length);
-      Object.assign((catalogs[language] ??= {}), await readJson(path));
+    } else {
+      catalogs[entry.name.slice(0, -".json".length)] = await readJson(path);
     }
   }
   return catalogs;

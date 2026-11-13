@@ -82,6 +82,12 @@ test("a file per language with full keys works too", () => {
   assert.equal(out, "de: 1 message, 1 missing\n  cart.empty\nen: 2 messages (the source)\n");
 });
 
+test("a directory with both layouts is refused", () => {
+  const { status, err } = check(fixture("mixed"));
+  assert.equal(status, 2);
+  assert.match(err, /mixes two layouts: en\/ \(a folder per language\) and de\.json/);
+});
+
 test("another source language", () => {
   const { status, err } = check(fixture("flat"), "--source", "de");
   assert.equal(status, 1);

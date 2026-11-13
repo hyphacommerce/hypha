@@ -38,8 +38,12 @@ export function parseAcceptLanguage(header: string | null | undefined): string[]
 /**
  * The first of `wanted` that `available` has, in `available`'s spelling: the exact tag,
  * then the tag with its last parts taken off one at a time (`de-CH` → `de`,
- * `sr-Latn-RS` → `sr-Latn` → `sr`), compared without case. It never widens: `de`
- * doesn't match an available `de-CH`.
+ * `sr-Latn-RS` → `sr-Latn` → `sr`), compared without case.
+ *
+ * Only when that finds nothing for any wanted tag does it widen: the first of `wanted`
+ * whose language some available tag shares gets the first such tag (`sr` or `sr-RS`
+ * → `sr-Latn`, `de` → `de-AT`). Two passes over all of `wanted`, so an exact or
+ * shortened match for a later wanted tag beats a widened one for an earlier tag.
  */
 export function matchLanguage(
   wanted: readonly string[],
@@ -59,6 +63,12 @@ export function matchLanguage(
       // A single letter introduces an extension (`-u-…`, `-x-…`): it goes with its values.
       if (parts.at(-1)?.length === 1) parts.pop();
     }
+  }
+  for (const tag of wanted) {
+    const primary = tag.trim().toLowerCase().split("-")[0];
+    if (!primary) continue;
+    const found = available.find((other) => other.toLowerCase().split("-")[0] === primary);
+    if (found !== undefined) return found;
   }
   return undefined;
 }
