@@ -524,28 +524,28 @@ impl<S: Storage> AppState<S> {
     /// `payments:write`). The order placed (or placed already by the shopper's browser);
     /// `None` when there was nothing to complete. A checkout that can't complete gives the
     /// money back and answers why; a storage failure is worth trying again (the provider's
-    /// report delivered again does).
-    pub async fn complete_paid_checkout<P>(
+    /// report delivered again does). `ports` are the request's own (`Caller::authenticate`,
+    /// `public_ports`).
+    pub async fn complete_paid_checkout(
         &self,
-        ports: &P,
+        ports: &S::Ports<'_>,
         ctx: &hypha_core::Ctx,
         payment: &hypha_payments::Payment,
-    ) -> Result<Option<hypha_core::OrderId>, hypha_checkout::CommandError>
-    where
-        P: hypha_checkout::CheckoutPorts
-            + hypha_shipping::HasAppProviders
-            + hypha_apps::HasApps
-            + hypha_apps::HasExtensionEndpoints
-            + hypha_apps::HasSporeSettings
-            + hypha_extensions::HasExtensionCalls
-            + hypha_checkout_rules::HasCheckoutSettings,
-    {
+    ) -> Result<Option<hypha_core::OrderId>, hypha_checkout::CommandError> {
         let (Some(cart), None) = (payment.cart(), payment.order()) else {
             return Ok(None);
         };
         if !payment.status().committed() {
             return Ok(None);
         }
+        // The store's languages, which the order's is resolved against, read on the
+        // connection `ports` hold: a request holding one pooled connection while it waits
+        // for a second can starve the pool when reports arrive together. A failure is a
+        // storage one, worth trying again.
+        let store = crate::routes::stores::store_as_system(self, ports)
+            .await
+            .map_err(|e| hypha_core::RepoError::Backend(format!("{e:?}")))?;
+        let languages = crate::language::content_languages(&store);
         let rates = self.cart_rates(ports, cart);
         let providers = self.payments(ports);
         let placed = hypha_checkout::complete_paid_checkout(
@@ -556,6 +556,7 @@ impl<S: Storage> AppState<S> {
             &rates,
             &providers,
             &self.cart_checks(ports),
+            languages,
             payment.id(),
         )
         .await?;
@@ -661,6 +662,7 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_receiving::ReceivingPorts
         + hypha_inventory::TransferPorts
         + hypha_checkout_rules::HasCheckoutSettings
+        + hypha_translations::HasTranslations
         + hypha_inventory::HasLocations
         + HasBatch<
             Batch: hypha_core::StageEvents

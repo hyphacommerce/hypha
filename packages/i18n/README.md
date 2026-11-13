@@ -46,6 +46,22 @@ export async function loadMessages(language: string): Promise<Messages> {
 }
 ```
 
+## Writing messages
+
+Three rules the apps' catalogs follow:
+
+1. **A plain `{count}` isn't formatted.** It's shown as `1234`, whatever the language.
+   A number outside a plural's `#` is written `{count, number}` (`1,234`, `1.234`); `#`
+   inside a plural is formatted already.
+2. **One key, one role.** A button's label and a page's title get separate keys even
+   when the English is the same (`cart.checkout_button`, `checkout.title`): another
+   language may need a verb for one and a noun for the other.
+3. **The merchant's content is written in the store's default language, never the
+   reader's.** Text an app saves as content (a preset's default name or message) is
+   read by everyone afterwards, so it's made with a translator for the store's
+   language. A function that builds text takes its translator as an argument rather
+   than finding one, so its caller decides which.
+
 ## On the server
 
 Server components, route handlers and actions make a translator themselves, with the

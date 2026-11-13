@@ -8,7 +8,10 @@
 //! Writes, option names and counts are always the built-in engine's: it stays in sync (it's
 //! the fallback), and an app keeps its own index from webhooks.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use hypha_apps::{HasApps, HasExtensionEndpoints};
 use hypha_core::{AppKey, ChannelId, MarketId, ProductId};
@@ -39,9 +42,16 @@ pub struct AppSearch<'a, P, I> {
     pub app: Option<AppKey>,
     /// The words as the shopper typed them (the query only has their terms).
     pub words: Option<String>,
+    /// What the store offers shoppers, its default language first: what the documents
+    /// of an app's hits are written in (`documents_for`).
+    pub servable: Vec<hypha_core::Language>,
     pub endpoints: HostAppEndpoints<'a, P>,
     pub caller: HostExtensions<'a>,
     pub env: &'a HostEnv,
+    /// Whether the app answered the last search: it searched the language asked in its
+    /// own index, so the built-in index's documents don't decide a fallback
+    /// (`has_documents`). `false` to begin with.
+    pub answered: AtomicBool,
 }
 
 impl<P, I> AppSearch<'_, P, I>
@@ -86,7 +96,7 @@ where
             Answered::App(answer) => answer,
             Answered::Fallback(e) => return Err(e.to_string()),
         };
-        results(self.ports, market, query, answer)
+        results(self.ports, market, query, answer, &self.servable)
             .await
             .map_err(|e| e.to_string())
     }
@@ -107,6 +117,7 @@ where
     }
 
     async fn search(&self, query: &SearchQuery) -> Result<SearchResults, IndexError> {
+        self.answered.store(false, Ordering::Relaxed);
         let Some(app) = &self.app else {
             return self.built_in.search(query).await;
         };
@@ -118,7 +129,10 @@ where
             return self.built_in.search(query).await;
         }
         match self.ask(app, query).await {
-            Ok(results) => Ok(results),
+            Ok(results) => {
+                self.answered.store(true, Ordering::Relaxed);
+                Ok(results)
+            }
             Err(why) => {
                 tracing::warn!(%app, point = SearchQueryPoint::NAME, %why,
                     "search app failed; the built-in engine answers");
@@ -137,6 +151,17 @@ where
 
     async fn count(&self) -> Result<u64, IndexError> {
         self.built_in.count().await
+    }
+
+    async fn has_documents(
+        &self,
+        market: MarketId,
+        language: &hypha_core::Language,
+    ) -> Result<bool, IndexError> {
+        if self.answered.load(Ordering::Relaxed) {
+            return Ok(true);
+        }
+        self.built_in.has_documents(market, language).await
     }
 }
 
@@ -180,6 +205,7 @@ fn wire_request(
         facets: q.facets.iter().map(ToString::to_string).collect(),
         offset: q.offset,
         limit: q.limit,
+        language: Some(q.language.clone()),
     }
 }
 
@@ -193,6 +219,7 @@ async fn results<P: SyncPorts>(
     market: hypha_markets::Market,
     query: &SearchQuery,
     answer: SearchQueryResponse,
+    servable: &[hypha_core::Language],
 ) -> Result<SearchResults, hypha_search::SyncError> {
     let mut products: Vec<ProductId> = Vec::new();
     let mut seen = BTreeSet::new();
@@ -202,7 +229,7 @@ async fn results<P: SyncPorts>(
         }
     }
     let mut by_product: BTreeMap<ProductId, Vec<SearchDocument>> = BTreeMap::new();
-    for document in documents_for(ports, market, &products).await? {
+    for document in documents_for(ports, market, &products, &query.language, servable).await? {
         let shown = query.channel.is_none_or(|c| document.channels.contains(&c));
         if shown {
             by_product
@@ -226,6 +253,22 @@ async fn results<P: SyncPorts>(
             })
         })
         .collect();
+    // An app counts values as stored; their labels in the query's language come from
+    // the documents of the products it found (the least, as the engine picks), the value
+    // itself for one none of them has.
+    let mut labels: BTreeMap<(String, String), String> = BTreeMap::new();
+    for document in by_product.values().flatten() {
+        for (key, value, label) in document.labelled_facet_values() {
+            labels
+                .entry((key, value))
+                .and_modify(|least| {
+                    if label < *least {
+                        least.clone_from(&label);
+                    }
+                })
+                .or_insert(label);
+        }
+    }
     let facets = query
         .facets
         .iter()
@@ -239,6 +282,10 @@ async fn results<P: SyncPorts>(
                     f.values
                         .iter()
                         .map(|v| FacetValue {
+                            label: labels
+                                .get(&(f.facet.clone(), v.value.clone()))
+                                .cloned()
+                                .unwrap_or_else(|| v.value.clone()),
                             value: v.value.clone(),
                             count: v.count,
                         })

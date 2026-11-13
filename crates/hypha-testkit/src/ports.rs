@@ -105,6 +105,8 @@ pub struct InMemoryPorts {
     pub checkout_rules: crate::InMemoryCheckoutRules,
     /// Which apps checkout asks about an address.
     pub checkout_settings: crate::InMemoryCheckoutSettings,
+    /// The content in the store's other languages.
+    pub translations: crate::InMemoryTranslations,
 }
 
 impl Default for InMemoryPorts {
@@ -188,6 +190,7 @@ impl Default for InMemoryPorts {
             transfers: crate::InMemoryTransfers::sharing(&outbox),
             checkout_rules: crate::InMemoryCheckoutRules::sharing(&outbox),
             checkout_settings: crate::InMemoryCheckoutSettings::sharing(&outbox),
+            translations: crate::InMemoryTranslations::sharing(&outbox),
             suppliers,
             outbox,
         }
@@ -198,6 +201,13 @@ impl hypha_core::HasPreviewTokens for InMemoryPorts {
     type PreviewTokens = crate::InMemoryPreviewTokenRepo;
     fn preview_tokens(&self) -> &crate::InMemoryPreviewTokenRepo {
         &self.preview_tokens
+    }
+}
+
+impl hypha_translations::HasTranslations for InMemoryPorts {
+    type Translations = crate::InMemoryTranslations;
+    fn translations(&self) -> &crate::InMemoryTranslations {
+        &self.translations
     }
 }
 

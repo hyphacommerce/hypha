@@ -1,15 +1,16 @@
 use std::collections::HashMap;
 
 use hypha_core::{
-    Address, CartId, ChannelId, CountryCode, CustomerId, Direction, Email, Keyset, MarketId, Money,
-    OrderId, OrderLineId, Page, PageRequest, Price, PriceListId, ProductId, Quantity, Recorded,
-    RepoError, ShippingGroupId, ShippingOptionId, SortKey, TaxClassId, TaxRegionId, Timestamp,
-    VariantId, Version, Versioned, stamp_insert, stamp_update,
+    Address, CartId, ChannelId, CountryCode, CustomerId, Direction, Email, Keyset, Language,
+    MarketId, Money, OrderId, OrderLineId, Page, PageRequest, Price, PriceListId, ProductId,
+    Quantity, Recorded, RepoError, ShippingGroupId, ShippingOptionId, SortKey, TaxClassId,
+    TaxRegionId, Timestamp, VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_orders::{
-    Cancellation, DiscountClass, DiscountShare, Order, OrderAddressCheck, OrderDiscount,
-    OrderFilter, OrderLine, OrderNumber, OrderRepo, OrderShippingLine, OrderSnapshot, OrderSort,
-    OrderStats, OrderSummary, OrderTax, OrderTaxSource, SalesFigures, SalesQuery,
+    Cancellation, DiscountClass, DiscountShare, LocalizedDiscount, Order, OrderAddressCheck,
+    OrderDiscount, OrderFilter, OrderLine, OrderNumber, OrderRepo, OrderShippingLine,
+    OrderSnapshot, OrderSort, OrderStats, OrderSummary, OrderTax, OrderTaxSource, SalesFigures,
+    SalesQuery,
 };
 use tokio_postgres::{Row, types::Type};
 use uuid::Uuid;
@@ -17,9 +18,9 @@ use uuid::Uuid;
 use crate::{
     columns::{
         ADDRESS_LEN, address_assignments, address_columns, address_from_row, address_values, col,
-        currency_from_db, id_and_address, micros, opt_micros, opt_ts, stamp_columns,
-        stamps_from_row, tax_rate_from_db, tax_rate_to_db, ts, unit_cost_from_db, unit_cost_to_db,
-        version_from_db, version_to_db, write_stamps,
+        currency_from_db, id_and_address, json_from_db, json_to_db, language_from_db, micros,
+        opt_micros, opt_ts, stamp_columns, stamps_from_row, tax_rate_from_db, tax_rate_to_db, ts,
+        unit_cost_from_db, unit_cost_to_db, version_from_db, version_to_db, write_stamps,
     },
     error::{corrupt, repo_error},
     field_filters::{Params, field_predicates},
@@ -313,7 +314,7 @@ pub(crate) async fn update_order(
                  taxes_included = $9, customer_id = $10, email = $11, subtotal = $12,
                  tax_total = $13, total = $14, financial_status = $15,
                  fulfillment_status = $16, cancelled_at = {}, cancel_reason = $18,
-                 discounts = $19::text::jsonb, discount_total = $20
+                 discounts = $19::text::jsonb, discount_total = $20, language = $21
              WHERE id = $1 AND version = $2 RETURNING version",
                 ts(4),
                 ts(17),
@@ -339,6 +340,7 @@ pub(crate) async fn update_order(
                 (&s.cancelled.map(|c| c.reason.as_str()), Type::TEXT),
                 (&discounts_out(&s.discounts), Type::TEXT),
                 (&s.discount_total.amount(), Type::INT8),
+                (&s.language.as_ref().map(Language::as_str), Type::TEXT),
             ],
         )
         .await
@@ -371,9 +373,9 @@ pub(crate) async fn insert_order(tx: &impl Queries, s: &OrderSnapshot) -> Result
             "INSERT INTO orders (id, version, number, placed_at, cart_id, market_id, currency,
              country, taxes_included, customer_id, email, subtotal, tax_total, total,
              financial_status, fulfillment_status, cancelled_at, cancel_reason, channel_id,
-             discounts, discount_total)
+             discounts, discount_total, language)
          VALUES ($1, 1, $2, {}, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, {}, $17,
-                 $18, $19::text::jsonb, $20)",
+                 $18, $19::text::jsonb, $20, $21)",
             ts(3),
             ts(16),
         ),
@@ -398,6 +400,7 @@ pub(crate) async fn insert_order(tx: &impl Queries, s: &OrderSnapshot) -> Result
             (&s.channel.as_uuid(), Type::UUID),
             (&discounts_out(&s.discounts), Type::TEXT),
             (&s.discount_total.amount(), Type::INT8),
+            (&s.language.as_ref().map(Language::as_str), Type::TEXT),
         ],
     )
     .await
@@ -447,13 +450,14 @@ async fn write_shipping(tx: &impl Queries, s: &OrderSnapshot) -> Result<(), Repo
     for (position, line) in (0i32..).zip(&s.shipping_lines) {
         let line_ids: Vec<Uuid> = line.lines.iter().map(|l| l.as_uuid()).collect();
         let tax = line.tax.as_ref();
+        let localized = json_to_db(line.localized.as_ref(), "order shipping line names")?;
         tx.query_typed(
             "INSERT INTO order_shipping_lines (order_id, position, group_id, line_ids,
                  option_id, code, name, provider, service, reference, amount,
                  estimate_min_days, estimate_max_days, tax_rate_ppm, tax_class_id,
-                 tax_amount, tax_region_id, total, discounts)
+                 tax_amount, tax_region_id, total, discounts, localized)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-                 $18, $19::text::jsonb)",
+                 $18, $19::text::jsonb, $20::text::jsonb)",
             &[
                 (&s.id.as_uuid(), Type::UUID),
                 (&position, Type::INT4),
@@ -488,6 +492,7 @@ async fn write_shipping(tx: &impl Queries, s: &OrderSnapshot) -> Result<(), Repo
                 ),
                 (&line.total.amount(), Type::INT8),
                 (&shares_out(&line.discounts), Type::TEXT),
+                (&localized, Type::TEXT),
             ],
         )
         .await
@@ -535,6 +540,10 @@ async fn insert_lines(
         .collect();
     let (costs, cost_currencies): (Vec<Option<i64>>, Vec<Option<&str>>) =
         lines.iter().map(|l| unit_cost_to_db(l.unit_cost)).unzip();
+    let localized = lines
+        .iter()
+        .map(|l| json_to_db(l.localized.as_ref(), "order line names"))
+        .collect::<Result<Vec<Option<String>>, _>>()?;
     let tax_rates = lines
         .iter()
         .map(|l| l.tax.map(|t| tax_rate_to_db(t.rate)).transpose())
@@ -559,19 +568,19 @@ async fn insert_lines(
         "INSERT INTO order_lines (order_id, position, id, product_id, variant_id, quantity,
              product_title, variant_title, sku, unit_price, total, tax_rate_ppm, tax_class_id,
              tax_amount, tax_region_id, fulfilled_quantity, compare_at_amount, price_list_id,
-             subtotal, discounts, unit_cost, unit_cost_currency)
+             subtotal, discounts, unit_cost, unit_cost_currency, localized)
          SELECT $1, (n - 1)::integer, id, product_id, variant_id, quantity, product_title,
              variant_title, sku, unit_price, total, tax_rate_ppm, tax_class_id, tax_amount,
              tax_region_id, fulfilled_quantity, compare_at, price_list, subtotal,
-             discounts::jsonb, unit_cost, unit_cost_currency
+             discounts::jsonb, unit_cost, unit_cost_currency, localized::jsonb
          FROM unnest($2::uuid[], $3::uuid[], $4::uuid[], $5::bigint[], $6::text[], $7::text[],
                      $8::text[], $9::bigint[], $10::bigint[], $11::integer[], $12::uuid[],
                      $13::bigint[], $14::uuid[], $15::bigint[], $16::bigint[], $17::uuid[],
-                     $18::bigint[], $19::text[], $20::bigint[], $21::text[])
+                     $18::bigint[], $19::text[], $20::bigint[], $21::text[], $22::text[])
               WITH ORDINALITY AS t (id, product_id, variant_id, quantity, product_title,
                   variant_title, sku, unit_price, total, tax_rate_ppm, tax_class_id,
                   tax_amount, tax_region_id, fulfilled_quantity, compare_at, price_list,
-                  subtotal, discounts, unit_cost, unit_cost_currency, n)",
+                  subtotal, discounts, unit_cost, unit_cost_currency, localized, n)",
         &[
             (&order.as_uuid(), Type::UUID),
             (&ids, Type::UUID_ARRAY),
@@ -594,6 +603,7 @@ async fn insert_lines(
             (&shares, Type::TEXT_ARRAY),
             (&costs, Type::INT8_ARRAY),
             (&cost_currencies, Type::TEXT_ARRAY),
+            (&localized, Type::TEXT_ARRAY),
         ],
     )
     .await
@@ -620,7 +630,7 @@ async fn load(client: &impl Queries, ids: &[Uuid]) -> Result<Vec<Order>, RepoErr
                      taxes_included, customer_id, email, subtotal, tax_total, total,
                      financial_status, fulfillment_status, {}, cancel_reason, {},
                      shipping_total, discounts::text AS discounts, discount_total,
-                     address_check::text AS address_check, {}
+                     address_check::text AS address_check, language, {}
                  FROM orders WHERE id = ANY($1)",
                 micros("placed_at"),
                 micros("cancelled_at"),
@@ -641,7 +651,8 @@ async fn load(client: &impl Queries, ids: &[Uuid]) -> Result<Vec<Order>, RepoErr
             "SELECT id, product_id, variant_id, quantity, product_title, variant_title, sku,
                  unit_price, total, tax_rate_ppm, tax_class_id, tax_amount, tax_region_id,
                  fulfilled_quantity, order_id, compare_at_amount, price_list_id, subtotal,
-                 discounts::text AS discounts, unit_cost, unit_cost_currency
+                 discounts::text AS discounts, unit_cost, unit_cost_currency,
+                 localized::text AS localized
              FROM order_lines WHERE order_id = ANY($1) ORDER BY order_id, position",
             &param,
         )
@@ -656,7 +667,8 @@ async fn load(client: &impl Queries, ids: &[Uuid]) -> Result<Vec<Order>, RepoErr
         .query_typed(
             "SELECT group_id, line_ids, option_id, code, name, provider, service, reference,
                  amount, estimate_min_days, estimate_max_days, tax_rate_ppm, tax_class_id,
-                 tax_amount, tax_region_id, order_id, total, discounts::text AS discounts
+                 tax_amount, tax_region_id, order_id, total, discounts::text AS discounts,
+                 localized::text AS localized
              FROM order_shipping_lines WHERE order_id = ANY($1) ORDER BY order_id, position",
             &param,
         )
@@ -748,6 +760,7 @@ fn order_from_db(
         financial_status: financial.parse().map_err(corrupt)?,
         fulfillment_status: fulfillment.parse().map_err(corrupt)?,
         cancelled,
+        language: language_from_db(col(row, "language")?)?,
     };
     Order::restore(snapshot).map_err(corrupt)
 }
@@ -818,6 +831,7 @@ fn shipping_line_from_db(
         total: money(col(line, "total")?)?,
         estimate_days: days("estimate_min_days")?.zip(days("estimate_max_days")?),
         tax,
+        localized: json_from_db(col(line, "localized")?, "order shipping line names")?,
     })
 }
 
@@ -871,6 +885,7 @@ fn line_from_db(
             col(line, "unit_cost")?,
             col::<Option<String>>(line, "unit_cost_currency")?.as_deref(),
         )?,
+        localized: json_from_db(col(line, "localized")?, "order line names")?,
     })
 }
 
@@ -893,6 +908,9 @@ struct OrderDiscountJson {
     value: serde_json::Value,
     target: serde_json::Value,
     amount: i64,
+    /// The title in the order's language; absent where it reads the same.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    localized: Option<LocalizedDiscount>,
 }
 
 fn shares_out(shares: &[DiscountShare]) -> String {
@@ -937,6 +955,7 @@ fn discounts_out(discounts: &[OrderDiscount]) -> String {
             value: d.value.clone(),
             target: d.target.clone(),
             amount: d.amount.amount(),
+            localized: d.localized.clone(),
         })
         .collect();
     serde_json::to_string(&json).unwrap_or_else(|_| "[]".to_string())
@@ -960,6 +979,7 @@ fn discounts_in(
                 value: d.value,
                 target: d.target,
                 amount: money(d.amount)?,
+                localized: d.localized,
             })
         })
         .collect()

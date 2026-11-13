@@ -47,6 +47,7 @@ pub mod stores;
 pub mod suppliers;
 pub mod taxes;
 pub mod transfers;
+pub mod translations;
 pub mod uploads;
 
 use hypha_core::{Stamps, Timestamp};
@@ -238,6 +239,12 @@ macro_rules! route_table {
             [admin, DELETE, "/admin/checkout-rules/{id}", checkout_rules::remove],
             [admin, GET, "/admin/checkout-settings", checkout_rules::settings],
             [admin, PATCH, "/admin/checkout-settings", checkout_rules::update_settings],
+            [admin, GET, "/admin/translations", translations::list],
+            [admin, GET, "/admin/translations/progress", translations::progress],
+            [admin, GET, "/admin/translations/{kind}/{id}", translations::fetch],
+            [admin, PUT, "/admin/translations/{kind}/{id}/{language}", translations::put],
+            [admin, PATCH, "/admin/translations/{kind}/{id}/{language}", translations::patch],
+            [admin, DELETE, "/admin/translations/{kind}/{id}/{language}", translations::remove],
             // discounts and their codes
             [admin, GET, "/admin/discounts", discounts::list],
             [admin, POST, "/admin/discounts", discounts::create],
@@ -479,6 +486,7 @@ macro_rules! route_table {
             [storefront, DELETE, "/storefront/carts/{id}/lines/{variant}", carts::remove_line],
             [storefront, PUT, "/storefront/carts/{id}/email", carts::set_email],
             [storefront, PUT, "/storefront/carts/{id}/marketing", carts::set_marketing],
+            [storefront, PUT, "/storefront/carts/{id}/language", carts::set_language],
             [storefront, POST, "/storefront/carts/{id}/discount-codes", carts::add_code],
             [storefront, DELETE, "/storefront/carts/{id}/discount-codes/{code}", carts::remove_code],
             [storefront, PUT, "/storefront/carts/{id}/shipping-address", carts::set_address],

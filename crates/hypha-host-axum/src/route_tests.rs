@@ -37,6 +37,14 @@ mod addresses;
 mod agents;
 // Checkout rules and the messages they put on carts.
 mod checkout_rules;
+// Translations of the store's content.
+mod translations;
+// The language storefront reads are answered in.
+mod languages;
+// Custom field values in other languages.
+mod value_translations;
+// Carts, orders and customers in a language.
+mod cart_language;
 // Apps installed through OAuth, and personal data.
 mod app_extensions;
 // Apps' custom fields, synced with their manifests.
@@ -2650,6 +2658,65 @@ async fn the_owner_logs_in_sees_themselves_and_logs_out() {
         (status, code(&body)),
         (StatusCode::UNAUTHORIZED, "invalid_token")
     );
+}
+
+#[tokio::test]
+async fn staff_pick_the_admins_language_and_clear_it() {
+    let app = app().await;
+    let session = owner_session(&app).await;
+    let (_, me) = send_as(&app, &session, "GET", "/admin/me", None).await;
+    assert_eq!(me["user"]["language"], Value::Null);
+
+    // Any well-formed tag, in canonical case: the store publishes no languages here.
+    let (status, me) = send_as(
+        &app,
+        &session,
+        "PATCH",
+        "/admin/me",
+        Some(r#"{"language":"sr-latn"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(me["user"]["language"], "sr-Latn");
+    let (_, me) = send_as(&app, &session, "GET", "/admin/me", None).await;
+    assert_eq!(me["user"]["language"], "sr-Latn");
+    let (_, users) = send(&app, "GET", "/admin/users", None).await;
+    assert_eq!(users["items"][0]["language"], "sr-Latn");
+
+    // Absent keeps it.
+    let (_, me) = send_as(
+        &app,
+        &session,
+        "PATCH",
+        "/admin/me",
+        Some(r#"{"name":"Ana"}"#),
+    )
+    .await;
+    assert_eq!(me["user"]["language"], "sr-Latn");
+
+    let (status, json) = send_as(
+        &app,
+        &session,
+        "PATCH",
+        "/admin/me",
+        Some(r#"{"language":"not a tag"}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "invalid_language")
+    );
+
+    let (status, me) = send_as(
+        &app,
+        &session,
+        "PATCH",
+        "/admin/me",
+        Some(r#"{"language":null}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(me["user"]["language"], Value::Null);
 }
 
 #[tokio::test]
@@ -5783,8 +5850,208 @@ async fn a_product_page_is_one_read_priced_in_the_shoppers_country() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         countries["items"],
-        json!([{"country": "HR", "name": "Croatia", "market": market, "currency": "EUR", "minor_units": 2, "prices_include_tax": false}])
+        json!([{"country": "HR", "name": "Croatia", "market": market, "currency": "EUR", "minor_units": 2, "prices_include_tax": false, "languages": ["en"]}])
     );
+}
+
+#[tokio::test]
+async fn a_store_lists_languages_and_markets_offer_the_published_ones() {
+    let app = app().await;
+    let (market, _) = market_selling_a_mug(&app).await;
+    let market_url = format!("/admin/markets/{market}");
+    let shop = publishable(&app).await;
+    let (_, store) = send(&app, "GET", "/admin/store", None).await;
+    assert_eq!(store["languages"], json!([]));
+    let (_, fetched) = send(&app, "GET", &market_url, None).await;
+    assert_eq!(fetched["languages"], json!([]));
+
+    // Tags are stored in canonical case, in the order sent; `published` is false unless
+    // said.
+    let body = r#"{"languages":[{"language":"DE","published":true},{"language":"sr-latn","published":true},{"language":"fr"}]}"#;
+    let (status, store) = send(&app, "PATCH", "/admin/store", Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{store}");
+    let three = json!([
+        {"language": "de", "published": true},
+        {"language": "sr-Latn", "published": true},
+        {"language": "fr", "published": false}
+    ]);
+    assert_eq!(store["languages"], three);
+    let (_, store) = send(&app, "GET", "/admin/store", None).await;
+    assert_eq!(store["languages"], three);
+    let event = outbox_events(&app)
+        .await
+        .into_iter()
+        .rfind(|e| e.event_type == "store.updated")
+        .unwrap();
+    assert_eq!(event.data["fields"], json!(["languages"]));
+    let (_, public) = send_as(&app, &shop, "GET", "/storefront/store", None).await;
+    assert!(
+        public.get("languages").is_none(),
+        "a storefront reads languages per country"
+    );
+
+    for (body, status, want) in [
+        (
+            r#"{"languages":[{"language":"de_DE","published":true}]}"#,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_language",
+        ),
+        (
+            r#"{"languages":[{"language":"en","published":true}]}"#,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "language_is_default",
+        ),
+        (
+            r#"{"languages":[{"language":"de"},{"language":"DE"}]}"#,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "duplicate_language",
+        ),
+        (
+            r#"{"languages":null}"#,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_body",
+        ),
+        (
+            r#"{"languages":[{"language":"de","primary":true}]}"#,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_body",
+        ),
+        (
+            r#"{"default_language":"de"}"#,
+            StatusCode::CONFLICT,
+            "default_language_listed",
+        ),
+    ] {
+        let (got, error) = send(&app, "PATCH", "/admin/store", Some(body)).await;
+        assert_eq!((got, code(&error)), (status, want), "{body}");
+    }
+    let many: Vec<Value> = (b'a'..=b'u')
+        .map(|c| json!({"language": format!("a{}", c as char)}))
+        .collect();
+    let body = json!({ "languages": many }).to_string();
+    let (status, error) = send(&app, "PATCH", "/admin/store", Some(&body)).await;
+    assert_eq!(
+        (status, code(&error)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "too_many_languages")
+    );
+
+    // A market offers the store's default or published languages, in its own order.
+    let countries = async || {
+        let (_, countries) = send_as(&app, &shop, "GET", "/storefront/countries", None).await;
+        countries["items"][0]["languages"].clone()
+    };
+    assert_eq!(countries().await, json!(["en"]), "the store's default");
+    let (status, changed) = send(
+        &app,
+        "PATCH",
+        &market_url,
+        Some(r#"{"languages":["DE","en"]}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, &changed["languages"]),
+        (StatusCode::OK, &json!(["de", "en"]))
+    );
+    let (_, listed) = send(&app, "GET", "/admin/markets", None).await;
+    assert_eq!(listed["items"][0]["languages"], json!(["de", "en"]));
+    assert_eq!(countries().await, json!(["de", "en"]));
+    let event = outbox_events(&app)
+        .await
+        .into_iter()
+        .rfind(|e| e.event_type == "market.changed")
+        .unwrap();
+    assert_eq!(event.data["fields"], json!(["languages"]));
+
+    for (body, want) in [
+        (r#"{"languages":["de","fr"]}"#, "language_not_offered"),
+        (r#"{"languages":["de","hr"]}"#, "language_not_offered"),
+        (r#"{"languages":["de","de"]}"#, "duplicate_language"),
+        (r#"{"languages":["de_DE"]}"#, "invalid_language"),
+        (r#"{"languages":null}"#, "invalid_body"),
+    ] {
+        let (status, error) = send(&app, "PATCH", &market_url, Some(body)).await;
+        assert_eq!(
+            (status, code(&error)),
+            (StatusCode::UNPROCESSABLE_ENTITY, want),
+            "{body}"
+        );
+    }
+    let (_, fetched) = send(&app, "GET", &market_url, None).await;
+    assert_eq!(fetched["languages"], json!(["de", "en"]), "nothing changed");
+
+    // What the market offers, the store keeps offering: not removed, not unpublished,
+    // and the default it names not replaced.
+    let in_use = |languages: Value| json!({"markets": [{"id": market, "languages": languages}]});
+    for (body, languages) in [
+        (
+            r#"{"languages":[{"language":"sr-Latn","published":true}]}"#,
+            json!(["de"]),
+        ),
+        (
+            r#"{"languages":[{"language":"de","published":false},{"language":"sr-Latn","published":true}]}"#,
+            json!(["de"]),
+        ),
+        (r#"{"default_language":"hr"}"#, json!(["en"])),
+        (
+            r#"{"default_language":"hr","languages":[]}"#,
+            json!(["de", "en"]),
+        ),
+    ] {
+        let (status, error) = send(&app, "PATCH", "/admin/store", Some(body)).await;
+        assert_eq!(
+            (status, code(&error), &error["details"]),
+            (StatusCode::CONFLICT, "language_in_use", &in_use(languages)),
+            "{body}"
+        );
+    }
+    let (_, store) = send(&app, "GET", "/admin/store", None).await;
+    assert_eq!(
+        (&store["default_language"], &store["languages"]),
+        (&json!("en"), &three),
+        "nothing changed"
+    );
+    // Which markets are in the way is for callers who may read markets.
+    let stores_only = key(
+        &app,
+        json!({"kind": "secret", "name": "Store settings", "scopes": ["stores:write"]}),
+    )
+    .await;
+    let (status, error) = send_as(
+        &app,
+        &stores_only,
+        "PATCH",
+        "/admin/store",
+        Some(r#"{"languages":[]}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&error), &error["details"]),
+        (StatusCode::CONFLICT, "language_in_use", &Value::Null)
+    );
+
+    // Languages no market names change freely; the default and another swap in one
+    // request, since the market is still offered both.
+    let body = r#"{"languages":[{"language":"de","published":true}]}"#;
+    let (status, _) = send(&app, "PATCH", "/admin/store", Some(body)).await;
+    assert_eq!(status, StatusCode::OK);
+    let body = r#"{"default_language":"de","languages":[{"language":"en","published":true}]}"#;
+    let (status, store) = send(&app, "PATCH", "/admin/store", Some(body)).await;
+    assert_eq!(
+        (status, &store["default_language"], &store["languages"]),
+        (
+            StatusCode::OK,
+            &json!("de"),
+            &json!([{"language": "en", "published": true}])
+        )
+    );
+    assert_eq!(countries().await, json!(["de", "en"]));
+
+    // Once the market lists none, it's the store's default alone and nothing is in use.
+    let (status, _) = send(&app, "PATCH", &market_url, Some(r#"{"languages":[]}"#)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(countries().await, json!(["de"]));
+    let (status, store) = send(&app, "PATCH", "/admin/store", Some(r#"{"languages":[]}"#)).await;
+    assert_eq!((status, &store["languages"]), (StatusCode::OK, &json!([])));
 }
 
 #[tokio::test]
@@ -6475,6 +6742,199 @@ async fn templates_are_listed_read_saved_checked_and_reverted() {
 }
 
 #[tokio::test]
+async fn templates_in_a_language_are_read_saved_listed_and_reverted() {
+    let app = app().await;
+    let (status, store) = send(
+        &app,
+        "PATCH",
+        "/admin/store",
+        Some(r#"{"languages":[{"language":"sr-Latn","published":true}]}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{store}");
+    let path = "/admin/notification-templates/order_confirmation";
+    let serbian = format!("{path}?language=sr-Latn");
+
+    // Nothing saved for Serbian: the build's Serbian default, and its sample in Serbian.
+    let (status, template) = send(&app, "GET", &serbian, None).await;
+    assert_eq!(status, StatusCode::OK, "{template}");
+    assert_eq!(
+        (
+            &template["language"],
+            &template["customized"],
+            &template["sources_language"],
+            &template["sources_origin"]
+        ),
+        (
+            &json!("sr-Latn"),
+            &json!(false),
+            &json!("sr-Latn"),
+            &json!("default")
+        )
+    );
+    assert!(
+        template["subject"]
+            .as_str()
+            .unwrap()
+            .starts_with("Porudžbina"),
+        "{template}"
+    );
+    assert_eq!(template["variables"]["language"], "sr-Latn");
+    assert_eq!(
+        template["variables"]["order"]["total"]["formatted"],
+        "102,10\u{a0}€"
+    );
+    // Staff emails have English defaults only.
+    let (_, staff) = send(
+        &app,
+        "GET",
+        "/admin/notification-templates/staff_new_order?language=sr-Latn",
+        None,
+    )
+    .await;
+    assert_eq!(staff["sources_language"], "en", "{staff}");
+    // The default language named is the default language's template.
+    let (status, english) = send(&app, "GET", &format!("{path}?language=en"), None).await;
+    assert_eq!(
+        (status, &english["language"]),
+        (StatusCode::OK, &Value::Null)
+    );
+    for (query, status_code, error) in [
+        (
+            "fr",
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "language_not_listed",
+        ),
+        (
+            "not+a+tag",
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_language",
+        ),
+    ] {
+        let (status, json) = send(&app, "GET", &format!("{path}?language={query}"), None).await;
+        assert_eq!((status, code(&json)), (status_code, error), "{query}");
+    }
+    let (status, json) = send(&app, "GET", &format!("{path}?lang=sr-Latn"), None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::BAD_REQUEST, "invalid_query")
+    );
+
+    let body = json!({
+        "subject": "Hvala: {{ order.number }}, {{ order.total.formatted }}",
+        "html": "{% extends \"layout\" %}{% block content %}<p>{{ order.number }}</p>{% endblock %}",
+    });
+    let mut with_enabled = body.clone();
+    with_enabled["enabled"] = json!(false);
+    let (status, json) = send(&app, "PUT", &serbian, Some(&with_enabled.to_string())).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "enabled_not_per_language")
+    );
+    let (status, saved) = send(&app, "PUT", &serbian, Some(&body.to_string())).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(
+        (
+            &saved["customized"],
+            &saved["sources_origin"],
+            &saved["language"]
+        ),
+        (&json!(true), &json!("merchant"), &json!("sr-Latn"))
+    );
+    let (_, english) = send(&app, "GET", path, None).await;
+    assert_eq!(english["customized"], false, "the default language's stays");
+
+    let (_, list) = send(&app, "GET", "/admin/notification-templates", None).await;
+    assert_eq!(list["items"][1]["key"], "order_confirmation");
+    assert_eq!(list["items"][1]["languages"], json!(["sr-Latn"]));
+    assert_eq!(list["items"][1]["customized"], false);
+    assert_eq!(list["items"][2]["languages"], json!([]));
+
+    let mut preview = body.clone();
+    preview["language"] = json!("sr-Latn");
+    let (status, rendered) = send(
+        &app,
+        "POST",
+        &format!("{path}/preview"),
+        Some(&preview.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{rendered}");
+    assert_eq!(rendered["subject"], "Hvala: #1001, 102,10 €");
+    assert!(
+        rendered["html"]
+            .as_str()
+            .unwrap()
+            .contains(r#"lang="sr-Latn""#)
+    );
+    preview["language"] = json!("fr");
+    let (status, json) = send(
+        &app,
+        "POST",
+        &format!("{path}/preview"),
+        Some(&preview.to_string()),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "language_not_listed")
+    );
+
+    let (status, reverted) = send(&app, "DELETE", &serbian, None).await;
+    assert_eq!(status, StatusCode::OK, "{reverted}");
+    assert_eq!(
+        (&reverted["customized"], &reverted["sources_origin"]),
+        (&json!(false), &json!("default"))
+    );
+    let (_, list) = send(&app, "GET", "/admin/notification-templates", None).await;
+    assert_eq!(list["items"][1]["languages"], json!([]));
+}
+
+/// A template saved for another language fixes the default language like a translation,
+/// and goes with its language when the store drops it.
+#[tokio::test]
+async fn a_templates_language_is_held_to_the_stores() {
+    let app = app().await;
+    let languages = r#"{"languages":[{"language":"sr-Latn","published":true},{"language":"de"}]}"#;
+    let (status, _) = send(&app, "PATCH", "/admin/store", Some(languages)).await;
+    assert_eq!(status, StatusCode::OK);
+    let body = json!({
+        "subject": "Hvala: {{ order.number }}",
+        "html": "{% extends \"layout\" %}{% block content %}<p>x</p>{% endblock %}",
+    })
+    .to_string();
+    for language in ["sr-Latn", "de"] {
+        let path = format!("/admin/notification-templates/order_shipped?language={language}");
+        let (status, json) = send(&app, "PUT", &path, Some(&body)).await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+    }
+    let (status, json) = send(
+        &app,
+        "PATCH",
+        "/admin/store",
+        Some(r#"{"default_language":"sr-Latn","languages":[{"language":"en"},{"language":"de"}]}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "default_language_in_use")
+    );
+
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        "/admin/store",
+        Some(r#"{"languages":[{"language":"sr-Latn","published":true}]}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    let (_, list) = send(&app, "GET", "/admin/notification-templates", None).await;
+    assert_eq!(list["items"][2]["key"], "order_shipped");
+    assert_eq!(list["items"][2]["languages"], json!(["sr-Latn"]));
+}
+
+#[tokio::test]
 async fn a_template_is_turned_off_and_on_without_its_sources() {
     let app = app().await;
     let path = "/admin/notification-templates/order_shipped";
@@ -7106,6 +7566,30 @@ async fn an_app_collects_a_carts_payment_and_its_report_places_the_order() {
         points,
         ["payments.refund", "payments.capture", "payments.start"]
     );
+}
+
+#[tokio::test]
+async fn a_report_completes_its_checkout_on_the_one_connection_its_request_holds() {
+    // A pool of one: a report taking a second connection while it holds the first would
+    // wait for itself until the pool gave up, and place no order.
+    let app = app_configured("[database]\nmax_connections = 1\npool_timeout = \"2s\"").await;
+    let (base, _, _) = fake_app(&[("/start", 200, card_widget())]).await;
+    let (pk, cart_path) = cart_paying_by_card(&app, &base).await;
+    let (status, started) = send_as(
+        &app,
+        &pk,
+        "POST",
+        &format!("{cart_path}/payment"),
+        Some(r#"{"return_url":"https://shop.example/back"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    let payment = started["payment"].as_str().unwrap().to_string();
+
+    let (status, json) = report(&app, &payment, "evt_1", json!({"type": "authorized"})).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert!(json["order"].is_string(), "the order is placed: {json}");
+    assert_eq!(json["financial_status"], "authorized");
 }
 
 #[tokio::test]

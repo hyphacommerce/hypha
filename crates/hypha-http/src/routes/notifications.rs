@@ -2,25 +2,28 @@
 //! defaults), previews and test sends, and the record of every message with resending.
 
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_core::{AssetId, EventId, NotificationId, OrderId, PurchaseOrderId, Scope, Stamped};
-use hypha_mail::{MailContext, MailEnv, TemplateInput, UpdateSettings};
+use hypha_core::{
+    AssetId, EventId, Language, NotificationId, OrderId, PurchaseOrderId, Scope, Stamped,
+};
+use hypha_mail::{Locale, MailContext, MailEnv, TemplateInput, UpdateSettings};
 use hypha_media::{AssetRepo, HasAssets};
 use hypha_notifications::{
-    Audience, EffectiveTemplate, Notification, NotificationFilter, NotificationSettings,
-    NotificationStatus, Rendered, TemplateError, TemplateKey, TemplatePart, TemplateProblem,
-    get_notification, get_notification_settings, get_notification_template,
-    list_notification_templates, list_notifications, revert_notification_template,
-    set_notification_template_enabled,
+    Audience, EffectiveTemplate, ListedTemplate, Notification, NotificationFilter,
+    NotificationSettings, NotificationStatus, Origin, Rendered, TemplateError, TemplateKey,
+    TemplateLanguages, TemplatePart, TemplateProblem, get_notification, get_notification_settings,
+    get_notification_template, list_notification_templates, list_notifications,
+    revert_notification_template, set_notification_template_enabled,
 };
 use serde::{Deserialize, Serialize};
 
 use super::{
     page::{ListQuery, PageParams, PageResponse},
     rfc3339, stamp_times,
+    stores::store_as_system,
 };
 use crate::{
     error::ApiError,
-    extract::{Caller, JsonBody, PathId},
+    extract::{Caller, JsonBody, PathId, Query},
     patch,
     redact::{self, Family, Redacted},
     state::{SharedState, Storage},
@@ -306,6 +309,75 @@ pub async fn update_settings<S: Storage>(
 
 // ---------- templates ----------
 
+/// The store's languages, read as the system: editing templates needs `notifications:*`,
+/// not `stores:read`.
+struct StoreLanguages {
+    default: Language,
+    others: Vec<Language>,
+}
+
+impl StoreLanguages {
+    fn templates(&self) -> TemplateLanguages<'_> {
+        TemplateLanguages {
+            default: &self.default,
+            others: &self.others,
+        }
+    }
+}
+
+async fn store_languages<S: Storage>(
+    state: &SharedState<S>,
+    ports: &S::Ports<'_>,
+) -> Result<StoreLanguages, ApiError> {
+    let store = store_as_system(state, ports).await?;
+    Ok(StoreLanguages {
+        default: store.default_language().clone(),
+        others: store
+            .languages()
+            .iter()
+            .map(|l| l.language.clone())
+            .collect(),
+    })
+}
+
+/// Which language of a template a request is about.
+#[derive(Deserialize, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub struct TemplateLanguageParams {
+    /// One of the store's languages (a BCP 47 tag, `sr-Latn`, `de-AT`); absent, or the
+    /// store's default language, is the default language's template. Another language's
+    /// template is the merchant's for it, else what an email in it sends: their template
+    /// for it without its region, the build's default in it (or without its region), then
+    /// the default language's. A language the store doesn't have is `422
+    /// language_not_listed`.
+    language: Option<String>,
+}
+
+impl TemplateLanguageParams {
+    fn language(&self) -> Result<Option<Language>, ApiError> {
+        parse_language(self.language.as_deref())
+    }
+}
+
+/// A template's language as a request names it: a tag that isn't one is `422
+/// invalid_language`.
+fn parse_language(tag: Option<&str>) -> Result<Option<Language>, ApiError> {
+    Ok(tag.map(Language::new).transpose()?)
+}
+
+/// Where a template's sources come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[schema(as = NotificationTemplateOrigin)]
+#[serde(rename_all = "snake_case")]
+pub enum OriginDto {
+    /// The merchant's: saved for this language, or inherited from the one in
+    /// `sources_language`.
+    Merchant,
+    /// The build's default.
+    Default,
+}
+
 /// A template in the list.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct NotificationTemplateSummary {
@@ -314,8 +386,8 @@ pub struct NotificationTemplateSummary {
     audience: Option<AudienceDto>,
     /// Whether the sources are the merchant's (else the build's default).
     customized: bool,
-    /// Whether its messages are sent. A template that's off records each message as
-    /// `skipped`.
+    /// Whether its messages are sent, in every language. A template that's off records
+    /// each message as `skipped`.
     enabled: bool,
     /// The layout, invites and password resets can't be turned off.
     can_disable: bool,
@@ -337,13 +409,34 @@ impl From<&EffectiveTemplate> for NotificationTemplateSummary {
     }
 }
 
+/// A template in the list: in the store's default language, with the other languages the
+/// merchant saved it in.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct NotificationTemplateListItem {
+    #[serde(flatten)]
+    summary: NotificationTemplateSummary,
+    /// The store's other languages with a template of the merchant's own for this key
+    /// (`?language=` reads one).
+    languages: Vec<String>,
+}
+
+impl From<&ListedTemplate> for NotificationTemplateListItem {
+    fn from(l: &ListedTemplate) -> Self {
+        Self {
+            summary: (&l.template).into(),
+            languages: l.languages.iter().map(|l| l.to_string()).collect(),
+        }
+    }
+}
+
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct NotificationTemplateList {
     /// Every template: the layout, the buyer's, then the staff's.
-    items: Vec<NotificationTemplateSummary>,
+    items: Vec<NotificationTemplateListItem>,
 }
 
-/// Every template, customized or default.
+/// Every template in the store's default language, customized or default, and the other
+/// languages each is customized in.
 #[utoipa::path(
     get,
     path = "/admin/notification-templates",
@@ -355,7 +448,9 @@ pub async fn list_templates<S: Storage>(
     caller: Caller,
 ) -> Result<Json<NotificationTemplateList>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let templates = list_notification_templates(&ctx, &ports).await?;
+    ctx.require(Scope::NotificationsRead)?;
+    let languages = store_languages(&state, &ports).await?;
+    let templates = list_notification_templates(&ctx, &ports, &languages.default).await?;
     Ok(Json(NotificationTemplateList {
         items: templates.iter().map(Into::into).collect(),
     }))
@@ -366,16 +461,24 @@ pub async fn list_templates<S: Storage>(
 pub struct NotificationTemplateResponse {
     #[serde(flatten)]
     summary: NotificationTemplateSummary,
-    /// Jinja; empty for the layout. The merchant's when `customized`, else the default.
+    /// The language this is the template of; `null`: the store's default language.
+    language: Option<String>,
+    /// The language `subject`, `html` and `text` are written in: this one's when
+    /// `customized`, else the one its emails fall back to.
+    sources_language: String,
+    /// Where `subject`, `html` and `text` come from.
+    sources_origin: OriginDto,
+    /// Jinja; empty for the layout. The merchant's when `customized`, else what emails
+    /// in this language send.
     subject: String,
     /// Jinja HTML. A message starts with `{% extends "layout" %}` and fills
     /// `{% block preheader %}` and `{% block content %}`.
     html: String,
     /// Jinja plain text; `null`: the text is made from the HTML.
     text: Option<String>,
-    /// The template's context, filled with a made-up order and the store's branding:
-    /// every variable it can print (money as `{amount, currency, formatted}`, times as
-    /// `{iso, formatted}`), for the editor's variable list.
+    /// The template's context, filled with a made-up order in this language and the
+    /// store's branding: every variable it can print (money as `{amount, currency,
+    /// formatted}`, times as `{iso, formatted}`), for the editor's variable list.
     #[schema(value_type = Object)]
     variables: serde_json::Value,
 }
@@ -384,11 +487,23 @@ async fn template_response<S: Storage>(
     state: &SharedState<S>,
     ports: &S::Ports<'_>,
     template: &EffectiveTemplate,
+    languages: &StoreLanguages,
 ) -> Result<NotificationTemplateResponse, ApiError> {
     let branding = hypha_mail::branding(&*state.mail, ports).await?;
-    let sample = MailContext::sample(template.key).with_branding(branding.shop, branding.brand);
+    let reader = template.locale.as_ref().unwrap_or(&languages.default);
+    let sources_language = template.sources_language(&languages.default);
+    // Formatted as this language's emails are (and its previews), by the sources' language.
+    let sample = MailContext::sample_in(template.key, &Locale::writing(reader, sources_language))
+        .with_branding(branding.shop, branding.brand);
+    let sources_origin = match (template.customized, template.origin()) {
+        (true, _) | (false, Origin::Merchant { .. }) => OriginDto::Merchant,
+        (false, Origin::Default { .. }) => OriginDto::Default,
+    };
     Ok(NotificationTemplateResponse {
         summary: template.into(),
+        language: template.locale.as_ref().map(ToString::to_string),
+        sources_language: sources_language.to_string(),
+        sources_origin,
         subject: template.sources.subject().to_string(),
         html: template.sources.html().to_string(),
         text: template.sources.text().map(str::to_string),
@@ -396,12 +511,15 @@ async fn template_response<S: Storage>(
     })
 }
 
-/// One template: its sources in effect, whether it's customized and on, and its
-/// variables.
+/// One template in one language: its sources in effect, whether it's customized and on,
+/// and its variables.
 #[utoipa::path(
     get,
     path = "/admin/notification-templates/{key}",
-    params(("key" = String, Path, pattern = "^[a-z_]+$", example = "order_confirmation")),
+    params(
+        ("key" = String, Path, pattern = "^[a-z_]+$", example = "order_confirmation"),
+        TemplateLanguageParams,
+    ),
     responses((status = 200, description = "OK", body = NotificationTemplateResponse)),
     extensions(("x-hypha-scopes" = json!(["notifications:read"]))),
 )]
@@ -409,11 +527,19 @@ pub async fn fetch_template<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(key): PathId<String>,
+    query: Query<TemplateLanguageParams>,
 ) -> Result<Json<NotificationTemplateResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let key = template_key(&key)?;
-    let template = get_notification_template(&ctx, &ports, key).await?;
-    Ok(Json(template_response(&state, &ports, &template).await?))
+    let language = query.parse()?.language()?;
+    ctx.require(Scope::NotificationsRead)?;
+    let languages = store_languages(&state, &ports).await?;
+    let template =
+        get_notification_template(&ctx, &ports, key, language.as_ref(), languages.templates())
+            .await?;
+    Ok(Json(
+        template_response(&state, &ports, &template, &languages).await?,
+    ))
 }
 
 /// A template's sources (all of them: this replaces the stored ones).
@@ -429,20 +555,24 @@ pub struct SaveNotificationTemplateRequest {
     #[serde(default)]
     #[schema(required = false)]
     text: Option<String>,
-    /// Absent keeps whether it's on.
+    /// Absent keeps whether it's on. Set for every language at once: with a `language`
+    /// it's `422 enabled_not_per_language`.
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = bool, required = false)]
     enabled: Option<bool>,
 }
 
-/// Saves a template. The sources must parse and render against the template's sample
-/// in the layout in effect (`template_invalid` with `details: {part, line, message}`);
-/// saving the layout renders every message in it. Turning off one that can't be is
-/// `template_required`.
+/// Saves a template for a language (none: the store's default). The sources must parse
+/// and render against the template's sample in that language, in the layout in effect
+/// for it (`template_invalid` with `details: {part, line, message}`); saving the layout
+/// renders every message in it. Turning off one that can't be is `template_required`.
 #[utoipa::path(
     put,
     path = "/admin/notification-templates/{key}",
-    params(("key" = String, Path, pattern = "^[a-z_]+$", example = "order_confirmation")),
+    params(
+        ("key" = String, Path, pattern = "^[a-z_]+$", example = "order_confirmation"),
+        TemplateLanguageParams,
+    ),
     request_body = SaveNotificationTemplateRequest,
     responses((status = 200, description = "OK", body = NotificationTemplateResponse)),
     extensions(("x-hypha-scopes" = json!(["notifications:write"]))),
@@ -451,22 +581,33 @@ pub async fn save_template<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(key): PathId<String>,
+    query: Query<TemplateLanguageParams>,
     body: JsonBody<SaveNotificationTemplateRequest>,
 ) -> Result<Json<NotificationTemplateResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let key = template_key(&key)?;
-    let enabled = match req.enabled {
-        Some(enabled) => enabled,
-        None => get_notification_template(&ctx, &ports, key).await?.enabled,
-    };
+    let language = query.parse()?.language()?;
+    ctx.require(Scope::NotificationsWrite)?;
+    let languages = store_languages(&state, &ports).await?;
     let input = TemplateInput {
         subject: req.subject,
         html: req.html,
         text: req.text,
     };
-    let template = hypha_mail::save_template(&ctx, &ports, key, input, enabled).await?;
-    Ok(Json(template_response(&state, &ports, &template).await?))
+    let template = hypha_mail::save_template(
+        &ctx,
+        &ports,
+        key,
+        language.as_ref(),
+        languages.templates(),
+        input,
+        req.enabled,
+    )
+    .await?;
+    Ok(Json(
+        template_response(&state, &ports, &template, &languages).await?,
+    ))
 }
 
 /// Whether a template is sent, apart from its sources.
@@ -476,8 +617,9 @@ pub struct SetNotificationTemplateRequest {
     enabled: bool,
 }
 
-/// Turns a template on or off, keeping its sources: a default stays a default (and
-/// gets later improvements). Turning off one that can't be is `template_required`.
+/// Turns a template on or off in every language, keeping its sources: a default stays a
+/// default (and gets later improvements). Turning off one that can't be is
+/// `template_required`. Answers the default language's template.
 #[utoipa::path(
     patch,
     path = "/admin/notification-templates/{key}",
@@ -495,15 +637,25 @@ pub async fn set_template_enabled<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let key = template_key(&key)?;
-    let template = set_notification_template_enabled(&ctx, &ports, key, req.enabled).await?;
-    Ok(Json(template_response(&state, &ports, &template).await?))
+    ctx.require(Scope::NotificationsWrite)?;
+    let languages = store_languages(&state, &ports).await?;
+    let template =
+        set_notification_template_enabled(&ctx, &ports, key, req.enabled, &languages.default)
+            .await?;
+    Ok(Json(
+        template_response(&state, &ports, &template, &languages).await?,
+    ))
 }
 
-/// Goes back to the default's sources, keeping whether it's on.
+/// Drops the merchant's sources for a language (none: the store's default), keeping
+/// whether it's on: emails in it send what they fall back to again.
 #[utoipa::path(
     delete,
     path = "/admin/notification-templates/{key}",
-    params(("key" = String, Path, pattern = "^[a-z_]+$", example = "order_confirmation")),
+    params(
+        ("key" = String, Path, pattern = "^[a-z_]+$", example = "order_confirmation"),
+        TemplateLanguageParams,
+    ),
     responses((status = 200, description = "OK", body = NotificationTemplateResponse)),
     extensions(("x-hypha-scopes" = json!(["notifications:write"]))),
 )]
@@ -511,11 +663,19 @@ pub async fn revert_template<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller,
     PathId(key): PathId<String>,
+    query: Query<TemplateLanguageParams>,
 ) -> Result<Json<NotificationTemplateResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let key = template_key(&key)?;
-    let template = revert_notification_template(&ctx, &ports, key).await?;
-    Ok(Json(template_response(&state, &ports, &template).await?))
+    let language = query.parse()?.language()?;
+    ctx.require(Scope::NotificationsWrite)?;
+    let languages = store_languages(&state, &ports).await?;
+    let template =
+        revert_notification_template(&ctx, &ports, key, language.as_ref(), languages.templates())
+            .await?;
+    Ok(Json(
+        template_response(&state, &ports, &template, &languages).await?,
+    ))
 }
 
 /// Unsaved sources to render.
@@ -536,18 +696,26 @@ pub struct PreviewNotificationRequest {
     #[serde(default)]
     #[schema(required = false)]
     order: Option<OrderId>,
+    /// The language the sources are written for (a BCP 47 tag, one of the store's):
+    /// rendered as that language's emails send, in its layout, with money and dates
+    /// written the way of the template's `sources_language` (a language still sending
+    /// another's sources keeps their formats). Absent: the store's default.
+    #[serde(default)]
+    #[schema(required = false)]
+    language: Option<String>,
 }
 
 impl PreviewNotificationRequest {
-    fn into_parts(self) -> (TemplateInput, Option<OrderId>) {
-        (
+    fn into_parts(self) -> Result<(TemplateInput, Option<OrderId>, Option<Language>), ApiError> {
+        Ok((
             TemplateInput {
                 subject: self.subject,
                 html: self.html,
                 text: self.text,
             },
             self.order,
-        )
+            parse_language(self.language.as_deref())?,
+        ))
     }
 }
 
@@ -588,13 +756,22 @@ pub async fn preview<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let key = template_key(&key)?;
-    let (input, order) = req.into_parts();
+    let (input, order, language) = req.into_parts()?;
     // A preview of an order's email shows the buyer's details: only for callers who may see
     // all of them.
     if order.is_some() {
         redact::require_fields(&ctx, &Scope::CUSTOMER_DATA)?;
     }
-    let rendered = hypha_mail::preview(&ctx, &*state.mail, &ports, key, input, order).await?;
+    let rendered = hypha_mail::preview(
+        &ctx,
+        &*state.mail,
+        &ports,
+        key,
+        input,
+        order,
+        language.as_ref(),
+    )
+    .await?;
     Ok(Json(rendered.into()))
 }
 
@@ -624,8 +801,17 @@ pub async fn send_test<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let key = template_key(&key)?;
-    let (input, order) = req.into_parts();
-    let to = hypha_mail::send_test(&ctx, &*state.mail, &ports, key, input, order).await?;
+    let (input, order, language) = req.into_parts()?;
+    let to = hypha_mail::send_test(
+        &ctx,
+        &*state.mail,
+        &ports,
+        key,
+        input,
+        order,
+        language.as_ref(),
+    )
+    .await?;
     Ok(Json(TestNotificationResponse {
         sent_to: to.to_string(),
     }))

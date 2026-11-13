@@ -167,6 +167,45 @@ fn the_shape_problem_names_the_example() {
 }
 
 #[test]
+fn the_shape_problem_gives_the_example_as_a_param() {
+    let Err(AddressError::Invalid(found)) = Formats.validate(us(Some("CA"), Some("1"))) else {
+        panic!("expected problems");
+    };
+    assert_eq!(
+        found[0].params,
+        MessageParams {
+            example: Some("90210".to_string()),
+            ..MessageParams::field(AddressField::PostalCode)
+        }
+    );
+}
+
+#[test]
+fn a_mismatch_names_the_region_as_params() {
+    let Err(AddressError::Invalid(found)) = Formats.validate(us(Some("NY"), Some("94043"))) else {
+        panic!("expected problems");
+    };
+    assert_eq!(
+        (
+            found[0].params.region.as_deref(),
+            found[0].params.region_name.as_deref()
+        ),
+        (Some("NY"), Some("New York"))
+    );
+}
+
+#[test]
+fn a_missing_region_names_its_field_as_params() {
+    let Err(AddressError::Invalid(found)) = Formats.validate(us(None, Some("94043"))) else {
+        panic!("expected problems");
+    };
+    assert_eq!(
+        found[0].params,
+        MessageParams::field(AddressField::Province)
+    );
+}
+
+#[test]
 fn a_postal_code_is_upper_cased_with_spaces_collapsed() {
     let address = checked(AddressParts {
         postal_code: Some(" e2   7rg ".to_string()),
@@ -334,4 +373,22 @@ fn a_country_worldwide_lacks_gets_the_common_form() {
         assert_eq!(Form::of(antarctica).rows(), OTHER.rows);
         assert!(problems(parts("AQ")).is_empty());
     }
+}
+
+#[test]
+fn a_forms_labels_have_keys() {
+    let keys = Form::of(CountryCode::new("US").unwrap()).label_keys();
+    let key = |field| keys.iter().find(|(f, _)| *f == field).and_then(|(_, k)| *k);
+    assert_eq!(
+        (
+            key(AddressField::Province),
+            key(AddressField::PostalCode),
+            key(AddressField::Line1)
+        ),
+        (
+            Some(LabelKey::State),
+            Some(LabelKey::ZipCode),
+            Some(LabelKey::Address1)
+        )
+    );
 }
