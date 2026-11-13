@@ -803,11 +803,11 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Searches the products the shopper's market sells, priced and stocked there; without `q`,
-         *     the market's product listing. Pages go at most 1,000 results deep. With a search app set
-         *     (`search_app` in the settings), the app chooses and orders the results (`search.query`)
-         *     and Hypha shows its own prices and stock for them; `price` is then `null`. When the app
-         *     fails, the built-in engine answers.
+         * Searches the products the shopper's market sells, priced and stocked there, in the
+         *     language asked for; without `q`, the market's product listing. Pages go at most 1,000
+         *     results deep. With a search app set (`search_app` in the settings), the app chooses and
+         *     orders the results (`search.query`) and Hypha shows its own prices and stock for them;
+         *     `price` is then `null`. When the app fails, the built-in engine answers.
          */
         get: operations["storefront.search.storefront_search"];
         put?: never;
@@ -1422,7 +1422,7 @@ export interface components {
              *     (`field.custom.material`).
              */
             key: string;
-            /** @description The merchant's label, if they set one. */
+            /** @description The merchant's label, if they set one, in the response's language. */
             label?: string | null;
             /** @description Most results first, then by value; at most 100. */
             values: components["schemas"]["FacetValueResponse"][];
@@ -1434,13 +1434,15 @@ export interface components {
              */
             count: number;
             /**
-             * @description What to show for it: a `choice` field's label, "Yes" or "No" for a `boolean` field;
-             *     `null` for every other facet, whose value is its own label.
+             * @description What to show for it: a `choice` field's label and an option value's, in the
+             *     response's language, where they differ from `value`; "Yes" or "No" for a `boolean`
+             *     field; `null` otherwise, the value being its own label.
              */
             label?: string | null;
             /**
-             * @description As `filter` takes it: a `choice` field's value is its key, a `boolean` field's
-             *     `true` or `false`.
+             * @description As `filter` takes it, as stored in every language: a `choice` field's value is its
+             *     key, a `boolean` field's `true` or `false`, an option's value its label in the
+             *     store's own language.
              */
             value: string;
         };
@@ -2037,6 +2039,10 @@ export interface components {
             variant_title?: string | null;
             vendor?: string | null;
         };
+        /**
+         * @description An option of the variant shown, in the response's language. (Filters take the value
+         *     as stored: the `option.<name>` facet's `value`.)
+         */
         SearchOption: {
             name: string;
             value: string;
@@ -6725,9 +6731,19 @@ export interface operations {
                 country: string;
                 /**
                  * @description Words to find in titles, vendors, types, tags, SKUs, option values and
-                 *     descriptions; each must start a word. Absent lists every product.
+                 *     descriptions, as `language` writes them; each must start a word. Absent lists
+                 *     every product.
                  */
                 q?: string;
+                /**
+                 * @description The language to search and answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
+                 *     `country`'s market offers (`/storefront/countries`): one it doesn't offer is tried
+                 *     without its region (`de` for `de-AT`), and without it, or with one still not
+                 *     offered, the market's default answers. `Content-Language` names the one served.
+                 *     Filters and facet values stay as stored in every language; facets label them in
+                 *     this one.
+                 */
+                language?: string;
                 /**
                  * @description Repeatable `key:value`, key `option.<name>` (any case), `vendor`,
                  *     `product_type`, `tag`, `on_sale` (`true`: only what's shown with a compare-at
@@ -6759,6 +6775,8 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     [name: string]: unknown;
                 };
                 content: {

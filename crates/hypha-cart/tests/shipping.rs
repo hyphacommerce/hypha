@@ -35,6 +35,11 @@ use hypha_testkit::{FixedClock, InMemoryPorts, SequentialIds};
 use pollster::block_on;
 use uuid::Uuid;
 
+/// A store in English alone.
+fn languages() -> hypha_cart::ContentLanguages {
+    hypha_cart::ContentLanguages::only(hypha_core::Language::new("en").unwrap())
+}
+
 fn market_id() -> MarketId {
     MarketId::from_uuid(Uuid::from_u128(1000))
 }
@@ -246,6 +251,7 @@ impl World {
             &Ctx::system(),
             &self.ports,
             rates,
+            &languages(),
             &self.clock,
             cart,
             group(cart),
@@ -332,6 +338,7 @@ fn offers_price_built_in_and_provider_options() {
         &Ctx::system(),
         &w.ports,
         &Dhl::quoting(1290),
+        &languages(),
         cart,
     ))
     .unwrap();
@@ -352,6 +359,7 @@ fn the_backup_stays_hidden_while_a_regular_option_is_offered() {
         &Ctx::system(),
         &w.ports,
         &Dhl::failing(),
+        &languages(),
         cart,
     ))
     .unwrap();
@@ -381,6 +389,7 @@ fn offers_need_an_address_and_something_to_ship() {
             &Ctx::system(),
             &w.ports,
             &Dhl::failing(),
+            &languages(),
             cart
         )),
         Err(CommandError::Cart(CartError::ShippingAddressRequired))
@@ -392,6 +401,7 @@ fn offers_need_an_address_and_something_to_ship() {
             &Ctx::system(),
             &w.ports,
             &Dhl::failing(),
+            &languages(),
             digital
         )),
         Err(CommandError::NothingToShip)
@@ -412,6 +422,7 @@ fn a_country_without_a_zone_has_no_shipping() {
             &Ctx::system(),
             &w.ports,
             &Dhl::failing(),
+            &languages(),
             cart
         )),
         Err(CommandError::NoShippingToCountry(hr()))
@@ -503,6 +514,7 @@ fn an_option_not_offered_now_cant_be_chosen() {
             &Ctx::system(),
             &w.ports,
             &Dhl::failing(),
+            &languages(),
             &w.clock,
             cart,
             other_group,
@@ -681,6 +693,7 @@ fn offers_show_their_price_after_shipping_discounts() {
         &Ctx::system(),
         &w.ports,
         &Dhl::quoting(1290),
+        &languages(),
         cart,
     ))
     .unwrap();

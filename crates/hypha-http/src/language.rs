@@ -77,6 +77,19 @@ impl ServedLanguage {
         Self::fixed(content_languages(store).of(cart), store)
     }
 
+    /// `of_cart` for a read that hasn't priced the cart: its choice and its market's
+    /// languages (a checked-out cart's: its order's language alone).
+    pub fn of_cart_choice(
+        language: Option<&Language>,
+        market_languages: &[Language],
+        store: &Store,
+    ) -> Self {
+        Self::fixed(
+            content_languages(store).of_choice(language, market_languages),
+            store,
+        )
+    }
+
     /// `language` as it is, for what was written in it already (an order); `None`, an
     /// order from before languages, reads as the store's default.
     pub fn of_order(language: Option<&Language>, store: &Store) -> Self {
@@ -86,6 +99,12 @@ impl ServedLanguage {
                 .unwrap_or_else(|| store.default_language().clone()),
             store,
         )
+    }
+
+    /// `language` as it is, chosen already out of what the read may answer in: a
+    /// search that fell back to a language its market has documents in.
+    pub(crate) fn chosen(language: Language, store: &Store) -> Self {
+        Self::fixed(language, store)
     }
 
     fn fixed(language: Language, store: &Store) -> Self {
@@ -157,14 +176,23 @@ pub(crate) async fn served_in<S: Storage>(
     ports: &S::Ports<'_>,
     params: &LanguageParams,
 ) -> Result<ServedLanguage, ApiError> {
-    let market = match params.country.as_deref() {
+    let market = market_in(ports, params).await?;
+    served(state, ports, params.language.as_deref(), market.as_ref()).await
+}
+
+/// The market selling to `params`' country, for a read that has the store already and
+/// passes both to `ServedLanguage::of`; `served_in` reads the store itself.
+pub(crate) async fn market_in<P: HasMarkets>(
+    ports: &P,
+    params: &LanguageParams,
+) -> Result<Option<Market>, ApiError> {
+    Ok(match params.country.as_deref() {
         Some(country) => {
             let country = CountryCode::new(country)?;
             ports.markets().get_by_country(country).await?
         }
         None => None,
-    };
-    served(state, ports, params.language.as_deref(), market.as_ref()).await
+    })
 }
 
 /// What checkout resolves a cart's language against: the store's default and the

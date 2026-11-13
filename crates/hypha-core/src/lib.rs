@@ -74,7 +74,7 @@ pub use ids::{
     ShippingZoneId, StoreId, SupplierId, TaxClassId, TaxRegionId, TransferId, UploadId, UserId,
     VariantId,
 };
-pub use language::{Language, LanguageError, offered_languages};
+pub use language::{Language, LanguageError};
 pub use money::{
     BasisPoints, Currency, CurrencyError, ExchangeRate, Money, MoneyError, Price, TaxRate, UnitCost,
 };

@@ -1580,7 +1580,7 @@
             "type": "string"
           },
           "label": {
-            "description": "The merchant's label, if they set one.",
+            "description": "The merchant's label, if they set one, in the response's language.",
             "type": [
               "string",
               "null"
@@ -1609,14 +1609,14 @@
             "type": "integer"
           },
           "label": {
-            "description": "What to show for it: a `choice` field's label, \"Yes\" or \"No\" for a `boolean` field;\n`null` for every other facet, whose value is its own label.",
+            "description": "What to show for it: a `choice` field's label and an option value's, in the\nresponse's language, where they differ from `value`; \"Yes\" or \"No\" for a `boolean`\nfield; `null` otherwise, the value being its own label.",
             "type": [
               "string",
               "null"
             ]
           },
           "value": {
-            "description": "As `filter` takes it: a `choice` field's value is its key, a `boolean` field's\n`true` or `false`.",
+            "description": "As `filter` takes it, as stored in every language: a `choice` field's value is its\nkey, a `boolean` field's `true` or `false`, an option's value its label in the\nstore's own language.",
             "type": "string"
           }
         },
@@ -3201,6 +3201,7 @@
         "type": "object"
       },
       "SearchOption": {
+        "description": "An option of the variant shown, in the response's language. (Filters take the value\nas stored: the `option.<name>` facet's `value`.)",
         "properties": {
           "name": {
             "type": "string"
@@ -10250,9 +10251,18 @@
             }
           },
           {
-            "description": "Words to find in titles, vendors, types, tags, SKUs, option values and\ndescriptions; each must start a word. Absent lists every product.",
+            "description": "Words to find in titles, vendors, types, tags, SKUs, option values and\ndescriptions, as `language` writes them; each must start a word. Absent lists\nevery product.",
             "in": "query",
             "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The language to search and answer in (a BCP 47 tag, `de`, `pt-BR`), out of those\n`country`'s market offers (`/storefront/countries`): one it doesn't offer is tried\nwithout its region (`de` for `de-AT`), and without it, or with one still not\noffered, the market's default answers. `Content-Language` names the one served.\nFilters and facet values stay as stored in every language; facets label them in\nthis one.",
+            "in": "query",
+            "name": "language",
             "required": false,
             "schema": {
               "type": "string"
@@ -10350,7 +10360,15 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Content-Language": {
+                "description": "The language the response is in.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -10408,7 +10426,7 @@
             "publishable_key": []
           }
         ],
-        "summary": "Searches the products the shopper's market sells, priced and stocked there; without `q`,\nthe market's product listing. Pages go at most 1,000 results deep. With a search app set\n(`search_app` in the settings), the app chooses and orders the results (`search.query`)\nand Hypha shows its own prices and stock for them; `price` is then `null`. When the app\nfails, the built-in engine answers.",
+        "summary": "Searches the products the shopper's market sells, priced and stocked there, in the\nlanguage asked for; without `q`, the market's product listing. Pages go at most 1,000\nresults deep. With a search app set (`search_app` in the settings), the app chooses and\norders the results (`search.query`) and Hypha shows its own prices and stock for them;\n`price` is then `null`. When the app fails, the built-in engine answers.",
         "tags": [
           "search"
         ],

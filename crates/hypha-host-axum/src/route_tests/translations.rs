@@ -784,3 +784,41 @@ async fn the_default_language_is_fixed_while_anything_is_translated() {
     let (_, page) = send(&app, "GET", "/admin/translations", None).await;
     assert_eq!(page["items"], json!([]));
 }
+
+/// A swap makes a listed language the default, and the cleanup keeps only listed ones:
+/// translations into the new default count, or they'd all be deleted.
+#[tokio::test]
+async fn the_default_language_doesnt_swap_with_a_translated_one() {
+    let app = app().await;
+    let body = r#"{"languages":[{"language":"de","published":true},{"language":"fr"}]}"#;
+    let (status, store) = send(&app, "PATCH", "/admin/store", Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{store}");
+    let product = create_product(&app, "mug").await;
+    let path = format!("/admin/translations/product/{product}");
+    let (status, _) = translate(&app, &path, "de", &fields(&[("title", "Tasse")])).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let swap = r#"{"default_language":"de","languages":[{"language":"en","published":true}]}"#;
+    let (status, json) = send(&app, "PATCH", "/admin/store", Some(swap)).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "default_language_in_use")
+    );
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    let (_, view) = send(&app, "GET", &path, None).await;
+    assert_eq!(view["translations"][0]["language"], "de");
+    assert_eq!(
+        field(&view, "title")["translations"]["de"]["value"],
+        "Tasse"
+    );
+
+    // Once the German is gone with its language, the same swap goes through, dropping
+    // French, which has no translations either.
+    let body = r#"{"languages":[{"language":"fr"}]}"#;
+    let (status, _) = send(&app, "PATCH", "/admin/store", Some(body)).await;
+    assert_eq!(status, StatusCode::OK);
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    let (status, store) = send(&app, "PATCH", "/admin/store", Some(swap)).await;
+    assert_eq!(status, StatusCode::OK, "{store}");
+    assert_eq!(store["default_language"], "de");
+}

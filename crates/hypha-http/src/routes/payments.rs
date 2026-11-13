@@ -364,7 +364,7 @@ pub async fn delete<S: Storage>(
         .await
         .map_err(|e| ApiError::from(e).not_found_if("payment_method_not_found"))?;
     // No event names a deleted method, so its translations go here.
-    forget(&ports, ResourceKind::PaymentMethod, [id.as_uuid()]).await?;
+    forget(&ports, ResourceKind::PaymentMethod, [id.as_uuid()]).await;
     Ok(StatusCode::NO_CONTENT)
 }
 

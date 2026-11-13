@@ -11,15 +11,17 @@ use hypha_search_index::{
     Group, HasSearchSettings, SearchSettingsRepo, Sort, UpdateSearchSettings, get_search_settings,
     reindex, search_status,
 };
+use hypha_translations::{ResourceKind, ResourceRef, fields as keys};
 use serde::{Deserialize, Serialize};
 
 use super::{
     page::{ListQuery, PageParams, cursor_at},
-    products::{ProductMediaResponse, media_items},
+    products::{ProductMediaResponse, asset_resources, media_items_in},
 };
 use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, Storefront},
+    language::{Localized, ServedLanguage},
     patch,
     state::{SharedState, Storage},
 };
@@ -82,8 +84,16 @@ pub struct SearchParams {
     /// stocks the results.
     country: String,
     /// Words to find in titles, vendors, types, tags, SKUs, option values and
-    /// descriptions; each must start a word. Absent lists every product.
+    /// descriptions, as `language` writes them; each must start a word. Absent lists
+    /// every product.
     q: Option<String>,
+    /// The language to search and answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
+    /// `country`'s market offers (`/storefront/countries`): one it doesn't offer is tried
+    /// without its region (`de` for `de-AT`), and without it, or with one still not
+    /// offered, the market's default answers. `Content-Language` names the one served.
+    /// Filters and facet values stay as stored in every language; facets label them in
+    /// this one.
+    language: Option<String>,
     /// Repeatable `key:value`, key `option.<name>` (any case), `vendor`,
     /// `product_type`, `tag`, `on_sale` (`true`: only what's shown with a compare-at
     /// price) or `field.<namespace>.<key>` (a custom field the merchant made a facet; a
@@ -115,6 +125,8 @@ pub struct SearchPriceRange {
     max: Money,
 }
 
+/// An option of the variant shown, in the response's language. (Filters take the value
+/// as stored: the `option.<name>` facet's `value`.)
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct SearchOption {
     name: String,
@@ -162,11 +174,13 @@ pub struct SearchHitResponse {
 
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct FacetValueResponse {
-    /// As `filter` takes it: a `choice` field's value is its key, a `boolean` field's
-    /// `true` or `false`.
+    /// As `filter` takes it, as stored in every language: a `choice` field's value is its
+    /// key, a `boolean` field's `true` or `false`, an option's value its label in the
+    /// store's own language.
     value: String,
-    /// What to show for it: a `choice` field's label, "Yes" or "No" for a `boolean` field;
-    /// `null` for every other facet, whose value is its own label.
+    /// What to show for it: a `choice` field's label and an option value's, in the
+    /// response's language, where they differ from `value`; "Yes" or "No" for a `boolean`
+    /// field; `null` otherwise, the value being its own label.
     label: Option<String>,
     /// Results (as grouped) with this value, ignoring this facet's own filter.
     count: u64,
@@ -178,7 +192,7 @@ pub struct FacetResponse {
     /// (values `true` and `false`), or `field.<namespace>.<key>` for a custom field
     /// (`field.custom.material`).
     key: String,
-    /// The merchant's label, if they set one.
+    /// The merchant's label, if they set one, in the response's language.
     label: Option<String>,
     /// Most results first, then by value; at most 100.
     values: Vec<FacetValueResponse>,
@@ -199,25 +213,33 @@ pub struct SearchResponse {
     next_cursor: Option<String>,
 }
 
-/// Searches the products the shopper's market sells, priced and stocked there; without `q`,
-/// the market's product listing. Pages go at most 1,000 results deep. With a search app set
-/// (`search_app` in the settings), the app chooses and orders the results (`search.query`)
-/// and Hypha shows its own prices and stock for them; `price` is then `null`. When the app
-/// fails, the built-in engine answers.
+/// Searches the products the shopper's market sells, priced and stocked there, in the
+/// language asked for; without `q`, the market's product listing. Pages go at most 1,000
+/// results deep. With a search app set (`search_app` in the settings), the app chooses and
+/// orders the results (`search.query`) and Hypha shows its own prices and stock for them;
+/// `price` is then `null`. When the app fails, the built-in engine answers.
 #[utoipa::path(
     get,
     path = "/storefront/search",
     params(PageParams, SearchParams),
-    responses((status = 200, description = "OK", body = SearchResponse)),
+    responses((
+        status = 200,
+        description = "OK",
+        body = SearchResponse,
+        headers(("Content-Language" = String, description = "The language the response is in.")),
+    )),
     extensions(("x-hypha-scopes" = json!(["products:read"]))),
 )]
 pub async fn storefront_search<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
     query: ListQuery<SearchParams>,
-) -> Result<Json<SearchResponse>, ApiError> {
+) -> Result<Localized<SearchResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let (page, params, scope) = query.parse::<u32>()?;
+    let asked = params.language;
+    let store = super::stores::store_as_system(&state, &ports).await?;
+    let servable = store.offered_languages();
     let offset = page.after.unwrap_or(0);
     let limit = page.limit.get();
     let words = params.q.clone();
@@ -245,11 +267,24 @@ pub async fn storefront_search<S: Storage>(
         ports: &ports,
         app,
         words,
+        servable: servable.clone(),
         endpoints: state.app_endpoints(&ports),
         caller: state.extensions(),
         env: &state.env,
     };
-    let found = search(&ctx, &ports, &engine, input).await?;
+    // The language a product read in the same market would answer in, then the market's
+    // others, for while it has no documents yet.
+    let found = search(&ctx, &ports, &engine, input, |market| {
+        let served = ServedLanguage::of(asked.as_deref(), &store, Some(market));
+        let others = market
+            .offered_languages(&servable)
+            .into_iter()
+            .filter(|l| l != served.language())
+            .collect();
+        (served.language().clone(), others)
+    })
+    .await?;
+    let served = ServedLanguage::chosen(found.language.clone(), &store);
     let results = found.results;
 
     // Each image once, in one query.
@@ -261,10 +296,6 @@ pub async fn storefront_search<S: Storage>(
     wanted.sort();
     wanted.dedup();
     let assets = ports.assets().get_many(&wanted).await?;
-    let mut images: BTreeMap<AssetId, ProductMediaResponse> = BTreeMap::new();
-    for item in media_items(&assets, state.media.as_deref()).await? {
-        images.insert(item.asset_id(), item);
-    }
 
     let mut products: Vec<hypha_core::ProductId> =
         results.hits.iter().map(|h| h.document.product).collect();
@@ -278,6 +309,26 @@ pub async fn storefront_search<S: Storage>(
         hypha_core::Clock::now(&state.clock),
     )
     .await?;
+
+    // What's translated beside the documents, in one read: images' alt text, promotions'
+    // titles, the merchant's facet labels and choice fields' labels.
+    let facets_of_store = ResourceRef::new(ResourceKind::SearchFacet, state.store.as_uuid());
+    let choice_field = |key: &hypha_search_index::FacetKey| {
+        found
+            .choice_fields
+            .get(key)
+            .map(|id| ResourceRef::new(ResourceKind::CustomFieldDefinition, id.as_uuid()))
+    };
+    let resources: Vec<ResourceRef> = asset_resources(&assets)
+        .chain(promotions.values().flatten().map(|p| p.resource()))
+        .chain((!found.labels.is_empty()).then_some(facets_of_store))
+        .chain(results.facets.iter().filter_map(|f| choice_field(&f.key)))
+        .collect();
+    let overlay = served.overlay(&ports, &resources).await?;
+    let mut images: BTreeMap<AssetId, ProductMediaResponse> = BTreeMap::new();
+    for item in media_items_in(&assets, state.media.as_deref(), &overlay).await? {
+        images.insert(item.asset_id(), item);
+    }
     let range = |r: hypha_search_index::PriceRange| SearchPriceRange {
         min: r.min,
         max: r.max,
@@ -302,7 +353,7 @@ pub async fn storefront_search<S: Storage>(
                 vendor: d.vendor,
                 product_type: d.product_type,
                 options: d
-                    .options
+                    .option_labels
                     .into_iter()
                     .map(|(name, value)| SearchOption { name, value })
                     .collect(),
@@ -313,11 +364,16 @@ pub async fn storefront_search<S: Storage>(
                 listing_price: range(d.listing_price),
                 available: d.available,
                 matched_variants: hit.matched,
-                promotions: promotions.get(&d.product).cloned().unwrap_or_default(),
+                promotions: promotions
+                    .get(&d.product)
+                    .into_iter()
+                    .flatten()
+                    .map(|p| p.clone().translated(&overlay))
+                    .collect(),
             }
         })
         .collect();
-    Ok(Json(SearchResponse {
+    let body = SearchResponse {
         items,
         total: results.total,
         facets: results
@@ -325,16 +381,42 @@ pub async fn storefront_search<S: Storage>(
             .into_iter()
             .map(|f| {
                 let value_labels = found.value_labels.get(&f.key);
+                let choices = choice_field(&f.key);
+                let label = overlay
+                    .optional(
+                        facets_of_store,
+                        &keys::search_facet::facet_label(&f.key),
+                        found.labels.get(&f.key).map(String::as_str),
+                    )
+                    .map(str::to_string);
                 FacetResponse {
-                    label: found.labels.get(&f.key).cloned(),
+                    label,
                     key: f.key.to_string(),
                     values: f
                         .values
                         .into_iter()
-                        .map(|v| FacetValueResponse {
-                            label: value_labels.and_then(|l| l.get(&v.value)).cloned(),
-                            value: v.value,
-                            count: v.count,
+                        .map(|v| {
+                            let defined =
+                                value_labels
+                                    .and_then(|l| l.get(&v.value))
+                                    .map(|l| match choices {
+                                        Some(field) => overlay.text_or(
+                                            field,
+                                            &keys::custom_field_definition::choice_label(&v.value),
+                                            l,
+                                        ),
+                                        None => l.as_str(),
+                                    });
+                            let label = match defined {
+                                Some(label) => Some(label.to_string()),
+                                // An option value's label, where the language's differs.
+                                None => (v.label != v.value).then_some(v.label),
+                            };
+                            FacetValueResponse {
+                                label,
+                                value: v.value,
+                                count: v.count,
+                            }
                         })
                         .collect(),
                 }
@@ -349,7 +431,8 @@ pub async fn storefront_search<S: Storage>(
         } else {
             None
         },
-    }))
+    };
+    Ok(served.respond(body))
 }
 
 // ---------- admin ----------

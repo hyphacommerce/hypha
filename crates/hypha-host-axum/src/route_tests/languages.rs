@@ -598,3 +598,121 @@ async fn the_stores_description_is_read_in_the_language_asked_for() {
         (StatusCode::BAD_REQUEST, "invalid_query")
     );
 }
+
+#[tokio::test]
+async fn search_is_answered_in_the_language_asked_for() {
+    let app = app().await;
+    languages(&app, &[("de", true), ("fr", false)]).await;
+    let (mug, [size, small, red]) = sized_mug(&app).await;
+    market_offers(&app, &["en", "de"]).await;
+    translate(
+        &app,
+        "product",
+        &mug,
+        "de",
+        &[
+            ("title", "Tasse"),
+            (&size, "Größe"),
+            (&small, "Klein"),
+            (&red, "Rot"),
+        ],
+    )
+    .await;
+    let (status, settings) = send(
+        &app,
+        "PATCH",
+        "/admin/search/settings",
+        Some(r#"{"facets":[{"key":"option.color","label":"Colour"},{"key":"option.size"}]}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{settings}");
+    let (_, store) = send(&app, "GET", "/admin/store", None).await;
+    let store = store["id"].as_str().unwrap();
+    translate(
+        &app,
+        "search_facet",
+        store,
+        "de",
+        &[("facets.option.color.label", "Farbe")],
+    )
+    .await;
+    super::settle_search(&app).await;
+    let pk = publishable(&app).await;
+    let search = "/storefront/search?country=HR&sort=price_asc";
+
+    // German words find the German documents; their text and facet labels are German,
+    // filters and facet values as stored.
+    let (language, found) = read_ok(
+        &app,
+        &pk,
+        &format!("{search}&language=de&q=tasse&filter=option.color:Red&group=variant"),
+    )
+    .await;
+    assert_eq!(language, "de");
+    assert_eq!(found["total"], 2, "{found}");
+    let hit = &found["items"][0];
+    assert_eq!(
+        (&hit["title"], &hit["variant_title"], &hit["options"]),
+        (
+            &json!("Tasse"),
+            &json!("Klein / Rot"),
+            &json!([{"name": "Größe", "value": "Klein"}, {"name": "Color", "value": "Rot"}])
+        )
+    );
+    assert_eq!(
+        found["facets"],
+        json!([
+            {
+                "key": "option.color",
+                "label": "Farbe",
+                "values": [{"value": "Red", "label": "Rot", "count": 2}],
+            },
+            {
+                "key": "option.size",
+                "label": null,
+                "values": [
+                    {"value": "M", "label": null, "count": 1},
+                    {"value": "S", "label": "Klein", "count": 1},
+                ],
+            },
+        ])
+    );
+    // A label isn't a filter value, and English words aren't German ones.
+    for query in ["filter=option.color:Rot", "q=mug"] {
+        let (_, found) = read_ok(&app, &pk, &format!("{search}&language=de&{query}")).await;
+        assert_eq!(found["total"], 0, "{query}");
+    }
+
+    // A language the store hasn't published, and none: the market's default, as before.
+    for query in ["&language=fr", ""] {
+        let (language, found) = read_ok(&app, &pk, &format!("{search}&q=mug{query}")).await;
+        assert_eq!(language, "en", "{query:?}");
+        assert_eq!(found["items"][0]["title"], "Mug");
+        assert_eq!(found["items"][0]["variant_title"], "S / Red");
+        assert_eq!(found["facets"][0]["label"], "Colour");
+        assert_eq!(
+            found["facets"][0]["values"],
+            json!([{"value": "Red", "label": null, "count": 1}])
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_store_with_one_language_searches_as_it_did() {
+    let app = app().await;
+    market_selling_a_mug(&app).await;
+    super::settle_search(&app).await;
+    let pk = publishable(&app).await;
+    // German isn't the store's: its own language answers, one document per variant.
+    let (language, found) = read_ok(
+        &app,
+        &pk,
+        "/storefront/search?country=HR&q=mug&language=de&group=variant",
+    )
+    .await;
+    assert_eq!(language, "en");
+    assert_eq!(found["total"], 1);
+    assert_eq!(found["items"][0]["title"], "Mug");
+    let (_, status) = send(&app, "GET", "/admin/search/status", None).await;
+    assert_eq!(status["documents"], 1, "{status}");
+}
