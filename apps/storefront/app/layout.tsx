@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 
 import "./globals.css";
 import { loadStore } from "@/lib/api";
+import { astryxMessages } from "@/lib/astryx-messages";
 import { writtenIn } from "@/lib/messages";
 import { pageLanguage, siteUrl } from "@/lib/site";
 
@@ -64,7 +65,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         />
       </head>
       <body>
-        <Providers language={language} direction={direction}>
+        <Providers
+          language={language}
+          direction={direction}
+          astryxMessages={await astryxMessages(language)}
+        >
           {children}
         </Providers>
       </body>

@@ -10,11 +10,11 @@
 //   pseudo-language. It's for formats and `<html lang>`, and is never sent to the API,
 //   which would refuse or misread it.
 
-import { type Messages, createTranslator, localeOf } from "@hyphacommerce/i18n";
+import { type Messages, createTranslator, localeOf, pickNamespaces } from "@hyphacommerce/i18n";
 import { cache } from "react";
 
 import { loadStore } from "./api";
-import { type Key, type Namespace, type T, en, loadMessages, pick, writtenIn } from "./messages";
+import { type Key, type Namespace, type T, en, loadMessages, writtenIn } from "./messages";
 import { pageLanguage, segmentCountry } from "./site";
 
 /**
@@ -47,5 +47,5 @@ export async function actionT(country: string): Promise<T> {
 /** The messages of `namespaces` for the browser, in `t`'s language: one catalog, with
  * English where the language lacks a message. */
 export async function clientMessages(t: T, namespaces: readonly Namespace[]): Promise<Messages> {
-  return pick(await loadMessages(t.language), namespaces);
+  return pickNamespaces({ ...en, ...(await loadMessages(t.language)) }, namespaces);
 }

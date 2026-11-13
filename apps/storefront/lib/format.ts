@@ -1,14 +1,7 @@
 // Dates and names as a locale writes them. Pure: every function takes the locale (a
 // translator's `locale`), never assumes one.
 
-/**
- * What an `Intl` formatter is asked for: the locale, then English. A runtime that lacks
- * the locale's data would otherwise use its own default, which differs between the
- * server and each shopper's browser: the same amount written two ways on one page.
- */
-export function withEnglish(locale: string): string[] {
-  return [locale, "en"];
-}
+import { withEnglish } from "@hyphacommerce/i18n";
 
 /** Formatters by locale, built once: a page formats many dates. */
 const dateFormats = new Map<string, Intl.DateTimeFormat>();

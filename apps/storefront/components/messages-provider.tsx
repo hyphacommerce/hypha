@@ -1,13 +1,12 @@
 "use client";
 
-// The browser's side of `ClientMessages`: the messages it's given, added to those a
-// provider above it was given, as one catalog for `useT`.
+// The browser's side of `ClientMessages`: the package's provider (one inside another
+// adds its messages to the outer one's), kept steady across server renders, with a
+// warning in development for a namespace the page wasn't sent.
 
 import type { Messages, Missing } from "@hyphacommerce/i18n";
 import { I18nProvider } from "@hyphacommerce/i18n/react";
-import { createContext, useContext, useMemo } from "react";
-
-const Sent = createContext<Messages>({});
+import { useMemo } from "react";
 
 /** A key no provider above the component was given: its namespace wasn't sent to this
  * page, and the key itself is on screen. */
@@ -33,17 +32,15 @@ export function MessagesProvider({
   messages: Messages;
   children: React.ReactNode;
 }) {
-  const above = useContext(Sent);
   // By content, not identity: every server render of the layout (a navigation, an
-  // action's `refresh()`) sends an equal catalog as a new object, and a new translator
-  // would compile every message again and re-render everything that reads one.
+  // action's `refresh()`) sends an equal catalog as a new object, and the provider
+  // would make a new translator for it, compiling every message again and re-rendering
+  // everything that reads one.
   const sent = JSON.stringify(messages);
-  const all = useMemo<Messages>(() => ({ ...above, ...JSON.parse(sent) }), [above, sent]);
+  const steady = useMemo<Messages>(() => JSON.parse(sent), [sent]);
   return (
-    <Sent value={all}>
-      <I18nProvider language={language} locale={locale} messages={all} onMissing={onMissing}>
-        {children}
-      </I18nProvider>
-    </Sent>
+    <I18nProvider language={language} locale={locale} messages={steady} onMissing={onMissing}>
+      {children}
+    </I18nProvider>
   );
 }

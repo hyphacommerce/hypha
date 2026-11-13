@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
 
-import { createTranslator } from "@hyphacommerce/i18n";
+import { createTranslator, pickNamespaces } from "@hyphacommerce/i18n";
 
-import { PSEUDO, SHARED_NAMESPACES, en, isKey, loadMessages, pick, writtenIn } from "./messages.ts";
+import { PSEUDO, SHARED_NAMESPACES, en, isKey, loadMessages, writtenIn } from "./messages.ts";
 
 /** The keys of a language's catalog files, as the catalog check reads them. */
 function keysOnDisk(language: string): string[] {
@@ -68,15 +68,8 @@ test("the pseudo-language accents English and keeps its placeholders", async () 
   assert.match(t("checkout.pay", { total: "€10.00" }), /€10\.00/);
 });
 
-test("the browser is sent only the namespaces asked for, English where a language lacks one", () => {
-  const sent = pick({ "cart.title": "Korpa" }, ["cart"]);
-  assert.equal(sent["cart.title"], "Korpa");
-  assert.equal(sent["cart.total"], en["cart.total"]);
-  assert.ok(Object.keys(sent).every((key) => key.startsWith("cart.")));
-});
-
 test("no page is sent the errors or the checkout's messages unasked", () => {
-  const sent = Object.keys(pick(en, SHARED_NAMESPACES));
+  const sent = Object.keys(pickNamespaces(en, SHARED_NAMESPACES));
   assert.ok(sent.length > 0);
   assert.ok(!sent.some((key) => /^(errors|checkout|account|order)\./.test(key)));
 });

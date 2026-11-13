@@ -5,6 +5,7 @@
 import {
   type KeysOf,
   type Messages,
+  type NamespaceKeys,
   type Translator,
   matchLanguage,
   mergeCatalogs,
@@ -56,7 +57,7 @@ export type Key = KeysOf<typeof en>;
 export type Namespace = keyof typeof namespaces;
 
 /** The keys of the namespaces `N`. */
-export type KeyIn<N extends Namespace> = Extract<Key, `${N}.${string}`>;
+export type KeyIn<N extends Namespace> = NamespaceKeys<typeof en, N>;
 
 /** A translator of every message: what server code has. */
 export type T = Translator<Key>;
@@ -92,7 +93,7 @@ const TRANSLATED = ["sr-Latn"] as const;
 
 /** The translated catalog `language` reads, if there's one: its own, or the nearest
  * (`sr-Latn-RS` and plain `sr` both read `sr-Latn`). */
-function translated(language: string): string | undefined {
+export function translated(language: string): string | undefined {
   return matchLanguage([language], TRANSLATED);
 }
 
@@ -121,17 +122,6 @@ export async function loadMessages(language: string): Promise<Messages> {
     default:
       return en;
   }
-}
-
-/** The messages of the `wanted` namespaces in `messages`, with English for what it lacks: one
- * catalog, as the browser is sent it. */
-export function pick(messages: Messages, wanted: readonly Namespace[]): Messages {
-  const prefixes = wanted.map((namespace) => `${namespace}.`);
-  const picked: Record<string, string> = {};
-  for (const [key, message] of Object.entries<string>(en)) {
-    if (prefixes.some((prefix) => key.startsWith(prefix))) picked[key] = messages[key] ?? message;
-  }
-  return picked;
 }
 
 /** Whether `key` is a message: for keys built from the API's values (a status). */

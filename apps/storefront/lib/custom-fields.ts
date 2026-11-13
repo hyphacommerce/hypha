@@ -11,7 +11,8 @@
 // component, gets plain strings and never formats in the browser (no hydration
 // mismatch from a different ICU).
 
-import { withEnglish } from "./format";
+import { withEnglish } from "@hyphacommerce/i18n";
+
 import { formatMoney } from "./money";
 
 /** One piece of a value: text, or a link. */

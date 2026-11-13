@@ -3,7 +3,7 @@
 // EUR but 1050 JPY). How it's written is the page's locale's (a translator's `locale`):
 // "€10.50" in `en-IE`, "10,50 €" in `de-DE`.
 
-import { withEnglish } from "./format.ts";
+import { withEnglish } from "@hyphacommerce/i18n";
 
 export type Money = { amount: number; currency: string };
 
