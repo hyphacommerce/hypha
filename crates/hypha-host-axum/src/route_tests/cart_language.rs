@@ -302,6 +302,11 @@ async fn an_order_is_read_in_its_language_by_the_buyer_and_in_the_stores_by_staf
     assert_eq!(status, StatusCode::OK, "{cart}");
     assert_eq!(language.as_deref(), Some("de"));
     assert_eq!(cart["lines"][0]["product_title"], "Tasse");
+    // Its payment methods answer in the language the cart does.
+    let path = format!("{cart_path}/payment-methods");
+    let (status, language, json) = storefront(&app, &pk, "GET", &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(language.as_deref(), Some("de"), "as the cart reads");
 }
 
 #[tokio::test]

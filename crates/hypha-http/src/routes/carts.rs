@@ -1253,9 +1253,7 @@ pub async fn shipping_options<S: Storage>(
     // Priced for the offers: its market's languages are read already.
     let served = match offers.cart.order {
         None => ServedLanguage::of_cart(&offers.cart, &store),
-        Some(order) => {
-            served_checked_out(&ports, offers.cart.language.as_ref(), order, &store).await?
-        }
+        Some(order) => served_checked_out(&ports, order, &store).await?,
     };
     let mut response = ShippingOptionsResponse {
         groups: offers.groups.iter().map(Into::into).collect(),
@@ -1363,18 +1361,17 @@ async fn served_for<S: Storage>(
 }
 
 /// The language `cart` reads in now, for a read about it that isn't the cart itself (its
-/// payment methods): the cart's rule (`ServedLanguage::of_cart_choice`) over its market's
-/// languages, or its order's once checked out, without pricing it. A store serving only
-/// its default reads nothing more.
+/// payment methods): what the cart's own response would say (`ServedLanguage::of_cart`)
+/// without pricing it. An open cart: its choice held to its market's languages (none read
+/// for a store serving only its default). A checked-out one: its order's language, as
+/// written, whatever the store publishes since.
 async fn served_in_store<P: HasMarkets + HasOrders>(
     ports: &P,
     cart: &hypha_cart::Cart,
     store: &hypha_stores::Store,
 ) -> Result<ServedLanguage, ApiError> {
     match cart.status() {
-        CartStatus::Completed { order } => {
-            served_checked_out(ports, cart.language(), order, store).await
-        }
+        CartStatus::Completed { order } => served_checked_out(ports, order, store).await,
         CartStatus::Open if one_language(store) => Ok(ServedLanguage::of_order(None, store)),
         CartStatus::Open => {
             let market_languages: Vec<Language> = ports
@@ -1392,28 +1389,17 @@ async fn served_in_store<P: HasMarkets + HasOrders>(
     }
 }
 
-/// `served_in_store` for a checked-out cart: its choice held to its order's language
-/// alone (what `PricedCart::market_languages` holds then), that language while the store
-/// still publishes it.
+/// `served_in_store` for a checked-out cart: its order's language, as `of_cart` reads a
+/// checked-out cart (its order's copies are written in it, whatever the store publishes
+/// since); an order from before languages reads as the store's default.
 async fn served_checked_out<P: HasOrders>(
     ports: &P,
-    language: Option<&Language>,
     order: OrderId,
     store: &hypha_stores::Store,
 ) -> Result<ServedLanguage, ApiError> {
-    if one_language(store) {
-        return Ok(ServedLanguage::of_order(None, store));
-    }
-    let order_language: Vec<Language> = ports
-        .orders()
-        .get(order)
-        .await?
-        .and_then(|o| o.language().cloned())
-        .into_iter()
-        .collect();
-    Ok(ServedLanguage::of_cart_choice(
-        language,
-        &order_language,
+    let order = ports.orders().get(order).await?;
+    Ok(ServedLanguage::of_order(
+        order.as_ref().and_then(|o| o.language()),
         store,
     ))
 }
