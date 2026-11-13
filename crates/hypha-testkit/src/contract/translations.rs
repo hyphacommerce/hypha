@@ -113,7 +113,9 @@ where
     worklist_pages(&make().await).await;
     scenario("translation sources: progress counts each language's fields");
     progress(&make().await).await;
-    scenario("translation sources: the queue, longest waiting first, queued again survives");
+    scenario(
+        "translation sources: the queue, longest waiting first, queued again survives, counted",
+    );
     queue(&make().await).await;
 }
 
@@ -397,6 +399,10 @@ async fn queue<S: HasTranslations>(ports: &S) {
     assert_eq!(resources(&first).len(), 2);
     let all = repo.queued(10).await.unwrap();
     assert_eq!(all.len(), 3);
+    // Counted by kind.
+    assert_eq!(repo.pending(&ResourceKind::ALL).await, Ok(3));
+    assert_eq!(repo.pending(&[ResourceKind::Category]).await, Ok(1));
+    assert_eq!(repo.pending(&[]).await, Ok(0));
     // Longest waiting first.
     assert_eq!(resources(&all)[2], product(1));
 
@@ -407,6 +413,7 @@ async fn queue<S: HasTranslations>(ports: &S) {
     assert_eq!(resources(&left), [all[0].resource]);
     repo.unqueue(&left).await.unwrap();
     assert_eq!(repo.queued(10).await, Ok(vec![]));
+    assert_eq!(repo.pending(&ResourceKind::ALL).await, Ok(0));
 
     // Touched while queued: it stays queued, at the back; one not queued stays off it.
     repo.queue(&[product(1)]).await.unwrap();

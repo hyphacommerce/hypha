@@ -1061,6 +1061,7 @@ async fn progress_counts_each_languages_fields() {
                 {"language": "de-AT", "total": 3, "translated": 0, "outdated": 0, "missing": 3},
                 {"language": "fr", "total": 3, "translated": 1, "outdated": 0, "missing": 2},
             ],
+            "pending": 0,
         })
     );
     let (status, all) = send(&app, "GET", "/admin/translations/progress", None).await;
@@ -1098,6 +1099,57 @@ async fn progress_counts_each_languages_fields() {
     assert_eq!(
         (status, code(&body)),
         (StatusCode::BAD_REQUEST, "invalid_query")
+    );
+}
+
+#[tokio::test]
+async fn progress_says_how_many_resources_are_still_being_counted() {
+    let app = app().await;
+    in_four_languages(&app).await;
+    create_product(&app, "mug").await;
+    create_product(&app, "plate").await;
+    let progress = async |query: &str| {
+        let (status, body) = send(
+            &app,
+            "GET",
+            &format!("/admin/translations/progress{query}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        body
+    };
+    // Their events not delivered, then queued as the migration queues what was there
+    // before the worklist: nothing counted yet, and the count says so.
+    sql(
+        &app,
+        "INSERT INTO translation_source_queue (resource_kind, resource_id)
+                   SELECT 'product', id FROM products
+         UNION ALL SELECT 'store', id FROM stores",
+    )
+    .await;
+    let before = progress("").await;
+    assert_eq!(before["pending"], 3, "{before}");
+    assert_eq!(before["languages"][0]["total"], 0);
+    let products = progress("?kind=product").await;
+    assert_eq!(
+        products["pending"], 2,
+        "only the kind asked for: {products}"
+    );
+
+    loop {
+        let ran = hypha_http::jobs::translation_sources(&app.state)
+            .await
+            .unwrap();
+        if ran.idle {
+            break;
+        }
+    }
+    let after = progress("?kind=product").await;
+    assert_eq!(after["pending"], 0, "{after}");
+    assert_eq!(
+        after["languages"][0]["total"], 2,
+        "the mug's and the plate's titles"
     );
 }
 

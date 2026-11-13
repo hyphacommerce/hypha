@@ -17108,11 +17108,18 @@
               "$ref": "#/components/schemas/LanguageProgressResponse"
             },
             "type": "array"
+          },
+          "pending": {
+            "description": "Resources of the kinds counted whose text is yet to be read: until it's 0 the\ntotals are short of the store's text (after an upgrade, while the job counts every\nresource once). 0 when everything is counted.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
           }
         },
         "required": [
           "default_language",
-          "languages"
+          "languages",
+          "pending"
         ],
         "type": "object"
       },

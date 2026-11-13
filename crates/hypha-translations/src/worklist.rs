@@ -174,6 +174,17 @@ impl LanguageProgress {
     }
 }
 
+/// How far the store's languages cover its text, and how much of it is yet to be counted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TranslationProgress {
+    /// Each language asked for, in the order given.
+    pub languages: Vec<LanguageProgress>,
+    /// Resources of the kinds counted still waiting for their digests to be read
+    /// (`TranslationSourceRepo::pending`): while there are any, the totals are short of
+    /// the store's text (after an upgrade, until the job has read every resource once).
+    pub pending: u64,
+}
+
 /// A resource waiting for its digests to be read again (`TranslationSourceRepo::queue`),
 /// and when it was queued: `unqueue` takes it off only if it wasn't queued again since.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -10455,6 +10455,13 @@ export interface components {
             default_language: components["schemas"]["Language"];
             /** @description Each of the store's other languages, published or not, in the store's order. */
             languages: components["schemas"]["LanguageProgressResponse"][];
+            /**
+             * Format: int64
+             * @description Resources of the kinds counted whose text is yet to be read: until it's 0 the
+             *     totals are short of the store's text (after an upgrade, while the job counts every
+             *     resource once). 0 when everything is counted.
+             */
+            pending: number;
         };
         /** @description One language's translation of a resource, as a whole. */
         TranslationStateResponse: {

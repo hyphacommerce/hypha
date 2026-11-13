@@ -182,6 +182,8 @@ pub trait TranslationSourceRepo {
     /// Queues every resource of `kind` that has digests: what a change reaching all of
     /// them (a custom field definition's access) does.
     async fn queue_kind(&self, kind: ResourceKind) -> Result<(), RepoError>;
+    /// How many of `kinds`' resources are queued. One count.
+    async fn pending(&self, kinds: &[ResourceKind]) -> Result<u64, RepoError>;
     /// Up to `limit` queued resources, longest waiting first.
     async fn queued(&self, limit: u32) -> Result<Vec<QueuedSource>, RepoError>;
     /// Takes `done` off the queue, each only if it wasn't queued again since it was read

@@ -36,6 +36,6 @@ pub use source::{Source, SourceField, source_digest};
 pub use translation::{FieldInput, TranslatedField, Translation, TranslationSnapshot};
 pub use worklist::{
     FieldCounts, InvalidWorkPosition, LanguageProgress, QueuedSource, SourceDigest,
-    SourceSyncSettings, TranslationState, UnknownState, WorkItem, WorkPosition, WorklistFilter,
-    source_digests,
+    SourceSyncSettings, TranslationProgress, TranslationState, UnknownState, WorkItem,
+    WorkPosition, WorklistFilter, source_digests,
 };
