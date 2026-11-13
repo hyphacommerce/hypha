@@ -35,6 +35,7 @@
   "detail_summary_items": "Items",
   "detail_column_shipped": "Shipped",
   "detail_line_shipped": "{fulfilled, number} of {quantity, number}",
+  "detail_line_localized": "Shown to the buyer as {title}",
   "detail_line_cost": "Cost {cost}",
   "detail_line_cost_margin": "Cost {cost} · margin {margin}",
   "detail_line_cost_margin_share": "Cost {cost} · margin {margin} ({share})",
