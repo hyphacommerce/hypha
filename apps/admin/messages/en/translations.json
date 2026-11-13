@@ -37,6 +37,7 @@
   "field_option_value_alone": "Option value: {value}",
   "field_choice": "Choice: {name}",
   "field_facet": "Filter: {name}",
+  "field_custom_field_variant": "{name} ({variant})",
   "problem_unknown_field": "This field can't be translated.",
   "problem_unknown_child": "What this translates no longer exists. Reload the page.",
   "problem_too_long": "The translation is too long.",

@@ -78,12 +78,36 @@ function partsOf(section: Section) {
     : [{ variant: undefined, entries: section.fields }];
 }
 
+type PartVariant = { title: string | null } | undefined;
+
+/**
+ * Whether a section's parts get headings: whenever a variant's values are among them, so
+ * a variant's value is never taken for the resource's own. Only products have variants,
+ * so the own part's heading names a product.
+ */
+function hasPartHeadings(parts: readonly { variant?: PartVariant }[]): boolean {
+  return parts.some((part) => part.variant !== undefined);
+}
+
 /** The heading of a custom fields part: the resource's own values, or a variant's. */
-function partTitle(t: EditorT, variant: { title: string | null } | undefined): string {
+function partTitle(t: EditorT, variant: PartVariant): string {
   if (variant === undefined) return t("translations.custom_fields_own");
   return variant.title === null || variant.title.trim() === ""
     ? t("translations.custom_fields_variant_untitled")
     : t("translations.custom_fields_variant", { title: variant.title });
+}
+
+/**
+ * A field's name for its input: a variant's custom field value names the variant too,
+ * since the same definition's inputs repeat for each variant.
+ */
+function inputName(t: EditorT, name: FieldName, label: string): string {
+  if (name.type !== "custom_field" || name.variant === undefined) return label;
+  const title = name.variant.title?.trim();
+  return t("translations.field_custom_field_variant", {
+    name: label,
+    variant: title || t("translations.custom_fields_variant_untitled"),
+  });
 }
 
 /** A refused field's problem in the reader's language; the API's own for an unknown code. */
@@ -266,7 +290,7 @@ export function TranslationEditor({
                 </div>
                 {partsOf(section).map((part, _index, parts) => (
                   <VStack gap={4} key={part.variant?.id ?? "own"}>
-                    {parts.length > 1 && (
+                    {hasPartHeadings(parts) && (
                       <Text type="large" as="h3">
                         {partTitle(t, part.variant)}
                       </Text>
@@ -341,7 +365,10 @@ function FieldRow({
 }) {
   const stored = field.translations[language];
   const isHtml = field.format === "html";
-  const inputLabel = t("translations.translation_label", { field: label, language: languageName });
+  const inputLabel = t("translations.translation_label", {
+    field: inputName(t, name, label),
+    language: languageName,
+  });
 
   return (
     <div className="translation-row">

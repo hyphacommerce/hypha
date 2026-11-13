@@ -264,6 +264,7 @@ test("a text value takes one line, a multiline one a text area, whatever their l
   assert.equal(isSingleLine({ format: "text", max_length: 1000 }, name("text")), true);
   assert.equal(isSingleLine(short, name("multiline_text")), false);
   assert.equal(isSingleLine(long, name("multiline_text")), false);
+  assert.equal(isSingleLine(long, name("short_text")), true);
   assert.equal(isSingleLine({ format: "html", max_length: 16384 }, name("rich_text")), false);
 });
 

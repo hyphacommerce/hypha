@@ -37,6 +37,7 @@
   "field_option_value_alone": "Vrednost opcije: {value}",
   "field_choice": "Ponuđena vrednost: {name}",
   "field_facet": "Filter: {name}",
+  "field_custom_field_variant": "{name} ({variant})",
   "problem_unknown_field": "Ovo polje se ne može prevesti.",
   "problem_unknown_child": "Ono što ovo prevodi više ne postoji. Učitajte stranicu ponovo.",
   "problem_too_long": "Prevod je predugačak.",

@@ -244,8 +244,10 @@ export function isSingleLine(
   name: FieldName,
 ): boolean {
   if (field.format === "html") return false;
+  // A type this build doesn't know takes one line, so no line break the API might refuse
+  // can be typed into it.
   if (name.type === "custom_field" && name.valueType !== undefined)
-    return name.valueType === "text";
+    return name.valueType !== "multiline_text";
   return field.max_length <= SINGLE_LINE_MAX;
 }
 
