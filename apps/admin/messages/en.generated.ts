@@ -20,6 +20,7 @@ import errors from "./en/errors.json";
 import global_error from "./en/global_error.json";
 import home from "./en/home.json";
 import inventory from "./en/inventory.json";
+import languages from "./en/languages.json";
 import markets from "./en/markets.json";
 import media from "./en/media.json";
 import nav from "./en/nav.json";
@@ -37,9 +38,10 @@ import staff from "./en/staff.json";
 import suppliers from "./en/suppliers.json";
 import table from "./en/table.json";
 import transfers from "./en/transfers.json";
+import translations from "./en/translations.json";
 
 /** The en catalog's files, by namespace. */
-export const namespaces = { account, agents, api_keys, apps, auth, bulk, categories, checkout, common, components, custom_fields, customers, defaults, discounts, errors, global_error, home, inventory, markets, media, nav, notifications, orders, payments, price_lists, products, purchasing, settings, setup, shell, shipping, staff, suppliers, table, transfers };
+export const namespaces = { account, agents, api_keys, apps, auth, bulk, categories, checkout, common, components, custom_fields, customers, defaults, discounts, errors, global_error, home, inventory, languages, markets, media, nav, notifications, orders, payments, price_lists, products, purchasing, settings, setup, shell, shipping, staff, suppliers, table, transfers, translations };
 
 /** The en catalog: every namespace, keys as `<namespace>.<key>`. */
 export default mergeCatalogs(namespaces);

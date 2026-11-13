@@ -3,6 +3,7 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Card } from "@astryxdesign/core/Card";
 import { VStack } from "@astryxdesign/core/Layout";
+import { Link } from "@astryxdesign/core/Link";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
@@ -13,6 +14,7 @@ import { startTransition, useActionState, useState } from "react";
 import { useCurrencies } from "@/components/currencies";
 import { SaveBar } from "@/components/save-bar";
 import { currencyCodes } from "@/lib/format";
+import { languageLabel } from "@/lib/languages";
 import type { KeyIn } from "@/lib/messages";
 import { type Country, countryOptions, currencyOptions } from "@/lib/regions";
 import { useFormat } from "@/lib/use-format";
@@ -105,7 +107,7 @@ function orNull(value: string): string | null {
 }
 
 export function StoreForm({ store, countries }: { store: Store; countries: Country[] }) {
-  const t = useT<"settings">();
+  const t = useT<"settings" | "languages">();
   const format = useFormat();
   const [name, setName] = useState(store.name);
   const [email, setEmail] = useState(store.contact_email ?? "");
@@ -113,7 +115,6 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
   const [legalName, setLegalName] = useState(store.legal_name ?? "");
   const [address, setAddress] = useState(() => addressDraft(store.legal_address));
   const [timezone, setTimezone] = useState(store.timezone ?? "");
-  const [language, setLanguage] = useState(store.default_language);
   const [currency, setCurrency] = useState(store.currency ?? "");
   const currencies = useCurrencies();
   const [state, save, isPending] = useActionState(updateStore, {});
@@ -128,7 +129,6 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
   if (JSON.stringify(addressValue(address)) !== savedAddress)
     patch.legal_address = addressValue(address);
   if (timezone !== (store.timezone ?? "")) patch.timezone = orNull(timezone);
-  if (language.trim() !== store.default_language) patch.default_language = language;
   if (currency !== (store.currency ?? "")) patch.currency = orNull(currency);
   const isChanged = Object.keys(patch).length > 0;
 
@@ -143,7 +143,6 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
     setLegalName(store.legal_name ?? "");
     setAddress(addressDraft(store.legal_address));
     setTimezone(store.timezone ?? "");
-    setLanguage(store.default_language);
     setCurrency(store.currency ?? "");
   };
   const field = (key: keyof AddressDraft) => (value: string) =>
@@ -195,16 +194,23 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
               {t("settings.store_language_title")}
             </Text>
             <Text type="supporting" color="secondary">
-              {t("settings.store_language_description")}
+              {t("languages.store_form_description")}
             </Text>
           </VStack>
           <div className="form-grid">
-            <TextInput
-              label={t("settings.store_content_language_label")}
-              description={t("settings.store_content_language_description")}
-              value={language}
-              onChange={setLanguage}
-            />
+            <VStack gap={1}>
+              <Text type="label">{t("settings.store_content_language_label")}</Text>
+              <Text>{languageLabel(format, store.default_language)}</Text>
+              <Text type="supporting" color="secondary">
+                {t.rich("languages.store_form_hint", {
+                  link: (chunks, key) => (
+                    <Link key={key} href="/settings/languages">
+                      {chunks}
+                    </Link>
+                  ),
+                })}
+              </Text>
+            </VStack>
             <Selector
               label={t("common.time_zone")}
               description={t("settings.store_time_zone_description")}

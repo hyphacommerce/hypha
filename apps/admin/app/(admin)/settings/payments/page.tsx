@@ -10,6 +10,7 @@ import { getStoreDefaults } from "@/lib/get-store-t";
 import { getT } from "@/lib/i18n";
 import { settingsCrumb } from "@/lib/navigation";
 import type { PaymentApp } from "@/lib/payments";
+import { offersTranslate } from "@/lib/translations-server";
 import { PAYMENT_NAME_DEFAULTS } from "@/lib/store-defaults";
 
 import { PaymentMethodsCard } from "./methods";
@@ -54,6 +55,7 @@ async function PaymentMethods() {
       />
     );
   }
+  const canTranslate = await offersTranslate("payment_method");
   return (
     <>
       {!methods.some((m) => m.enabled) && (
@@ -72,6 +74,7 @@ async function PaymentMethods() {
         paymentApps={paymentApps}
         presetNames={presetNames}
         canWrite={me.scopes.includes("payments:write")}
+        canTranslate={canTranslate}
       />
     </>
   );
