@@ -58,3 +58,15 @@ test("the store's languages changing expires the store and its countries", () =>
 test("other events are left to the webhook's own cases", () => {
   assert.equal(languageChange("product.updated", {}), undefined);
 });
+
+test("a discount's or an image's translation expires the pages that show it", () => {
+  assert.deepEqual(languageChange("translation.updated", translated("discount"))?.tags, [
+    TAGS.products,
+    TAGS.listings,
+  ]);
+  assert.deepEqual(languageChange("translation.updated", translated("asset"))?.tags, [
+    TAGS.products,
+    TAGS.listings,
+    TAGS.categories,
+  ]);
+});

@@ -59,7 +59,16 @@ export function segmentCountry(segment: string): string {
  * `en-GB`), as the API resolves it; `undefined` when the country offers none of them.
  */
 export function offered(wanted: string | undefined, offer: Offer): string | undefined {
-  return wanted === undefined ? undefined : matchLanguage([wanted], offer.languages);
+  if (wanted === undefined) return undefined;
+  // Compared as BCP 47 spells them, since a segment is read that way (`iw` is `he`),
+  // and answered in the country's own spelling, the API's.
+  const spelled = new Map<string, string>();
+  for (const tag of offer.languages) {
+    const canonical = canonicalLanguage(tag) ?? tag;
+    if (!spelled.has(canonical)) spelled.set(canonical, tag);
+  }
+  const found = matchLanguage([canonicalLanguage(wanted) ?? wanted], [...spelled.keys()]);
+  return found === undefined ? undefined : spelled.get(found);
 }
 
 /** The language of a locale segment in its country: the one it names when the country
@@ -126,6 +135,28 @@ export function alternatePlaces(
     tag: localeOf(l.language, l.country),
     segment: l.segment,
   }));
+}
+
+/**
+ * The places to name as `hreflang` alternates: `alternatePlaces`, except in a single
+ * tree whose countries' default languages differ, where none. There the unprefixed URL
+ * is each shopper's country's default language, so no one tag is true of it.
+ */
+export function hreflangPlaces(
+  mode: Routing,
+  countries: readonly Offer[],
+): { tag: string; segment: string }[] {
+  if (mode === "single" && new Set(countries.map(defaultLanguage)).size > 1) return [];
+  return alternatePlaces(mode, countries);
+}
+
+/**
+ * Every prefix a page's path may have here: each country in each of its languages with
+ * folders (`/de`, `/en-de`), the default's none and each other language's in a single
+ * tree (``, `/en`), for robots.
+ */
+export function prefixes(mode: Routing, countries: readonly Offer[]): string[] {
+  return [...new Set(locales(countries).map((l) => href(mode, l.segment, "")))];
 }
 
 /**

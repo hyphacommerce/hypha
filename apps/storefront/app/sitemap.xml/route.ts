@@ -4,7 +4,7 @@
 
 import { loadCategories, loadCountries } from "@/lib/api";
 import { search } from "@/lib/listing-data";
-import { alternatePlaces } from "@/lib/routing";
+import { alternatePlaces, hreflangPlaces } from "@/lib/routing";
 import { localeAlternates } from "@/lib/seo";
 import { link, mode, segmentCountry, siteUrl } from "@/lib/site";
 
@@ -49,6 +49,8 @@ export async function GET(request: Request) {
   const origin = siteUrl()?.origin ?? new URL(request.url).origin;
   const [countries, categories] = await Promise.all([loadCountries(), loadCategories()]);
   const places = alternatePlaces(mode(), countries);
+  // What alternates may name (none where a single tree's URLs have no one language).
+  const named = new Set(hreflangPlaces(mode(), countries).map((p) => p.segment));
   const codes = [...new Set(places.map((p) => segmentCountry(p.segment)))];
   const perCountry = new Map(
     await Promise.all(codes.map(async (c) => [c, await productHandles(c)] as const)),
@@ -60,7 +62,9 @@ export async function GET(request: Request) {
 
   const entry = (place: Place, path: string, alsoIn: Place[]) => {
     const alternates = localeAlternates(
-      alsoIn.map((p) => ({ tag: p.tag, href: link(p.segment, path) })),
+      alsoIn
+        .filter((p) => named.has(p.segment))
+        .map((p) => ({ tag: p.tag, href: link(p.segment, path) })),
     );
     return [
       "<url>",

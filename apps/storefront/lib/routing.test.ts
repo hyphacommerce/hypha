@@ -5,8 +5,10 @@ import {
   alternatePlaces,
   canonicalSegment,
   href,
+  hreflangPlaces,
   localeOfSegment,
   pickLanguage,
+  prefixes,
   routeFor,
   segmentCountry,
   segmentLanguage,
@@ -189,4 +191,24 @@ test("a single tree's hreflang is the first country's languages", () => {
     { tag: "de", segment: "de" },
     { tag: "en", segment: "en-de" },
   ]);
+});
+
+test("a language the country spells as an alias is reached by its segment", () => {
+  const IL = { country: "IL", languages: ["en", "iw"] };
+  assert.equal(segmentLanguage("iw-il", IL), "iw");
+  assert.equal(segmentLanguage("he-il", IL), "iw");
+  assert.equal(canonicalSegment("iw-il", IL), "iw-il");
+  assert.equal(canonicalSegment("he-il", IL), "iw-il");
+});
+
+test("a single tree names no hreflang when its countries' defaults differ", () => {
+  const GB = { country: "GB", languages: ["en"] };
+  assert.deepEqual(hreflangPlaces("single", [DE, GB]), []);
+  assert.deepEqual(hreflangPlaces("single", [DE, AT]), alternatePlaces("single", [DE, AT]));
+  assert.deepEqual(hreflangPlaces("folders", [DE, GB]), alternatePlaces("folders", [DE, GB]));
+});
+
+test("robots' prefixes: every place with folders, every other language in a single tree", () => {
+  assert.deepEqual(prefixes("folders", COUNTRIES), ["/de", "/en-de", "/at", "/rs", "/en-gb-rs"]);
+  assert.deepEqual(prefixes("single", COUNTRIES), ["", "/en", "/en-gb"]);
 });

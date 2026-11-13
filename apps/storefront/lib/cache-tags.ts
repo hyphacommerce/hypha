@@ -33,7 +33,8 @@ export type LanguageChange = { tags: string[]; products: string[] };
  * - `translation.updated` / `.deleted`, by `data.resource.kind`: a product's page; a
  *   category's name and description show in the header's tree and on every category
  *   page; a field definition's names on every page that shows its values; the store's
- *   description in every footer; anything else (search facets' labels) in listings.
+ *   description in every footer; a discount's title and an image's alt text on
+ *   product pages; anything else (search facets' labels) in listings.
  * - `store.updated`: the store's details (name, description) and, for `languages` or
  *   `default_language`, every country's languages: all under `store`.
  */
@@ -56,6 +57,12 @@ export function languageChange(
           return { tags: [TAGS.fields], products: [] };
         case "store":
           return { tags: [TAGS.store], products: [] };
+        // A promotion's title shows on product pages and listings; an image's alt text on
+        // product pages, listings and category pages.
+        case "discount":
+          return { tags: [TAGS.products, TAGS.listings], products: [] };
+        case "asset":
+          return { tags: [TAGS.products, TAGS.listings, TAGS.categories], products: [] };
         default:
           return { tags: [TAGS.listings], products: [] };
       }

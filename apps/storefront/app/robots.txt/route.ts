@@ -3,8 +3,8 @@
 // would crowd out the products. The sitemap lists the rest.
 
 import { loadCountries } from "@/lib/api";
-import { alternatePlaces } from "@/lib/routing";
-import { link, mode, siteUrl } from "@/lib/site";
+import { prefixes } from "@/lib/routing";
+import { mode, siteUrl } from "@/lib/site";
 
 const PRIVATE = ["/cart", "/checkout", "/account", "/search", "/order/"];
 
@@ -12,7 +12,7 @@ export async function GET(request: Request) {
   const origin = siteUrl()?.origin ?? new URL(request.url).origin;
   // Each place's prefix spelled out (`/de`, `/en-de`; in a single tree none and `/en`):
   // a `/*/search` wildcard would also match a product whose handle starts with "search".
-  const folders = alternatePlaces(mode(), await loadCountries()).map((p) => link(p.segment, ""));
+  const folders = prefixes(mode(), await loadCountries());
   const lines = [
     "User-agent: *",
     ...folders.flatMap((f) => PRIVATE.map((p) => `Disallow: ${f}${p}`)),

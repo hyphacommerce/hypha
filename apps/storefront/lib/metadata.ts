@@ -4,7 +4,7 @@ import { localeOf } from "@hyphacommerce/i18n";
 import type { Metadata } from "next";
 
 import { loadCountries, loadStore, pageLocale } from "./api";
-import { alternatePlaces } from "./routing";
+import { hreflangPlaces } from "./routing";
 import { localeAlternates } from "./seo";
 import { link, mode, siteUrl } from "./site";
 
@@ -12,16 +12,12 @@ type Image = { url: string; width?: number | null; height?: number | null; alt?:
 
 /**
  * A page's alternates by `hreflang`: its copy in every country and language
- * (`alternatePlaces`), `path` being its path inside a place (`/p/mug`). `among` limits
- * them to some countries (a product only where it's sold).
+ * (`hreflangPlaces`), `path` being its path inside a place (`/p/mug`).
  */
-export async function alternatesOf(
-  path: string,
-  among?: readonly string[],
-): Promise<Record<string, string> | undefined> {
-  const countries = (await loadCountries()).filter((c) => !among || among.includes(c.country));
+export async function alternatesOf(path: string): Promise<Record<string, string> | undefined> {
+  const countries = await loadCountries();
   return localeAlternates(
-    alternatePlaces(mode(), countries).map((p) => ({ tag: p.tag, href: link(p.segment, path) })),
+    hreflangPlaces(mode(), countries).map((p) => ({ tag: p.tag, href: link(p.segment, path) })),
   );
 }
 
