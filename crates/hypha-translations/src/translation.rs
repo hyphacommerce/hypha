@@ -9,7 +9,7 @@ use hypha_core::{
 };
 
 use crate::{
-    catalog::{FieldRule, ResourceRef},
+    catalog::{FieldRule, ResourceRef, ValueFormat, ValueRule},
     error::{Problem, TranslationError},
     events::{TRANSLATION, TranslationDeleted, TranslationUpdated},
     source::Source,
@@ -89,7 +89,16 @@ impl Translation {
                 );
                 continue;
             };
-            let value = match spec.rule {
+            let now = source.field(&key);
+            let rule = now.map_or(spec.rule, |f| f.rule_or(spec.rule));
+            let value = match rule {
+                FieldRule::Value(rule) => match value_of(rule, &field.value) {
+                    Ok(value) => value,
+                    Err((code, message)) => {
+                        problem(&key, code, message);
+                        continue;
+                    }
+                },
                 FieldRule::Text { max_chars } => {
                     let value = field.value.trim();
                     if value.chars().count() > max_chars {
@@ -113,7 +122,7 @@ impl Translation {
             if value.is_empty() {
                 continue;
             }
-            let Some(now) = source.field(&key) else {
+            let Some(now) = now else {
                 let code = match child {
                     Some(_) => "unknown_child",
                     None => "unknown_field",
@@ -190,6 +199,39 @@ impl Translation {
             },
         );
         Ok(true)
+    }
+
+    /// Removes the fields `keys` name (what's gone from the resource: a custom field
+    /// value removed), recording `translation.updated` with those it had. Returns whether
+    /// any was there; a translation left empty is for the caller to delete.
+    pub fn remove_fields(&mut self, keys: &[String]) -> bool {
+        let removed: Vec<String> = keys
+            .iter()
+            .filter(|key| self.fields.remove(key.as_str()).is_some())
+            .cloned()
+            .collect();
+        if removed.is_empty() {
+            return false;
+        }
+        let earlier = self.events.take();
+        let mut named: Vec<String> = earlier
+            .iter()
+            .filter_map(|e| e.data["fields"].as_array())
+            .flatten()
+            .filter_map(|f| f.as_str().map(str::to_string))
+            .chain(removed)
+            .collect();
+        named.sort_unstable();
+        named.dedup();
+        self.events.record(
+            self.subject(),
+            &TranslationUpdated {
+                resource: self.resource.into(),
+                language: self.language.clone(),
+                fields: named,
+            },
+        );
+        true
     }
 
     /// Records `translation.deleted` in place of anything pending, for the repo's delete.
@@ -275,6 +317,44 @@ impl Translation {
             events: Recorder::default(),
         })
     }
+}
+
+/// A custom field value's translation as its rule takes it: trimmed (sanitised, for
+/// HTML), or why not. Blank is the empty text: the field is removed.
+fn value_of(rule: ValueRule, raw: &str) -> Result<String, (&'static str, String)> {
+    let too_many_bytes = |text: &str| rule.max_bytes.filter(|max| text.len() > *max);
+    if let Some(max) = too_many_bytes(raw.trim()) {
+        return Err(("too_long", format!("at most {max} bytes")));
+    }
+    let value = match rule.format {
+        ValueFormat::Line | ValueFormat::Lines => raw.trim().to_string(),
+        ValueFormat::Html => match Description::new(raw) {
+            Ok(html) => html.map(|h| h.as_html().to_string()).unwrap_or_default(),
+            Err(DescriptionError::TooLong { max }) => {
+                return Err(("too_long", format!("at most {max} bytes of HTML")));
+            }
+        },
+    };
+    if value.is_empty() {
+        return Ok(value);
+    }
+    if rule.format == ValueFormat::Line && value.contains(['\n', '\r']) {
+        return Err((
+            "not_single_line",
+            "one line, without line breaks".to_string(),
+        ));
+    }
+    if let Some(max) = too_many_bytes(&value) {
+        return Err(("too_long", format!("at most {max} bytes")));
+    }
+    let chars = value.chars().count();
+    if let Some(max) = rule.max_chars.filter(|max| chars > *max) {
+        return Err(("too_long", format!("at most {max} characters")));
+    }
+    if let Some(min) = rule.min_chars.filter(|min| chars < *min) {
+        return Err(("too_short", format!("at least {min} characters")));
+    }
+    Ok(value)
 }
 
 /// Plain-data form for storage adapters.
@@ -619,5 +699,122 @@ mod tests {
                 message: "no such field".to_string(),
             }]))
         );
+    }
+
+    const VALUE: &str = "custom_fields.cfdef_1.value";
+
+    fn with_value(rule: ValueRule, text: &str) -> Source {
+        Source::new(vec![
+            SourceField::new("title", Some("Mug")),
+            SourceField::new(VALUE, Some(text)).with_rule(FieldRule::Value(rule)),
+        ])
+    }
+
+    fn rule(format: ValueFormat) -> ValueRule {
+        ValueRule {
+            format,
+            min_chars: Some(2),
+            max_chars: Some(5),
+            max_bytes: Some(8),
+        }
+    }
+
+    #[test]
+    fn a_value_takes_its_sources_rule_over_the_catalogs() {
+        let source = with_value(rule(ValueFormat::Line), "Wool");
+        let mut t = german();
+        assert_eq!(t.replace(&source, input(&[(VALUE, " Wolle ")])), Ok(true));
+        assert_eq!(t.text(VALUE), Some("Wolle"));
+        assert_eq!(
+            problems(t.replace(&source, input(&[(VALUE, "Wollen")]))),
+            vec![(VALUE.to_string(), "too_long")]
+        );
+        assert_eq!(
+            problems(t.replace(&source, input(&[(VALUE, "W")]))),
+            vec![(VALUE.to_string(), "too_short")]
+        );
+    }
+
+    #[test]
+    fn a_one_line_value_has_no_line_breaks_and_a_multiline_one_may() {
+        let mut t = german();
+        let line = with_value(rule(ValueFormat::Line), "Wool");
+        assert_eq!(
+            problems(t.replace(&line, input(&[(VALUE, "a\nb")]))),
+            vec![(VALUE.to_string(), "not_single_line")]
+        );
+        let lines = with_value(rule(ValueFormat::Lines), "Wool");
+        assert_eq!(t.replace(&lines, input(&[(VALUE, "a\nb")])), Ok(true));
+    }
+
+    #[test]
+    fn a_value_is_capped_in_bytes_as_well_as_characters() {
+        let mut t = german();
+        let lines = with_value(rule(ValueFormat::Lines), "Wool");
+        // Five characters, ten bytes.
+        assert_eq!(
+            problems(t.replace(&lines, input(&[(VALUE, "žžžžž")]))),
+            vec![(VALUE.to_string(), "too_long")]
+        );
+    }
+
+    #[test]
+    fn a_rich_text_value_is_sanitised_and_counted_as_stored() {
+        let mut t = german();
+        let html = with_value(
+            ValueRule {
+                format: ValueFormat::Html,
+                min_chars: None,
+                max_chars: None,
+                max_bytes: Some(64),
+            },
+            "<p>Wool</p>",
+        );
+        assert_eq!(
+            t.replace(&html, input(&[(VALUE, "<p>Wolle</p><script>x</script>")])),
+            Ok(true)
+        );
+        assert_eq!(t.text(VALUE), Some("<p>Wolle</p>"));
+        // Nothing left once sanitised removes the field.
+        assert_eq!(
+            t.replace(&html, input(&[(VALUE, "<script>x</script>")])),
+            Ok(true)
+        );
+        assert_eq!(t.text(VALUE), None);
+    }
+
+    /// A value whose definition stops qualifying (deleted, made private, no longer
+    /// shown to storefronts) leaves the source: its stored translation stays, and the
+    /// next write of the language drops it, or refuses to take it again.
+    #[test]
+    fn a_value_gone_from_the_source_drops_out_on_the_next_write() {
+        let mut t = german();
+        let source = with_value(ValueRule::LINE, "Wool");
+        t.replace(&source, input(&[("title", "Tasse"), (VALUE, "Wolle")]))
+            .unwrap();
+        let without = Source::new(vec![SourceField::new("title", Some("Mug"))]);
+        assert_eq!(
+            problems(t.replace(&without, input(&[("title", "Tasse"), (VALUE, "Wolle")]))),
+            vec![(VALUE.to_string(), "unknown_child")]
+        );
+        assert_eq!(t.text(VALUE), Some("Wolle"));
+        assert_eq!(t.replace(&without, input(&[("title", "Tasse")])), Ok(true));
+        assert_eq!(t.text(VALUE), None);
+    }
+
+    #[test]
+    fn removing_fields_names_only_those_it_had() {
+        let mut t = german();
+        let source = with_value(ValueRule::LINE, "Wool");
+        t.replace(&source, input(&[("title", "Tasse"), (VALUE, "Wolle")]))
+            .unwrap();
+        t.take_events();
+        let gone = ["custom_fields.cfdef_9.value".to_string(), VALUE.to_string()];
+        assert!(t.remove_fields(&gone));
+        assert_eq!(t.text(VALUE), None);
+        let events = t.take_events();
+        assert_eq!(events[0].data["fields"], serde_json::json!([VALUE]));
+        assert!(!t.remove_fields(&gone));
+        assert!(t.take_events().is_empty());
     }
 }

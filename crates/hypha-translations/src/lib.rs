@@ -14,7 +14,10 @@ pub mod repo;
 pub mod source;
 pub mod translation;
 
-pub use catalog::{FieldRule, FieldSpec, MAX_KEY_LEN, ResourceKind, ResourceRef, UnknownKind};
+pub use catalog::{
+    FieldRule, FieldSpec, MAX_KEY_LEN, ResourceKind, ResourceRef, UnknownKind, ValueFormat,
+    ValueRule,
+};
 pub use commands::{
     CommandError, StoreLanguages, delete_translation, get_translations, list_translations,
     put_translation, require_read, require_write,

@@ -5,11 +5,11 @@
 use std::collections::BTreeMap;
 
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_core::{Language, Stamped};
+use hypha_core::{CustomFieldDefinitionId, Language, Stamped, VariantId};
 use hypha_translations::{
-    FieldInput, FieldRule, ResourceKind, ResourceRef, Source, StoreLanguages, Translation,
-    TranslationKey, delete_translation, get_translations, list_translations, put_translation,
-    require_read, require_write,
+    FieldInput, FieldRule, ResourceKind, ResourceRef, StoreLanguages, Translation, TranslationKey,
+    delete_translation, get_translations, list_translations, put_translation, require_read,
+    require_write,
 };
 use serde::{Deserialize, Serialize};
 
@@ -22,7 +22,7 @@ use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, PathId},
     state::{AppState, SharedState, Storage},
-    translations::source,
+    translations::{Loaded, ValueLabel, source},
 };
 
 /// The resource a translation is of.
@@ -55,15 +55,55 @@ pub struct FieldTranslationResponse {
     outdated: bool,
 }
 
+/// The custom field value a field translates, for an editor to label it.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct TranslatedValueResponse {
+    definition: CustomFieldDefinitionId,
+    /// The field's key, `custom.material`.
+    key: String,
+    /// The definition's name, in the store's default language.
+    name: String,
+    /// `text`, `multiline_text` or `rich_text`.
+    #[serde(rename = "type")]
+    field_type: &'static str,
+    /// The variant whose value it is, in a product's translation; `null` for the
+    /// resource's own.
+    variant: Option<VariantId>,
+    /// That variant's title as stored ("M / Blue"); `null` for the resource's own value
+    /// and a variant without options.
+    variant_title: Option<String>,
+}
+
+impl From<&ValueLabel> for TranslatedValueResponse {
+    fn from(label: &ValueLabel) -> Self {
+        Self {
+            definition: label.definition,
+            key: label.key.clone(),
+            name: label.name.clone(),
+            field_type: label.field_type,
+            variant: label.variant,
+            variant_title: label.variant_title.clone(),
+        }
+    }
+}
+
 /// One translatable field of a resource: its source text and its translations.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct TranslatableFieldResponse {
     /// `title`, or a child's field by the child's ID: `options.<opt_…>.name`,
-    /// `option_values.<optval_…>.label`, `choices.<key>.label`, `facets.<key>.label`.
+    /// `option_values.<optval_…>.label`, `choices.<key>.label`, `facets.<key>.label`,
+    /// a custom field value's `custom_fields.<cfdef_…>.value` (a product's or a
+    /// category's) or `variant_custom_fields.<var_…>.<cfdef_…>.value` (a variant's, in
+    /// its product's).
     key: String,
-    /// `text` (plain, trimmed) or `html` (sanitised like a description).
+    /// `text` (plain, trimmed) or `html` (sanitised like a description). A custom field
+    /// value's follows its definition's type: `text` for `text` (one line) and
+    /// `multiline_text`, `html` for `rich_text`.
     format: &'static str,
-    /// The longest translation: characters for `text`, bytes of HTML for `html`.
+    /// The longest translation: characters for `text`, bytes of HTML for `html`. A
+    /// custom field value's is its definition's `max_length` in characters, else its
+    /// type's cap (255 characters for `text`, 16 KiB for the others), and its
+    /// `min_length` holds too.
     max_length: usize,
     /// The text in the store's default language; empty when the resource has none.
     source: String,
@@ -72,6 +112,9 @@ pub struct TranslatableFieldResponse {
     digest: String,
     /// By language tag; a language without a translation of this field is absent.
     translations: BTreeMap<String, FieldTranslationResponse>,
+    /// For a custom field value, which one: its definition and variant. `null` for
+    /// every other field.
+    custom_field: Option<TranslatedValueResponse>,
 }
 
 /// One language's translation of a resource, as a whole.
@@ -107,17 +150,22 @@ impl TranslationsResponse {
     fn new(
         resource: ResourceRef,
         languages: &Languages,
-        source: &Source,
+        loaded: &Loaded,
         translations: &[Translation],
     ) -> Result<Self, ApiError> {
-        let fields: Vec<TranslatableFieldResponse> = source
+        let fields: Vec<TranslatableFieldResponse> = loaded
+            .source
             .fields
             .iter()
             .filter_map(|field| {
                 let (spec, _) = resource.kind.field(&field.key)?;
-                let (format, max_length) = match spec.rule {
+                let (format, max_length) = match field.rule_or(spec.rule) {
                     FieldRule::Text { max_chars } => ("text", max_chars),
                     FieldRule::Html { max_bytes } => ("html", max_bytes),
+                    FieldRule::Value(rule) => match rule.format {
+                        hypha_translations::ValueFormat::Html => ("html", rule.max_length()),
+                        _ => ("text", rule.max_length()),
+                    },
                 };
                 Some(TranslatableFieldResponse {
                     key: field.key.clone(),
@@ -139,6 +187,7 @@ impl TranslationsResponse {
                             ))
                         })
                         .collect(),
+                    custom_field: loaded.values.get(&field.key).map(Into::into),
                 })
             })
             .collect();
@@ -235,12 +284,12 @@ async fn view<S: Storage>(
     ports: &S::Ports<'_>,
     resource: ResourceRef,
 ) -> Result<TranslationsResponse, ApiError> {
-    let source = source(state, ports, resource)
+    let loaded = source(state, ports, resource)
         .await?
         .ok_or(hypha_translations::CommandError::ResourceNotFound(resource))?;
     let translations = get_translations(ctx, ports, resource).await?;
     let languages = languages(state, ports).await?;
-    TranslationsResponse::new(resource, &languages, &source, &translations)
+    TranslationsResponse::new(resource, &languages, &loaded, &translations)
 }
 
 /// One field of a translation being written.
@@ -303,7 +352,7 @@ pub async fn put<S: Storage>(
             )
         })
         .collect();
-    let source = source(&state, &ports, resource).await?;
+    let loaded = source(&state, &ports, resource).await?;
     let languages = languages(&state, &ports).await?;
     put_translation(
         &ctx,
@@ -314,17 +363,17 @@ pub async fn put<S: Storage>(
             default: &languages.default,
             others: &languages.others,
         },
-        source.as_ref(),
+        loaded.as_ref().map(|l| &l.source),
         fields,
     )
     .await?;
     // The write found the resource, so the source is there.
-    let source = source.unwrap_or_default();
+    let loaded = loaded.unwrap_or_default();
     let translations = get_translations(&ctx, &ports, resource).await?;
     Ok(Json(TranslationsResponse::new(
         resource,
         &languages,
-        &source,
+        &loaded,
         &translations,
     )?))
 }
