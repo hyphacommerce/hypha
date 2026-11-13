@@ -34,6 +34,7 @@ import {
   type AddressFormat,
   type AddressValues,
   type FieldProblems,
+  fieldLabel,
   missingIn,
 } from "@/lib/address";
 import { type CartMessage, type PlacedMessages, statusOf } from "@/lib/cart-messages";
@@ -154,7 +155,7 @@ export function DetailsForm({
       onChange={set(key)}
       status={
         (options.required ? required(key) : undefined) ??
-        (key === "email" && !edited.has("email") ? statusOf(messages?.email) : undefined)
+        (key === "email" && !edited.has("email") ? statusOf(t, messages?.email) : undefined)
       }
     />
   );
@@ -193,6 +194,8 @@ export function DetailsForm({
           />
         ) : (
           <CartMessages
+            t={t}
+            labelOf={(f) => fieldLabel(t, format, f)}
             messages={
               edited.size === 0
                 ? messages?.address.filter((m) => m.code !== "address_corrections_suggested")
@@ -347,7 +350,7 @@ export function ShippingChoice({
           />
         ))}
       </RadioList>
-      <CartMessages messages={messages} />
+      <CartMessages t={t} messages={messages} />
       {error && <Banner status="error" title={error} />}
     </VStack>
   );

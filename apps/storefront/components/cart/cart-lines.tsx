@@ -30,6 +30,7 @@ type Line = Cart["lines"][number];
 
 export function CartLines({ size = "md" }: { size?: "sm" | "md" }) {
   const { cart, digits, base, change, isPending } = useCart();
+  const t = useT();
   if (!cart) return null;
   const discounts = readCartDiscounts(cart);
   const messages = placeMessages(cart.messages);
@@ -48,7 +49,7 @@ export function CartLines({ size = "md" }: { size?: "sm" | "md" }) {
             isPending={isPending}
             onChange={(quantity) => change(line.variant, quantity)}
           />
-          <CartMessages messages={messages.lines[i]} />
+          <CartMessages t={t} messages={messages.lines[i]} />
         </VStack>
       ))}
     </VStack>

@@ -20,5 +20,18 @@
   "shipping_free": "Besplatno",
   "tax": "Porez",
   "including_tax": "Uključen porez",
-  "total": "Ukupno"
+  "total": "Ukupno",
+  "message_required": "Popunite polje „{field}“",
+  "message_required_choice": "Izaberite: {field}",
+  "message_too_long": "Polje „{field}“ je predugačko (najviše {max, plural, one {# znak} few {# znaka} other {# znakova}})",
+  "message_invalid_format": "Unesite ispravnu vrednost u polje „{field}“",
+  "message_invalid_format_example": "Unesite ispravnu vrednost u polje „{field}“, na primer {example}",
+  "message_unknown_region": "Izaberite ispravnu vrednost u polju „{field}“",
+  "message_region_mismatch": "Polje „{field}“ ne odgovara regionu {region}",
+  "message_house_number_missing": "Dodajte kućni broj",
+  "message_apartment_missing": "Dodajte broj stana ili poslovnog prostora.",
+  "message_address_corrections_suggested": "Ova adresa možda sadrži grešku. Proverite predloženu adresu.",
+  "message_address_ambiguous": "Nismo uspeli tačno da odredimo ovu adresu. Proverite ulicu, broj i poštanski broj.",
+  "message_address_undeliverable": "Nismo pronašli ovu adresu. Proverite je pre nego što nastavite.",
+  "message_validation_unavailable": "Trenutno ne možemo da proverimo vašu porudžbinu. Pokušajte ponovo za trenutak."
 }

@@ -47,9 +47,11 @@ async function signedIn(locale: string) {
 /** Emails a sign-in code; the same answer whatever the address (the API tells nobody who
  * is a customer). */
 export async function requestCode(locale: string, email: string): Promise<ActionResult> {
+  // The page's language, so the code's email is in it (and a new customer keeps it).
+  const { language } = await pageLocale(locale);
   const { error } = await (
     await shopperApi()
-  ).POST("/storefront/auth/code", { body: { email: email.trim() } });
+  ).POST("/storefront/auth/code", { body: { email: email.trim(), language } });
   if (error) return refused(locale, error);
   return undefined;
 }
