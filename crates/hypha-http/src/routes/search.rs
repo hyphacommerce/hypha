@@ -1,10 +1,10 @@
 //! Search: the storefront's search and product listing, and the admin's settings, reindex
 //! and status.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt, str::FromStr};
 
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_core::{AssetId, CategoryId, Money, ProductId, VariantId};
+use hypha_core::{AssetId, CategoryId, Language, Money, ProductId, VariantId};
 use hypha_media::{AssetRepo, HasAssets};
 use hypha_search::{SearchInput, search, update_search_settings};
 use hypha_search_index::{
@@ -215,6 +215,39 @@ pub struct SearchResponse {
     next_cursor: Option<String>,
 }
 
+/// Where a search's next page starts, as its cursor holds it: the results shown so far
+/// and the language searched (`20@de`; a cursor from before languages has the offset
+/// alone), so following pages search the documents the first page did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SearchPosition {
+    offset: u32,
+    language: Option<Language>,
+}
+
+impl FromStr for SearchPosition {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, ()> {
+        let (offset, language) = match s.split_once('@') {
+            Some((offset, tag)) => (offset, Some(Language::new(tag).map_err(|_| ())?)),
+            None => (s, None),
+        };
+        Ok(Self {
+            offset: offset.parse().map_err(|_| ())?,
+            language,
+        })
+    }
+}
+
+impl fmt::Display for SearchPosition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.language {
+            Some(language) => write!(f, "{}@{}", self.offset, language.as_str()),
+            None => write!(f, "{}", self.offset),
+        }
+    }
+}
+
 /// Searches the products the shopper's market sells, priced and stocked there, in the
 /// language asked for; without `q`, the market's product listing. Pages go at most 1,000
 /// results deep. With a search app set (`search_app` in the settings), the app chooses and
@@ -238,11 +271,14 @@ pub async fn storefront_search<S: Storage>(
     query: ListQuery<SearchParams>,
 ) -> Result<Localized<SearchResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let (page, params, scope) = query.parse::<u32>()?;
+    let (page, params, scope) = query.parse::<SearchPosition>()?;
     let asked = params.language;
     let store = super::stores::store_as_system(&state, &ports).await?;
     let servable = store.offered_languages();
-    let offset = page.after.unwrap_or(0);
+    let (offset, searched) = match page.after {
+        Some(at) => (at.offset, at.language),
+        None => (0, None),
+    };
     let limit = page.limit.get();
     let words = params.q.clone();
     let input = SearchInput {
@@ -275,12 +311,17 @@ pub async fn storefront_search<S: Storage>(
         env: &state.env,
         answered: Default::default(),
     };
-    // The language a product read in the same market would answer in, then the market's
+    // A following page: the language its first page searched, while the market offers
+    // it, so a fallback that changed since can't skip or repeat results. Otherwise the
+    // language a product read in the same market would answer in, then the market's
     // others, for while it has no documents yet.
     let found = search(&ctx, &ports, &engine, input, |market| {
+        let offered = market.offered_languages(&servable);
+        if let Some(language) = searched.filter(|l| offered.contains(l)) {
+            return (language, Vec::new());
+        }
         let served = ServedLanguage::of(asked.as_deref(), &store, Some(market));
-        let others = market
-            .offered_languages(&servable)
+        let others = offered
             .into_iter()
             .filter(|l| l != served.language())
             .collect();
@@ -455,7 +496,11 @@ pub async fn storefront_search<S: Storage>(
             .map(|(min, max)| SearchPriceRange { min, max }),
         has_more,
         next_cursor: if has_more {
-            Some(cursor_at(&scope, shown)?)
+            let at = SearchPosition {
+                offset: u32::try_from(shown).map_err(ApiError::internal)?,
+                language: Some(served.language().clone()),
+            };
+            Some(cursor_at(&scope, at)?)
         } else {
             None
         },

@@ -760,3 +760,32 @@ async fn a_search_app_is_asked_in_the_language_asked_for_before_its_documents_ar
         .collect();
     assert_eq!(sent, [&json!("de"), &json!("de")]);
 }
+
+#[tokio::test]
+async fn a_searchs_following_pages_search_the_language_its_first_did() {
+    let app = app().await;
+    languages(&app, &[("de", true)]).await;
+    let (mug, _) = sized_mug(&app).await;
+    translate(&app, "product", &mug, "de", &[("title", "Tasse")]).await;
+    super::settle_search(&app).await;
+    // German is offered, its documents not built yet: the first page falls back.
+    market_offers(&app, &["en", "de"]).await;
+    let pk = publishable(&app).await;
+    let search = "/storefront/search?country=HR&language=de&group=variant&limit=1";
+    let (language, first) = read_ok(&app, &pk, search).await;
+    assert_eq!((language.as_str(), &first["total"]), ("en", &json!(2)));
+    let cursor = first["next_cursor"].as_str().unwrap().to_string();
+
+    // German's documents are built meanwhile; the next page still reads English.
+    super::settle_search(&app).await;
+    let (language, second) = read_ok(&app, &pk, &format!("{search}&cursor={cursor}")).await;
+    assert_eq!(language, "en");
+    assert_eq!(second["items"][0]["title"], "Mug");
+    assert_ne!(second["items"][0]["variant"], first["items"][0]["variant"]);
+    // A new search reads German.
+    let (language, again) = read_ok(&app, &pk, search).await;
+    assert_eq!(
+        (language.as_str(), &again["items"][0]["title"]),
+        ("de", &json!("Tasse"))
+    );
+}
