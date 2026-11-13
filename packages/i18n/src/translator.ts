@@ -76,6 +76,9 @@ export function createTranslator<Keys extends string = string>(
 ): Translator<Keys> {
   const { fallback, onMissing, onError } = options;
   const locale = options.locale ?? language;
+  // A runtime without the locale's data would use its own default, which differs
+  // between a server and a browser: English data is everywhere, so both agree.
+  const locales = [locale, "en"];
   const catalog: Readonly<Record<string, string | undefined>> = messages;
   const fallbackCatalog: Readonly<Record<string, string | undefined>> = fallback ?? {};
   const compiled = new Map<string, IntlMessageFormat | null>();
@@ -91,7 +94,7 @@ export function createTranslator<Keys extends string = string>(
     let format: IntlMessageFormat | null = null;
     if (source !== undefined) {
       try {
-        format = new IntlMessageFormat(source, locale);
+        format = new IntlMessageFormat(source, locales);
       } catch (error) {
         report(error, key);
       }
