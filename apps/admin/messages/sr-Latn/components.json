@@ -87,5 +87,6 @@
   "amount_no_decimals": "Ova valuta nema decimale.",
   "amount_too_many_decimals": "Najviše {digits, plural, one {# decimalno mesto} few {# decimalna mesta} other {# decimalnih mesta}}.",
   "amount_too_large": "Preveliki iznos.",
-  "amount_invalid": "{input} nije iznos."
+  "amount_invalid": "{input} nije iznos.",
+  "translate_action": "Prevedi"
 }

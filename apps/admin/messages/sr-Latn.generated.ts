@@ -20,6 +20,7 @@ import errors from "./sr-Latn/errors.json";
 import global_error from "./sr-Latn/global_error.json";
 import home from "./sr-Latn/home.json";
 import inventory from "./sr-Latn/inventory.json";
+import languages from "./sr-Latn/languages.json";
 import markets from "./sr-Latn/markets.json";
 import media from "./sr-Latn/media.json";
 import nav from "./sr-Latn/nav.json";
@@ -37,9 +38,10 @@ import staff from "./sr-Latn/staff.json";
 import suppliers from "./sr-Latn/suppliers.json";
 import table from "./sr-Latn/table.json";
 import transfers from "./sr-Latn/transfers.json";
+import translations from "./sr-Latn/translations.json";
 
 /** The sr-Latn catalog's files, by namespace. */
-export const namespaces = { account, agents, api_keys, apps, auth, bulk, categories, checkout, common, components, custom_fields, customers, defaults, discounts, errors, global_error, home, inventory, markets, media, nav, notifications, orders, payments, price_lists, products, purchasing, settings, setup, shell, shipping, staff, suppliers, table, transfers };
+export const namespaces = { account, agents, api_keys, apps, auth, bulk, categories, checkout, common, components, custom_fields, customers, defaults, discounts, errors, global_error, home, inventory, languages, markets, media, nav, notifications, orders, payments, price_lists, products, purchasing, settings, setup, shell, shipping, staff, suppliers, table, transfers, translations };
 
 /** The sr-Latn catalog: every namespace, keys as `<namespace>.<key>`. */
 export default mergeCatalogs(namespaces);

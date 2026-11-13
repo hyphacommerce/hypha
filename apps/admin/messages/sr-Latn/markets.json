@@ -47,5 +47,13 @@
   "price_lists_add_label": "Dodajte cenovnik u valuti {currency}",
   "price_lists_add_placeholder": "Izaberite cenovnik",
   "price_lists_option_description": "{kind} · {adjustment}",
-  "price_lists_full": "Katalog može imati najviše {max, number} cenovnika."
+  "price_lists_full": "Katalog može imati najviše {max, number} cenovnika.",
+  "languages_title": "Jezici",
+  "languages_description": "Jezici koje kupci na ovom tržištu mogu da izaberu, ovim redosledom. Prvi je podrazumevani jezik tržišta.",
+  "languages_empty": "Kupci ovde dobijaju jezik sadržaja prodavnice: {language}.",
+  "languages_default_badge": "Podrazumevani za tržište",
+  "languages_add_label": "Dodajte jezik",
+  "languages_add_placeholder": "Izaberite jezik",
+  "languages_none_published": "Prodavnica još nema drugi objavljen jezik. Dodajte ga i objavite u <link>Podešavanja → Jezici</link>.",
+  "languages_hint": "Mogu se nuditi samo objavljeni jezici. Upravljajte njima u <link>Podešavanja → Jezici</link>."
 }

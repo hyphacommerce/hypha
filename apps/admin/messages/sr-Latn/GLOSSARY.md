@@ -139,6 +139,17 @@ nominative. So a name is never put where another case is needed:
 | deployment | instalacija | |
 | operator | operater | |
 | custom field | prilagođeno polje | |
+| content language | jezik sadržaja | the store's own language; never `podrazumevani jezik` |
+| other languages | drugi jezici | |
+| language tag | (BCP 47) oznaka | |
+| publish / unpublish (a language) | objaviti / povući | `nije objavljen` for unpublished |
+| market default (language) | podrazumevani za tržište | |
+| translation, to translate | prevod, prevesti | |
+| source, original (of a translation) | original | |
+| outdated (translation) | zastarelo | the original changed since |
+| mark as reviewed | označiti kao pregledano | |
+| store-wide text | tekstovi cele prodavnice | |
+| search filter (facet) | filter pretrage | |
 | choice (field type) | ponuđena vrednost | |
 | media / file | mediji / fajl | |
 | alt text | alternativni tekst | |

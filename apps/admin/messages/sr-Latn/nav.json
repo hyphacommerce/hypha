@@ -54,5 +54,7 @@
   "settings_api_keys": "API ključevi",
   "settings_api_keys_description": "Tajni ključevi za vaš kôd, javni ključevi za internet prodavnice.",
   "settings_apps": "Webhook-ovi i ručno pravljene aplikacije",
-  "settings_apps_description": "Ručno napravljene aplikacije: njihovi webhook-ovi, događaji i tajne za potpisivanje."
+  "settings_apps_description": "Ručno napravljene aplikacije: njihovi webhook-ovi, događaji i tajne za potpisivanje.",
+  "settings_languages": "Jezici",
+  "settings_languages_description": "Jezik na kom je vaš sadržaj napisan i jezici na koje je preveden."
 }
