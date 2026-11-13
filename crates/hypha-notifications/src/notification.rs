@@ -787,7 +787,7 @@ mod tests {
             Notification::sending(new()),
             sent,
         ] {
-            assert_eq!(Notification::restore(n.snapshot()), Ok(n.clone()));
+            assert_eq!(Notification::restore(n.snapshot()), Ok(n));
         }
     }
 
