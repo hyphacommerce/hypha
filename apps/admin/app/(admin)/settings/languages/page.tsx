@@ -4,7 +4,7 @@ import { Suspense } from "react";
 
 import { PageHeader } from "@/components/page-header";
 import { CardSkeleton, FormSkeleton } from "@/components/skeletons";
-import { requireStaff, requireStore } from "@/lib/hypha";
+import { requireStaff, requireStore, sessionClient } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
 import { settingsCrumb } from "@/lib/navigation";
 import { canReadTranslations, translateHref } from "@/lib/translations";
@@ -40,13 +40,20 @@ export default async function LanguagesSettingsPage() {
 
 async function Languages() {
   // The store is the layout's read too (`loadStore`): one call for both.
-  const [store, me] = await Promise.all([requireStore(), requireStaff()]);
+  // The markets, so a change one of them is in the way of is refused before it's
+  // confirmed; none for a role without `markets:read` (the API's answer says so then).
+  const [store, me, markets] = await Promise.all([
+    requireStore(),
+    requireStaff(),
+    sessionClient().then((client) => client.GET("/admin/markets")),
+  ]);
   return (
     <LanguagesForm
       // A saved change starts the form again from the store as it is now.
       key={JSON.stringify([store.default_language, store.languages])}
       defaultLanguage={store.default_language}
       languages={store.languages}
+      markets={markets.data?.items.map(({ id, name, languages }) => ({ id, name, languages }))}
       canWrite={me.scopes.includes("stores:write")}
       storeHref={
         canReadTranslations(me.scopes, "store") ? translateHref("store", store.id) : undefined

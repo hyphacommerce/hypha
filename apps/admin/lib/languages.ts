@@ -165,6 +165,26 @@ export function offeredLanguages(
 export type MarketInUse = { id: string; languages: string[] };
 
 /**
+ * The markets a change of the store's languages would leave offering one the store no
+ * longer does, each with those languages: what the API refuses as `language_in_use`,
+ * found before asking it. As there, only a language the store offered before counts, so
+ * a market already naming an unpublished one doesn't block other changes. Empty when
+ * nothing's in the way.
+ */
+export function languagesInUse<M extends { languages: readonly string[] }>(
+  before: readonly string[],
+  after: readonly string[],
+  markets: readonly M[],
+): (M & { languages: string[] })[] {
+  return markets.flatMap((market) => {
+    const lost = market.languages.filter(
+      (tag) => before.some((l) => sameTag(l, tag)) && !after.some((l) => sameTag(l, tag)),
+    );
+    return lost.length > 0 ? [{ ...market, languages: lost }] : [];
+  });
+}
+
+/**
  * The markets a `409 language_in_use` names (`details.markets`); empty when the answer
  * has none (a caller without `markets:read` isn't told).
  */
