@@ -227,16 +227,42 @@ export async function heldChallenge(): Promise<string | undefined> {
 }
 
 /**
- * The signed-in staff member, for pages behind the login, once per request (the layout's
- * user menu and providers and the page share it). A session the API no longer accepts
- * goes to `/session-expired` (`sessionClient`).
+ * This request's `GET /admin/me`, once: `null` without a session cookie. It never
+ * redirects, so the root layout can ask it on any page (`staffLanguage`), the ones
+ * before the login included; `requireStaff` decides what a failed read means.
  */
-export const requireStaff = perRequest(async (): Promise<AdminSchemas["MeResponse"]> => {
-  const client = await sessionClient();
-  const { data, response } = await client.GET("/admin/me");
-  if (data) return data;
-  throw new Error(`GET /admin/me failed with ${response.status}`);
+const readStaff = perRequest(async () => {
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  if (!token) return null;
+  return createAdminClient(apiUrl(), token, {}, apiFetch()).GET("/admin/me");
 });
+
+/**
+ * The signed-in staff member, for pages behind the login, once per request (the layout's
+ * user menu and providers and the page share it). Without a session, to the login page;
+ * a session the API no longer accepts goes to `/session-expired`.
+ */
+export async function requireStaff(): Promise<AdminSchemas["MeResponse"]> {
+  const read = await readStaff();
+  if (!read) redirect("/login");
+  if (read.data) return read.data;
+  if (read.response.status === 401) await sessionExpired();
+  throw new Error(`GET /admin/me failed with ${read.response.status}`);
+}
+
+/**
+ * The signed-in staff member's own language (`users.language`), or `null`: none chosen,
+ * no session, or a session the API refused. The language of a page is decided before it
+ * knows whether it needs a session, so this asks without consequences.
+ */
+export async function staffLanguage(): Promise<string | null> {
+  try {
+    return (await readStaff())?.data?.user.language ?? null;
+  } catch {
+    // The API unreachable: the page's own reads will say so; its language needn't.
+    return null;
+  }
+}
 
 /**
  * Whether an API answer is a `403 missing_scope`: the user's role lacks what the call

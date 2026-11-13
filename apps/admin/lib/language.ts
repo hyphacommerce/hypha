@@ -1,9 +1,11 @@
 // Server-only: the language of the request. One place decides it, for the root layout's
-// `<html lang dir>` and providers, the pages behind the login and the ones before it
-// (login, invite, password reset), which have no session to ask.
+// `<html lang dir>` and providers, the pages behind the login (which know the staff
+// member, and so their language) and the ones before it (login, invite, password
+// reset), which go by the browser.
 
 import { cookies, headers } from "next/headers";
 
+import { staffLanguage } from "./hypha";
 import { LANGUAGES } from "./messages";
 import { LANGUAGE_COOKIE, pickLanguage } from "./pick-language.ts";
 import { PSEUDO } from "./pseudo.ts";
@@ -22,20 +24,27 @@ export function offeredLanguages(): readonly string[] {
 }
 
 /**
- * The request's language: the staff member's choice (the cookie their profile writes),
- * else the browser's `Accept-Language` matched against the catalogs, else English. The
- * admin's language is the person's, never the store's content language.
+ * The request's language: the signed-in staff member's own (`users.language`, from the
+ * request's one `GET /admin/me`), else the choice on this browser (the cookie their
+ * profile writes, which the pages before the login read), else the browser's
+ * `Accept-Language`, each matched against the catalogs, else English (`pickLanguage`).
+ * The admin's language is the person's, never the store's content language.
  */
 export async function getLanguage(): Promise<string> {
-  const [jar, sent] = await Promise.all([cookies(), headers()]);
+  const [jar, sent, user] = await Promise.all([cookies(), headers(), staffLanguage()]);
   return pickLanguage(
-    { cookie: jar.get(LANGUAGE_COOKIE)?.value, acceptLanguage: sent.get("accept-language") },
+    {
+      user,
+      cookie: jar.get(LANGUAGE_COOKIE)?.value,
+      acceptLanguage: sent.get("accept-language"),
+    },
     offeredLanguages(),
   );
 }
 
 /**
- * Keeps `language` as the staff member's choice on this browser, for a year. Only in a
+ * Keeps `language` as the staff member's choice on this browser, for a year: what the
+ * pages before the login speak, and the pseudo-language's only home. Only in a
  * server action or a route handler (pages can't set cookies). `false` for a language the
  * admin doesn't offer, which changes nothing.
  */

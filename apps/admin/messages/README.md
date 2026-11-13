@@ -269,18 +269,26 @@ const format = useFormat();       // client
 
 ## The language
 
-`getLanguage()` (`lib/language.ts`) decides it for every request: the staff member's
-choice (the `hypha_admin_language` cookie, written by the profile page), else the first
-language of the browser's `Accept-Language` the catalogs have (`sr` reads `sr-Latn`),
-else English.
+`getLanguage()` (`lib/language.ts`) decides it for every request, taking the first of
+these the catalogs have (`matchLanguage`: `sr` reads `sr-Latn`, `de-AT` reads `de`), else
+English (`pickLanguage` in `lib/pick-language.ts`, tested):
 
-Once the API has `users.language`, the order is: the signed-in user's language from the
-request's staff read (`GET /admin/me`, the read the layout already makes), then the
-cookie (the pages before the login, which have no session), then `Accept-Language`, then
-English. The profile's select then saves to the API and to the cookie. The pseudo-
-language stays in the cookie alone: `en-XA` is never sent to the API. The root layout sets
-`<html lang dir>` from it and hands it to the providers; the login, invite and reset pages
-use the same function. It has nothing to do with the store's content languages.
+1. the signed-in staff member's own, `users.language` (`user.language` in `GET /admin/me`:
+   the request's one staff read, which `requireStaff` and the layout share; `staffLanguage`
+   in `lib/hypha.ts` asks it without redirecting, so the pages before the login can ask
+   too, and a refused or failed read is no language);
+2. the choice on this browser, the `hypha_admin_language` cookie (what the login, invite
+   and reset pages go by, having no session);
+3. the browser's `Accept-Language`, in its order.
+
+The profile's select (**Your account → Language**, `chooseLanguage` in
+`app/(admin)/account/actions.ts`) saves the choice on the user (`PATCH /admin/me` with
+`language`) and in the cookie, so the login pages follow. An account that can't change
+itself (`403 account_locked`, the public demo's shared login) keeps it in the cookie alone,
+with a note saying so. The pseudo-language stays in the cookie alone: `en-XA` is never sent
+to the API, and since it's never the user's, a cookie naming it (where it's offered) comes
+first. The root layout sets `<html lang dir>` from the language and hands it to the
+providers. It has nothing to do with the store's content languages.
 
 A second language is a folder: `messages/<tag>/<namespace>.json`, then
 `pnpm --filter admin i18n:index`. The browser gets one catalog, its language's, as a
