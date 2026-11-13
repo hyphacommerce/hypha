@@ -59,8 +59,6 @@ export function BulkOutcomeBanner({
   onClose,
 }: {
   outcome: BulkOutcome;
-  /** No longer read: the outcome's summary names what changed. */
-  noun?: string;
   onClose: () => void;
 }) {
   const t = useT<"bulk">();

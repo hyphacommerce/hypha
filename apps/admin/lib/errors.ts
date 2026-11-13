@@ -49,7 +49,7 @@ const FROM_API: ReadonlySet<string> = new Set([
  * few that carry some. A code the admin has no sentence for shows the API's own (English)
  * to an English reader, and a general sentence with the API's after it to anyone else.
  */
-export function describeWith(t: TFor<"errors">, error: ApiError): string {
+export function describeWith(t: TFor<"errors" | "notifications">, error: ApiError): string {
   switch (error.code) {
     case "payment_refused": {
       const reason =
@@ -77,7 +77,7 @@ export function describeWith(t: TFor<"errors">, error: ApiError): string {
     case "template_invalid": {
       const problem = problemOf(error.details);
       return problem
-        ? t("errors.template_invalid_problem", { problem: describeProblem(problem) })
+        ? t("errors.template_invalid_problem", { problem: describeProblem(t, problem) })
         : t("errors.template_invalid");
     }
     case "custom_field_values_invalid": {

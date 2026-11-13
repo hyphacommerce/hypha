@@ -58,7 +58,7 @@ function list(overrides: Partial<PriceList> = {}): PriceList {
 
 test("percentInput is what parsePercent reads back", () => {
   for (const bps of [-2000, 550, 0, -1225]) {
-    assert.deepEqual(parsePercent(percentInput(bps)), { ok: true, value: bps });
+    assert.deepEqual(parsePercent(percentInput(bps), t), { ok: true, value: bps });
   }
 });
 
@@ -273,7 +273,7 @@ test("audienceLabel names up to two groups, else counts them", () => {
 
 test("candidateReason says a list for other groups doesn't price for this buyer", () => {
   assert.equal(
-    candidateReason("not_in_audience", "active"),
+    candidateReason("not_in_audience", "active", t),
     "Not for this buyer: it prices only for other customer groups.",
   );
 });
@@ -309,11 +309,11 @@ test("catalogsInUse reads the catalogs holding a list", () => {
 
 test("candidateReason explains a list that isn't live by its phase", () => {
   assert.equal(
-    candidateReason("not_live", "scheduled"),
+    candidateReason("not_live", "scheduled", t),
     "Not live yet: its window hasn't started.",
   );
-  assert.equal(candidateReason("not_live", "draft"), "Not live: it's a draft.");
-  assert.equal(candidateReason("won", "active"), "Wins: the lowest price.");
+  assert.equal(candidateReason("not_live", "draft", t), "Not live: it's a draft.");
+  assert.equal(candidateReason("won", "active", t), "Wins: the lowest price.");
 });
 
 test("clearErrors drops the errors of the fields being changed", () => {

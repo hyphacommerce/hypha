@@ -18,13 +18,13 @@ import {
 import { type Discount, methodLabel, usesLabel } from "@/lib/discounts/wire";
 import type { Format } from "@/lib/format";
 import type { TFor } from "@/lib/messages";
-import { PHASES } from "@/lib/price-lists";
+import { phaseOptions } from "@/lib/price-lists";
 import { useFormat } from "@/lib/use-format";
 import { useT } from "@/lib/use-t";
 
 import { ListWindow } from "../markets/price-lists/price-lists-table";
 
-type DiscountsT = TFor<"common" | "discounts">;
+type DiscountsT = TFor<"common" | "components" | "discounts">;
 
 const filters = (t: DiscountsT): FilterDef[] => [
   {
@@ -37,7 +37,7 @@ const filters = (t: DiscountsT): FilterDef[] => [
     kind: "select",
     param: "status",
     label: t("common.status"),
-    options: PHASES.map((p) => ({ value: p.value, label: p.label })),
+    options: phaseOptions(t),
   },
   {
     kind: "select",
@@ -99,7 +99,7 @@ const columns = (t: DiscountsT, format: Format): TableColumn<Discount>[] => [
     key: "phase",
     header: t("common.status"),
     width: pixel(120),
-    renderCell: (d) => <DiscountStatusBadge phase={d.phase} />,
+    renderCell: (d) => <DiscountStatusBadge t={t} phase={d.phase} />,
   },
   {
     key: "window",

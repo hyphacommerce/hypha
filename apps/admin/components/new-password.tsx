@@ -14,8 +14,8 @@ import { useT } from "@/lib/use-t";
 export const PASSWORD_MIN = 8;
 
 /**
- * What's wrong with the pair, for the form to show, or nothing. In the language of `t`
- * (the form's `useT()`); English without one.
+ * What's wrong with the pair, for the form to show, or nothing, in the language of `t`
+ * (the form's `useT()`).
  */
 export function newPasswordProblem(
   password: string,

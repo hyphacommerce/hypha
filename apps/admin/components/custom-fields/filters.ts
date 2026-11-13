@@ -7,11 +7,8 @@ import type { FilterDef } from "@/components/resource-table/resource-table";
 import { type Definition, filterParam, isFilterOffered, parseType } from "@/lib/custom-fields";
 import type { TFor } from "@/lib/messages";
 
-/**
- * `t` names the yes/no of a true/false field; without one they're English, for the
- * lists that haven't a translator yet.
- */
-export function customFieldFilters(definitions: Definition[], t?: TFor<"common">): FilterDef[] {
+/** The filters, in `t`'s language where the admin names something (a true/false field's yes and no). */
+export function customFieldFilters(definitions: Definition[], t: TFor<"common">): FilterDef[] {
   return definitions.filter(isFilterOffered).map((definition): FilterDef => {
     const param = filterParam(definition);
     const label = definition.name;
@@ -33,8 +30,8 @@ export function customFieldFilters(definitions: Definition[], t?: TFor<"common">
         param,
         label,
         options: [
-          { value: "true", label: t?.("common.yes") ?? "Yes" },
-          { value: "false", label: t?.("common.no") ?? "No" },
+          { value: "true", label: t("common.yes") },
+          { value: "false", label: t("common.no") },
         ],
       };
     }

@@ -173,7 +173,7 @@ export async function saveProduct(
           ...stored,
           error: await describe(error),
           options,
-          fieldProblems: problemsOf(error.code, error.details),
+          fieldProblems: problemsOf(error.code, error.details, await getT()),
         };
       }
       return { ...stored, customFields: data };

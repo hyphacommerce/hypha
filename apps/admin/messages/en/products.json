@@ -151,6 +151,7 @@
   "stock_no_locations": "The store has no locations to keep stock at.",
   "stock_on_hand": "On hand at {location}",
   "stock_reserved": "{reserved} reserved for orders, {available} available.",
+  "stock_incoming": "{incoming}.",
   "stock_note_description": "Why the counts changed, for the stock history.",
   "stock_history": "History",
   "stock_save": "Save stock",

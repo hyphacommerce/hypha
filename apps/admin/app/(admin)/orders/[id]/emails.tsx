@@ -14,7 +14,7 @@ import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { useState } from "react";
 
 import { DateTime } from "@/components/date-time";
-import { MESSAGE_STATUS, templateName } from "@/lib/notifications";
+import { messageStatus, templateName } from "@/lib/notifications";
 import { useT } from "@/lib/use-t";
 
 import { resendNotification } from "../actions";
@@ -37,7 +37,7 @@ export function EmailsCard({
   const [error, setError] = useState<string>();
   const [resending, setResending] = useState<string>();
   const toast = useToast();
-  const t = useT<"orders">();
+  const t = useT<"orders" | "notifications">();
 
   const resend = async (message: Message) => {
     setResending(message.id);
@@ -62,10 +62,7 @@ export function EmailsCard({
         ) : (
           <VStack gap={3}>
             {messages.map((message) => {
-              const status = MESSAGE_STATUS[message.status] ?? {
-                label: message.status,
-                variant: "neutral" as const,
-              };
+              const status = messageStatus(t, message.status);
               const sent = (
                 <DateTime key="time" value={message.sent_at ?? message.created_at} short />
               );
@@ -74,7 +71,7 @@ export function EmailsCard({
                 <HStack key={message.id} gap={3} hAlign="between" vAlign="start" wrap="wrap">
                   <VStack gap={0.5}>
                     <HStack gap={2} vAlign="center" wrap="wrap">
-                      <Text weight="medium">{templateName(message.template)}</Text>
+                      <Text weight="medium">{templateName(t, message.template)}</Text>
                       <Badge label={status.label} variant={status.variant} />
                     </HStack>
                     <Text type="supporting" color="secondary">

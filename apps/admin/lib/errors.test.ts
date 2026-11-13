@@ -8,13 +8,21 @@ import { createTranslator, mergeCatalogs } from "@hyphacommerce/i18n";
 import { describeWith } from "./errors.ts";
 import type { TFor } from "./messages";
 
-const errors: Record<string, string> = JSON.parse(
-  readFileSync(join(import.meta.dirname, "..", "messages", "en", "errors.json"), "utf8"),
-);
-const catalog = mergeCatalogs({ errors });
+function read(namespace: string): Record<string, string> {
+  const file = join(import.meta.dirname, "..", "messages", "en", `${namespace}.json`);
+  const parsed: Record<string, string> = JSON.parse(readFileSync(file, "utf8"));
+  return parsed;
+}
+const catalog = mergeCatalogs({ errors: read("errors"), notifications: read("notifications") });
 
-/** A translator over the `errors` namespace alone, which is all `describeWith` reads. */
-function translator(language: string, messages: Record<string, string> = catalog): TFor<"errors"> {
+/**
+ * A translator over what `describeWith` reads: the `errors` namespace, and
+ * `notifications` for where a template's problem is.
+ */
+function translator(
+  language: string,
+  messages: Record<string, string> = catalog,
+): TFor<"errors" | "notifications"> {
   return createTranslator(language, messages, { fallback: catalog });
 }
 
@@ -137,7 +145,7 @@ test("every sentence formats without values it wasn't given", () => {
     "rate_limited_seconds",
     "unknown",
   ]);
-  for (const code of Object.keys(errors)) {
+  for (const code of Object.keys(read("errors"))) {
     if (needValues.has(code)) continue;
     assert.equal(describeWith(en, error(code)).includes("{"), code === "invalid_order_url", code);
   }

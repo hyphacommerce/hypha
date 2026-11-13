@@ -100,7 +100,7 @@ async function DiscountView({
       <PageHeader
         title={discount.title}
         back={back}
-        badges={<DiscountStatusBadge phase={discount.phase} />}
+        badges={<DiscountStatusBadge t={t} phase={discount.phase} />}
         description={`${methodLabel(discount, t)} · ${discount.summary}`}
       />
       <DiscountTabs id={id} tab={tab} hasCodes={hasCodes} hasUsage={hasUsage}>

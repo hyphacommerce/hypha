@@ -9,7 +9,6 @@
   "list_search_placeholder": "Search customers by email, name or phone",
   "list_column_since": "Since",
   "list_column_addresses": "Addresses",
-  "list_bulk_noun": "customer",
   "list_empty_title": "No customers yet",
   "list_empty_description": "Checkout adds a customer for each new email; they show up here.",
   "list_no_results_title": "No customers match",

@@ -5,7 +5,7 @@
 
 import type { TFor } from "../messages";
 import { fromLocalInput } from "../price-lists.ts";
-import { parseAmount, parsePercent } from "../price-grid/money.ts";
+import { amountOf, parseAmount, percentOf } from "../price-grid/money.ts";
 import {
   type DiscountDraft,
   type ItemSetDraft,
@@ -19,7 +19,7 @@ import {
 } from "./draft.ts";
 
 /** The translator a discount's labels, problems and summary need. */
-export type DiscountsT = TFor<"common" | "discounts">;
+export type DiscountsT = TFor<"common" | "components" | "discounts">;
 
 /** One broken rule: where it is and what to do about it. */
 export type Problem = { path: string; message: string };
@@ -63,11 +63,11 @@ export function parseOff(
   text: string,
 ): { ok: true; value: number } | { ok: false; error: OffProblem } {
   if (/^\s*[-−]/.test(text)) return { ok: false, error: "discounts.problem_off_sign" };
-  const parsed = parsePercent(text);
-  if (!parsed.ok) return { ok: false, error: "discounts.problem_off_not_percent" };
-  if (parsed.value <= 0) return { ok: false, error: "discounts.problem_off_zero" };
-  if (parsed.value > 10_000) return { ok: false, error: "discounts.problem_off_over" };
-  return parsed;
+  const value = percentOf(text);
+  if (value === null) return { ok: false, error: "discounts.problem_off_not_percent" };
+  if (value <= 0) return { ok: false, error: "discounts.problem_off_zero" };
+  if (value > 10_000) return { ok: false, error: "discounts.problem_off_over" };
+  return { ok: true, value };
 }
 
 /**
@@ -85,8 +85,8 @@ export function amountsOf(
     const text = amounts[market.id]?.trim() ?? "";
     const digits = currencies[market.currency];
     if (text === "" || digits === undefined) continue;
-    const amount = parseAmount(text, digits, market.currency);
-    if (amount.ok && (amount.value !== 0 || options.allowZero)) parsed[market.id] = amount.value;
+    const amount = amountOf(text, digits, market.currency);
+    if (amount !== null && (amount !== 0 || options.allowZero)) parsed[market.id] = amount;
   }
   return parsed;
 }
@@ -116,7 +116,7 @@ export function parseAmounts(
       });
       continue;
     }
-    const amount = parseAmount(text, digits, market.currency);
+    const amount = parseAmount(text, digits, market.currency, t);
     if (!amount.ok) problems.push({ path: at, message: amount.error });
     else if (amount.value === 0 && !options.allowZero) {
       problems.push({ path: at, message: t("discounts.problem_amount_zero") });

@@ -68,7 +68,7 @@ export function HistoryTable({
   /** Whether the staff member sees cost (`purchasing:read`): a cost column then. */
   showCost?: boolean;
 }) {
-  const t = useT<"inventory">();
+  const t = useT<"inventory" | "apps">();
   const format = useFormat();
   const cost = (m: Movement) => {
     if (m.reason === "cost_adjustment") {
@@ -161,7 +161,7 @@ export function HistoryTable({
         <VStack gap={0.5} hAlign="start">
           <Source source={m.source} t={t} />
           <Text type="supporting" color="secondary">
-            {actorLabel(m.actor)}
+            {actorLabel(t, m.actor)}
           </Text>
         </VStack>
       ),

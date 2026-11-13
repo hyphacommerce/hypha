@@ -97,7 +97,7 @@ export function CustomersTable({
           },
         ]
       : [];
-  const filters = [search, ...groupFilter, ...customFieldFilters(fieldFilters)];
+  const filters = [search, ...groupFilter, ...customFieldFilters(fieldFilters, t)];
   const columns: TableColumn<Customer>[] = [
     {
       key: "name",
@@ -169,13 +169,7 @@ export function CustomersTable({
   const bulk = canLabel && (labels !== undefined || groups.length > 0);
   return (
     <VStack gap={3}>
-      {outcome && (
-        <BulkOutcomeBanner
-          outcome={outcome}
-          noun={t("customers.list_bulk_noun")}
-          onClose={() => setOutcome(undefined)}
-        />
-      )}
+      {outcome && <BulkOutcomeBanner outcome={outcome} onClose={() => setOutcome(undefined)} />}
       <ResourceTable<Customer>
         rows={page?.items}
         nextCursor={page?.next_cursor}

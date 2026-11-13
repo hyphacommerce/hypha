@@ -15,36 +15,6 @@ export type PaymentPreset = {
   instructionsPlaceholder: string;
 };
 
-/**
- * The presets in English.
- *
- * @deprecated Use `paymentPresets(t)`. Kept until the payment settings page moves to it.
- */
-export const PAYMENT_PRESETS: PaymentPreset[] = [
-  {
-    value: "cash_on_delivery",
-    label: "Cash on delivery",
-    description: "The shopper pays the courier; you mark the order paid.",
-    name: "Cash on delivery",
-    instructionsPlaceholder: "Pay the courier in cash when your order arrives.",
-  },
-  {
-    value: "bank_transfer",
-    label: "Bank transfer",
-    description: "The shopper transfers the total; you mark the order paid when it lands.",
-    name: "Bank transfer",
-    instructionsPlaceholder:
-      "Transfer the total to IBAN HR12 3456 7890 1234 5678 9 (Your Store Ltd), with your order number as the reference.",
-  },
-  {
-    value: "custom",
-    label: "Other manual method",
-    description: "Anything else you collect yourself: a card terminal, an invoice.",
-    name: "",
-    instructionsPlaceholder: "What the shopper should do to pay.",
-  },
-];
-
 /** The name a method made from each preset starts with. */
 const PRESET_NAMES: Record<PaymentPreset["value"], string> = {
   cash_on_delivery: "Cash on delivery",
@@ -60,13 +30,13 @@ const PRESET_VALUES = ["cash_on_delivery", "bank_transfer", "custom"] as const;
  * (shoppers see it at checkout), which is in the store's language whatever the staff
  * member's is, so it isn't translated: staff change it before saving.
  */
-export function paymentPresets(t: TFor<"orders">): PaymentPreset[] {
+export function paymentPresets(t: TFor<"payments">): PaymentPreset[] {
   return PRESET_VALUES.map((value) => ({
     value,
-    label: t(`orders.payment_preset_${value}_label`),
-    description: t(`orders.payment_preset_${value}_description`),
+    label: t(`payments.preset_${value}_label`),
+    description: t(`payments.preset_${value}_description`),
     name: PRESET_NAMES[value],
-    instructionsPlaceholder: t(`orders.payment_preset_${value}_instructions`),
+    instructionsPlaceholder: t(`payments.preset_${value}_instructions`),
   }));
 }
 
@@ -76,11 +46,10 @@ export type PaymentApp = { key: string; name: string; isBuiltIn: boolean };
 
 /**
  * What a provider key reads as: "Manual", or the app's or spore's name from its key
- * (`app_stripe`, `spore_stripe`). Without a translator "Manual" is English: every caller
- * should pass one.
+ * (`app_stripe`, `spore_stripe`).
  */
-export function providerLabel(provider: string, t?: TFor<"orders">): string {
-  if (provider === "manual") return t ? t("orders.payment_provider_manual") : "Manual";
+export function providerLabel(provider: string, t: TFor<"payments">): string {
+  if (provider === "manual") return t("payments.provider_manual");
   for (const prefix of ["app_", "spore_"])
     if (provider.startsWith(prefix)) return provider.slice(prefix.length);
   return provider;

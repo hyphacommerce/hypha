@@ -35,12 +35,7 @@ import {
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { useState, useTransition } from "react";
 
-import {
-  PAYMENT_PRESETS,
-  type PaymentApp,
-  type PaymentPreset,
-  providerLabel,
-} from "@/lib/payments";
+import { paymentPresets, type PaymentApp, type PaymentPreset, providerLabel } from "@/lib/payments";
 import { useFormat } from "@/lib/use-format";
 import { useT } from "@/lib/use-t";
 
@@ -144,7 +139,7 @@ export function PaymentMethodsCard({
                     <VStack gap={0.5}>
                       <HStack gap={2} vAlign="center">
                         <Text weight="medium">{method.name}</Text>
-                        <Badge label={providerLabel(method.provider)} />
+                        <Badge label={providerLabel(method.provider, t)} />
                       </HStack>
                       {method.instructions && (
                         <Text type="supporting" color="secondary">
@@ -242,12 +237,12 @@ export function PaymentMethodsCard({
 type Kind = { preset: PaymentPreset; app?: undefined } | { app: PaymentApp; preset?: undefined };
 
 /** The preset or app a kind's value names. */
-function kindOf(value: string, paymentApps: PaymentApp[]): Kind {
+function kindOf(value: string, presets: PaymentPreset[], paymentApps: PaymentApp[]): Kind {
   const app = value.startsWith("app:")
     ? paymentApps.find((a) => `app:${a.key}` === value)
     : undefined;
   if (app) return { app };
-  return { preset: PAYMENT_PRESETS.find((p) => p.value === value) ?? PAYMENT_PRESETS[0] };
+  return { preset: presets.find((p) => p.value === value) ?? presets[0] };
 }
 
 /**
@@ -268,13 +263,14 @@ function MethodDialog({
   onClose: () => void;
 }) {
   const t = useT<"payments">();
-  const [kind, setKind] = useState<Kind>({ preset: PAYMENT_PRESETS[0] });
+  const presets = paymentPresets(t);
+  const [kind, setKind] = useState<Kind>({ preset: presets[0] });
   const kindName = kind.app ? kind.app.name : kind.preset.name;
   const kindValue = kind.app ? `app:${kind.app.key}` : kind.preset.value;
   // An app's or spore's method collects the money itself: no instructions to show.
   const isApp = method ? method.provider !== "manual" : Boolean(kind.app);
   const [form, setForm] = useState<MethodInput>({
-    name: method?.name ?? PAYMENT_PRESETS[0].name,
+    name: method?.name ?? presets[0].name,
     instructions: method?.instructions ?? "",
     markets: method?.markets ?? [],
     channels: method?.channels ?? [],
@@ -286,7 +282,7 @@ function MethodDialog({
   const isComplete = form.name.trim() !== "" && form.instructions.length <= 2000;
 
   const chooseKind = (value: string) => {
-    const next = kindOf(value, paymentApps);
+    const next = kindOf(value, presets, paymentApps);
     // The name follows the kind unless staff typed their own.
     if (form.name === kindName) set({ name: next.app ? next.app.name : next.preset.name });
     setKind(next);
@@ -332,7 +328,7 @@ function MethodDialog({
             <Selector
               label={t("payments.method_kind_label")}
               options={[
-                ...PAYMENT_PRESETS.map(({ value, label, description }) => ({
+                ...presets.map(({ value, label, description }) => ({
                   value,
                   label,
                   description,

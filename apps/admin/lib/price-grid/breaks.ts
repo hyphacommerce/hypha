@@ -1,8 +1,7 @@
 // Quantity price breaks: their rules, and the one-line text a grid cell holds for them
 // ("10=8.00; 20=7.50"), so breaks copy, paste and fill like any other cell.
 
-import { formatAmount, parseAmount, type Parsed } from "./money.ts";
-import { say } from "./say.ts";
+import { type Parsed, type Read, formatAmount, readAmount, said } from "./money.ts";
 import { MAX_BREAKS, type PriceT } from "./types.ts";
 
 /** A break in minor units of the list's currency. */
@@ -16,15 +15,24 @@ export function formatBreaks(breaks: readonly BreakAmount[], digits: number): st
 /**
  * Breaks from their cell text: pairs separated by `;` or new lines, each a quantity and
  * a price joined by `=`, `:` or `@` ("10 @ 8,00" works too). Their rules are checked
- * apart, by `breakProblems`. The error is in `t`'s language (English without one, for a
- * caller that only asks whether the text parses).
+ * apart, by `breakProblems`. The error is in `t`'s language.
  */
 export function parseBreaks(
   text: string,
   digits: number,
   currency: string,
-  t?: PriceT,
+  t: PriceT,
 ): Parsed<BreakAmount[]> {
+  return said(readBreaks(text, digits, currency), t);
+}
+
+/** The breaks `parseBreaks` reads, or null when the text isn't breaks. */
+export function breaksOf(text: string, digits: number, currency: string): BreakAmount[] | null {
+  const read = readBreaks(text, digits, currency);
+  return read.ok ? read.value : null;
+}
+
+function readBreaks(text: string, digits: number, currency: string): Read<BreakAmount[]> {
   const parts = text
     .split(/[;\n]/)
     .map((part) => part.trim())
@@ -35,15 +43,16 @@ export function parseBreaks(
     if (!match) {
       return {
         ok: false,
-        error: say(t, "price_lists.break_invalid", { part: JSON.stringify(part) }),
+        problem: (t) => t("price_lists.break_invalid", { part: JSON.stringify(part) }),
       };
     }
     const [, quantity = "", price = ""] = match;
-    const amount = parseAmount(price, digits, currency, t);
+    const amount = readAmount(price, digits, currency);
     if (!amount.ok) {
       return {
         ok: false,
-        error: say(t, "price_lists.break_amount_invalid", { quantity, error: amount.error }),
+        problem: (t) =>
+          t("price_lists.break_amount_invalid", { quantity, error: amount.problem(t) }),
       };
     }
     breaks.push({ min_quantity: Number(quantity), amount: amount.value });

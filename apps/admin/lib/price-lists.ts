@@ -8,8 +8,8 @@ import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 import { type CategoryNode, subtree } from "./categories.ts";
 import type { Format } from "./format.ts";
-import { adjustAmount, parsePercent } from "./price-grid/money.ts";
-import { say } from "./price-grid/say.ts";
+import type { TFor } from "./messages";
+import { adjustAmount, percentOf } from "./price-grid/money.ts";
 import { MAX_BREAKS, type Money, type PriceT } from "./price-grid/types.ts";
 
 export type PriceList = AdminSchemas["PriceListResponse"];
@@ -46,19 +46,16 @@ export function kindLabel(t: PriceT, kind: string): string {
 /** The phases, in the order a filter offers them. */
 const PHASE_ORDER: readonly Phase[] = ["active", "scheduled", "expired", "draft"];
 
-/** A filter's options for the phases, in `t`'s language. */
-export function phaseOptions(t: PriceT): { value: Phase; label: string }[] {
-  return PHASE_ORDER.map((value) => ({ value, label: t(`price_lists.phase_${value}`) }));
-}
-
 /**
- * LEGACY: the phases with English labels, for the discounts table until it passes its
- * translator to `phaseOptions`.
+ * A translator for the phases' names: any at all, since they're `common`'s (a price list
+ * and a discount are scheduled the same way, and say so with the same words).
  */
-export const PHASES: { value: Phase; label: string }[] = PHASE_ORDER.map((value) => ({
-  value,
-  label: say(undefined, `price_lists.phase_${value}`),
-}));
+export type PhaseT = TFor<"common">;
+
+/** A filter's options for the phases, in `t`'s language. */
+export function phaseOptions(t: PhaseT): { value: Phase; label: string }[] {
+  return PHASE_ORDER.map((value) => ({ value, label: t(`common.phase_${value}`) }));
+}
 
 const PHASE_VARIANTS = {
   active: "success",
@@ -67,20 +64,17 @@ const PHASE_VARIANTS = {
   draft: "neutral",
 } as const satisfies Record<Phase, string>;
 
-/**
- * A phase's badge: its label, in `t`'s language (English without one: the discounts'
- * badge doesn't pass its translator yet), and its colour. An unknown phase as it is.
- */
+/** A phase's badge: its label, in `t`'s language, and its colour. An unknown phase as it is. */
 export function phaseBadge(
   phase: string,
-  t?: PriceT,
+  t: PhaseT,
 ): {
   label: string;
   variant: "neutral" | "info" | "success" | "warning";
 } {
   const known = PHASE_ORDER.find((p) => p === phase);
   if (!known) return { label: phase, variant: "neutral" };
-  return { label: say(t, `price_lists.phase_${known}`), variant: PHASE_VARIANTS[known] };
+  return { label: t(`common.phase_${known}`), variant: PHASE_VARIANTS[known] };
 }
 
 // ---- the adjustment ----
@@ -425,7 +419,7 @@ export function checkForm(t: PriceT, form: ListForm, timeZone: string): FormErro
     errors.groups = t("price_lists.form_too_many_groups", { max: MAX_AUDIENCE_GROUPS });
   }
   if (form.hasAdjustment) {
-    if (!parsePercent(form.percent).ok) {
+    if (percentOf(form.percent) === null) {
       errors.percent = t("price_lists.form_percent_invalid");
     }
     if (form.scope === "products" && form.products.length === 0) {
@@ -444,8 +438,7 @@ export function checkForm(t: PriceT, form: ListForm, timeZone: string): FormErro
 
 function adjustmentOf(form: ListForm): Adjustment | null {
   if (!form.hasAdjustment) return null;
-  const percent = parsePercent(form.percent);
-  const percent_bps = percent.ok ? percent.value : 0;
+  const percent_bps = percentOf(form.percent) ?? 0;
   const applies_to: AppliesTo =
     form.scope === "products"
       ? { type: "products", products: form.products }
@@ -610,19 +603,18 @@ export function catalogsInUse(details: unknown): string[] {
 
 /**
  * Why a candidate list did or didn't set a variant's price, for the Prices card, in `t`'s
- * language (English without one: the product page doesn't pass its translator yet).
+ * language. A result this build doesn't know as it is.
  */
-export function candidateReason(result: string, phase: string, t?: PriceT): string {
+export function candidateReason(result: string, phase: string, t: PriceT): string {
   switch (result) {
     case "won":
     case "higher":
     case "tied_with_older":
     case "not_pricing":
     case "not_in_audience":
-      return say(t, `price_lists.candidate_${result}`);
+      return t(`price_lists.candidate_${result}`);
     case "not_live":
-      return say(
-        t,
+      return t(
         phase === "scheduled"
           ? "price_lists.candidate_not_live_scheduled"
           : phase === "expired"

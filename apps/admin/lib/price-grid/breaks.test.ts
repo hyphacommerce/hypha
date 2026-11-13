@@ -11,26 +11,26 @@ test("breaks round-trip through their cell text", () => {
   ];
   const text = formatBreaks(breaks, 2);
   assert.equal(text, "10=8.00; 20=7.50");
-  assert.deepEqual(parseBreaks(text, 2, "EUR"), { ok: true, value: breaks });
+  assert.deepEqual(parseBreaks(text, 2, "EUR", t), { ok: true, value: breaks });
 });
 
 test("breaks parse leniently: other joiners, new lines, decimal commas", () => {
-  assert.deepEqual(parseBreaks("10 @ 8,00\n20: 7.5;", 2, "EUR"), {
+  assert.deepEqual(parseBreaks("10 @ 8,00\n20: 7.5;", 2, "EUR", t), {
     ok: true,
     value: [
       { min_quantity: 10, amount: 800 },
       { min_quantity: 20, amount: 750 },
     ],
   });
-  assert.deepEqual(parseBreaks("  ", 2, "EUR"), { ok: true, value: [] });
+  assert.deepEqual(parseBreaks("  ", 2, "EUR", t), { ok: true, value: [] });
 });
 
 test("a part that isn't a break, or a bad price, is refused with the part", () => {
-  assert.deepEqual(parseBreaks("ten=8", 2, "EUR"), {
+  assert.deepEqual(parseBreaks("ten=8", 2, "EUR", t), {
     ok: false,
     error: '"ten=8" isn\'t a break, like 10=8.00.',
   });
-  assert.deepEqual(parseBreaks("10=8.0001", 2, "EUR"), {
+  assert.deepEqual(parseBreaks("10=8.0001", 2, "EUR", t), {
     ok: false,
     error: "Break 10: At most 2 decimal places.",
   });
@@ -103,4 +103,10 @@ test("at most ten breaks", () => {
 test("labels count breaks", () => {
   assert.equal(breaksLabel(t, 1), "1 break");
   assert.equal(breaksLabel(t, 3), "3 breaks");
+});
+
+test("counts are plurals, written for the language", () => {
+  assert.equal(breaksLabel(t, 1), "1 break");
+  assert.equal(breaksLabel(t, 1234), "1,234 breaks");
+  assert.equal(t("price_lists.form_too_many_products", { max: 1000 }), "At most 1,000 products.");
 });

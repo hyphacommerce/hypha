@@ -39,5 +39,15 @@
   "method_dialog_title_add": "Add payment method",
   "method_dialog_title_edit": "Edit {name}",
   "method_markets_placeholder": "Every market",
-  "method_channels_placeholder": "Every channel"
+  "method_channels_placeholder": "Every channel",
+  "provider_manual": "Manual",
+  "preset_cash_on_delivery_label": "Cash on delivery",
+  "preset_cash_on_delivery_description": "The shopper pays the courier; you mark the order paid.",
+  "preset_cash_on_delivery_instructions": "Pay the courier in cash when your order arrives.",
+  "preset_bank_transfer_label": "Bank transfer",
+  "preset_bank_transfer_description": "The shopper transfers the total; you mark the order paid when it lands.",
+  "preset_bank_transfer_instructions": "Transfer the total to IBAN HR12 3456 7890 1234 5678 9 (Your Store Ltd), with your order number as the reference.",
+  "preset_custom_label": "Other manual method",
+  "preset_custom_description": "Anything else you collect yourself: a card terminal, an invoice.",
+  "preset_custom_instructions": "What the shopper should do to pay."
 }

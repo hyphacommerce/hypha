@@ -83,5 +83,13 @@
   "app_sent_to": "Sent to {app}.",
   "app_field_whole_number": "A whole number",
   "app_field_at_least": "At least {min}",
-  "app_field_at_most": "At most {max}"
+  "app_field_at_most": "At most {max}",
+  "amount_foreign_currency": "That's in {written}; this list is in {currency}.",
+  "amount_required": "Enter an amount.",
+  "amount_negative": "Can't be negative.",
+  "amount_ambiguous": "{input} is ambiguous: write it without the separator, or with {digits, plural, one {# decimal} other {# decimals}}.",
+  "amount_no_decimals": "This currency has no decimals.",
+  "amount_too_many_decimals": "At most {digits, plural, one {# decimal place} other {# decimal places}}.",
+  "amount_too_large": "Too large.",
+  "amount_invalid": "{input} isn't an amount."
 }

@@ -158,7 +158,7 @@ export function ProductsTable({
     { kind: "text", param: "vendor", label: t("products.vendor") },
     { kind: "text", param: "product_type", label: t("common.type") },
     { kind: "text", param: "tag", label: t("products.tag") },
-    ...customFieldFilters(fieldFilters),
+    ...customFieldFilters(fieldFilters, t),
   ];
   const views: View[] = [
     { label: t("common.all"), params: {} },

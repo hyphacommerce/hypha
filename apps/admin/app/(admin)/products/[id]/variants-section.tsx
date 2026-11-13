@@ -24,6 +24,7 @@ import { VariantFieldsCell } from "@/components/custom-fields/variant-fields";
 import type { Definition } from "@/lib/custom-fields";
 import { incomingLabel } from "@/lib/inventory";
 import type { TFor } from "@/lib/messages";
+import { useFormat } from "@/lib/use-format";
 import { useT } from "@/lib/use-t";
 
 import {
@@ -646,7 +647,8 @@ function StockDialog({
   locations: Location[];
   onClose: () => void;
 }) {
-  const t = useT<"products">();
+  const t = useT<"products" | "inventory">();
+  const format = useFormat();
   const [stock, setStock] = useState<Stock | undefined>(initial);
   const [form, setForm] = useState(() => formOf(initial, locations));
   const [error, setError] = useState<string>();
@@ -721,6 +723,7 @@ function StockDialog({
             ) : (
               locations.map((location) => {
                 const level = stock?.levels.find((l) => l.location === location.id);
+                const incoming = level ? incomingLabel(level, t, format) : null;
                 return (
                   <NumberInput
                     key={location.id}
@@ -733,7 +736,7 @@ function StockDialog({
                               available: level.available,
                             })
                           : null,
-                        level && incomingLabel(level) ? `${incomingLabel(level)}.` : null,
+                        incoming ? t("products.stock_incoming", { incoming }) : null,
                       ]
                         .filter(Boolean)
                         .join(" ") || undefined

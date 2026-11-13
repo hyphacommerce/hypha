@@ -16,7 +16,11 @@ function catalog(namespace: string): Record<string, string> {
   return parsed;
 }
 
-const messages = mergeCatalogs({ common: catalog("common"), discounts: catalog("discounts") });
+const messages = mergeCatalogs({
+  common: catalog("common"),
+  components: catalog("components"),
+  discounts: catalog("discounts"),
+});
 
 /** English; a message that can't be formatted throws. */
 export const t: DiscountsT = createTranslator("en", messages, {

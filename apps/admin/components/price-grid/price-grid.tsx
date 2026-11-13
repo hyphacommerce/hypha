@@ -81,7 +81,7 @@ import {
 import { useCurrencies } from "@/components/currencies";
 import type { TFor } from "@/lib/messages";
 import { useT } from "@/lib/use-t";
-import { breaksLabel, parseBreaks } from "@/lib/price-grid/breaks";
+import { breaksLabel, breaksOf } from "@/lib/price-grid/breaks";
 import {
   type CellChange,
   type Drafts,
@@ -98,7 +98,7 @@ import {
   setTo,
 } from "@/lib/price-grid/edits";
 import { gridCommand, isSaveKey } from "@/lib/price-grid/keys";
-import { cellAmount, formatAmount, parseAmount } from "@/lib/price-grid/money";
+import { amountOf, cellAmount, formatAmount } from "@/lib/price-grid/money";
 import { type PriceGridRow, variantsById, visibleRows } from "@/lib/price-grid/rows";
 import {
   type Cell,
@@ -429,8 +429,8 @@ export function PriceGrid({
     if (text.trim() === "") {
       return variant.adjusted_price ? { money: variant.adjusted_price, isAdjusted: true } : null;
     }
-    const amount = parseAmount(text, digits, currency);
-    return amount.ok ? { money: { amount: amount.value, currency }, isAdjusted: false } : null;
+    const amount = amountOf(text, digits, currency);
+    return amount === null ? null : { money: { amount, currency }, isAdjusted: false };
   };
 
   const plain = (money: Money | null) =>
@@ -958,10 +958,10 @@ export function PriceGrid({
             <EmptyEditable label={cellText.add} />
           );
         }
-        const parsed = parseBreaks(text, digits, currency);
+        const breaks = breaksOf(text, digits, currency);
         return (
           <EditableValue error={error}>
-            {parsed.ok ? breaksLabel(t, parsed.value.length) : text}
+            {breaks ? breaksLabel(t, breaks.length) : text}
           </EditableValue>
         );
       }

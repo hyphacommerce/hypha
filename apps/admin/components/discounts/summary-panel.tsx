@@ -61,7 +61,7 @@ export function SummaryPanel({
             <Text type="display-3" as="h2">
               {t("common.summary")}
             </Text>
-            <DiscountStatusBadge phase={phase} />
+            <DiscountStatusBadge t={t} phase={phase} />
           </HStack>
           <Text weight="semibold">{draft.title.trim() || t("discounts.panel_untitled")}</Text>
           <Text color="secondary">

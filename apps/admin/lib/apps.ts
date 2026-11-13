@@ -139,30 +139,8 @@ export function scopeLabel(t: TFor<"apps">, scope: string): string {
 
 type Actor = AdminSchemas["EventActor"] | null | undefined;
 
-/**
- * Who did something, for a line of history: "a staff member", "the app itself", …
- * @deprecated English only: pass the translator, `actorLabel(t, actor)`.
- */
-export function actorLabel(actor: Actor): string;
-/** Who did something, for a line of history, in `t`'s language. */
-export function actorLabel(t: TFor<"apps">, actor: Actor): string;
-export function actorLabel(first: TFor<"apps"> | Actor, second?: Actor): string {
-  if (typeof first === "function") {
-    const key = `apps.actor_${second?.type ?? "unknown"}`;
-    return hasKey(first, key) ? first(key) : first("apps.actor_unknown");
-  }
-  switch (first?.type) {
-    case "user":
-      return "a staff member";
-    case "agent":
-      return "an agent";
-    case "api_key":
-      return "an API key";
-    case "app":
-      return "the app itself";
-    case "system":
-      return "Hypha";
-    default:
-      return "someone";
-  }
+/** Who did something, for a line of history ("a staff member", "the app itself"), in `t`'s language. */
+export function actorLabel(t: TFor<"apps">, actor: Actor): string {
+  const key = `apps.actor_${actor?.type ?? "unknown"}`;
+  return hasKey(t, key) ? t(key) : t("apps.actor_unknown");
 }

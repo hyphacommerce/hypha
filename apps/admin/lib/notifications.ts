@@ -7,33 +7,10 @@ import type { TFor } from "./messages";
 
 type NotificationsT = TFor<"notifications">;
 
-/** The templates' names in English, for callers that have no translator yet. */
-const ENGLISH_NAMES: Record<string, string> = {
-  layout: "Email layout",
-  order_confirmation: "Order confirmation",
-  order_shipped: "Order shipped",
-  order_tracking_updated: "Tracking updated",
-  order_cancelled: "Order cancelled",
-  staff_new_order: "New order",
-  staff_invite: "Staff invite",
-  staff_password_reset: "Password reset",
-  customer_login_code: "Customer sign-in code",
-  customer_erasure_requested: "Erasure requested",
-  supplier_purchase_order: "Purchase order",
-};
-
-/**
- * A template key as people read it, in English.
- * @deprecated Pass the translator first: `templateName(t, key)`.
- */
-export function templateName(key: string): string;
 /** A template key as people read it; an unknown one as it is. */
-export function templateName(t: NotificationsT, key: string): string;
-export function templateName(first: NotificationsT | string, key?: string): string {
-  if (typeof first === "string") return ENGLISH_NAMES[first] ?? first;
-  if (key === undefined) return "";
+export function templateName(t: NotificationsT, key: string): string {
   const name = `notifications.template_${key}_name`;
-  return hasKey(first, name) ? first(name) : key;
+  return hasKey(t, name) ? t(name) : key;
 }
 
 /** What a template is for, by its stable key; nothing for an unknown one. */
@@ -42,17 +19,29 @@ export function templateDescription(t: NotificationsT, key: string): string | un
   return hasKey(t, description) ? t(description) : undefined;
 }
 
-/** A message's status: its label (in English) and badge colour. */
-export const MESSAGE_STATUS: Record<
-  string,
-  { label: string; variant: "success" | "neutral" | "warning" | "error" | "info" }
-> = {
-  queued: { label: "Queued", variant: "info" },
-  sending: { label: "Sending", variant: "info" },
-  sent: { label: "Sent", variant: "success" },
-  failed: { label: "Failed", variant: "error" },
-  skipped: { label: "Skipped", variant: "neutral" },
-};
+const MESSAGE_STATUS_VARIANTS = {
+  queued: "info",
+  sending: "info",
+  sent: "success",
+  failed: "error",
+  skipped: "neutral",
+} as const;
+
+/**
+ * A message's status as a badge: its label, in `t`'s language, and its colour. The order's
+ * emails are where messages are listed, so the words are `orders`'. An unknown status as
+ * it is.
+ */
+export function messageStatus(
+  t: TFor<"orders">,
+  status: string,
+): { label: string; variant: "success" | "neutral" | "error" | "info" } {
+  const known = (["queued", "sending", "sent", "failed", "skipped"] as const).find(
+    (s) => s === status,
+  );
+  if (!known) return { label: status, variant: "neutral" };
+  return { label: t(`orders.emails_status_${known}`), variant: MESSAGE_STATUS_VARIANTS[known] };
+}
 
 /** Which source a template problem is in, as the editor names it; an unknown one as it is. */
 function partName(t: NotificationsT, part: string): string {
@@ -63,37 +52,16 @@ function partName(t: NotificationsT, part: string): string {
 /** Where a template problem is: its part, its line (from 1, when known) and the words. */
 export type Problem = { part: string; line?: number | null; message: string };
 
-/** The parts' names in English, for callers that have no `notifications` translator yet. */
-const ENGLISH_PARTS: Record<string, string> = {
-  subject: "Subject",
-  html: "HTML",
-  text: "Plain text",
-  layout: "Email layout",
-};
-
-/**
- * "HTML, line 4: …" in English.
- * @deprecated Pass the translator first: `describeProblem(t, problem)`.
- */
-export function describeProblem(problem: Problem): string;
 /** "HTML, line 4: …": a problem for a banner. The words are the API's, as it wrote them. */
-export function describeProblem(t: NotificationsT, problem: Problem): string;
-export function describeProblem(first: NotificationsT | Problem, second?: Problem): string {
-  if (typeof first !== "function") {
-    const part = ENGLISH_PARTS[first.part] ?? first.part;
-    return first.line
-      ? `${part}, line ${first.line}: ${first.message}`
-      : `${part}: ${first.message}`;
-  }
-  if (!second) return "";
-  const part = partName(first, second.part);
-  return second.line
-    ? first("notifications.problem_at_line", {
+export function describeProblem(t: NotificationsT, problem: Problem): string {
+  const part = partName(t, problem.part);
+  return problem.line
+    ? t("notifications.problem_at_line", {
         part,
-        line: String(second.line),
-        message: second.message,
+        line: String(problem.line),
+        message: problem.message,
       })
-    : first("notifications.problem_in_part", { part, message: second.message });
+    : t("notifications.problem_in_part", { part, message: problem.message });
 }
 
 /** A template problem among an error's `details`, if the API sent one. */

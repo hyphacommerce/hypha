@@ -507,13 +507,12 @@ export function inputsOf(
 /**
  * The problems of a `422 custom_fields_invalid` by field key (`details`: `[{key, path,
  * code, message}]`), or of a `409 custom_field_stale` (`{key}`). The API's own messages
- * are shown as they are; `t` says the admin's. Without one they're English: for callers
- * that haven't a translator yet.
+ * are shown as they are; `t` says the admin's.
  */
 export function problemsOf(
   code: string | undefined,
   details: unknown,
-  t?: FieldsT,
+  t: FieldsT,
 ): Record<string, string> {
   const problems: Record<string, string> = {};
   if (code === "custom_fields_invalid" && Array.isArray(details)) {
@@ -522,16 +521,14 @@ export function problemsOf(
       const message =
         typeof item.message === "string"
           ? `${item.message.charAt(0).toUpperCase()}${item.message.slice(1)}`
-          : (t?.("custom_fields.problem_not_valid") ?? "Isn't valid");
+          : t("custom_fields.problem_not_valid");
       const path = typeof item.path === "string" && item.path !== item.key ? `${item.path}: ` : "";
       const text = `${path}${message}`;
       problems[item.key] = problems[item.key] ? `${problems[item.key]} ${text}` : text;
     }
   }
   if (code === "custom_field_stale" && isObject(details) && typeof details.key === "string") {
-    problems[details.key] =
-      t?.("custom_fields.problem_stale") ??
-      "Someone else changed this field meanwhile. Reload to see it.";
+    problems[details.key] = t("custom_fields.problem_stale");
   }
   return problems;
 }

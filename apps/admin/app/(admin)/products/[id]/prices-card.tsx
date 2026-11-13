@@ -166,7 +166,7 @@ function MarketTable({
   variantTitles: Record<string, string | null>;
   isWhyShown: boolean;
 }) {
-  const t = useT<"products">();
+  const t = useT<"products" | "price_lists">();
   const format = useFormat();
   return (
     <VStack gap={2}>
@@ -231,7 +231,7 @@ function MarketTable({
                               {chunks}
                             </Link>
                           );
-                          const reason = candidateReason(c.result, c.phase);
+                          const reason = candidateReason(c.result, c.phase, t);
                           return (
                             <Text key={c.price_list} type="supporting" color="secondary">
                               {c.price

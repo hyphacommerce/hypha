@@ -644,7 +644,7 @@ function ShippingStep({
 }
 
 function PaymentStep({ data, onSaved }: { data: WizardData; onSaved: () => void }) {
-  const t = useT<"setup" | "orders">();
+  const t = useT<"setup" | "payments">();
   const presets = paymentPresets(t);
   const [isAdding, setIsAdding] = useState(data.paymentMethods.length === 0);
   const [presetValue, setPresetValue] = useState<string>(presets[0].value);

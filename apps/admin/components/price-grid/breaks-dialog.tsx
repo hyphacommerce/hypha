@@ -13,22 +13,16 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { TrashIcon } from "@heroicons/react/24/outline";
 import { useState } from "react";
 
-import {
-  type BreakAmount,
-  breakProblems,
-  formatBreaks,
-  parseBreaks,
-} from "@/lib/price-grid/breaks";
-import { formatAmount, parseAmount } from "@/lib/price-grid/money";
+import { type BreakAmount, breakProblems, formatBreaks, breaksOf } from "@/lib/price-grid/breaks";
+import { amountOf, formatAmount, parseAmount } from "@/lib/price-grid/money";
 import { MAX_BREAKS } from "@/lib/price-grid/types";
 import { useT } from "@/lib/use-t";
 
 type Row = { key: number; quantity: string; price: string };
 
 function rowsOf(text: string, digits: number, currency: string): Row[] {
-  const parsed = parseBreaks(text, digits, currency);
-  if (!parsed.ok) return [];
-  return parsed.value.map((b, key) => ({
+  const breaks = breaksOf(text, digits, currency) ?? [];
+  return breaks.map((b, key) => ({
     key,
     quantity: String(b.min_quantity),
     price: formatAmount(b.amount, digits),
@@ -58,8 +52,7 @@ export function BreaksDialog({
   const t = useT<"price_lists">();
   const [rows, setRows] = useState(() => rowsOf(value, digits, currency));
 
-  const fixed = parseAmount(fixedPrice, digits, currency);
-  const fixedAmount = fixed.ok ? fixed.value : null;
+  const fixedAmount = amountOf(fixedPrice, digits, currency);
   const parsed = rows.map((row) => ({
     quantity: /^\d+$/.test(row.quantity.trim()) ? Number(row.quantity.trim()) : null,
     price: parseAmount(row.price, digits, currency, t),

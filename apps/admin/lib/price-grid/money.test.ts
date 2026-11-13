@@ -9,9 +9,10 @@ import {
   parseAmount,
   parsePercent,
 } from "./money.ts";
+import { t } from "./testing.ts";
 
 const amount = (input: string, digits = 2, currency = "EUR") => {
-  const parsed = parseAmount(input, digits, currency);
+  const parsed = parseAmount(input, digits, currency, t);
   return parsed.ok ? parsed.value : parsed.error;
 };
 
@@ -125,7 +126,7 @@ test("adjusting past the largest amount is null", () => {
 });
 
 const bps = (input: string) => {
-  const parsed = parsePercent(input);
+  const parsed = parsePercent(input, t);
   return parsed.ok ? parsed.value : parsed.error;
 };
 

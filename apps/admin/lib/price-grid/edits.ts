@@ -4,8 +4,8 @@
 // every way of editing (typing, paste, fill, bulk actions) is a list of `CellChange`s
 // applied by `applyChanges`.
 
-import { type BreakAmount, breakProblems, formatBreaks, parseBreaks } from "./breaks.ts";
-import { adjustAmount, formatAmount, parseAmount } from "./money.ts";
+import { type BreakAmount, breakProblems, breaksOf, formatBreaks, parseBreaks } from "./breaks.ts";
+import { adjustAmount, amountOf, formatAmount, parseAmount } from "./money.ts";
 import type { Cell, Rect } from "./selection.ts";
 import type { Placed } from "./tsv.ts";
 import type {
@@ -65,11 +65,11 @@ export function normalizeCell(
   const trimmed = text.trim();
   if (trimmed === "") return "";
   if (column === "breaks") {
-    const breaks = parseBreaks(trimmed, digits, currency);
-    return breaks.ok ? formatBreaks(breaks.value, digits) : trimmed;
+    const breaks = breaksOf(trimmed, digits, currency);
+    return breaks ? formatBreaks(breaks, digits) : trimmed;
   }
-  const amount = parseAmount(trimmed, digits, currency);
-  return amount.ok ? formatAmount(amount.value, digits) : trimmed;
+  const amount = amountOf(trimmed, digits, currency);
+  return amount === null ? trimmed : formatAmount(amount, digits);
 }
 
 function sameDraft(a: Draft, b: Draft, digits: number, currency: string): boolean {

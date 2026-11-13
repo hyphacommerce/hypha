@@ -154,7 +154,7 @@ export function OrdersTable({
       label: t("common.currency"),
       options: orderCurrencies.map((c) => ({ value: c, label: c })),
     },
-    ...customFieldFilters(fieldFilters),
+    ...customFieldFilters(fieldFilters, t),
   ];
   const columns: TableColumn<Order>[] = [
     {
@@ -233,13 +233,7 @@ export function OrdersTable({
   ];
   return (
     <VStack gap={3}>
-      {outcome && (
-        <BulkOutcomeBanner
-          outcome={outcome}
-          noun={t("orders.list_bulk_noun")}
-          onClose={() => setOutcome(undefined)}
-        />
-      )}
+      {outcome && <BulkOutcomeBanner outcome={outcome} onClose={() => setOutcome(undefined)} />}
       <ResourceTable<Order>
         renderBulkActions={(selected, clear) => (
           <OrderBulkActions selected={selected} clear={clear} onDone={setOutcome} />
