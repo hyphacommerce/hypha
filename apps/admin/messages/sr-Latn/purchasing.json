@@ -9,7 +9,7 @@
   "allocation_by_quantity_description": "Udeo svake stavke u broju jedinica.",
   "allocation_none": "Ne ulazi u nabavnu cenu",
   "allocation_none_description": "Trošak samo u ukupnom iznosu.",
-  "terms_net": "Odloženo {days, number} dana",
+  "terms_net": "Valuta plaćanja: {days, number} d.",
   "terms_in_advance": "Avansno",
   "terms_on_receipt": "Po prijemu",
   "days_count": "{count, plural, one {# dan} few {# dana} other {# dana}}",

@@ -38,6 +38,8 @@ nominative. So a name is never put where another case is needed:
 | admin | admin | |
 | order | porudžbina | storefront |
 | purchase order | narudžbenica | the document sent to a supplier; never `porudžbina` |
+| ordering from a supplier | narudžbina, naručiti | the act; `porudžbina` stays the shopper's |
+| net 30 (payment terms) | valuta plaćanja: 30 d. | |
 | cart | korpa | storefront |
 | checkout | završetak kupovine | storefront |
 | customer, shopper, buyer | kupac | one word for all three |

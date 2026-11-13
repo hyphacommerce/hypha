@@ -40,7 +40,7 @@
   "price_per_unit": "Cena po jedinici ({currency})",
   "price_description": "Do 4 decimale posle najmanje jedinice valute.",
   "price_invalid": "Iznos poput 4.125",
-  "minimum_order": "Minimalna porudžbina",
+  "minimum_order": "Minimalna količina narudžbine",
   "minimum_order_invalid": "Najmanje 1",
   "lead_time_days": "Rok isporuke (dana)",
   "lead_time_overrides": "Ima prednost nad rokom dobavljača.",
