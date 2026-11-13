@@ -28,68 +28,14 @@ const generated = [
 ];
 
 /**
- * The admin's files whose words all come from its catalogs (`apps/admin/messages/`): in
- * these, literal text in JSX is an error (`i18n/no-literal-text`). An area whose strings
- * are extracted adds its folders here, one per line, sorted, so two areas finishing at
- * once don't collide. Once every area is in, this is `apps/admin/app/**` and
- * `apps/admin/components/**`.
+ * The admin's files: every word they show comes from its catalogs
+ * (`apps/admin/messages/`), so literal text in their JSX is an error
+ * (`i18n/no-literal-text`), and so is a format function that names no locale.
  */
 const adminTranslated = [
-  "apps/admin/app/(admin)/account/**",
-  "apps/admin/app/(admin)/address-actions.ts",
-  "apps/admin/app/(admin)/admin-shell.tsx",
-  "apps/admin/app/(admin)/agents/**",
-  "apps/admin/app/(admin)/apps/**",
-  "apps/admin/app/(admin)/custom-fields/**",
-  "apps/admin/app/(admin)/customers/**",
-  "apps/admin/app/(admin)/discounts/**",
-  "apps/admin/app/(admin)/forbidden.tsx",
-  "apps/admin/app/(admin)/inventory/**",
-  "apps/admin/app/(admin)/layout.tsx",
-  "apps/admin/app/(admin)/markets/**",
-  "apps/admin/app/(admin)/media/**",
-  "apps/admin/app/(admin)/orders/**",
-  "apps/admin/app/(admin)/page.tsx",
-  "apps/admin/app/(admin)/products/**",
-  "apps/admin/app/(admin)/purchase-orders/**",
-  "apps/admin/app/(admin)/settings/api-keys/**",
-  "apps/admin/app/(admin)/settings/apps/**",
-  "apps/admin/app/(admin)/settings/channels/**",
-  "apps/admin/app/(admin)/settings/checkout/**",
-  "apps/admin/app/(admin)/settings/custom-fields/**",
-  "apps/admin/app/(admin)/settings/notifications/**",
-  "apps/admin/app/(admin)/settings/page.tsx",
-  "apps/admin/app/(admin)/settings/payments/**",
-  "apps/admin/app/(admin)/settings/search/**",
-  "apps/admin/app/(admin)/settings/shipping/**",
-  "apps/admin/app/(admin)/settings/staff/**",
-  "apps/admin/app/(admin)/settings/store/**",
-  "apps/admin/app/(admin)/setup-checklist.ts",
-  "apps/admin/app/(admin)/setup/**",
-  "apps/admin/app/(admin)/suppliers/**",
-  "apps/admin/app/(admin)/transfers/**",
-  "apps/admin/app/(editor)/forbidden.tsx",
-  "apps/admin/app/(editor)/layout.tsx",
-  "apps/admin/app/(editor)/markets/**",
-  "apps/admin/app/*.tsx",
-  "apps/admin/app/forgot-password/**",
-  "apps/admin/app/invite/**",
-  "apps/admin/app/login/**",
-  "apps/admin/app/reset-password/**",
-  "apps/admin/components/*.tsx",
-  "apps/admin/components/agents/**",
-  "apps/admin/components/app-extensions/**",
-  "apps/admin/components/custom-fields/**",
-  "apps/admin/components/discounts/**",
-  "apps/admin/components/price-grid/**",
-  "apps/admin/components/resource-table/**",
-  "apps/admin/resources/bulk.tsx",
-  "apps/admin/resources/customers.tsx",
-  "apps/admin/resources/inventory.tsx",
-  "apps/admin/resources/markets.tsx",
-  "apps/admin/resources/media.tsx",
-  "apps/admin/resources/orders.tsx",
-  "apps/admin/resources/products.tsx",
+  "apps/admin/app/**",
+  "apps/admin/components/**",
+  "apps/admin/resources/**",
 ];
 
 export default defineConfig({
