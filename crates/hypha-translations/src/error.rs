@@ -7,7 +7,8 @@ pub struct Problem {
     pub key: String,
     /// Stable snake_case: `unknown_field` (the kind has no such field), `unknown_child`
     /// (the option, value, choice or facet the key names isn't the resource's now),
-    /// `too_long`, `source_changed` (the digest sent isn't the source's now).
+    /// `too_long`, `source_empty` (the resource has no text in the field: nothing to
+    /// translate), `source_changed` (the digest sent isn't the source's now).
     pub code: &'static str,
     pub message: String,
 }
