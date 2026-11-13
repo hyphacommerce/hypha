@@ -120,21 +120,6 @@ impl Language {
     }
 }
 
-/// What a market listing `listed` offers shoppers, out of what the store offers
-/// (`servable`, its default first): the listed languages in order that the store still
-/// offers, or the store's default when none is left.
-pub fn offered_languages(listed: &[Language], servable: &[Language]) -> Vec<Language> {
-    let offered: Vec<Language> = listed
-        .iter()
-        .filter(|l| servable.contains(l))
-        .cloned()
-        .collect();
-    if offered.is_empty() {
-        return servable.first().cloned().into_iter().collect();
-    }
-    offered
-}
-
 /// `latn` → `Latn`. Only called on ASCII letters.
 fn title_case(subtag: &str) -> String {
     let lower = subtag.to_ascii_lowercase();
@@ -226,24 +211,6 @@ mod tests {
         assert_eq!(picked(None, &["de", "en"]), Some("de".into()));
         assert_eq!(picked(Some("de"), &["en", "de-AT"]), Some("en".into()));
         assert_eq!(picked(Some("de"), &[]), None);
-    }
-
-    #[test]
-    fn a_market_offers_what_it_lists_that_the_store_offers() {
-        assert_eq!(
-            offered_languages(&tags(&["de", "fr", "en"]), &tags(&["en", "de"])),
-            tags(&["de", "en"])
-        );
-    }
-
-    #[test]
-    fn a_market_listing_nothing_the_store_offers_offers_the_stores_default() {
-        assert_eq!(
-            offered_languages(&tags(&["fr"]), &tags(&["en", "de"])),
-            tags(&["en"])
-        );
-        assert_eq!(offered_languages(&[], &tags(&["en", "de"])), tags(&["en"]));
-        assert!(offered_languages(&[], &[]).is_empty());
     }
 
     #[test]

@@ -1,7 +1,8 @@
 //! The language a cart is read in: one rule for its responses, the order it's placed as
 //! and what apps asked about it are told.
 
-use hypha_core::{Language, offered_languages};
+use hypha_core::Language;
+use hypha_markets::offered_languages;
 
 use crate::PricedCart;
 
