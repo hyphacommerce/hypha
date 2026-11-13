@@ -46,14 +46,29 @@ pick_creds() {
 
 # step NAME STATUS CODE_OR_DASH CURL_ARGS...
 # Runs curl, checks the status and (unless "-") the "code" field. Leaves the body in $BODY.
+# A step that doesn't expect a 429 and gets one waits out its `retry_after_secs` (at most
+# MAX_RATE_WAIT seconds) and sends once more: the script runs every step from one address,
+# so a busy section can use up a per-address allowance (cart creation's, say) that a
+# shopper never would. Steps that test a limit expect the 429 and aren't retried.
+MAX_RATE_WAIT=10
 step() {
     local name=$1 want_status=$2 want_code=$3
     shift 3
-    local out status
+    local out status wait
     pick_creds "$@"
     out=$(curl -s -w '\n%{http_code}' ${CREDS[@]+"${CREDS[@]}"} "$@")
     status=${out##*$'\n'}
     BODY=${out%$'\n'*}
+    if [[ $status == 429 && $want_status != 429 ]]; then
+        wait=$(sed -nE 's/.*"retry_after_secs":([0-9]+).*/\1/p' <<<"$BODY")
+        wait=${wait:-1}
+        ((wait > MAX_RATE_WAIT)) && wait=$MAX_RATE_WAIT
+        echo "wait $name: rate limited, retrying in ${wait}s"
+        sleep "$wait"
+        out=$(curl -s -w '\n%{http_code}' ${CREDS[@]+"${CREDS[@]}"} "$@")
+        status=${out##*$'\n'}
+        BODY=${out%$'\n'*}
+    fi
     if [[ $status != "$want_status" ]]; then
         echo "FAIL $name: expected HTTP $want_status, got $status: $BODY"
         FAILED=$((FAILED + 1))
