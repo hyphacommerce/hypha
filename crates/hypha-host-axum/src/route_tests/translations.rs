@@ -415,6 +415,7 @@ async fn every_kind_has_its_fields() {
             "owner_type": "product", "key": "material",
             "name": "Material", "type": "choice",
             "validations": {"choices": [{"key": "wool", "label": "Wool"}]},
+            "access": {"admin": "read_write", "storefront": "read"},
         }),
     )
     .await;
@@ -577,6 +578,51 @@ async fn every_kind_has_its_fields() {
     }
     hypha_http::jobs::dispatch(&app.state).await.unwrap();
     assert_eq!(listed().await, ["search_facet", "store"]);
+}
+
+#[tokio::test]
+async fn a_definition_shoppers_never_read_has_nothing_to_translate() {
+    let app = app().await;
+    in_four_languages(&app).await;
+    let (status, definition) = send(
+        &app,
+        "POST",
+        "/admin/custom-field-definitions",
+        Some(
+            &json!({
+                "owner_type": "product", "key": "bin", "name": "Bin", "type": "text",
+                "description": "Where it's shelved.",
+            })
+            .to_string(),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{definition}");
+    let uri = format!(
+        "/admin/custom-field-definitions/{}",
+        definition["id"].as_str().unwrap()
+    );
+    let path = format!(
+        "/admin/translations/custom_field_definition/{}",
+        definition["id"].as_str().unwrap()
+    );
+    // Staff-only: the admin shows its source, so nothing of it is translated.
+    let (status, view) = send(&app, "GET", &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    assert!(keys(&view).is_empty(), "{view}");
+
+    // Shown on the storefront, it has its fields.
+    let (status, body) = send(
+        &app,
+        "PATCH",
+        &uri,
+        Some(r#"{"access":{"admin":"read_write","storefront":"read"}}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, view) = send(&app, "GET", &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    assert_eq!(keys(&view), ["name", "description"]);
 }
 
 #[tokio::test]
