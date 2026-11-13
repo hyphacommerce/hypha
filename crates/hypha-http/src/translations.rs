@@ -13,8 +13,9 @@ use hypha_core::{
     VariantId,
 };
 use hypha_custom_fields::{
-    BaseType, CustomFieldDefinition, DefinitionRepo, FieldsRead, HasCustomFieldDefinitions,
-    HasCustomFieldValues, OwnerType, StorefrontAccess, ValueRepo,
+    AdminAccess, BaseType, CustomFieldDefinition, DefinitionRepo, FieldKey, FieldsRead,
+    HasCustomFieldDefinitions, HasCustomFieldValues, Namespace, OwnerType, StorefrontAccess,
+    ValueRepo,
     limits::{MAX_LONG_BYTES, MAX_TEXT_CHARS},
 };
 use hypha_discounts::{Discount, DiscountRepo, HasDiscounts};
@@ -30,7 +31,7 @@ use hypha_shipping::{HasShippingZones, ShippingOption, ShippingZoneRepo};
 use hypha_stores::{Store, StoreRepo};
 use hypha_translations::{
     FieldRule, HasTranslations, ResourceKind, ResourceRef, Source, SourceField, TranslationRepo,
-    ValueFormat, ValueRule, fields,
+    ValueFormat, ValueRule, fields, source_digest,
 };
 use serde_json::{Map, Value};
 use uuid::Uuid;
@@ -45,7 +46,7 @@ use crate::{
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Loaded {
     pub source: Source,
-    pub values: BTreeMap<String, ValueLabel>,
+    pub values: BTreeMap<String, TranslatedValue>,
 }
 
 impl From<Source> for Loaded {
@@ -57,27 +58,32 @@ impl From<Source> for Loaded {
     }
 }
 
-/// What a custom field value is, for an editor to label it: its definition, and the
-/// variant whose value it is (in a product's translation).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ValueLabel {
+/// The custom field value a translatable field is, for an editor to label it: its
+/// definition, and the variant whose value it is (in a product's translation).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, utoipa::ToSchema)]
+pub struct TranslatedValue {
     pub definition: CustomFieldDefinitionId,
-    /// `custom.material`.
+    /// The field's key, `custom.material`.
     pub key: String,
     /// The definition's name, in the store's default language.
     pub name: String,
     /// `text`, `multiline_text` or `rich_text`.
+    #[serde(rename = "type")]
     pub field_type: &'static str,
+    /// The variant whose value it is, in a product's translation; `null` for the
+    /// resource's own.
     pub variant: Option<VariantId>,
-    /// The variant's title as stored ("M / Blue"); `None` for a product's own value and a
-    /// variant without options.
+    /// That variant's title as stored ("M / Blue"); `null` for the resource's own value
+    /// and a variant without options.
     pub variant_title: Option<String>,
 }
 
 /// Whether `definition`'s values are translated: prose a shopper reads. A single
 /// `text`, `multiline_text` or `rich_text` field of a product, variant or category, that
 /// storefronts read (`access.storefront: read`), not an app's private one, and without a
-/// `pattern` (its values are codes). Customers' and orders' fields hold personal data and
+/// `pattern` (its values are codes), whose values the merchant writes (their own, or an
+/// app's or spore's with `access.admin: read_write`: translating one an app keeps
+/// read-only would change what shoppers see of it). Customers' and orders' fields hold personal data and
 /// are never translated; lists are filter values, like tags. A definition that stops
 /// qualifying keeps its translations stored until the next write of each, and isn't read
 /// meanwhile.
@@ -97,6 +103,8 @@ pub fn translatable_value(definition: &CustomFieldDefinition) -> bool {
         && definition.access().storefront == StorefrontAccess::Read
         && !definition.private()
         && definition.validations().pattern().is_none()
+        && (*definition.namespace() == Namespace::Custom
+            || definition.access().admin == AdminAccess::ReadWrite)
 }
 
 /// What a translation of `definition`'s value is held to: what a value is (one line for
@@ -147,9 +155,14 @@ pub async fn value_texts<P: HasCustomFieldDefinitions + HasCustomFieldValues>(
     ports: &P,
     owners: &[(Uuid, OwnerType)],
 ) -> Result<Vec<ValueText>, RepoError> {
+    // A category's are of one type; a product's of two, read together.
+    let only = match owners {
+        [(_, owner_type)] => Some(*owner_type),
+        _ => None,
+    };
     let definitions: Vec<CustomFieldDefinition> = ports
         .custom_field_definitions()
-        .list(None)
+        .list(only)
         .await?
         .into_iter()
         .filter(|d| translatable_value(d) && owners.iter().any(|(_, t)| *t == d.owner_type()))
@@ -192,7 +205,7 @@ fn value_fields(
     values: &[ValueText],
     key: impl Fn(&ValueText) -> (String, Option<VariantId>, Option<String>),
     fields: &mut Vec<SourceField>,
-    labels: &mut BTreeMap<String, ValueLabel>,
+    labels: &mut BTreeMap<String, TranslatedValue>,
 ) {
     for value in values {
         let (field_key, variant, variant_title) = key(value);
@@ -201,7 +214,7 @@ fn value_fields(
             .push(SourceField::new(field_key.clone(), Some(&value.text)).with_rule(value_rule(d)));
         labels.insert(
             field_key,
-            ValueLabel {
+            TranslatedValue {
                 definition: d.id(),
                 key: d.field_key().to_string(),
                 name: d.name().to_string(),
@@ -220,23 +233,12 @@ pub fn translated_values<'t>(
     owner: Uuid,
     text: impl Fn(CustomFieldDefinitionId) -> Option<&'t str>,
 ) -> Map<String, Value> {
-    let Some(of_owner) = fields.owners.get(&owner) else {
-        return Map::new();
-    };
-    of_owner
-        .entries
-        .iter()
-        .map(|entry| {
-            let translated = translatable_value(&entry.definition)
-                .then(|| text(entry.definition.id()))
-                .flatten();
-            let value = match translated {
-                Some(text) => Value::String(text.to_string()),
-                None => entry.value.to_json(),
-            };
-            (entry.key().to_string(), value)
-        })
-        .collect()
+    fields.json_with(owner, |entry| {
+        let translated = translatable_value(&entry.definition)
+            .then(|| text(entry.definition.id()))
+            .flatten()?;
+        Some(Value::String(translated.to_string()))
+    })
 }
 
 /// A product's translatable fields: its title and description, each option's name and
@@ -544,11 +546,12 @@ impl<P: StoreRepo + HasTranslations + HasNotificationTemplates> EventHandler<P>
 }
 
 /// Removes the translation of a custom field value that was removed, in every language,
-/// so a value set again later doesn't come back with the old one's translation. A
+/// so a value set again later doesn't come back with the old one's translation: a field
+/// is kept only when it translates the value there now (its digest is that value's). A
 /// removed owner's go with its translations (`TranslationCleanup`), a deleted
 /// definition's and a removed variant's stay until the next write and are never read
 /// (their IDs aren't used again). Follows `<owner>.custom_fields_updated` naming a value
-/// removed (`"value": null`), and keeps what's there again when it runs. Idempotent.
+/// removed (`"value": null`). Idempotent.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ValueTranslationCleanup;
 
@@ -567,12 +570,12 @@ impl<P: HasTranslations + HasCustomFieldDefinitions + HasCustomFieldValues> Even
     }
 
     async fn handle(&self, ports: &P, event: &StoredEvent) -> Result<(), String> {
-        let removed: Vec<&str> = event.data["changes"]
+        let removed: Vec<FieldKey> = event.data["changes"]
             .as_array()
             .into_iter()
             .flatten()
             .filter(|c| c.get("value").is_some_and(Value::is_null))
-            .filter_map(|c| c["key"].as_str())
+            .filter_map(|c| c["key"].as_str().and_then(|k| FieldKey::parse(k).ok()))
             .collect();
         if removed.is_empty() {
             return Ok(());
@@ -613,32 +616,49 @@ impl<P: HasTranslations + HasCustomFieldDefinitions + HasCustomFieldValues> Even
             .await
             .map_err(fail)?
             .into_iter()
-            .filter(|d| removed.contains(&d.field_key().to_string().as_str()))
+            .filter(|d| removed.contains(&d.field_key()))
             .collect();
         if definitions.is_empty() {
             return Ok(());
         }
         let ids: Vec<CustomFieldDefinitionId> = definitions.iter().map(|d| d.id()).collect();
-        // A value set again since the event keeps its translation: it's the one now.
-        let present = ports
+        let now = ports
             .custom_field_values()
             .get_many(&[owner], Some(&ids))
             .await
             .map_err(fail)?;
-        let keys: Vec<String> = ids
+        // Each removed value's key, with the digest of the value set again since, if one
+        // was.
+        let gone: Vec<(String, Option<String>)> = ids
             .into_iter()
-            .filter(|d| !present.iter().any(|row| row.definition == *d))
-            .map(|d| match variant {
-                Some(v) => fields::custom_field::variant_value(v, d),
-                None => fields::custom_field::value(d),
+            .map(|d| {
+                let key = match variant {
+                    Some(v) => fields::custom_field::variant_value(v, d),
+                    None => fields::custom_field::value(d),
+                };
+                let again = now
+                    .iter()
+                    .find(|row| row.definition == d)
+                    .and_then(|row| row.value.as_str())
+                    .map(source_digest);
+                (key, again)
             })
             .collect();
-        if keys.is_empty() {
-            return Ok(());
-        }
         let repo = ports.translations();
         for mut translation in repo.for_resource(resource).await.map_err(fail)? {
-            if !translation.remove_fields(&keys) {
+            // A field translating the value set again since (written after it, or the
+            // same text) is that value's: it stays. Any other translated the removed one.
+            let stale: Vec<String> = gone
+                .iter()
+                .filter(|(key, again)| {
+                    translation
+                        .fields()
+                        .get(key)
+                        .is_some_and(|f| again.as_deref() != Some(f.source_digest.as_str()))
+                })
+                .map(|(key, _)| key.clone())
+                .collect();
+            if !translation.remove_fields(&stale) {
                 continue;
             }
             let written = if translation.is_empty() {
@@ -660,6 +680,122 @@ mod tests {
     use hypha_translations::FieldRule;
 
     use super::*;
+
+    mod translatable {
+        use hypha_core::CustomFieldDefinitionId;
+        use hypha_custom_fields::{
+            Access, AdminAccess, Capabilities, CustomFieldDefinition, DefinitionSpec, FieldType,
+            Namespace, OwnerType, RawValidations, StorefrontAccess,
+        };
+        use uuid::Uuid;
+
+        use crate::translations::translatable_value;
+
+        struct Def {
+            namespace: &'static str,
+            owner: OwnerType,
+            field_type: &'static str,
+            admin: AdminAccess,
+            storefront: StorefrontAccess,
+            private: bool,
+            pattern: Option<&'static str>,
+        }
+
+        const TEXT: Def = Def {
+            namespace: "custom",
+            owner: OwnerType::Product,
+            field_type: "text",
+            admin: AdminAccess::ReadWrite,
+            storefront: StorefrontAccess::Read,
+            private: false,
+            pattern: None,
+        };
+
+        fn definition(d: Def) -> CustomFieldDefinition {
+            CustomFieldDefinition::new(
+                CustomFieldDefinitionId::from_uuid(Uuid::from_u128(1)),
+                Namespace::parse(d.namespace).unwrap(),
+                DefinitionSpec {
+                    owner_type: d.owner,
+                    key: "field".to_string(),
+                    field_type: FieldType::parse(d.field_type).unwrap(),
+                    name: "Field".to_string(),
+                    description: None,
+                    validations: RawValidations {
+                        pattern: d.pattern.map(str::to_string),
+                        ..RawValidations::default()
+                    },
+                    access: Access {
+                        admin: d.admin,
+                        storefront: d.storefront,
+                    },
+                    private: d.private,
+                    personal: false,
+                    capabilities: Capabilities::default(),
+                },
+                0,
+            )
+            .unwrap()
+        }
+
+        #[test]
+        fn prose_a_shopper_reads_on_the_catalog_is_translatable() {
+            for owner in [OwnerType::Product, OwnerType::Variant, OwnerType::Category] {
+                for field_type in ["text", "multiline_text", "rich_text"] {
+                    let d = definition(Def {
+                        owner,
+                        field_type,
+                        ..TEXT
+                    });
+                    assert!(translatable_value(&d), "{owner} {field_type}");
+                }
+            }
+        }
+
+        #[test]
+        fn customers_orders_lists_and_other_types_are_not() {
+            for owner in [OwnerType::Customer, OwnerType::Order] {
+                assert!(!translatable_value(&definition(Def { owner, ..TEXT })));
+            }
+            // A choice's labels are its definition's own translation.
+            for field_type in ["list.text", "url", "json", "integer"] {
+                let d = definition(Def { field_type, ..TEXT });
+                assert!(!translatable_value(&d), "{field_type}");
+            }
+        }
+
+        #[test]
+        fn hidden_private_patterned_or_read_only_fields_are_not() {
+            let hidden = Def {
+                storefront: StorefrontAccess::None,
+                ..TEXT
+            };
+            assert!(!translatable_value(&definition(hidden)));
+            let code = Def {
+                pattern: Some("^[A-Z]+$"),
+                ..TEXT
+            };
+            assert!(!translatable_value(&definition(code)));
+            let private = Def {
+                namespace: "app_erp",
+                private: true,
+                ..TEXT
+            };
+            assert!(!translatable_value(&definition(private)));
+            // An app's field staff may only read: its text is the app's to say.
+            let read_only = Def {
+                namespace: "app_erp",
+                admin: AdminAccess::Read,
+                ..TEXT
+            };
+            assert!(!translatable_value(&definition(read_only)));
+            let writable = Def {
+                namespace: "app_erp",
+                ..TEXT
+            };
+            assert!(translatable_value(&definition(writable)));
+        }
+    }
 
     fn limit(kind: ResourceKind, key: &str) -> usize {
         match kind.field(key).map(|(spec, _)| spec.rule) {

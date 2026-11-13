@@ -16936,7 +16936,7 @@
           "custom_field": {
             "oneOf": [
               {
-                "$ref": "#/components/schemas/TranslatedValueResponse",
+                "$ref": "#/components/schemas/TranslatedValue",
                 "description": "For a custom field value, which one: its definition and variant. `null` for\nevery other field."
               },
               {
@@ -17004,8 +17004,8 @@
         ],
         "type": "object"
       },
-      "TranslatedValueResponse": {
-        "description": "The custom field value a field translates, for an editor to label it.",
+      "TranslatedValue": {
+        "description": "The custom field value a translatable field is, for an editor to label it: its\ndefinition, and the variant whose value it is (in a product's translation).",
         "properties": {
           "definition": {
             "$ref": "#/components/schemas/CustomFieldDefinitionId"

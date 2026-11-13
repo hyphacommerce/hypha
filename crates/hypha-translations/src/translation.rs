@@ -90,6 +90,19 @@ impl Translation {
                 continue;
             };
             let now = source.field(&key);
+            // A field whose rule is the resource's own has none to check by once it's
+            // gone: it's unknown, whatever it holds (blank still removes it).
+            if now.is_none()
+                && matches!(spec.rule, FieldRule::Value(_))
+                && !field.value.trim().is_empty()
+            {
+                problem(
+                    &key,
+                    "unknown_child",
+                    "the resource has no such field now".to_string(),
+                );
+                continue;
+            }
             let rule = now.map_or(spec.rule, |f| f.rule_or(spec.rule));
             let value = match rule {
                 FieldRule::Value(rule) => match value_of(rule, &field.value) {
@@ -179,7 +192,13 @@ impl Translation {
         }
         changed.sort_unstable();
         self.fields = fields;
-        // One event per write: a second change before the write replaces the first's.
+        self.record_updated(changed);
+        Ok(true)
+    }
+
+    /// Records `translation.updated` naming `changed`. One event per write: a second
+    /// change before the write replaces the first's, naming both's fields.
+    fn record_updated(&mut self, changed: Vec<String>) {
         let earlier = self.events.take();
         let mut named: Vec<String> = earlier
             .iter()
@@ -198,7 +217,6 @@ impl Translation {
                 fields: named,
             },
         );
-        Ok(true)
     }
 
     /// Removes the fields `keys` name (what's gone from the resource: a custom field
@@ -213,24 +231,7 @@ impl Translation {
         if removed.is_empty() {
             return false;
         }
-        let earlier = self.events.take();
-        let mut named: Vec<String> = earlier
-            .iter()
-            .filter_map(|e| e.data["fields"].as_array())
-            .flatten()
-            .filter_map(|f| f.as_str().map(str::to_string))
-            .chain(removed)
-            .collect();
-        named.sort_unstable();
-        named.dedup();
-        self.events.record(
-            self.subject(),
-            &TranslationUpdated {
-                resource: self.resource.into(),
-                language: self.language.clone(),
-                fields: named,
-            },
-        );
+        self.record_updated(removed);
         true
     }
 
@@ -795,6 +796,11 @@ mod tests {
         let without = Source::new(vec![SourceField::new("title", Some("Mug"))]);
         assert_eq!(
             problems(t.replace(&without, input(&[("title", "Tasse"), (VALUE, "Wolle")]))),
+            vec![(VALUE.to_string(), "unknown_child")]
+        );
+        // Whatever it holds: a gone multiline value isn't checked as one line.
+        assert_eq!(
+            problems(t.replace(&without, input(&[(VALUE, "Zeile 1\nZeile 2")]))),
             vec![(VALUE.to_string(), "unknown_child")]
         );
         assert_eq!(t.text(VALUE), Some("Wolle"));

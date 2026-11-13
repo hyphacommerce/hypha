@@ -359,7 +359,8 @@ async fn a_removed_value_and_a_deleted_owner_take_their_translations() {
     let pk = publishable(&app).await;
     let german = storefront_mug(&app, &pk, "&language=de").await;
     assert_eq!(german["custom_fields"]["custom.care"], "Dishwasher safe");
-    // A value set again before the cleanup ran keeps its translation: it's the one now.
+    // Set again to the same text before the cleanup ran: the translation is still that
+    // text's, and stays.
     let again = body(&[("title", "Tasse"), (&key, "Spülmaschinenfest")]);
     send(&app, "PUT", &format!("{path}/de"), Some(&again)).await;
     set_fields(&app, &product, json!({"custom.care": null})).await;
@@ -367,6 +368,22 @@ async fn a_removed_value_and_a_deleted_owner_take_their_translations() {
     hypha_http::jobs::dispatch(&app.state).await.unwrap();
     let german = storefront_mug(&app, &pk, "&language=de").await;
     assert_eq!(german["custom_fields"]["custom.care"], "Spülmaschinenfest");
+    // Set again to other text before the cleanup ran: the removed value's translation
+    // goes all the same.
+    set_fields(&app, &product, json!({"custom.care": null})).await;
+    set_fields(&app, &product, json!({"custom.care": "Oven safe"})).await;
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    let german = storefront_mug(&app, &pk, "&language=de").await;
+    assert_eq!(german["custom_fields"]["custom.care"], "Oven safe");
+    // A translation of the new value, written before the cleanup ran, stays.
+    let oven = body(&[("title", "Tasse"), (&key, "Ofenfest")]);
+    set_fields(&app, &product, json!({"custom.care": null})).await;
+    set_fields(&app, &product, json!({"custom.care": "Oven proof"})).await;
+    let (status, json) = send(&app, "PUT", &format!("{path}/de"), Some(&oven)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    let german = storefront_mug(&app, &pk, "&language=de").await;
+    assert_eq!(german["custom_fields"]["custom.care"], "Ofenfest");
 
     // The product deleted: its translation goes, values and all.
     let (status, _) = send(&app, "DELETE", &product, None).await;

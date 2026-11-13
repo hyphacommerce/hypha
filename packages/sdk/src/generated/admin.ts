@@ -10328,7 +10328,7 @@ export interface components {
         };
         /** @description One translatable field of a resource: its source text and its translations. */
         TranslatableFieldResponse: {
-            custom_field?: components["schemas"]["TranslatedValueResponse"] | null;
+            custom_field?: components["schemas"]["TranslatedValue"] | null;
             /**
              * @description SHA-256 of `source`, in hex: send it back as a field's `source_digest` to say
              *     which text was translated.
@@ -10372,8 +10372,11 @@ export interface components {
              */
             kind: string;
         };
-        /** @description The custom field value a field translates, for an editor to label it. */
-        TranslatedValueResponse: {
+        /**
+         * @description The custom field value a translatable field is, for an editor to label it: its
+         *     definition, and the variant whose value it is (in a product's translation).
+         */
+        TranslatedValue: {
             definition: components["schemas"]["CustomFieldDefinitionId"];
             /** @description The field's key, `custom.material`. */
             key: string;

@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_core::{CustomFieldDefinitionId, Language, Stamped, VariantId};
+use hypha_core::{Language, Stamped};
 use hypha_translations::{
     FieldInput, FieldRule, ResourceKind, ResourceRef, StoreLanguages, Translation, TranslationKey,
     delete_translation, get_translations, list_translations, put_translation, require_read,
@@ -22,7 +22,7 @@ use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, PathId},
     state::{AppState, SharedState, Storage},
-    translations::{Loaded, ValueLabel, source},
+    translations::{Loaded, TranslatedValue, source},
 };
 
 /// The resource a translation is of.
@@ -55,38 +55,6 @@ pub struct FieldTranslationResponse {
     outdated: bool,
 }
 
-/// The custom field value a field translates, for an editor to label it.
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct TranslatedValueResponse {
-    definition: CustomFieldDefinitionId,
-    /// The field's key, `custom.material`.
-    key: String,
-    /// The definition's name, in the store's default language.
-    name: String,
-    /// `text`, `multiline_text` or `rich_text`.
-    #[serde(rename = "type")]
-    field_type: &'static str,
-    /// The variant whose value it is, in a product's translation; `null` for the
-    /// resource's own.
-    variant: Option<VariantId>,
-    /// That variant's title as stored ("M / Blue"); `null` for the resource's own value
-    /// and a variant without options.
-    variant_title: Option<String>,
-}
-
-impl From<&ValueLabel> for TranslatedValueResponse {
-    fn from(label: &ValueLabel) -> Self {
-        Self {
-            definition: label.definition,
-            key: label.key.clone(),
-            name: label.name.clone(),
-            field_type: label.field_type,
-            variant: label.variant,
-            variant_title: label.variant_title.clone(),
-        }
-    }
-}
-
 /// One translatable field of a resource: its source text and its translations.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct TranslatableFieldResponse {
@@ -114,7 +82,7 @@ pub struct TranslatableFieldResponse {
     translations: BTreeMap<String, FieldTranslationResponse>,
     /// For a custom field value, which one: its definition and variant. `null` for
     /// every other field.
-    custom_field: Option<TranslatedValueResponse>,
+    custom_field: Option<TranslatedValue>,
 }
 
 /// One language's translation of a resource, as a whole.
@@ -187,7 +155,7 @@ impl TranslationsResponse {
                             ))
                         })
                         .collect(),
-                    custom_field: loaded.values.get(&field.key).map(Into::into),
+                    custom_field: loaded.values.get(&field.key).cloned(),
                 })
             })
             .collect();
