@@ -2,12 +2,12 @@ use std::collections::HashSet;
 
 use hypha_core::{
     Address, AddressVerification, AppCheck, AssetId, CartId, ChannelId, CountryCode, Currency,
-    CustomerId, Email, MarketId, Money, MoneyError, OrderId, PaymentMethodId, Price, PriceListId,
-    ProductId, Quantity, VariantId, Weight,
+    CustomerId, Email, Language, MarketId, Money, MoneyError, OptionValueId, OrderId,
+    PaymentMethodId, Price, PriceListId, ProductId, Quantity, VariantId, Weight,
 };
 use hypha_inventory::{Availability, StockContext};
 use hypha_pricing::{PricingContext, ResolvedPrice, VariantPrices, resolve_price};
-use hypha_products::{Product, ProductStatus};
+use hypha_products::{Product, ProductStatus, join_variant_title};
 use hypha_tax::{TaxContext, TaxLine, TaxableKind, TaxableLine, tax_line};
 
 use crate::{
@@ -72,6 +72,10 @@ pub struct LineDetails {
     pub product_title: String,
     /// The variant's option values (`"M / Blue"`); `None` for a simple product.
     pub variant_title: Option<String>,
+    /// The option values `variant_title` joins, in option order, each with its label:
+    /// what a reader in another language translates one by one. Empty for a simple
+    /// product, and for a cart already checked out (the order keeps titles only).
+    pub option_values: Vec<(OptionValueId, String)>,
     pub sku: Option<String>,
     /// The product's handle, to link to its page; `None` for a cart already checked out,
     /// whose lines are read from the order (which keeps no handle).
@@ -82,6 +86,25 @@ pub struct LineDetails {
     /// One unit's weight when the variant is shipped; `None` when it isn't, has no weight,
     /// or the cart is checked out.
     pub shipping_weight: Option<Weight>,
+}
+
+impl LineDetails {
+    /// `variant_title` with each value's label as `label` gives it, a value it has
+    /// none for keeping its own: the title in another language than it's stored in.
+    /// Without the values (a checked-out cart), the title as kept.
+    pub fn variant_title_with<'a>(
+        &'a self,
+        label: impl Fn(OptionValueId) -> Option<&'a str>,
+    ) -> Option<String> {
+        if self.option_values.is_empty() {
+            return self.variant_title.clone();
+        }
+        join_variant_title(
+            self.option_values
+                .iter()
+                .map(|(id, own)| label(*id).unwrap_or(own)),
+        )
+    }
 }
 
 /// A cart line with its current status. A read model: computed, never stored.
@@ -154,9 +177,24 @@ pub struct PricedCart {
     pub payment_method: Option<PaymentMethodId>,
     /// Whether the buyer ticked "Email me with news and offers".
     pub marketing_opt_in: bool,
+    /// The language the cart was given; `None` follows the market's default.
+    pub language: Option<Language>,
+    /// The languages the cart's market lists, its default first; empty when it lists
+    /// none (the store's default language then).
+    pub market_languages: Vec<Language>,
 }
 
 impl PricedCart {
+    /// The language the cart is in as far as the cart and its market say: the one it
+    /// was given while the market still lists it (or its language without the region),
+    /// else the market's default (`Language::pick`); `None` when the market lists none
+    /// (the store's default language). What apps asked about the cart are told. A market
+    /// lists only languages the store publishes (the store refuses to unpublish one in
+    /// use), so this is the language its responses are in.
+    pub fn spoken_language(&self) -> Option<Language> {
+        Language::pick(self.language.as_ref(), &self.market_languages)
+    }
+
     /// Checkout should refuse a cart unless this is true.
     pub fn is_fully_available(&self) -> bool {
         self.lines.iter().all(PricedLine::is_available)
@@ -394,6 +432,8 @@ pub fn price_cart_with_shipping(
         total: totals.total,
         payment_method: cart.payment_method(),
         marketing_opt_in: cart.marketing_opt_in(),
+        language: cart.language().cloned(),
+        market_languages: pricing.market.languages().to_vec(),
     }
 }
 
@@ -559,6 +599,11 @@ fn line_details(product: &Product, variant: VariantId) -> Option<LineDetails> {
     Some(LineDetails {
         product_title: product.title().to_string(),
         variant_title: product.variant_title(variant),
+        option_values: product
+            .variant_values(variant)
+            .into_iter()
+            .map(|value| (value.id(), value.label().to_string()))
+            .collect(),
         sku: found.sku().map(str::to_string),
         handle: Some(product.handle().as_str().to_string()),
         image: found.media().or_else(|| product.media().first().copied()),
@@ -992,12 +1037,65 @@ mod tests {
             Some(LineDetails {
                 product_title: "Shirt".to_string(),
                 variant_title: Some("M".to_string()),
+                option_values: vec![(
+                    OptionValueId::from_uuid(Uuid::from_u128(51)),
+                    "M".to_string()
+                )],
                 sku: Some("SH-M".to_string()),
                 handle: Some("shirt".to_string()),
                 image: None,
                 shipping_weight: None,
             })
         );
+    }
+
+    #[test]
+    fn a_lines_variant_title_takes_the_labels_it_is_given() {
+        let result = price_cart(
+            &cart(&[(5, 1)]),
+            &[shirt()],
+            &pricing(&[5]),
+            &no_tax(),
+            &no_stock(),
+        );
+        let details = result.lines[0].details.as_ref().unwrap();
+        assert_eq!(
+            details.variant_title_with(|_| Some("Mittel")),
+            Some("Mittel".to_string())
+        );
+        // A value without a label of its own in that language keeps the stored one.
+        assert_eq!(details.variant_title_with(|_| None), Some("M".to_string()));
+    }
+
+    #[test]
+    fn a_line_without_its_values_keeps_the_title_it_has() {
+        let details = LineDetails {
+            product_title: "Shirt".to_string(),
+            variant_title: Some("M".to_string()),
+            option_values: Vec::new(),
+            sku: None,
+            handle: None,
+            image: None,
+            shipping_weight: None,
+        };
+        assert_eq!(
+            details.variant_title_with(|_| Some("Mittel")),
+            Some("M".to_string())
+        );
+    }
+
+    #[test]
+    fn a_cart_speaks_its_own_language_else_its_markets_default() {
+        let lang = |tag: &str| hypha_core::Language::new(tag).unwrap();
+        let mut priced = price_cart(&cart(&[]), &[], &pricing(&[]), &no_tax(), &no_stock());
+        assert_eq!(priced.spoken_language(), None);
+        priced.market_languages = vec![lang("de"), lang("en")];
+        assert_eq!(priced.spoken_language(), Some(lang("de")));
+        priced.language = Some(lang("en"));
+        assert_eq!(priced.spoken_language(), Some(lang("en")));
+        // A choice the market stopped offering falls back to its default.
+        priced.language = Some(lang("fr"));
+        assert_eq!(priced.spoken_language(), Some(lang("de")));
     }
 
     #[test]
@@ -1041,6 +1139,7 @@ mod tests {
             Some(LineDetails {
                 product_title: "Product 1".to_string(),
                 variant_title: None,
+                option_values: Vec::new(),
                 sku: None,
                 handle: Some("p1".to_string()),
                 image: None,

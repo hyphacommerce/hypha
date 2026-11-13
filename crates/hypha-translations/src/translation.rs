@@ -121,6 +121,16 @@ impl Translation {
                 problem(&key, code, "the resource has no such field now".to_string());
                 continue;
             };
+            // A translation replaces text the resource has: without a source nothing
+            // would ever show it.
+            if now.text.is_empty() {
+                problem(
+                    &key,
+                    "source_empty",
+                    "the resource has no text in this field to translate".to_string(),
+                );
+                continue;
+            }
             let source_digest = match (field.source_digest, self.fields.get(&key)) {
                 (Some(seen), _) if seen != now.digest => {
                     problem(
@@ -400,6 +410,51 @@ mod tests {
             problems(t.replace(&source(), input(&[("description", &over)]))),
             vec![("description".to_string(), "too_long")]
         );
+    }
+
+    #[test]
+    fn a_field_the_resource_has_no_text_in_is_refused() {
+        let without_description = Source::new(vec![
+            SourceField::new("title", Some("Mug")),
+            SourceField::new("description", None),
+        ]);
+        let mut t = german();
+        let result = t.replace(
+            &without_description,
+            input(&[("title", "Tasse"), ("description", "<p>Eine Tasse.</p>")]),
+        );
+        assert_eq!(
+            problems(result),
+            vec![("description".to_string(), "source_empty")]
+        );
+        assert!(t.is_empty());
+    }
+
+    #[test]
+    fn a_blank_value_for_a_field_without_text_only_removes_it() {
+        let without_description = Source::new(vec![
+            SourceField::new("title", Some("Mug")),
+            SourceField::new("description", None),
+        ]);
+        let mut t = german();
+        assert_eq!(
+            t.replace(
+                &without_description,
+                input(&[("title", "Tasse"), ("description", " ")])
+            ),
+            Ok(true)
+        );
+        assert_eq!(t.text("description"), None);
+    }
+
+    #[test]
+    fn a_stored_translation_of_a_field_whose_text_went_still_loads() {
+        let mut t = german();
+        t.replace(&source(), input(&[("description", "<p>Eine Tasse.</p>")]))
+            .unwrap();
+        // The source's description is removed afterwards: nothing checks the row again.
+        let restored = Translation::restore(t.snapshot()).unwrap();
+        assert_eq!(restored.text("description"), Some("<p>Eine Tasse.</p>"));
     }
 
     #[test]

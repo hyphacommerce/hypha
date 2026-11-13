@@ -4,9 +4,9 @@ use hypha_core::{
     AddressError, AddressFormats, AddressParts, AddressVerifier, AuthError, CartId, CategoryId,
     Clock, CountryCode, CountryError, Ctx, CustomerGroupId, CustomerId, Email, EmailError,
     ErrorCode, HasBatch, HasClock, HasIdempotency, IdGenerator, IdempotencyError,
-    IdempotencyRecord, IdempotencyRequest, Idempotent, MarketId, Money, MoneyError, ProductId,
-    Quantity, QuantityError, RepoError, Scope, ShippingGroupId, ShippingOptionId, StageIdempotency,
-    Timestamp, VariantId, VerifyContext, earlier_id, verify_address,
+    IdempotencyRecord, IdempotencyRequest, Idempotent, Language, MarketId, Money, MoneyError,
+    ProductId, Quantity, QuantityError, RepoError, Scope, ShippingGroupId, ShippingOptionId,
+    StageIdempotency, Timestamp, VariantId, VerifyContext, earlier_id, verify_address,
 };
 use hypha_customers::{CustomerGroupRepo, CustomerRepo, HasCustomerGroups, HasCustomers};
 use hypha_inventory::{HasInventoryItems, HasLocations, StockContext};
@@ -225,6 +225,9 @@ pub struct CreateCart {
     /// The signed-in customer the cart is for, with their email: the host passes the
     /// session's customer; a guest's cart has none.
     pub customer: Option<(CustomerId, Email)>,
+    /// The language the shopper reads in, as the host held it to what the country's
+    /// market offers; `None` follows the market's default.
+    pub language: Option<Language>,
 }
 
 /// Creates an empty cart shipping to `country`, in the market that sells there
@@ -260,6 +263,7 @@ pub async fn create_cart<S: IdempotentCartPorts, I: IdGenerator, C: Clock>(
     if input.customer.is_some() {
         cart.set_customer(input.customer)?;
     }
+    cart.set_language(input.language)?;
     // A new cart is empty: priced from the market just read, without reading it again.
     let priced = empty_reading::<ReadingOf<S>>(&cart, market).priced;
     match write_cart(
@@ -431,6 +435,24 @@ pub async fn set_cart_marketing<S: HasCarts + PricingPorts>(
 
     let mut cart = load_open_cart(ctx, ports, id).await?;
     cart.set_marketing_opt_in(opt_in)?;
+    let priced = reprice(ports, &cart).await?;
+    ports.carts().update(&mut cart).await?;
+    Ok(priced)
+}
+
+/// Sets the language the shopper reads the cart in; `None` goes back to the market's
+/// default. The caller holds it to what the cart's market offers (the host knows the
+/// store's languages; the cart doesn't).
+pub async fn set_cart_language<S: HasCarts + PricingPorts>(
+    ctx: &Ctx,
+    ports: &S,
+    id: CartId,
+    language: Option<Language>,
+) -> Result<PricedCart, CommandError> {
+    ctx.require(Scope::CartsWrite)?;
+
+    let mut cart = load_open_cart(ctx, ports, id).await?;
+    cart.set_language(language)?;
     let priced = reprice(ports, &cart).await?;
     ports.carts().update(&mut cart).await?;
     Ok(priced)
@@ -1056,6 +1078,7 @@ pub async fn group_offers<P: RateProvider, R: PromotionReading>(
             destination: destination.clone(),
             items,
             subtotal,
+            language: reading.priced.spoken_language(),
         };
         let offered = offers(zone, rates, &request).await;
         let after_discounts = offered

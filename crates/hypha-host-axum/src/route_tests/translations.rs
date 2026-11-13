@@ -103,6 +103,23 @@ async fn a_products_translation_is_written_read_and_goes_outdated() {
     );
     let digest = title["digest"].as_str().unwrap().to_string();
     assert_eq!(digest.len(), 64);
+    // Nothing to translate where the product has no description: refused, not kept
+    // unseen.
+    let body = json!({"fields": {"description": {"value": "<p>Eine Tasse.</p>"}}}).to_string();
+    let (status, refused) = translate(&app, &path, "de", &body).await;
+    assert_eq!(
+        (status, code(&refused)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "invalid_translation")
+    );
+    assert_eq!(problems(&refused), [("description", "source_empty")]);
+    let (status, json) = send(
+        &app,
+        "PATCH",
+        &format!("/admin/products/{product}"),
+        Some(r#"{"description":"<p>A mug.</p>"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
 
     let body = json!({"fields": {
         "title": {"value": "  Tasse ", "source_digest": digest},
@@ -591,6 +608,14 @@ async fn translations_are_listed_by_kind_and_language_in_pages() {
         assert_eq!(status, StatusCode::OK, "{body}");
     }
     let store = store_id(&app).await;
+    let (status, json) = send(
+        &app,
+        "PATCH",
+        "/admin/store",
+        Some(r#"{"description":"Mugs"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
     let path = format!("/admin/translations/store/{store}");
     let (status, _) = translate(&app, &path, "de", &fields(&[("description", "Tassen")])).await;
     assert_eq!(status, StatusCode::OK);

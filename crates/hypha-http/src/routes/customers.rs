@@ -59,6 +59,11 @@ pub struct UpdateCustomerRequest {
     last_name: Option<Option<String>>,
     #[serde(default, deserialize_with = "patch::nullable")]
     phone: Option<Option<String>>,
+    /// The language they read (a BCP 47 tag), out of those the store publishes: one it
+    /// doesn't is tried without its region, else the store's default is kept. `null`
+    /// goes back to the store's default.
+    #[serde(default, deserialize_with = "patch::nullable")]
+    language: Option<Option<String>>,
 }
 
 /// An address for the address book. Sending it again (PUT) replaces it whole,
@@ -155,6 +160,10 @@ pub struct CustomerResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(required = false)]
     redacted: Option<Vec<String>>,
+    /// The language they read (a BCP 47 tag): their latest checkout's, or as they or staff
+    /// set it. What emails that aren't about one order use; `null` for the store's
+    /// default. Not personal data: never redacted.
+    language: Option<hypha_core::Language>,
 }
 
 /// What the admin knows of a customer's account.
@@ -406,6 +415,7 @@ impl CustomerResponse {
             erasure_due_at: c.erasure_due_at().map(super::rfc3339).transpose()?,
             id: c.id(),
             email: c.email().clone(),
+            language: c.language().cloned(),
             first_name: c.first_name().map(str::to_string),
             last_name: c.last_name().map(str::to_string),
             phone: c.phone().map(str::to_string),
@@ -768,11 +778,16 @@ pub async fn update<S: Storage>(
 ) -> Result<Json<Redacted>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
+    let language = match req.language {
+        Some(asked) => Some(customer_language(&state, &ports, asked).await?),
+        None => None,
+    };
     let input = UpdateCustomer {
         email: req.email,
         first_name: req.first_name,
         last_name: req.last_name,
         phone: req.phone,
+        language,
     };
     let customer = update_customer(&ctx, ports.customers(), id, input).await?;
     Ok(Json(respond(&ctx, &ports, &state.clock, &customer).await?))
@@ -976,4 +991,19 @@ pub async fn remove_address_handler<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let customer = remove_address(&ctx, ports.customers(), id, address).await?;
     Ok(Json(respond(&ctx, &ports, &state.clock, &customer).await?))
+}
+
+/// A customer's language as kept: `asked` held to the store's languages (its default and
+/// the published ones; a tag not among them tries its language, else the default), or
+/// `None` for the store's default. Never refuses, like a cart's.
+pub(crate) async fn customer_language<S: Storage>(
+    state: &crate::state::AppState<S>,
+    ports: &S::Ports<'_>,
+    asked: Option<String>,
+) -> Result<Option<hypha_core::Language>, ApiError> {
+    let Some(asked) = asked else {
+        return Ok(None);
+    };
+    let store = super::stores::store_as_system(state, ports).await?;
+    Ok(crate::language::chosen(Some(&asked), &store, None))
 }

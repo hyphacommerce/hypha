@@ -103,6 +103,7 @@ fn order_for(ana: CustomerId, n: u128) -> Order {
             compare_at_price: None,
             price_list: None,
             unit_cost: None,
+            localized: None,
         }],
         shipping_address: None,
         address_check: None,
@@ -111,6 +112,7 @@ fn order_for(ana: CustomerId, n: u128) -> Order {
         shipping_total: eur(0),
         tax_total: eur(0),
         total: eur(500),
+        language: None,
     })
     .unwrap()
 }

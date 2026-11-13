@@ -2302,6 +2302,17 @@
           "id": {
             "$ref": "#/components/schemas/CartId"
           },
+          "language": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Language",
+                "description": "The language the shopper chose for the cart (`PUT …/language`), as kept: `null`\nfollows the market's default. A storefront's answer is in the language the cart\nreads in now, which `Content-Language` names; the admin's is in the store's."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "lines": {
             "items": {
               "$ref": "#/components/schemas/LineResponse"
@@ -5248,6 +5259,17 @@
           "id": {
             "$ref": "#/components/schemas/CustomerId"
           },
+          "language": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Language",
+                "description": "The language they read (a BCP 47 tag): their latest checkout's, or as they or staff\nset it. What emails that aren't about one order use; `null` for the store's\ndefault. Not personal data: never redacted."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "last_name": {
             "type": [
               "string",
@@ -8134,6 +8156,49 @@
         ],
         "type": "object"
       },
+      "LocalizedLineResponse": {
+        "description": "A line's names as the buyer read them, in the order's language.",
+        "properties": {
+          "product_title": {
+            "type": "string"
+          },
+          "variant_title": {
+            "description": "`null` for a product without options.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "product_title"
+        ],
+        "type": "object"
+      },
+      "LocalizedNameResponse": {
+        "description": "A name as the buyer read it, in the order's language.",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "LocalizedTitleResponse": {
+        "description": "A title as the buyer read it, in the order's language.",
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
       "LocationId": {
         "description": "A LocationId: `loc_` and 32 hex digits.",
         "examples": [
@@ -9218,6 +9283,17 @@
           "discount": {
             "$ref": "#/components/schemas/DiscountId"
           },
+          "localized": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LocalizedTitleResponse",
+                "description": "`title` as the buyer read it, in the order's `language`, where it reads\ndifferently; `null` otherwise, and on a storefront's answer, whose `title` is the\nbuyer's already."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "summary": {
             "description": "The sentence the shopper saw at checkout, kept as it was.",
             "type": "string"
@@ -9293,6 +9369,17 @@
               {
                 "$ref": "#/components/schemas/ProductMediaResponse",
                 "description": "The line's picture as its product is now (an order keeps none): the variant's\nimage, else the product's first media item; `null` for a product gone or without\nmedia, or without file storage."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "localized": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LocalizedLineResponse",
+                "description": "`product_title` and `variant_title` as the buyer read them, in the order's\n`language`, where they read differently; `null` otherwise."
               },
               {
                 "type": "null"
@@ -9455,6 +9542,17 @@
           "id": {
             "$ref": "#/components/schemas/OrderId"
           },
+          "language": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Language",
+                "description": "The language the buyer checked out in (a BCP 47 tag): what each `localized` copy\nis in, and the order's emails. `null` for orders placed before orders had one,\nwhich read as the store's default."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "lines": {
             "items": {
               "$ref": "#/components/schemas/OrderLineResponse"
@@ -9587,6 +9685,17 @@
               "$ref": "#/components/schemas/OrderLineId"
             },
             "type": "array"
+          },
+          "localized": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LocalizedNameResponse",
+                "description": "`name` as the buyer read it, in the order's `language`, where it reads\ndifferently; `null` otherwise."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "name": {
             "type": "string"
@@ -17202,6 +17311,13 @@
             "type": "string"
           },
           "first_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "language": {
+            "description": "The language they read (a BCP 47 tag), out of those the store publishes: one it\ndoesn't is tried without its region, else the store's default is kept. `null`\ngoes back to the store's default.",
             "type": [
               "string",
               "null"

@@ -7,6 +7,8 @@ use axum::{
     http::{HeaderValue, header},
     response::{IntoResponse, Response},
 };
+use hypha_cart::PricedCart;
+use hypha_checkout::ContentLanguages;
 use hypha_core::{CountryCode, Language, RepoError};
 use hypha_markets::{HasMarkets, Market, MarketRepo};
 use hypha_stores::Store;
@@ -24,8 +26,9 @@ use crate::{
 #[into_params(parameter_in = Query)]
 pub struct LanguageParams {
     /// The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
-    /// `country`'s market offers (`/storefront/countries`): without it, or with one the
-    /// market doesn't offer, the market's default answers. Without `country`, out of the
+    /// `country`'s market offers (`/storefront/countries`): one it doesn't offer is
+    /// tried without its region (`de` for `de-AT`), and without it, or with one still
+    /// not offered, the market's default answers. Without `country`, out of the
     /// store's default and the languages it has published, the store's default
     /// otherwise. `Content-Language` names the one served. Text without a translation
     /// stays in the store's default language.
@@ -52,6 +55,7 @@ impl ServedLanguage {
     ///
     /// - what `asked` names, in the API's spelling, when it's offered: by the market, or
     ///   without one by the store (its default and its published languages);
+    /// - else that language without its region (`de` for `de-AT`), when that's offered;
     /// - otherwise (nothing asked, a tag that doesn't parse, a language not offered or
     ///   not published) the market's default, or without a market the store's.
     ///
@@ -65,6 +69,33 @@ impl ServedLanguage {
         Self::resolve(asked, store.default_language(), servable, &offered)
     }
 
+    /// The language `cart` is read in: the one it was given, held to what its market
+    /// offers now (`ContentLanguages::of`, the rule checkout places its order by), else
+    /// the market's default. A checked-out cart reads in its order's language, whatever
+    /// the market offers since (the only one its priced form offers).
+    pub fn of_cart(cart: &PricedCart, store: &Store) -> Self {
+        Self::fixed(content_languages(store).of(cart), store)
+    }
+
+    /// `language` as it is, for what was written in it already (an order); `None`, an
+    /// order from before languages, reads as the store's default.
+    pub fn of_order(language: Option<&Language>, store: &Store) -> Self {
+        Self::fixed(
+            language
+                .cloned()
+                .unwrap_or_else(|| store.default_language().clone()),
+            store,
+        )
+    }
+
+    fn fixed(language: Language, store: &Store) -> Self {
+        Self {
+            source: language == *store.default_language(),
+            language,
+            servable: store.offered_languages(),
+        }
+    }
+
     /// `of` on plain values: `source` is the store's default language, `servable` what
     /// the store offers and `offered` what this read may answer in, its default first.
     fn resolve(
@@ -73,11 +104,8 @@ impl ServedLanguage {
         servable: Vec<Language>,
         offered: &[Language],
     ) -> Self {
-        let language = asked
-            .and_then(|tag| Language::new(tag).ok())
-            .filter(|language| offered.contains(language))
-            .or_else(|| offered.first().cloned())
-            .unwrap_or_else(|| source.clone());
+        let asked = asked.and_then(|tag| Language::new(tag).ok());
+        let language = Language::pick(asked.as_ref(), offered).unwrap_or_else(|| source.clone());
         Self {
             source: language == *source,
             language,
@@ -139,6 +167,27 @@ pub(crate) async fn served_in<S: Storage>(
     served(state, ports, params.language.as_deref(), market.as_ref()).await
 }
 
+/// What checkout resolves a cart's language against: the store's default and the
+/// languages it publishes.
+pub(crate) fn content_languages(store: &Store) -> ContentLanguages {
+    ContentLanguages {
+        source: store.default_language().clone(),
+        servable: store.offered_languages(),
+    }
+}
+
+/// The language a shopper's choice is kept as: what `asked` resolves to in `market`
+/// (`ServedLanguage::of`: a tag not offered tries its language, then the market's
+/// default), or `None` when nothing was asked (the market's default, followed as it
+/// changes). Never refuses: a stale or malformed tag is kept as what it reads in.
+pub(crate) fn chosen(
+    asked: Option<&str>,
+    store: &Store,
+    market: Option<&Market>,
+) -> Option<Language> {
+    asked.map(|tag| ServedLanguage::of(Some(tag), store, market).language)
+}
+
 /// The language `asked` gets from the store as it is now; see `ServedLanguage::of`.
 pub(crate) async fn served<S: Storage>(
     state: &AppState<S>,
@@ -161,13 +210,18 @@ pub struct Localized<T> {
 impl<T: Serialize> IntoResponse for Localized<T> {
     fn into_response(self) -> Response {
         let mut response = Json(self.body).into_response();
-        // A tag is letters, digits and hyphens: always a header value.
-        if let Ok(language) = HeaderValue::from_str(self.language.as_str()) {
-            response
-                .headers_mut()
-                .insert(header::CONTENT_LANGUAGE, language);
-        }
+        name_language(&mut response, &self.language);
         response
+    }
+}
+
+/// Names `language` in `response`'s `Content-Language`.
+pub(crate) fn name_language(response: &mut Response, language: &Language) {
+    // A tag is letters, digits and hyphens: always a header value.
+    if let Ok(language) = HeaderValue::from_str(language.as_str()) {
+        response
+            .headers_mut()
+            .insert(header::CONTENT_LANGUAGE, language);
     }
 }
 
@@ -240,11 +294,40 @@ mod tests {
     }
 
     #[test]
-    fn a_regional_tag_is_not_resolved_to_its_language() {
-        // Falling back from `de-AT` to `de` is each field's, within the language
-        // served: asking for a tag that isn't offered gets the default, not a guess.
+    fn a_regional_tag_not_offered_gets_its_language_when_that_is() {
+        let served = in_market(Some("de-AT"), &["en", "de"]);
+        assert_eq!(served.language(), &lang("de"));
+        assert!(!served.is_source());
+        let script = ServedLanguage::resolve(
+            Some("sr-Latn-RS"),
+            &lang("en"),
+            langs(&["en", "sr-Latn"]),
+            &langs(&["en", "sr-Latn"]),
+        );
+        assert_eq!(script.language(), &lang("sr-Latn"));
+    }
+
+    #[test]
+    fn an_offered_regional_tag_wins_over_its_language() {
         assert_eq!(
-            in_market(Some("de-AT"), &["en", "de"]).language(),
+            in_market(Some("de-AT"), &["en", "de", "de-AT"]).language(),
+            &lang("de-AT")
+        );
+    }
+
+    #[test]
+    fn a_regional_tag_whose_language_is_not_offered_gets_the_default() {
+        // `de` is published by the store, but this market offers neither.
+        assert_eq!(
+            in_market(Some("de-AT"), &["en", "fr"]).language(),
+            &lang("en")
+        );
+    }
+
+    #[test]
+    fn a_language_is_not_resolved_to_one_of_its_regions() {
+        assert_eq!(
+            in_market(Some("de"), &["en", "de-AT"]).language(),
             &lang("en")
         );
     }

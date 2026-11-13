@@ -41,6 +41,8 @@ mod checkout_rules;
 mod translations;
 // The language storefront reads are answered in.
 mod languages;
+// Carts, orders and customers in a language.
+mod cart_language;
 // Apps installed through OAuth, and personal data.
 mod app_extensions;
 // Apps' custom fields, synced with their manifests.

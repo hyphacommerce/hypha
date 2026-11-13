@@ -93,6 +93,7 @@ fn order_for(ana: CustomerId, n: u128, cart: CartId) -> Order {
             compare_at_price: None,
             price_list: None,
             unit_cost: None,
+            localized: None,
         }],
         shipping_address: Some(address()),
         address_check: None,
@@ -101,6 +102,7 @@ fn order_for(ana: CustomerId, n: u128, cart: CartId) -> Order {
         shipping_total: eur(0),
         tax_total: eur(0),
         total: eur(500),
+        language: None,
     })
     .unwrap()
 }
@@ -441,6 +443,7 @@ fn an_open_cart_with_a_pending_payment_is_kept_redacted() {
         provider: ProviderKey::manual(),
         amount: eur(500),
         instructions: None,
+        localized: None,
     })
     .unwrap();
     block_on(ports.payments.insert(&mut payment)).unwrap();

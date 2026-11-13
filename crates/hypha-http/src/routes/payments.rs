@@ -484,8 +484,9 @@ impl PlacedPaymentResponse {
     pub(crate) fn new(p: &Payment) -> Self {
         Self {
             status: p.status().into(),
-            method_name: p.method_name().map(str::to_string),
-            instructions: p.instructions().map(str::to_string),
+            // As the buyer read them: in the order's language where it had them.
+            method_name: p.buyer_method_name().map(str::to_string),
+            instructions: p.buyer_instructions().map(str::to_string),
             amount: p.amount(),
         }
     }
@@ -538,12 +539,23 @@ pub struct CartPaymentMethodResponse {
 }
 
 impl CartPaymentMethodResponse {
-    pub(crate) fn new(m: &PaymentMethod) -> Self {
+    /// The method with its name and instructions as `overlay` translates them.
+    pub(crate) fn translated(m: &PaymentMethod, overlay: &hypha_translations::Overlay) -> Self {
+        use hypha_translations::{ResourceKind, ResourceRef, fields};
+        let resource = ResourceRef::new(ResourceKind::PaymentMethod, m.id().as_uuid());
         Self {
             id: m.id(),
-            name: m.name().to_string(),
+            name: overlay
+                .text_or(resource, fields::payment_method::NAME, m.name())
+                .to_string(),
             provider: m.provider().to_string(),
-            instructions: m.instructions().map(str::to_string),
+            instructions: overlay
+                .optional(
+                    resource,
+                    fields::payment_method::INSTRUCTIONS,
+                    m.instructions(),
+                )
+                .map(str::to_string),
         }
     }
 }
@@ -670,10 +682,18 @@ pub async fn report_event<S: Storage>(
     };
     let done = record_payment_event(&ctx, &ports, &state.clock, input).await?;
     let mut report = done.value;
-    // A cart's money committed: its checkout completes now.
-    let completed = match state
-        .complete_paid_checkout(&ports, &ctx, &report.payment)
-        .await
+    // A cart's money committed: its checkout completes now, the store read on this
+    // request's connection.
+    let completed = match async {
+        let store = super::stores::store_as_system(&state, &ports)
+            .await
+            .map_err(|e| hypha_core::RepoError::Backend(format!("{e:?}")))?;
+        let languages = crate::language::content_languages(&store);
+        state
+            .complete_paid_checkout_in(&ports, &ctx, &report.payment, languages)
+            .await
+    }
+    .await
     {
         Ok(order) => order,
         // The report stands; the app's next report (or the shopper's checkout) tries

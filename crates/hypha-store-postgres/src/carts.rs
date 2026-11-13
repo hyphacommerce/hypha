@@ -1,8 +1,8 @@
 use hypha_cart::{Cart, CartLineSnapshot, CartRepo, CartSnapshot, SelectedShipping, StoredQuote};
 use hypha_core::{
-    CartId, ChannelId, CountryCode, CustomerId, Email, MarketId, Money, OrderId, PaymentMethodId,
-    Price, ProductId, RepoError, ShippingOptionId, Timestamp, VariantId, Version, Versioned,
-    stamp_insert, stamp_update,
+    CartId, ChannelId, CountryCode, CustomerId, Email, Language, MarketId, Money, OrderId,
+    PaymentMethodId, Price, ProductId, RepoError, ShippingOptionId, Timestamp, VariantId, Version,
+    Versioned, stamp_insert, stamp_update,
 };
 use hypha_shipping::ProviderKey;
 use std::collections::HashMap;
@@ -16,8 +16,8 @@ use uuid::Uuid;
 use crate::{
     columns::{
         ADDRESS_LEN, address_assignments, address_columns, address_from_row, address_values, col,
-        currency_from_db, id_and_address, micros, stamp_columns, stamps_from_row, ts,
-        version_from_db, version_to_db, write_stamps,
+        currency_from_db, id_and_address, language_from_db, micros, stamp_columns, stamps_from_row,
+        ts, version_from_db, version_to_db, write_stamps,
     },
     error::{corrupt, repo_error},
     store::Queries,
@@ -56,8 +56,8 @@ impl<C: PgConnection> CartRepo for PgStore<C> {
 pub(crate) async fn insert_cart(tx: &impl Queries, s: &CartSnapshot) -> Result<(), RepoError> {
     tx.query_typed(
         "INSERT INTO carts (id, version, market_id, country, email, customer_id, order_id,
-             channel_id, payment_method_id, marketing_opt_in, discount_codes)
-         VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+             channel_id, payment_method_id, marketing_opt_in, discount_codes, language)
+         VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
         &[
             (&s.id.as_uuid(), Type::UUID),
             (&s.market.as_uuid(), Type::UUID),
@@ -69,6 +69,7 @@ pub(crate) async fn insert_cart(tx: &impl Queries, s: &CartSnapshot) -> Result<(
             (&s.payment_method.map(|m| m.as_uuid()), Type::UUID),
             (&s.marketing_opt_in, Type::BOOL),
             (&s.discount_codes, Type::TEXT_ARRAY),
+            (&s.language.as_ref().map(Language::as_str), Type::TEXT),
         ],
     )
     .await
@@ -166,7 +167,7 @@ pub(crate) async fn update_cart(tx: &impl Queries, s: &CartSnapshot) -> Result<V
         .query_typed_opt(
             "UPDATE carts SET version = version + 1, market_id = $3, country = $4, email = $5,
                      customer_id = $6, order_id = $7, payment_method_id = $8,
-                     marketing_opt_in = $9, discount_codes = $10
+                     marketing_opt_in = $9, discount_codes = $10, language = $11
                  WHERE id = $1 AND version = $2 RETURNING version",
             &[
                 (&s.id.as_uuid(), Type::UUID),
@@ -179,6 +180,7 @@ pub(crate) async fn update_cart(tx: &impl Queries, s: &CartSnapshot) -> Result<V
                 (&s.payment_method.map(|m| m.as_uuid()), Type::UUID),
                 (&s.marketing_opt_in, Type::BOOL),
                 (&s.discount_codes, Type::TEXT_ARRAY),
+                (&s.language.as_ref().map(Language::as_str), Type::TEXT),
             ],
         )
         .await
@@ -300,7 +302,7 @@ async fn load_carts_of(
 fn select_carts() -> String {
     format!(
         "SELECT id, version, market_id, country, email, customer_id, order_id, channel_id,
-                payment_method_id, marketing_opt_in, discount_codes, {},
+                payment_method_id, marketing_opt_in, discount_codes, language, {},
                 shipping_option_id, quote_amount, quote_currency, quote_provider,
                 quote_service, quote_reference, address_check::text AS address_check,
                 app_checks::text AS app_checks, {}, {}
@@ -343,6 +345,7 @@ fn cart_from_row(row: &Row, id: CartId, lines: Vec<CartLineSnapshot>) -> Result<
             .map(PaymentMethodId::from_uuid),
         marketing_opt_in: col(row, "marketing_opt_in")?,
         discount_codes: col(row, "discount_codes")?,
+        language: language_from_db(col(row, "language")?)?,
         shipping_address: address_from_row(row, "shipping_")?,
         address_check: col::<Option<String>>(row, "address_check")?
             .map(|text| serde_json::from_str(&text))

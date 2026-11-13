@@ -251,6 +251,8 @@ mod tests {
             total: eur,
             payment_method: None,
             marketing_opt_in: false,
+            language: None,
+            market_languages: Vec::new(),
         }
     }
 

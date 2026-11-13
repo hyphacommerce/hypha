@@ -10,6 +10,7 @@ use hypha_payments::{
 use hypha_shipping::RateProvider;
 
 use crate::commands::{Ready, ready, refuse_errors};
+use crate::language::{ContentLanguages, Localizer};
 use crate::messages::CartChecks;
 use crate::start::{Payer, refresh, start};
 use crate::{CheckoutPorts, CommandError};
@@ -22,6 +23,8 @@ pub struct StartCartPayment {
     pub expected_total: Option<Money>,
     /// Where the storefront wants the shopper back after the provider's page.
     pub return_url: Option<String>,
+    /// The store's languages: the payment's `localized` copies are made in the cart's.
+    pub languages: ContentLanguages,
 }
 
 /// The cart's payment, started, and what the shopper does next: the provider's card form
@@ -156,6 +159,7 @@ async fn start_once<
     }
     // No money is taken for a cart checkout would refuse.
     refuse_errors(cart.id(), messages)?;
+    let localizer = Localizer::load(ports, &input.languages, &priced, Some(&method)).await?;
     let payer = Payer {
         cart: cart.id(),
         order: None,
@@ -163,7 +167,9 @@ async fn start_once<
         market: priced.market,
         country: priced.country,
         email,
+        language: Some(localizer.language().clone()),
     };
+    let localized = localizer.payment(&method);
     let reusable = existing
         .iter()
         .find(|p| {
@@ -172,19 +178,25 @@ async fn start_once<
                 && p.status() == PaymentStatus::Pending
                 && p.method() == Some(method.id())
                 && p.amount() == priced.total
+                // Started while the cart read in another language: a new one, so the
+                // order's payment names its method as the buyer reads it now.
+                && p.localized() == localized.as_ref()
         })
         .cloned();
     let reused = reusable.is_some();
     let mut payment = match reusable {
         Some(payment) => payment,
         None => {
-            let mut payment = Payment::new(NewPayment::by(
-                &method,
-                PaymentId::from_uuid(ids.new_uuid()),
-                cart.id(),
-                None,
-                priced.total,
-            ))?;
+            let mut payment = Payment::new(NewPayment {
+                localized: localized.clone(),
+                ..NewPayment::by(
+                    &method,
+                    PaymentId::from_uuid(ids.new_uuid()),
+                    cart.id(),
+                    None,
+                    priced.total,
+                )
+            })?;
             let now = clock.now();
             let mut stale: Vec<Payment> = existing
                 .into_iter()

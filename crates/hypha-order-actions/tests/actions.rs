@@ -88,6 +88,7 @@ fn line(id: OrderLineId, variant: u128, quantity: u32) -> OrderLine {
         compare_at_price: None,
         price_list: None,
         unit_cost: None,
+        localized: None,
     }
 }
 
@@ -141,6 +142,7 @@ impl World {
             shipping_total: eur(0),
             tax_total: eur(0),
             total: eur(2000),
+            language: None,
         })
         .unwrap();
         block_on(world.orders.insert(&mut order)).unwrap();
@@ -900,6 +902,7 @@ fn pending_payment(world: &World) -> Payment {
         provider: ProviderKey::manual(),
         amount: eur(2000),
         instructions: Some("IBAN HR12".to_string()),
+        localized: None,
     })
     .unwrap();
     block_on(world.payments.insert(&mut payment)).unwrap();
@@ -1071,6 +1074,7 @@ fn stored_payment(world: &World, n: u128, amount: i64, status: PaymentStatus, re
         instructions: None,
         paid_at: status.captured().then_some(FixedClock::DEFAULT),
         voided_at: (status == PaymentStatus::Voided).then_some(FixedClock::DEFAULT),
+        localized: None,
     })
     .unwrap();
     block_on(world.payments.insert(&mut payment)).unwrap();
@@ -1818,6 +1822,7 @@ fn owned_payment(world: &World, owner: &str, provider: &str, id: hypha_core::App
         provider: ProviderKey::new(provider).unwrap(),
         amount: eur(2000),
         instructions: None,
+        localized: None,
     })
     .unwrap();
     block_on(world.payments.insert(&mut payment)).unwrap();
@@ -1936,6 +1941,7 @@ fn cart_payment(world: &World) -> Payment {
         provider: ProviderKey::new("app_card").unwrap(),
         amount: eur(2000),
         instructions: None,
+        localized: None,
     })
     .unwrap();
     block_on(world.payments.insert(&mut payment)).unwrap();

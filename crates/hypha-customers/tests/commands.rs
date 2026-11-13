@@ -297,6 +297,34 @@ fn update_changes_given_fields_and_none_or_blank_clears() {
 }
 
 #[test]
+fn update_sets_and_clears_the_language() {
+    let world = World::new();
+    let c = world.create("ana@example.hr").unwrap();
+    let german = hypha_core::Language::new("de").unwrap();
+    let updated = world
+        .update(
+            c.id(),
+            UpdateCustomer {
+                language: Some(Some(german.clone())),
+                ..UpdateCustomer::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(updated.language(), Some(&german));
+    assert_eq!(world.stored(c.id()).language(), Some(&german));
+    let cleared = world
+        .update(
+            c.id(),
+            UpdateCustomer {
+                language: Some(None),
+                ..UpdateCustomer::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(cleared.language(), None);
+}
+
+#[test]
 fn update_can_change_the_email_to_a_free_one() {
     let world = World::new();
     let c = world.create("ana@example.hr").unwrap();

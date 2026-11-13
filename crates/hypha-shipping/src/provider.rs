@@ -4,7 +4,7 @@
 
 use std::fmt;
 
-use hypha_core::{Address, Currency, Money, Price, Quantity, VariantId, Weight};
+use hypha_core::{Address, Currency, Language, Money, Price, Quantity, VariantId, Weight};
 use thiserror::Error;
 
 use crate::ShippingError;
@@ -101,6 +101,9 @@ pub struct RateRequest {
     pub items: Vec<RateItem>,
     /// The group's lines, as priced.
     pub subtotal: Money,
+    /// The language the cart's shopper reads, as far as the cart and its market say;
+    /// `None` when neither names one (the store's default language).
+    pub language: Option<Language>,
 }
 
 /// A service a provider can quote: what an option offers by `service`.

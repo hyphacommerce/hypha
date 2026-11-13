@@ -239,6 +239,7 @@ fn wire_request(r: &RateRequest) -> RateRequestBody {
             })
             .collect(),
         subtotal: r.subtotal,
+        language: r.language.clone(),
     }
 }
 

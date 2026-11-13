@@ -1,6 +1,7 @@
 use hypha_core::{
-    Address, AddressId, AddressParts, CustomerId, Direction, Email, Keyset, Page, PageRequest,
-    Recorded, RepoError, SortKey, Timestamp, Version, Versioned, stamp_insert, stamp_update,
+    Address, AddressId, AddressParts, CustomerId, Direction, Email, Keyset, Language, Page,
+    PageRequest, Recorded, RepoError, SortKey, Timestamp, Version, Versioned, stamp_insert,
+    stamp_update,
 };
 use hypha_customers::{
     ConsentSource, ConsentState, Customer, CustomerFilter, CustomerRepo, CustomerSnapshot,
@@ -11,8 +12,8 @@ use uuid::Uuid;
 
 use crate::{
     columns::{
-        address_columns, address_from_row, col, stamp_columns, stamps_from_row, version_from_db,
-        version_to_db, write_stamps,
+        address_columns, address_from_row, col, language_from_db, stamp_columns, stamps_from_row,
+        version_from_db, version_to_db, write_stamps,
     },
     error::{corrupt, repo_error},
     field_filters::{Params, field_predicates},
@@ -206,7 +207,7 @@ pub(crate) async fn update_customer(
                  email_marketing_at = $11, email_marketing_source = $12,
                  sms_marketing_state = $13, sms_marketing_level = $14,
                  sms_marketing_at = $15, sms_marketing_source = $16,
-                 erased_at = $17, erasure_due_at = $18
+                 erased_at = $17, erasure_due_at = $18, language = $19
              WHERE id = $1 AND version = $2 RETURNING version",
             &[
                 (&s.id.as_uuid(), Type::UUID),
@@ -239,6 +240,7 @@ pub(crate) async fn update_customer(
                 ),
                 (&s.erased_at.map(Timestamp::unix_micros), Type::INT8),
                 (&s.erasure_due_at.map(Timestamp::unix_micros), Type::INT8),
+                (&s.language.as_ref().map(Language::as_str), Type::TEXT),
             ],
         )
         .await
@@ -286,8 +288,9 @@ pub(crate) async fn insert_customer(
              default_shipping_address_id, default_billing_address_id,
              email_marketing_state, email_marketing_level, email_marketing_at,
              email_marketing_source, sms_marketing_state, sms_marketing_level,
-             sms_marketing_at, sms_marketing_source, erased_at, erasure_due_at)
-         VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
+             sms_marketing_at, sms_marketing_source, erased_at, erasure_due_at, language)
+         VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+                 $18)",
         &[
             (&s.id.as_uuid(), Type::UUID),
             (&s.email.as_str(), Type::TEXT),
@@ -318,6 +321,7 @@ pub(crate) async fn insert_customer(
             ),
             (&s.erased_at.map(Timestamp::unix_micros), Type::INT8),
             (&s.erasure_due_at.map(Timestamp::unix_micros), Type::INT8),
+            (&s.language.as_ref().map(Language::as_str), Type::TEXT),
         ],
     )
     .await
@@ -388,7 +392,8 @@ async fn load<T: tokio_postgres::types::ToSql + Sync>(
                      default_shipping_address_id, default_billing_address_id,
                      email_marketing_state, email_marketing_level, email_marketing_at,
                      email_marketing_source, sms_marketing_state, sms_marketing_level,
-                     sms_marketing_at, sms_marketing_source, erased_at, erasure_due_at, {}
+                     sms_marketing_at, sms_marketing_source, erased_at, erasure_due_at,
+                     language, {}
                  FROM customers WHERE {filter}",
                 stamp_columns(""),
             ),
@@ -433,6 +438,7 @@ async fn load<T: tokio_postgres::types::ToSql + Sync>(
         erased_at: col::<Option<i64>>(&row, "erased_at")?.map(Timestamp::from_unix_micros),
         erasure_due_at: col::<Option<i64>>(&row, "erasure_due_at")?
             .map(Timestamp::from_unix_micros),
+        language: language_from_db(col(&row, "language")?)?,
     };
     Customer::restore(snapshot)
         .map(Some)

@@ -48,7 +48,9 @@ pub async fn view_cart<S: HasCarts + HasOrders + PricingPorts>(
     Ok(as_charged(&cart, &order))
 }
 
-/// `cart` with its order's lines and totals. Email and customer stay the cart's own.
+/// `cart` with its order's lines and totals, named as the buyer read them (the order's
+/// `localized` copies): a reader overlays nothing on it. Email and customer stay the
+/// cart's own.
 fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
     let lines = order
         .lines()
@@ -58,8 +60,9 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
             variant: line.variant,
             quantity: line.quantity,
             details: Some(LineDetails {
-                product_title: line.product_title.clone(),
-                variant_title: line.variant_title.clone(),
+                product_title: line.buyer_product_title().to_string(),
+                variant_title: line.buyer_variant_title().map(str::to_string),
+                option_values: Vec::new(),
                 sku: line.sku.clone(),
                 handle: None,
                 image: None,
@@ -108,7 +111,7 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
                 selected: Some(PricedShipping {
                     option: s.option,
                     code: s.code.clone(),
-                    name: s.name.clone(),
+                    name: s.buyer_name().to_string(),
                     amount: s.amount.money(),
                     discounts: shares(&s.discounts),
                     total: s.total,
@@ -130,6 +133,10 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
         tax_total: order.tax_total(),
         total: order.total(),
         payment_method: cart.payment_method(),
+        language: cart.language().cloned(),
+        // Its order's language is the only one it reads in now (none for an order from
+        // before languages: the store's default).
+        market_languages: order.language().cloned().into_iter().collect(),
     }
 }
 
@@ -150,7 +157,7 @@ fn application(d: &OrderDiscount) -> Application {
     Application {
         discount: d.discount,
         code: d.code.clone(),
-        title: d.title.clone(),
+        title: d.buyer_title().to_string(),
         summary: d.summary.clone(),
         class: match d.class {
             DiscountClass::Product => Class::Product,
