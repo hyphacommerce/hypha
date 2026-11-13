@@ -379,17 +379,20 @@ pub async fn search_sync<S: Storage>(state: &AppState<S>) -> Step {
         .await
         .map_err(|_| "no connection".to_string())?;
     let now = state.clock.now();
-    // What markets may offer and translations are read in: the store's languages now.
-    let servable = crate::routes::stores::store_as_system(state, &ports)
-        .await
-        .map_err(|e| format!("the store couldn't be read: {}", e.body().error))?
-        .offered_languages();
+    // What markets may offer and translations are read in: the store's languages now,
+    // read only when there's something to rebuild.
+    let servable = async {
+        crate::routes::stores::store_as_system(state, &ports)
+            .await
+            .map(|store| store.offered_languages())
+            .map_err(|e| hypha_core::RepoError::Backend(format!("the store: {}", e.body().error)))
+    };
     let synced = hypha_search::sync(
         &ports,
         &state.storage.search(&ports),
         &state.clock,
         &state.config.search_sync,
-        &servable,
+        servable,
     )
     .await
     .map_err(|e| e.to_string())?;

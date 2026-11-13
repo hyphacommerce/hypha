@@ -1,7 +1,9 @@
 //! Search's ports (sections 4 to 6): the engine, the queue of what to rebuild, and the
 //! merchant's settings.
 
-use hypha_core::{CategoryId, ChannelId, MarketId, ProductId, RepoError, Timestamp, VariantId};
+use hypha_core::{
+    CategoryId, ChannelId, Language, MarketId, ProductId, RepoError, Timestamp, VariantId,
+};
 
 use crate::{IndexError, SearchDocument, SearchQuery, SearchResults, SearchSettings};
 
@@ -40,6 +42,15 @@ pub trait SearchIndex {
     /// How many documents it holds, over every market: none means a new engine, which
     /// the host fills with a full rebuild.
     async fn count(&self) -> Result<u64, IndexError>;
+
+    /// Whether `market` has any document in `language`: a language a market just began
+    /// to offer has none until the sync job has built them, and a search falls back to
+    /// one that has.
+    async fn has_documents(
+        &self,
+        market: MarketId,
+        language: &Language,
+    ) -> Result<bool, IndexError>;
 }
 
 /// A borrowed engine is an engine, so a host can lend the request's ports out as one.
@@ -67,6 +78,14 @@ impl<T: SearchIndex + ?Sized> SearchIndex for &T {
 
     async fn count(&self) -> Result<u64, IndexError> {
         (**self).count().await
+    }
+
+    async fn has_documents(
+        &self,
+        market: MarketId,
+        language: &Language,
+    ) -> Result<bool, IndexError> {
+        (**self).has_documents(market, language).await
     }
 }
 

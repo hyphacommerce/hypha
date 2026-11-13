@@ -89,6 +89,11 @@ fn lang(tag: &str) -> Language {
     Language::new(tag).unwrap()
 }
 
+/// The store's languages, as the sync job reads them: English alone.
+fn english() -> std::future::Ready<Result<Vec<Language>, hypha_core::RepoError>> {
+    std::future::ready(Ok(vec![lang("en")]))
+}
+
 impl World {
     /// Croatia (EUR, a −10% price list with a fixed 1000 for Blue/S) sells the shirt,
     /// the mug (none in stock) and a draft; the US (USD) lists the shirt, whose EUR
@@ -227,7 +232,7 @@ impl World {
             &self.index,
             &self.clock,
             &SyncSettings::default(),
-            &self.servable.borrow(),
+            async { Ok(self.servable.borrow().clone()) },
         ))
         .unwrap()
         .progress
@@ -258,8 +263,13 @@ impl World {
         input: SearchInput,
         language: &str,
     ) -> Result<hypha_search::Found, CommandError> {
-        block_on(search(ctx, &self.ports, &self.index, input, |_| {
-            lang(language)
+        block_on(search(ctx, &self.ports, &self.index, input, |market| {
+            let others = market
+                .offered_languages(&self.servable.borrow())
+                .into_iter()
+                .filter(|l| *l != lang(language))
+                .collect();
+            (lang(language), others)
         }))
     }
 }
@@ -360,6 +370,14 @@ impl hypha_search_index::SearchIndex for Refusing<'_> {
     async fn count(&self) -> Result<u64, hypha_search_index::IndexError> {
         self.inner.count().await
     }
+
+    async fn has_documents(
+        &self,
+        market: MarketId,
+        language: &Language,
+    ) -> Result<bool, hypha_search_index::IndexError> {
+        self.inner.has_documents(market, language).await
+    }
 }
 
 #[test]
@@ -378,7 +396,7 @@ fn a_product_the_engine_refuses_fails_alone() {
             &refusing,
             &w.clock,
             &SyncSettings::default(),
-            &[lang("en")],
+            english(),
         ))
         .unwrap();
         failed.extend(synced.failed.iter().map(|(id, _)| *id));
@@ -527,7 +545,7 @@ fn a_full_rebuild_says_there_is_more_to_do_at_once() {
         &w.index,
         &w.clock,
         &SyncSettings::default(),
-        &[lang("en")],
+        english(),
     ))
     .unwrap();
     assert_eq!((synced.progress.done, synced.progress.more), (1, true));
@@ -1821,7 +1839,7 @@ fn a_market_mark_queues_the_products_its_catalog_sells() {
         &w.index,
         &w.clock,
         &SyncSettings::default(),
-        &[lang("en")],
+        english(),
     ))
     .unwrap();
     assert!(synced.progress.more);
@@ -1898,4 +1916,18 @@ fn languages_and_translations_mark_what_their_documents_hold() {
         changed(serde_json::json!(["languages", "currency"])),
         Ok(vec![Target::All])
     );
+}
+
+#[test]
+fn a_language_whose_documents_are_not_built_yet_searches_another() {
+    let w = World::new();
+    w.settle();
+    german_croatia(&w);
+    // The market offers German, but the sync job hasn't built its documents.
+    let found = w.search_in(&Ctx::system(), input("HR"), "de").unwrap();
+    assert_eq!(found.language, lang("en"));
+    assert_eq!(found.results.total, 2);
+    w.settle();
+    let found = w.search_in(&Ctx::system(), input("HR"), "de").unwrap();
+    assert_eq!(found.language, lang("de"));
 }

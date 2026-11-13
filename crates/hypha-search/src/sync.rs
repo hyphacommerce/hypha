@@ -125,16 +125,17 @@ pub struct Synced {
 /// Leases up to `batch` marks and rebuilds what they name: every product for `All`
 /// and a market's products for `Market` (by queueing each), a variant's product, a
 /// product's documents in every market, in each language the market offers (none once
-/// it's gone, inactive or unlisted). `servable` is what the store offers shoppers, its
+/// it's gone, inactive or unlisted). `servable` reads what the store offers shoppers, its
 /// default language first (`Store::offered_languages`): what markets offer out of it,
-/// and what translations are read in. `Err` only when the step as a whole couldn't run
-/// (the queue, the markets or the settings couldn't be read).
+/// and what translations are read in. It's awaited only once there are marks, so an idle
+/// step reads nothing but the queue. `Err` only when the step as a whole couldn't run
+/// (the queue, the store's languages, the markets or the settings couldn't be read).
 pub async fn sync<S: SyncPorts, I: SearchIndex>(
     ports: &S,
     index: &I,
     clock: &impl Clock,
     settings: &SyncSettings,
-    servable: &[Language],
+    servable: impl Future<Output = Result<Vec<Language>, RepoError>>,
 ) -> Result<Synced, SyncError> {
     let now = clock.now();
     let marks = ports
@@ -152,6 +153,7 @@ pub async fn sync<S: SyncPorts, I: SearchIndex>(
         });
     }
 
+    let servable = servable.await?;
     let mut finished: Vec<Mark> = Vec::new();
     let mut products: BTreeSet<ProductId> = BTreeSet::new();
     let mut variants: Vec<VariantId> = Vec::new();
@@ -190,7 +192,7 @@ pub async fn sync<S: SyncPorts, I: SearchIndex>(
     products.extend(owners.iter().copied());
     let products: Vec<ProductId> = products.into_iter().collect();
 
-    let failed = rebuild(ports, index, &products, servable).await?;
+    let failed = rebuild(ports, index, &products, &servable).await?;
     // Variant marks finish with their product: one that failed may own any of them, so
     // they wait unless every product succeeded.
     let failed_ids: BTreeSet<ProductId> = failed.iter().map(|(id, _)| *id).collect();

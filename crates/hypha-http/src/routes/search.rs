@@ -239,6 +239,7 @@ pub async fn storefront_search<S: Storage>(
     let (page, params, scope) = query.parse::<u32>()?;
     let asked = params.language;
     let store = super::stores::store_as_system(&state, &ports).await?;
+    let servable = store.offered_languages();
     let offset = page.after.unwrap_or(0);
     let limit = page.limit.get();
     let words = params.q.clone();
@@ -266,19 +267,24 @@ pub async fn storefront_search<S: Storage>(
         ports: &ports,
         app,
         words,
-        servable: store.offered_languages(),
+        servable: servable.clone(),
         endpoints: state.app_endpoints(&ports),
         caller: state.extensions(),
         env: &state.env,
     };
-    // The language a product read in the same market would answer in.
+    // The language a product read in the same market would answer in, then the market's
+    // others, for while it has no documents yet.
     let found = search(&ctx, &ports, &engine, input, |market| {
-        ServedLanguage::of(asked.as_deref(), &store, Some(market))
-            .language()
-            .clone()
+        let served = ServedLanguage::of(asked.as_deref(), &store, Some(market));
+        let others = market
+            .offered_languages(&servable)
+            .into_iter()
+            .filter(|l| l != served.language())
+            .collect();
+        (served.language().clone(), others)
     })
     .await?;
-    let served = ServedLanguage::of(asked.as_deref(), &store, Some(&found.market));
+    let served = ServedLanguage::chosen(found.language.clone(), &store);
     let results = found.results;
 
     // Each image once, in one query.

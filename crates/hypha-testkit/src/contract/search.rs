@@ -85,7 +85,10 @@ fn filter(key: FacetKey, values: &[&str]) -> Filter {
 pub async fn search_index<I: SearchIndex>(make: impl AsyncFn() -> I) {
     scenario("search index: replace adds, replaces and removes a product's documents");
     replace(&make().await).await;
-    scenario("search index: replace takes a product's documents in every language together");
+    scenario(
+        "search index: replace takes a product's documents in every language together, and \
+         a market has documents in a language until none is left",
+    );
     replace_languages(&make().await).await;
     scenario("search index: every query answers as the reference does");
     battery(&make().await).await;
@@ -149,6 +152,18 @@ async fn replace<I: SearchIndex>(index: &I) {
 async fn replace_languages<I: SearchIndex>(index: &I) {
     let fixture = search_fixture();
     load(index, &fixture).await;
+    assert_eq!(
+        index.has_documents(market(1), &language("de")).await,
+        Ok(true)
+    );
+    assert_eq!(
+        index.has_documents(market(2), &language("de")).await,
+        Ok(false)
+    );
+    assert_eq!(
+        index.has_documents(market(2), &language("en")).await,
+        Ok(true)
+    );
     let mut german = query(1);
     german.language = language("de");
     german.group = Group::Variant;
@@ -186,6 +201,25 @@ async fn replace_languages<I: SearchIndex>(index: &I) {
     }
     assert_eq!(index.search(&german).await.unwrap().total, 3);
     assert_eq!(index.count().await, Ok(left.len() as u64));
+
+    // Every product's German documents gone: the market has none in German.
+    let others: Vec<ProductId> = [2, 3].map(product).to_vec();
+    let english: Vec<SearchDocument> = fixture
+        .iter()
+        .filter(|d| {
+            d.market == market(1) && others.contains(&d.product) && d.language == language("en")
+        })
+        .cloned()
+        .collect();
+    index.replace(market(1), &others, &english).await.unwrap();
+    assert_eq!(
+        index.has_documents(market(1), &language("de")).await,
+        Ok(false)
+    );
+    assert_eq!(
+        index.has_documents(market(1), &language("en")).await,
+        Ok(true)
+    );
 }
 
 async fn battery<I: SearchIndex>(index: &I) {

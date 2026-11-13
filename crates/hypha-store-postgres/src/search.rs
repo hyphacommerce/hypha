@@ -268,6 +268,28 @@ impl<C: PgConnection> SearchIndex for PgStore<C> {
         let n: i64 = col(&row, "n")?;
         Ok(u64::try_from(n).map_err(corrupt)?)
     }
+
+    async fn has_documents(
+        &self,
+        market: MarketId,
+        language: &Language,
+    ) -> Result<bool, IndexError> {
+        let mut conn = self.conn().await;
+        // The key's prefix: one index probe.
+        let row = conn
+            .db()
+            .query_typed_one(
+                "SELECT EXISTS (SELECT 1 FROM search_documents
+                                WHERE market_id = $1 AND language = $2) AS found",
+                &[
+                    (&market.as_uuid(), Type::UUID),
+                    (&language.as_str(), Type::TEXT),
+                ],
+            )
+            .await
+            .map_err(repo_error)?;
+        Ok(col::<bool>(&row, "found")?)
+    }
 }
 
 /// One `INSERT` for `documents` (at most `INSERT_ROWS`).

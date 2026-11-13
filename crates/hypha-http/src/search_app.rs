@@ -141,6 +141,14 @@ where
     async fn count(&self) -> Result<u64, IndexError> {
         self.built_in.count().await
     }
+
+    async fn has_documents(
+        &self,
+        market: MarketId,
+        language: &hypha_core::Language,
+    ) -> Result<bool, IndexError> {
+        self.built_in.has_documents(market, language).await
+    }
 }
 
 /// A checked query as the point sends it.

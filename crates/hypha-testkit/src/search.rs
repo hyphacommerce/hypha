@@ -61,6 +61,17 @@ impl SearchIndex for InMemorySearchIndex {
     async fn count(&self) -> Result<u64, IndexError> {
         Ok(self.lock().len() as u64)
     }
+
+    async fn has_documents(
+        &self,
+        market: MarketId,
+        language: &hypha_core::Language,
+    ) -> Result<bool, IndexError> {
+        Ok(self
+            .lock()
+            .iter()
+            .any(|d| d.market == market && d.language == *language))
+    }
 }
 
 struct Queued {
