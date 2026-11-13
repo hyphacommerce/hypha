@@ -7,13 +7,9 @@ import { type SearchParams, one } from "@/components/resource-table/params";
 import { FormSkeleton } from "@/components/skeletons";
 import { flatten } from "@/lib/categories";
 import { sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 
 import { type MarketOption, NewPriceListForm } from "../price-list-form";
-
-const BACK = [
-  { label: "Markets", href: "/markets" },
-  { label: "Price lists", href: "/markets/price-lists" },
-];
 
 /**
  * A new price list, from a template. `?market=` (the market page's "New price list")
@@ -25,14 +21,17 @@ export default async function NewPriceListPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const params = await searchParams;
+  const [params, t] = await Promise.all([searchParams, getT()]);
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={880}>
         <PageHeader
-          title="New price list"
-          description="Prices that differ from the base prices, for the markets that use the list."
-          back={BACK}
+          title={t("price_lists.new")}
+          description={t("price_lists.new_description")}
+          back={[
+            { label: t("common.markets"), href: "/markets" },
+            { label: t("price_lists.title"), href: "/markets/price-lists" },
+          ]}
         />
         <Suspense fallback={<FormSkeleton cards={4} />}>
           <Form market={one(params, "market")} />

@@ -39,8 +39,10 @@ const adminTranslated = [
   "apps/admin/app/(admin)/admin-shell.tsx",
   "apps/admin/app/(admin)/forbidden.tsx",
   "apps/admin/app/(admin)/layout.tsx",
+  "apps/admin/app/(admin)/markets/**",
   "apps/admin/app/(editor)/forbidden.tsx",
   "apps/admin/app/(editor)/layout.tsx",
+  "apps/admin/app/(editor)/markets/**",
   "apps/admin/app/*.tsx",
   "apps/admin/app/forgot-password/**",
   "apps/admin/app/invite/**",
@@ -48,7 +50,9 @@ const adminTranslated = [
   "apps/admin/app/reset-password/**",
   "apps/admin/components/*.tsx",
   "apps/admin/components/app-extensions/**",
+  "apps/admin/components/price-grid/**",
   "apps/admin/components/resource-table/**",
+  "apps/admin/resources/markets.tsx",
 ];
 
 export default defineConfig({

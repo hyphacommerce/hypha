@@ -28,11 +28,16 @@ import {
   kindLabel,
   phaseBadge,
 } from "@/lib/price-lists";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { addToCatalog, removeFromCatalog } from "../price-lists/actions";
 
 type Market = AdminSchemas["MarketResponse"];
 type Catalog = AdminSchemas["CatalogResponse"];
+
+/** The scope reading price lists takes: a name, shown as it is. */
+const READ_SCOPE = "pricing:read";
 
 /**
  * The market's price lists: every list its catalog holds, added and removed here. The
@@ -60,6 +65,8 @@ export function PriceListsCard({
   /** Lists in the market's currency the catalog doesn't hold, to add. */
   offered: PriceList[];
 }) {
+  const t = useT<"markets" | "price_lists">();
+  const format = useFormat();
   const [adding, setAdding] = useState<string>();
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -77,17 +84,17 @@ export function PriceListsCard({
         <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Price lists
+              {t("markets.price_lists_title")}
             </Text>
             <Text type="supporting" color="secondary">
               {catalog.price_lists.length === 0
-                ? `Without one, the market sells at each variant's base price (when it's in ${market.currency}).`
-                : "Shoppers pay the lowest live price among these lists, or the base price where none prices a variant. Put lists together only when they should compete: a markup beside a regular list never wins."}
+                ? t("markets.price_lists_description_none", { currency: market.currency })
+                : t("markets.price_lists_description")}
             </Text>
           </VStack>
           {canCreate && (
             <Button
-              label="New price list"
+              label={t("markets.price_lists_new")}
               variant="secondary"
               href={`/markets/price-lists/new?market=${market.id}`}
             />
@@ -95,25 +102,27 @@ export function PriceListsCard({
         </HStack>
         {error && <Banner status="error" title={error} />}
         {!canRead ? (
-          <Text color="secondary">Viewing price lists needs the pricing:read scope.</Text>
+          <Text color="secondary">{t("markets.price_lists_no_scope", { scope: READ_SCOPE })}</Text>
         ) : (
           <>
             {lists.length > 0 && (
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHeaderCell>List</TableHeaderCell>
-                    <TableHeaderCell>Kind</TableHeaderCell>
-                    <TableHeaderCell>Status</TableHeaderCell>
-                    <TableHeaderCell>Fixed prices</TableHeaderCell>
+                    <TableHeaderCell>{t("markets.price_lists_column_list")}</TableHeaderCell>
+                    <TableHeaderCell>{t("markets.price_lists_column_kind")}</TableHeaderCell>
+                    <TableHeaderCell>{t("common.status")}</TableHeaderCell>
                     <TableHeaderCell>
-                      <span className="visually-hidden">Remove</span>
+                      {t("markets.price_lists_column_fixed_prices")}
+                    </TableHeaderCell>
+                    <TableHeaderCell>
+                      <span className="visually-hidden">{t("common.remove")}</span>
                     </TableHeaderCell>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {lists.map((list) => {
-                    const phase = phaseBadge(list.phase);
+                    const phase = phaseBadge(list.phase, t);
                     return (
                       <TableRow key={list.id}>
                         <TableCell>
@@ -122,21 +131,24 @@ export function PriceListsCard({
                               {list.name}
                             </Link>
                             <Text type="supporting" color="secondary">
-                              {adjustmentLabel(list.adjustment)}
+                              {adjustmentLabel(t, format, list.adjustment)}
                             </Text>
                           </VStack>
                         </TableCell>
-                        <TableCell>{kindLabel(list.kind)}</TableCell>
+                        <TableCell>{kindLabel(t, list.kind)}</TableCell>
                         <TableCell>
                           <Badge label={phase.label} variant={phase.variant} />
                         </TableCell>
-                        <TableCell>{list.fixed_price_count.toLocaleString("en")}</TableCell>
+                        <TableCell>{format.number(list.fixed_price_count)}</TableCell>
                         <TableCell>
                           {canWrite && (
                             <HStack hAlign="end">
                               <IconButton
-                                label={`Remove ${list.name} from ${market.name}`}
-                                tooltip="Remove from this market (the list stays)"
+                                label={t("markets.price_lists_remove", {
+                                  list: list.name,
+                                  market: market.name,
+                                })}
+                                tooltip={t("markets.price_lists_remove_tooltip")}
                                 icon={<XMarkIcon />}
                                 size="sm"
                                 variant="ghost"
@@ -155,20 +167,23 @@ export function PriceListsCard({
             {canWrite && offered.length > 0 && !isFull && (
               <HStack gap={2} vAlign="end" wrap="wrap">
                 <Selector
-                  label={`Add a ${market.currency} price list`}
+                  label={t("markets.price_lists_add_label", { currency: market.currency })}
                   options={offered.map((l) => ({
                     value: l.id,
                     label: l.name,
-                    description: `${kindLabel(l.kind)} · ${adjustmentLabel(l.adjustment)}`,
+                    description: t("markets.price_lists_option_description", {
+                      kind: kindLabel(t, l.kind),
+                      adjustment: adjustmentLabel(t, format, l.adjustment),
+                    }),
                   }))}
                   value={adding}
                   onChange={setAdding}
                   hasSearch={offered.length > 8}
-                  placeholder="Choose a price list"
+                  placeholder={t("markets.price_lists_add_placeholder")}
                   width={280}
                 />
                 <Button
-                  label="Add"
+                  label={t("common.add")}
                   isDisabled={!adding || isPending}
                   onClick={() => adding && run(() => addToCatalog(adding, catalog.id))}
                 />
@@ -176,7 +191,7 @@ export function PriceListsCard({
             )}
             {isFull && (
               <Text type="supporting" color="secondary">
-                A catalog holds at most {MAX_LISTS_PER_CATALOG} price lists.
+                {t("markets.price_lists_full", { max: MAX_LISTS_PER_CATALOG })}
               </Text>
             )}
           </>

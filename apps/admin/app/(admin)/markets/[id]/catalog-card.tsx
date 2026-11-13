@@ -42,7 +42,7 @@ export function CatalogCard({
   page?: Page;
   isFirstPage: boolean;
 }) {
-  const t = useT();
+  const t = useT<"markets">();
   const [error, setError] = useState<string>();
   const [isAdding, setIsAdding] = useState(false);
   // The catalog's products on this page: the picker marks them. (Products on other pages
@@ -58,18 +58,21 @@ export function CatalogCard({
         <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Catalog
+              {t("markets.catalog_title")}
             </Text>
             <Text type="supporting" color="secondary">
-              The products this market can buy. A product also needs to be active and published to
-              the storefront's channel.
+              {t("markets.catalog_description")}
             </Text>
           </VStack>
           {catalog ? (
-            <Button label="Add products" variant="secondary" onClick={() => setIsAdding(true)} />
+            <Button
+              label={t("markets.catalog_add_products")}
+              variant="secondary"
+              onClick={() => setIsAdding(true)}
+            />
           ) : (
             <Button
-              label="Create catalog"
+              label={t("markets.catalog_create")}
               variant="primary"
               isLoading={isPending}
               onClick={() => run(() => createCatalog(market.id))}
@@ -78,15 +81,17 @@ export function CatalogCard({
         </HStack>
         {error && <Banner status="error" title={error} />}
         {!catalog ? (
-          <Text color="secondary">This market has no catalog yet, so it sells nothing.</Text>
+          <Text color="secondary">{t("markets.catalog_none")}</Text>
         ) : !page || page.items.length === 0 ? (
-          <Text color="secondary">{isFirstPage ? "No products yet." : "No more products."}</Text>
+          <Text color="secondary">
+            {isFirstPage ? t("markets.catalog_no_products") : t("markets.catalog_no_more_products")}
+          </Text>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHeaderCell>Product</TableHeaderCell>
-                <TableHeaderCell>Status</TableHeaderCell>
+                <TableHeaderCell>{t("common.product")}</TableHeaderCell>
+                <TableHeaderCell>{t("common.status")}</TableHeaderCell>
                 <TableHeaderCell>
                   <span />
                 </TableHeaderCell>
@@ -107,7 +112,9 @@ export function CatalogCard({
                       </VStack>
                     ) : (
                       // An ID stored as given that names no product.
-                      <Text color="secondary">{product.id} (no such product)</Text>
+                      <Text color="secondary">
+                        {t("markets.catalog_missing_product", { id: product.id })}
+                      </Text>
                     )}
                   </TableCell>
                   <TableCell>
@@ -116,7 +123,9 @@ export function CatalogCard({
                   <TableCell>
                     <HStack hAlign="end">
                       <IconButton
-                        label={`Remove ${product.title ?? product.id}`}
+                        label={t("markets.catalog_remove_product", {
+                          name: product.title ?? product.id,
+                        })}
                         icon={<TrashIcon />}
                         size="sm"
                         variant="ghost"
@@ -145,10 +154,10 @@ export function CatalogCard({
       </VStack>
       {isAdding && catalog && (
         <ProductPicker
-          title="Add products"
-          description={`Shoppers in ${market.name} can buy them once they're active and published.`}
+          title={t("markets.catalog_add_products")}
+          description={t("markets.catalog_picker_description", { market: market.name })}
           isAlreadyIn={(product) => listed.has(product.id)}
-          alreadyInLabel="Already in this catalog"
+          alreadyInLabel={t("markets.catalog_already_in")}
           onConfirm={async (products) => {
             const result = await addCatalogProducts(
               market.id,

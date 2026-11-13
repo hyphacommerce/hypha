@@ -3,10 +3,17 @@
 // handle and options) and checked by the grid's own rules, and the result is the grid's
 // diff, sent the same way. Plain string work, no browser or Node APIs, so it runs in a
 // server action on any host.
+//
+// The file is the same in every language: its column names (`variant_id`, `fixed_price`,
+// `break_1_qty`…) are fixed, and its amounts are plain decimals with a "." on the way out
+// ("12.50", never "12,50" or "€12.50"), so a file exported by one staff member imports
+// for another. Reading accepts what spreadsheets write back
+// either way ("12,50", ";" as the delimiter). Only the preview's sentences are translated.
 
 import { formatBreaks } from "./price-grid/breaks.ts";
 import { checkDraft, sameFixed } from "./price-grid/edits.ts";
 import { formatAmount } from "./price-grid/money.ts";
+import type { PriceT } from "./price-grid/say.ts";
 import type {
   FixedPriceUpsert,
   Money,
@@ -212,9 +219,11 @@ const sameText = (a: string, b: string) => a.trim().toLowerCase() === b.trim().t
 /**
  * What importing `text` into a list in `currency` would do, against the prices the
  * list has now (`products`, the whole list or the part being replaced). Nothing is
- * written: the preview's `diff` is what applying sends.
+ * written: the preview's `diff` is what applying sends. What each row does, or why it
+ * can't, is said in `t`'s language.
  */
 export function previewPriceImport(
+  t: PriceT,
   text: string,
   products: readonly PriceGridProduct[],
   currency: string,
@@ -230,13 +239,23 @@ export function previewPriceImport(
   const fail = (error: string): ImportPreview => ({ rows: [], counts, diff, error });
 
   const digits = currencies[currency];
-  if (digits === undefined) return fail(`Unknown currency ${JSON.stringify(currency)}.`);
+  if (digits === undefined) {
+    return fail(t("price_lists.import_unknown_currency", { currency: JSON.stringify(currency) }));
+  }
   const [header, ...data] = parseCsv(text);
-  if (!header) return fail("The file is empty.");
+  if (!header) return fail(t("price_lists.import_file_empty"));
   const field = fieldReader(header);
-  if (!field.has("fixed_price")) return fail("The file has no fixed_price column.");
+  if (!field.has("fixed_price")) {
+    return fail(t("price_lists.import_no_price_column", { column: "fixed_price" }));
+  }
   if (!field.has("variant_id") && !field.has("sku") && !field.has("handle")) {
-    return fail("The file needs a variant_id, sku or handle column to find each variant.");
+    return fail(
+      t("price_lists.import_no_id_column", {
+        variant_id: "variant_id",
+        sku: "sku",
+        handle: "handle",
+      }),
+    );
   }
   // The break numbers the header names, in order: a file may skip some (break_1, break_3).
   const breakNumbers = [
@@ -277,31 +296,43 @@ export function previewPriceImport(
     let variant: PriceGridVariant | undefined;
     if (id) {
       variant = byId.get(id);
-      if (!variant) return done("unmatched", [`No variant ${id} in this list.`]);
+      if (!variant) return done("unmatched", [t("price_lists.import_no_variant_id", { id })]);
     } else if (sku) {
       const found = bySku.get(sku.toLowerCase()) ?? [];
-      if (found.length > 1)
-        return done("invalid", [`SKU ${sku} is on ${found.length} variants: add variant_id.`]);
+      if (found.length > 1) {
+        return done("invalid", [
+          t("price_lists.import_sku_ambiguous", {
+            sku,
+            count: found.length,
+            column: "variant_id",
+          }),
+        ]);
+      }
       variant = found[0];
-      if (!variant) return done("unmatched", [`No variant with SKU ${sku}.`]);
+      if (!variant) return done("unmatched", [t("price_lists.import_no_sku", { sku })]);
     } else if (handle) {
       const product = byHandle.get(handle.toLowerCase());
-      if (!product) return done("unmatched", [`No product with handle ${handle}.`]);
+      if (!product) return done("unmatched", [t("price_lists.import_no_handle", { handle })]);
       const options = field.get(row, "options");
       variant = product.variants.find((v) => sameText(v.title ?? "", options));
       if (!variant) {
         return done("unmatched", [
           options
-            ? `${handle} has no variant ${options}.`
-            : `${handle} has options: fill in the options column.`,
+            ? t("price_lists.import_no_variant_options", { handle, options })
+            : t("price_lists.import_options_required", { handle, column: "options" }),
         ]);
       }
     } else {
-      return done("invalid", ["No variant_id, SKU or handle to find the variant by."]);
+      return done("invalid", [t("price_lists.import_no_identifier", { column: "variant_id" })]);
     }
     const earlier = seen.get(variant.variant);
     if (earlier !== undefined) {
-      return done("invalid", [`The same variant as line ${earlier}.`], variant.variant);
+      return done(
+        "invalid",
+        // A line number is a place in the file, not a quantity: no grouping.
+        [t("price_lists.import_duplicate_variant", { line: String(earlier) })],
+        variant.variant,
+      );
     }
     seen.set(variant.variant, line);
 
@@ -312,10 +343,16 @@ export function previewPriceImport(
       const qty = field.get(row, `break_${n}_qty`);
       const price = field.get(row, `break_${n}_price`);
       if (qty === "" && price === "") continue;
-      if (qty === "" || price === "") reasons.push(`Break ${n} needs both a quantity and a price.`);
-      else if (!/^\d+$/.test(qty))
-        reasons.push(`break_${n}_qty: ${JSON.stringify(qty)} isn't a whole number.`);
-      else breaks.push(`${qty}=${price}`);
+      if (qty === "" || price === "") {
+        reasons.push(t("price_lists.import_break_incomplete", { number: String(n) }));
+      } else if (!/^\d+$/.test(qty)) {
+        reasons.push(
+          t("price_lists.import_not_whole_number", {
+            column: `break_${n}_qty`,
+            value: JSON.stringify(qty),
+          }),
+        );
+      } else breaks.push(`${qty}=${price}`);
     }
     if (reasons.length > 0) return done("invalid", reasons, variant.variant);
 
@@ -340,6 +377,7 @@ export function previewPriceImport(
             digits,
           );
     const checked = checkDraft(
+      t,
       { fixed_price: fixedPrice, fixed_compare_at: compareAt, breaks: breaksText },
       currency,
       digits,
@@ -349,9 +387,11 @@ export function previewPriceImport(
       return done(
         "invalid",
         [
-          fixed_price && `fixed_price: ${fixed_price}`,
-          fixed_compare_at && `compare_at: ${fixed_compare_at}`,
-          breakError && `Breaks: ${breakError}`,
+          fixed_price &&
+            t("price_lists.import_column_error", { column: "fixed_price", error: fixed_price }),
+          fixed_compare_at &&
+            t("price_lists.import_column_error", { column: "compare_at", error: fixed_compare_at }),
+          breakError && t("price_lists.import_breaks_error", { error: breakError }),
         ].filter((reason): reason is string => Boolean(reason)),
         variant.variant,
       );
@@ -359,7 +399,7 @@ export function previewPriceImport(
     if (checked.kind === "none") {
       if (!variant.fixed) return done("unchanged", [], variant.variant);
       diff.clears.push({ variant: variant.variant });
-      return done("changed", ["Removes the fixed price."], variant.variant);
+      return done("changed", [t("price_lists.import_removes")], variant.variant);
     }
     if (variant.fixed && sameFixed(checked.fixed, variant.fixed)) {
       return done("unchanged", [], variant.variant);
@@ -367,7 +407,7 @@ export function previewPriceImport(
     diff.upserts.push({ variant: variant.variant, ...checked.fixed });
     return done(
       "changed",
-      [variant.fixed ? "Changes the fixed price." : "Sets a fixed price."],
+      [variant.fixed ? t("price_lists.import_changes") : t("price_lists.import_sets")],
       variant.variant,
     );
   });

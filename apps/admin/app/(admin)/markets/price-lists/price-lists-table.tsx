@@ -20,45 +20,41 @@ import {
   type View,
 } from "@/components/resource-table/resource-table";
 import {
+  KINDS,
   type PriceList,
-  PHASES,
   adjustmentLabel,
   audienceLabel,
   kindLabel,
   phaseBadge,
+  phaseOptions,
 } from "@/lib/price-lists";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 const NO_NAMES: Record<string, string> = {};
 
-const SORT_OPTIONS: SortOption[] = [
-  { value: "newest", label: "Newest" },
-  { value: "oldest", label: "Oldest" },
-  { value: "name_asc", label: "Name A–Z" },
-  { value: "name_desc", label: "Name Z–A" },
-];
-
 const SORTS: Record<string, SortDef> = { name: { asc: "name_asc", desc: "name_desc" } };
-
-const VIEWS: View[] = [
-  { label: "All", params: {} },
-  { label: "Active", params: { status: ["active"] } },
-  { label: "Scheduled", params: { status: ["scheduled"] } },
-  { label: "Sales", params: { kind: ["sale"] } },
-];
 
 /** When the list prices anything: "Always", "From …", "Until …", or both. */
 export function ListWindow({ list }: { list: Pick<PriceList, "starts_at" | "ends_at"> }) {
-  if (!list.starts_at && !list.ends_at) return <Text color="secondary">Always</Text>;
+  const t = useT<"price_lists">();
+  if (!list.starts_at && !list.ends_at) {
+    return <Text color="secondary">{t("price_lists.window_always")}</Text>;
+  }
   return (
     <VStack gap={0}>
       {list.starts_at && (
         <Text type="supporting">
-          From <DateTime value={list.starts_at} short />
+          {t.rich("price_lists.window_from", {
+            time: <DateTime key="time" value={list.starts_at} short />,
+          })}
         </Text>
       )}
       {list.ends_at && (
         <Text type="supporting">
-          Until <DateTime value={list.ends_at} short />
+          {t.rich("price_lists.window_until", {
+            time: <DateTime key="time" value={list.ends_at} short />,
+          })}
         </Text>
       )}
     </VStack>
@@ -77,43 +73,49 @@ export function PriceListsTable({
   /** Customer group names by ID (none without `customers:read`). */
   groups?: Record<string, string>;
 }) {
+  const t = useT<"price_lists">();
+  const format = useFormat();
+  const named = (names: Record<string, string>) =>
+    Object.entries(names)
+      .map(([value, label]) => ({ value, label }))
+      .toSorted((a, b) => format.compare(a.label, b.label));
+  const sortOptions: SortOption[] = [
+    { value: "newest", label: t("price_lists.sort_newest") },
+    { value: "oldest", label: t("price_lists.sort_oldest") },
+    { value: "name_asc", label: t("price_lists.sort_name_asc") },
+    { value: "name_desc", label: t("price_lists.sort_name_desc") },
+  ];
+  const views: View[] = [
+    { label: t("common.all"), params: {} },
+    { label: t("price_lists.phase_active"), params: { status: ["active"] } },
+    { label: t("price_lists.phase_scheduled"), params: { status: ["scheduled"] } },
+    { label: t("price_lists.view_sales"), params: { kind: ["sale"] } },
+  ];
   const filters: FilterDef[] = [
     {
       kind: "select",
       param: "kind",
-      label: "Kind",
-      options: [
-        { value: "sale", label: "Sale" },
-        { value: "override", label: "Regular prices" },
-      ],
+      label: t("price_lists.kind"),
+      options: KINDS.map((kind) => ({ value: kind, label: t(`price_lists.kind_${kind}`) })),
     },
     {
       kind: "select",
       param: "status",
-      label: "Status",
-      options: PHASES.map((p) => ({ value: p.value, label: p.label })),
+      label: t("common.status"),
+      options: phaseOptions(t),
     },
-    {
-      kind: "select",
-      param: "market",
-      label: "Market",
-      options: Object.entries(markets)
-        .map(([value, label]) => ({ value, label }))
-        .toSorted((a, b) => a.label.localeCompare(b.label)),
-    },
+    { kind: "select", param: "market", label: t("common.market"), options: named(markets) },
     {
       kind: "select",
       param: "group",
-      label: "Customer group",
-      options: Object.entries(groups)
-        .map(([value, label]) => ({ value, label }))
-        .toSorted((a, b) => a.label.localeCompare(b.label)),
+      label: t("price_lists.filter_group"),
+      options: named(groups),
     },
   ];
   const columns: TableColumn<PriceList>[] = [
     {
       key: "name",
-      header: "Price list",
+      header: t("price_lists.column_name"),
       width: proportional(3, { minWidth: 220 }),
       renderCell: (list) => (
         <VStack gap={0.5} hAlign="start">
@@ -121,62 +123,67 @@ export function PriceListsTable({
             {list.name}
           </Link>
           <Text type="supporting" color="secondary">
-            {list.description || adjustmentLabel(list.adjustment)}
+            {list.description || adjustmentLabel(t, format, list.adjustment)}
           </Text>
         </VStack>
       ),
     },
     {
       key: "kind",
-      header: "Kind",
+      header: t("price_lists.kind"),
       width: pixel(140),
       renderCell: (list) => (
-        <Badge label={kindLabel(list.kind)} variant={list.kind === "sale" ? "pink" : "blue"} />
+        <Badge label={kindLabel(t, list.kind)} variant={list.kind === "sale" ? "pink" : "blue"} />
       ),
     },
     {
       key: "phase",
-      header: "Status",
+      header: t("common.status"),
       width: pixel(120),
       renderCell: (list) => {
-        const badge = phaseBadge(list.phase);
+        const badge = phaseBadge(list.phase, t);
         return <Badge label={badge.label} variant={badge.variant} />;
       },
     },
     {
       key: "window",
-      header: "When",
+      header: t("price_lists.column_when"),
       width: pixel(170),
       renderCell: (list) => <ListWindow list={list} />,
     },
     {
       key: "audience",
-      header: "For",
+      header: t("price_lists.column_for"),
       width: proportional(1, { minWidth: 120 }),
       renderCell: (list) => (
         <Text color={list.audience.groups.length === 0 ? "secondary" : undefined}>
-          {audienceLabel(list.audience, groups)}
+          {audienceLabel(t, format, list.audience, groups)}
         </Text>
       ),
     },
     {
       key: "markets",
-      header: "Markets",
+      header: t("common.markets"),
       width: proportional(2, { minWidth: 140 }),
       renderCell: (list) =>
         list.markets.length === 0 ? (
-          <Text color="secondary">None</Text>
+          <Text color="secondary">{t("common.none")}</Text>
         ) : (
-          <Text>{list.markets.map((m) => markets[m] ?? m).join(", ")}</Text>
+          <Text>
+            {format.list(
+              list.markets.map((m) => markets[m] ?? m),
+              "unit",
+            )}
+          </Text>
         ),
     },
-    { key: "currency", header: "Currency", width: pixel(96) },
+    { key: "currency", header: t("common.currency"), width: pixel(96) },
     {
       key: "fixed_price_count",
-      header: "Fixed prices",
+      header: t("price_lists.fixed_prices"),
       width: pixel(120),
       align: "end",
-      renderCell: (list) => <Text>{list.fixed_price_count.toLocaleString("en")}</Text>,
+      renderCell: (list) => <Text>{format.number(list.fixed_price_count)}</Text>,
     },
   ];
   return (
@@ -189,19 +196,18 @@ export function PriceListsTable({
       rowHref={(list) => `/markets/price-lists/${list.id}`}
       isSelectable={false}
       filters={filters}
-      views={VIEWS}
+      views={views}
       sorts={SORTS}
-      sortOptions={SORT_OPTIONS}
+      sortOptions={sortOptions}
       defaultSort="newest"
       error={page?.error}
       empty={{
         icon: <TagIcon width={32} />,
-        title: "No price lists yet",
-        description:
-          "Without one, a market sells at the base prices. Make a list for a market's own prices, a sale or wholesale.",
-        action: <Button label="New price list" href="/markets/price-lists/new" />,
+        title: t("price_lists.list_empty_title"),
+        description: t("price_lists.list_empty_description"),
+        action: <Button label={t("price_lists.new")} href="/markets/price-lists/new" />,
       }}
-      noResults={{ title: "No price lists match these filters" }}
+      noResults={{ title: t("price_lists.list_no_results") }}
     />
   );
 }

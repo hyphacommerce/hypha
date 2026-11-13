@@ -79,6 +79,8 @@ import {
 } from "react";
 
 import { useCurrencies } from "@/components/currencies";
+import type { TFor } from "@/lib/messages";
+import { useT } from "@/lib/use-t";
 import { breaksLabel, parseBreaks } from "@/lib/price-grid/breaks";
 import {
   type CellChange,
@@ -172,14 +174,12 @@ export const ALL_COLUMNS: readonly PriceGridColumn[] = [
   "breaks",
 ];
 
-const HEADERS: Record<PriceGridColumn, string> = {
-  base_price: "Base",
-  compare_at_price: "Compare-at",
-  list_price: "List price",
-  fixed_price: "Fixed price",
-  fixed_compare_at: "Fixed compare-at",
-  breaks: "Breaks",
-};
+/** A column's header: the product and SKU columns' own, else the price column's. */
+function columnName(t: TFor<"common" | "price_lists">, column: GridColumn): string {
+  if (column === "name") return t("common.product");
+  if (column === "sku") return t("common.sku");
+  return t(`price_lists.grid_column_${column}`);
+}
 
 type Editing = { cell: Cell; text: string; mode: "replace" | "edit" };
 
@@ -203,7 +203,7 @@ export function PriceGrid({
   renderChrome,
   empty,
   isLoading = false,
-  label = "Prices",
+  label,
   onSave,
 }: {
   /** Names the page shown: a new one drops the drafts, the selection and the folds. */
@@ -217,10 +217,11 @@ export function PriceGrid({
   empty?: ReactNode;
   /** Another page is on its way: the grid dims meanwhile. */
   isLoading?: boolean;
-  /** The grid's accessible name. */
+  /** The grid's accessible name ("Prices" without one). */
   label?: string;
   onSave: (diff: PriceGridDiff) => Promise<PriceGridSaveResult>;
 }) {
+  const t = useT<"price_lists">();
   const currencies = useCurrencies();
   const digits = currencies[currency] ?? 2;
 
@@ -255,8 +256,8 @@ export function PriceGrid({
   const rows = useMemo(() => visibleRows(products, collapsed), [products, collapsed]);
   const variants = useMemo(() => variantsById(products), [products]);
   const checked = useMemo(
-    () => review(variants, drafts, currency, digits),
-    [variants, drafts, currency, digits],
+    () => review(t, variants, drafts, currency, digits),
+    [t, variants, drafts, currency, digits],
   );
   const changeCount = checked.changedVariants;
   const isDirty = changeCount > 0;
@@ -308,11 +309,7 @@ export function PriceGrid({
 
   const apply = (changes: readonly CellChange[], skipped = 0) => {
     setDrafts((before) => applyChanges(before, variants, changes, digits, currency));
-    setNotice(
-      skipped > 0
-        ? `${skipped} ${skipped === 1 ? "cell" : "cells"} couldn't take a value and kept theirs.`
-        : undefined,
-    );
+    setNotice(skipped > 0 ? t("price_lists.grid_cells_skipped", { count: skipped }) : undefined);
   };
 
   const toggle = (product: string) =>
@@ -357,10 +354,10 @@ export function PriceGrid({
     // that's still the one sent is what was saved; any other was typed meanwhile.
     const sent = applyChanges(drafts, variants, pending, digits, currency);
     if (sent !== drafts) setDrafts(sent);
-    const result = review(variants, sent, currency, digits);
+    const result = review(t, variants, sent, currency, digits);
     if (result.changedVariants === 0) return;
     if (result.errors.size > 0) {
-      setNotice("Fix the cells marked in red, then save.");
+      setNotice(t("price_lists.grid_fix_cells"));
       return;
     }
     startTransition(async () => {
@@ -378,11 +375,10 @@ export function PriceGrid({
       );
       setSaveError(
         failedIds.length > 0
-          ? (answer.error ??
-              `${failedIds.length} ${failedIds.length === 1 ? "variant wasn't" : "variants weren't"} saved: see the rows marked.`)
+          ? (answer.error ?? t("price_lists.grid_rows_not_saved", { count: failedIds.length }))
           : undefined,
       );
-      setNotice(failedIds.length > 0 ? undefined : "Saved.");
+      setNotice(failedIds.length > 0 ? undefined : t("price_lists.grid_saved"));
     });
   };
 
@@ -568,7 +564,7 @@ export function PriceGrid({
   const cellError =
     (focusedTarget && checked.errors.get(cellKey(focusedTarget.variant, focusedTarget.column))) ??
     (focusedRow?.kind === "variant" ? rowErrors[focusedRow.variant.variant] : undefined);
-  const hasMoneyTargets = selectedTargets.some((t) => t.column !== "breaks");
+  const hasMoneyTargets = selectedTargets.some((target) => target.column !== "breaks");
   const parts = renderChrome({ isDirty, confirmLeave });
 
   return (
@@ -580,23 +576,26 @@ export function PriceGrid({
             <>
               <span className="pe-count" data-state={checked.errors.size > 0 ? "error" : undefined}>
                 {changeCount === 0
-                  ? "No unsaved changes"
-                  : `${changeCount} ${changeCount === 1 ? "variant" : "variants"} changed${
-                      checked.errors.size > 0 ? `, ${checked.errors.size} to fix` : ""
-                    }`}
+                  ? t("price_lists.grid_no_changes")
+                  : checked.errors.size > 0
+                    ? t("price_lists.grid_changed_to_fix", {
+                        count: changeCount,
+                        errors: checked.errors.size,
+                      })
+                    : t("price_lists.grid_changed", { count: changeCount })}
               </span>
               <Button
-                label="Discard"
+                label={t("common.discard")}
                 size="sm"
                 variant="ghost"
                 isDisabled={!isDirty || isPending}
                 onClick={discard}
               />
               <Button
-                label="Save"
+                label={t("common.save")}
                 size="sm"
                 variant="primary"
-                tooltip="Save all changes (Ctrl/⌘ S)"
+                tooltip={t("price_lists.grid_save_tooltip")}
                 isLoading={isPending}
                 isDisabled={!isDirty || checked.errors.size > 0}
                 onClick={() => save()}
@@ -610,21 +609,21 @@ export function PriceGrid({
         {!isReadOnly && rows.length > 0 && (
           <div className="pe-group">
             <Button
-              label="Set to…"
+              label={t("price_lists.grid_set_to")}
               size="sm"
               variant="ghost"
               isDisabled={!hasMoneyTargets}
               onClick={() => setDialog({ kind: "bulk", action: "amount" })}
             />
             <Button
-              label="% of base…"
+              label={t("price_lists.grid_percent_of_base")}
               size="sm"
               variant="ghost"
               isDisabled={!hasMoneyTargets}
               onClick={() => setDialog({ kind: "bulk", action: "percent" })}
             />
             <Button
-              label="Clear"
+              label={t("common.clear")}
               size="sm"
               variant="ghost"
               isDisabled={selectedTargets.length === 0}
@@ -656,7 +655,7 @@ export function PriceGrid({
             // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-to-interactive-role
             role="grid"
             tabIndex={-1}
-            aria-label={label}
+            aria-label={label ?? t("price_lists.prices")}
             aria-rowcount={rows.length + 1}
             aria-colcount={gridColumns.length}
             aria-multiselectable="true"
@@ -743,7 +742,13 @@ export function PriceGrid({
                         {isEditing ? (
                           <CellInput
                             editing={isEditing}
-                            label={`${column === "name" || column === "sku" ? "Name" : HEADERS[column]}, ${rowTitle(r)}`}
+                            label={t("price_lists.grid_cell_label", {
+                              column:
+                                column === "name" || column === "sku"
+                                  ? t("common.name")
+                                  : columnName(t, column),
+                              row: rowTitle(r),
+                            })}
                             onChange={(text) => setEditing({ ...isEditing, text })}
                             onCommit={(by) =>
                               commit(
@@ -792,11 +797,14 @@ export function PriceGrid({
           ) : notice ? (
             <span>{notice}</span>
           ) : isReadOnly ? (
-            <span>Your role can see these prices but not change them.</span>
+            <span>{t("price_lists.grid_read_only")}</span>
           ) : (
             <span className="pe-hint">
-              Click a cell and type. <Kbd keys="enter" /> to edit, <Kbd keys="tab" /> or arrows to
-              move, <Kbd keys="mod+s" /> to save.
+              {t.rich("price_lists.grid_hint", {
+                enter: <Kbd key="enter" keys="enter" />,
+                tab: <Kbd key="tab" keys="tab" />,
+                save: <Kbd key="save" keys="mod+s" />,
+              })}
             </span>
           )}
         </output>
@@ -821,7 +829,7 @@ export function PriceGrid({
           action={dialog.action}
           currency={currency}
           digits={digits}
-          cells={selectedTargets.filter((t) => t.column !== "breaks").length}
+          cells={selectedTargets.filter((target) => target.column !== "breaks").length}
           onApply={(value) => {
             if (dialog.action === "amount") apply(setTo(selectedTargets, value, digits));
             else {
@@ -845,10 +853,10 @@ export function PriceGrid({
         <AlertDialog
           isOpen
           onOpenChange={(open) => !open && setDialog(null)}
-          title="Discard unsaved changes?"
-          description={`${changeCount} ${changeCount === 1 ? "variant has" : "variants have"} changes that aren't saved. Leaving drops them.`}
-          cancelLabel="Keep editing"
-          actionLabel="Discard changes"
+          title={t("price_lists.grid_leave_title")}
+          description={t("price_lists.grid_leave_description", { count: changeCount })}
+          cancelLabel={t("price_lists.grid_leave_cancel")}
+          actionLabel={t("price_lists.grid_leave_action")}
           onAction={() => {
             const { leave } = dialog;
             discard();
@@ -861,9 +869,8 @@ export function PriceGrid({
   );
 
   function headerOf(column: GridColumn): ReactNode {
-    if (column === "name") return "Product";
-    if (column === "sku") return "SKU";
-    const name = HEADERS[column];
+    const name = columnName(t, column);
+    if (column === "name" || column === "sku") return name;
     const editable = !isReadOnly && isEditableColumn(column);
     const showsCurrency = column !== "breaks" && column !== "base_price";
     return (
@@ -888,8 +895,8 @@ export function PriceGrid({
               className="pg-toggle"
               aria-label={
                 r.isCollapsed
-                  ? `Show ${r.product.title}'s variants`
-                  : `Hide ${r.product.title}'s variants`
+                  ? t("price_lists.grid_show_variants", { product: r.product.title })
+                  : t("price_lists.grid_hide_variants", { product: r.product.title })
               }
               onClick={() => toggle(r.product.id)}
             >
@@ -897,7 +904,7 @@ export function PriceGrid({
             </button>
             <span className="pg-name-title">{r.product.title}</span>
             <span className="pg-muted">{r.product.handle}</span>
-            <span className="pg-muted">{count === 1 ? "1 variant" : `${count} variants`}</span>
+            <span className="pg-muted">{t("price_lists.grid_variants_count", { count })}</span>
           </span>
         );
       }
@@ -930,7 +937,11 @@ export function PriceGrid({
         return (
           <span
             className={price.isAdjusted ? "pg-derived" : undefined}
-            title={price.isAdjusted ? "From the list's adjustment" : "The fixed price"}
+            title={
+              price.isAdjusted
+                ? t("price_lists.grid_from_adjustment")
+                : t("price_lists.grid_from_fixed")
+            }
           >
             {readOnlyAmount(price.money)}
           </span>
@@ -939,12 +950,16 @@ export function PriceGrid({
       case "breaks": {
         const text = currentDraft(drafts, variant, digits).breaks;
         if (text.trim() === "") {
-          return isReadOnly ? <span className="pg-none">—</span> : <EmptyEditable label="Add" />;
+          return isReadOnly ? (
+            <span className="pg-none">—</span>
+          ) : (
+            <EmptyEditable label={t("common.add")} />
+          );
         }
         const parsed = parseBreaks(text, digits, currency);
         return (
           <EditableValue error={error}>
-            {parsed.ok ? breaksLabel(parsed.value.length) : text}
+            {parsed.ok ? breaksLabel(t, parsed.value.length) : text}
           </EditableValue>
         );
       }

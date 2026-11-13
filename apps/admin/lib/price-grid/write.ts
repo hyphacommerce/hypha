@@ -3,12 +3,15 @@
 
 import { diffRequests } from "../price-csv.ts";
 import { entryErrors } from "../price-lists.ts";
+import type { PriceT } from "./say.ts";
 import type { FixedPriceUpsert, PriceGridDiff } from "./types.ts";
 
 /** An API error as the SDK answers it. */
 export type WriteError = { code: string; error: string; details?: unknown };
 
 export type DiffWriter = {
+  /** Says why an entry was refused, in the reader's language. */
+  t: PriceT;
   /** `PUT …/fixed-prices` with these entries. */
   put: (entries: readonly FixedPriceUpsert[]) => Promise<{ error?: WriteError }>;
   /** `DELETE …/fixed-prices` for these variants. */
@@ -28,7 +31,7 @@ export type SaveResult = { error?: string; rowErrors?: Record<string, string> };
  * and the API checks each request whole.
  */
 export async function writeDiff(diff: PriceGridDiff, writer: DiffWriter): Promise<SaveResult> {
-  const { put, remove, describe } = writer;
+  const { t, put, remove, describe } = writer;
   const { upserts, clears } = diffRequests(diff);
   const rowErrors: Record<string, string> = {};
   let error: string | undefined;
@@ -37,7 +40,7 @@ export async function writeDiff(diff: PriceGridDiff, writer: DiffWriter): Promis
     if (!first.error) continue;
     const refused =
       first.error.code === "fixed_prices_invalid"
-        ? entryErrors(first.error.details, entries)
+        ? entryErrors(t, first.error.details, entries)
         : null;
     if (!refused || Object.keys(refused).length === 0) {
       for (const e of entries) rowErrors[e.variant] = describe(first.error);
@@ -51,7 +54,7 @@ export async function writeDiff(diff: PriceGridDiff, writer: DiffWriter): Promis
     if (second.error) {
       const again =
         second.error.code === "fixed_prices_invalid"
-          ? entryErrors(second.error.details, rest)
+          ? entryErrors(t, second.error.details, rest)
           : null;
       for (const e of rest) rowErrors[e.variant] = again?.[e.variant] ?? describe(second.error);
     }

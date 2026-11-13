@@ -12,6 +12,7 @@ import { XMarkIcon } from "@heroicons/react/24/outline";
 import { useState, useTransition } from "react";
 
 import type { PriceList } from "@/lib/price-lists";
+import { useT } from "@/lib/use-t";
 
 import { addToCatalog, removeFromCatalog } from "../actions";
 import type { MarketOption } from "../price-list-form";
@@ -31,6 +32,7 @@ export function WhereCard({
   /** `markets:write`: attaching a list changes the market's catalog. */
   canWrite: boolean;
 }) {
+  const t = useT<"price_lists">();
   const [adding, setAdding] = useState<string>();
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -53,17 +55,15 @@ export function WhereCard({
       <VStack gap={3}>
         <VStack gap={1}>
           <Text type="display-3" as="h2">
-            Markets
+            {t("common.markets")}
           </Text>
           <Text type="supporting" color="secondary">
-            A market can use several lists: shoppers get the lowest live price among them. So put
-            lists together only when they should compete; a markup (+20%) beside a market&apos;s
-            regular list never wins.
+            {t("price_lists.where_description")}
           </Text>
         </VStack>
         {error && <Banner status="error" title={error} />}
         {using.length === 0 ? (
-          <Text color="secondary">No market uses it yet, so it prices nothing.</Text>
+          <Text color="secondary">{t("price_lists.where_none")}</Text>
         ) : (
           <VStack gap={1}>
             {using.map((m) => (
@@ -73,7 +73,7 @@ export function WhereCard({
                 </Link>
                 {canWrite && m.catalog && (
                   <IconButton
-                    label={`Remove from ${m.name}`}
+                    label={t("price_lists.where_remove", { market: m.name })}
                     icon={<XMarkIcon />}
                     size="sm"
                     variant="ghost"
@@ -88,15 +88,15 @@ export function WhereCard({
         {canWrite && offered.length > 0 && (
           <HStack gap={2} vAlign="end" wrap="wrap">
             <Selector
-              label={`Add to a market in ${list.currency}`}
+              label={t("price_lists.where_add_label", { currency: list.currency })}
               options={offered.map((m) => ({ value: m.id, label: m.name }))}
               value={adding}
               onChange={setAdding}
-              placeholder="Choose a market"
+              placeholder={t("price_lists.where_add_placeholder")}
               width={200}
             />
             <Button
-              label="Add"
+              label={t("common.add")}
               isDisabled={!adding || isPending}
               isLoading={isPending && Boolean(adding)}
               onClick={() => {
@@ -108,7 +108,7 @@ export function WhereCard({
         )}
         {canWrite && offered.length === 0 && using.length === 0 && (
           <Text type="supporting" color="secondary">
-            No market sells in {list.currency}.
+            {t("price_lists.where_no_market", { currency: list.currency })}
           </Text>
         )}
       </VStack>

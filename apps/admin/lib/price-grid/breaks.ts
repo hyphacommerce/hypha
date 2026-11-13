@@ -2,6 +2,7 @@
 // ("10=8.00; 20=7.50"), so breaks copy, paste and fill like any other cell.
 
 import { formatAmount, parseAmount, type Parsed } from "./money.ts";
+import { type PriceT, say } from "./say.ts";
 import { MAX_BREAKS } from "./types.ts";
 
 /** A break in minor units of the list's currency. */
@@ -15,9 +16,15 @@ export function formatBreaks(breaks: readonly BreakAmount[], digits: number): st
 /**
  * Breaks from their cell text: pairs separated by `;` or new lines, each a quantity and
  * a price joined by `=`, `:` or `@` ("10 @ 8,00" works too). Their rules are checked
- * apart, by `breakProblems`.
+ * apart, by `breakProblems`. The error is in `t`'s language (English without one, for a
+ * caller that only asks whether the text parses).
  */
-export function parseBreaks(text: string, digits: number, currency: string): Parsed<BreakAmount[]> {
+export function parseBreaks(
+  text: string,
+  digits: number,
+  currency: string,
+  t?: PriceT,
+): Parsed<BreakAmount[]> {
   const parts = text
     .split(/[;\n]/)
     .map((part) => part.trim())
@@ -26,11 +33,19 @@ export function parseBreaks(text: string, digits: number, currency: string): Par
   for (const part of parts) {
     const match = /^(\d+)\s*[=:@]\s*(.+)$/.exec(part);
     if (!match) {
-      return { ok: false, error: `${JSON.stringify(part)} isn't a break, like 10=8.00.` };
+      return {
+        ok: false,
+        error: say(t, "price_lists.break_invalid", { part: JSON.stringify(part) }),
+      };
     }
     const [, quantity = "", price = ""] = match;
-    const amount = parseAmount(price, digits, currency);
-    if (!amount.ok) return { ok: false, error: `Break ${quantity}: ${amount.error}` };
+    const amount = parseAmount(price, digits, currency, t);
+    if (!amount.ok) {
+      return {
+        ok: false,
+        error: say(t, "price_lists.break_amount_invalid", { quantity, error: amount.error }),
+      };
+    }
     breaks.push({ min_quantity: Number(quantity), amount: amount.value });
   }
   return { ok: true, value: breaks };
@@ -42,26 +57,33 @@ export function parseBreaks(text: string, digits: number, currency: string): Par
  * price (which must exist). Empty when they're fine.
  */
 export function breakProblems(
+  t: PriceT,
   breaks: readonly BreakAmount[],
   fixedAmount: number | null,
 ): string[] {
   if (breaks.length === 0) return [];
   const problems: string[] = [];
-  if (fixedAmount === null) problems.push("Breaks need a fixed price.");
-  if (breaks.length > MAX_BREAKS) problems.push(`At most ${MAX_BREAKS} breaks.`);
+  if (fixedAmount === null) problems.push(t("price_lists.breaks_need_fixed_price"));
+  if (breaks.length > MAX_BREAKS)
+    problems.push(t("price_lists.breaks_too_many", { max: MAX_BREAKS }));
   let previousQuantity = 1;
   let previousAmount = fixedAmount;
   for (const [index, b] of breaks.entries()) {
     if (!Number.isSafeInteger(b.min_quantity) || b.min_quantity < 2) {
-      problems.push(`Quantities start at 2 (${b.min_quantity}).`);
+      problems.push(t("price_lists.break_quantity_too_low", { quantity: b.min_quantity }));
     } else if (b.min_quantity <= previousQuantity) {
-      problems.push(`Quantities must increase (${b.min_quantity} after ${previousQuantity}).`);
+      problems.push(
+        t("price_lists.break_quantity_not_increasing", {
+          quantity: b.min_quantity,
+          previous: previousQuantity,
+        }),
+      );
     }
     if (previousAmount !== null && b.amount >= previousAmount) {
       problems.push(
         index === 0
-          ? `The price from ${b.min_quantity} must be below the fixed price.`
-          : `The price from ${b.min_quantity} must be below the one before it.`,
+          ? t("price_lists.break_price_not_below_fixed", { quantity: b.min_quantity })
+          : t("price_lists.break_price_not_below_previous", { quantity: b.min_quantity }),
       );
     }
     previousQuantity = Math.max(previousQuantity, b.min_quantity);
@@ -71,6 +93,6 @@ export function breakProblems(
 }
 
 /** "1 break", "3 breaks". */
-export function breaksLabel(count: number): string {
-  return count === 1 ? "1 break" : `${count} breaks`;
+export function breaksLabel(t: PriceT, count: number): string {
+  return t("price_lists.breaks_count", { count });
 }

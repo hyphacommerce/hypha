@@ -8,7 +8,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { describe, describeWith, loadCurrencies, loadTimeZone, sessionClient } from "@/lib/hypha";
-import { getT } from "@/lib/i18n";
+import { type T, getT } from "@/lib/i18n";
 import {
   type ImportPreview,
   type ImportRow,
@@ -79,7 +79,8 @@ export async function createPriceList(
   form: ListForm,
   catalogs: string[],
 ): Promise<Result & { fieldErrors?: FormErrors }> {
-  const request = createRequest(form, await loadTimeZone());
+  const [t, timeZone] = await Promise.all([getT(), loadTimeZone()]);
+  const request = createRequest(t, form, timeZone);
   if ("errors" in request) return { fieldErrors: request.errors };
   const client = await sessionClient();
   const { data: list, error } = await client.POST("/admin/price-lists", { body: request.body });
@@ -107,12 +108,14 @@ export async function updatePriceList(
   id: string,
   form: ListForm,
 ): Promise<Result & { fieldErrors?: FormErrors }> {
-  const client = await sessionClient();
+  const [client, t, timeZone] = await Promise.all([sessionClient(), getT(), loadTimeZone()]);
   const { data: list, error: readError } = await client.GET("/admin/price-lists/{id}", {
     params: { path: { id } },
   });
-  if (!list) return { error: readError ? await describe(readError) : "The list couldn't be read." };
-  const request = updateRequest(form, list, await loadTimeZone());
+  if (!list) {
+    return { error: readError ? describeWith(t, readError) : t("price_lists.list_unreadable") };
+  }
+  const request = updateRequest(t, form, list, timeZone);
   if ("errors" in request) return { fieldErrors: request.errors };
   if (Object.keys(request.body).length === 0) return {};
   const { error } = await client.PATCH("/admin/price-lists/{id}", {
@@ -177,6 +180,7 @@ export async function saveFixedPrices(list: string, diff: PriceGridDiff): Promis
   const [client, t] = await Promise.all([sessionClient(), getT()]);
   const params = { path: { id: list } };
   const result = await writeDiff(diff, {
+    t,
     put: (entries) =>
       client.PUT("/admin/price-lists/{id}/fixed-prices", {
         params,
@@ -205,21 +209,22 @@ export async function saveFixedPrices(list: string, diff: PriceGridDiff): Promis
 const STEP_BY_IDS = MAX_PRICES_PER_REQUEST;
 const STEP_BY_CATALOG = 5 * MAX_PRICES_PER_REQUEST;
 
-const TOO_LARGE = `That file is over ${MAX_IMPORT_BYTES / 1024 / 1024} MB. Split it into smaller files.`;
+const tooLarge = (t: T) =>
+  t("price_lists.import_too_large", { megabytes: MAX_IMPORT_BYTES / 1024 / 1024 });
 
 /** An upload's refusals, said for an import. */
-async function uploadMessage(error: ApiError): Promise<string> {
+function uploadMessage(t: T, error: ApiError): string {
   switch (error.code) {
     case "media_not_configured":
-      return "Imports go through media storage, and this store has none set up. Configure media storage, then import again.";
+      return t("price_lists.import_media_not_configured");
     case "file_too_large":
-      return TOO_LARGE;
+      return tooLarge(t);
     case "upload_missing":
-      return "The upload didn't finish. Try again.";
+      return t("price_lists.import_upload_missing");
     case "upload_not_found":
-      return "The uploaded file has expired. Import it again.";
+      return t("price_lists.import_upload_expired");
     default:
-      return await describe(error);
+      return describeWith(t, error);
   }
 }
 
@@ -231,12 +236,13 @@ export async function startPriceImport(file: {
   filename: string;
   byte_size: number;
 }): Promise<{ id: string; upload: SignedUpload } | { error: string }> {
-  if (file.byte_size > MAX_IMPORT_BYTES) return { error: TOO_LARGE };
+  const t = await getT();
+  if (file.byte_size > MAX_IMPORT_BYTES) return { error: tooLarge(t) };
   const client = await sessionClient();
   const { data, error } = await client.POST("/admin/uploads", {
     body: { purpose: "price_import", filename: file.filename, byte_size: file.byte_size },
   });
-  if (error) return { error: await uploadMessage(error) };
+  if (error) return { error: uploadMessage(t, error) };
   return { id: data.id, upload: data.upload };
 }
 
@@ -250,6 +256,7 @@ export async function discardPriceImport(upload: string): Promise<void> {
 /** The list and the uploaded file's text, or why either can't be read. */
 async function readImport(
   client: Client,
+  t: T,
   list: string,
   upload: string,
 ): Promise<{ list: PriceList; text: string } | { error: string }> {
@@ -260,10 +267,15 @@ async function readImport(
       parseAs: "text",
     }),
   ]);
-  if (!read.data)
-    return { error: read.error ? await describe(read.error) : "The list couldn't be read." };
+  if (!read.data) {
+    return {
+      error: read.error ? describeWith(t, read.error) : t("price_lists.list_unreadable"),
+    };
+  }
   if (file.data === undefined) {
-    return { error: file.error ? await uploadMessage(file.error) : "The file couldn't be read." };
+    return {
+      error: file.error ? uploadMessage(t, file.error) : t("price_lists.import_file_unreadable"),
+    };
   }
   return { list: read.data, text: file.data };
 }
@@ -275,6 +287,7 @@ async function readImport(
  */
 async function matchImport(
   client: Client,
+  t: T,
   list: PriceList,
   text: string,
   lines?: { from: number; to: number },
@@ -288,7 +301,10 @@ async function matchImport(
   const products = ids
     ? await gridProductsByIds(client, list, tree, ids)
     : await allGridProducts(client, list, tree, { fixedOnly: false });
-  return { preview: previewCsv(text, products, list.currency, currencies), byIds: ids !== null };
+  return {
+    preview: previewCsv(t, text, products, list.currency, currencies),
+    byIds: ids !== null,
+  };
 }
 
 /** The most rows an import's preview lists; the counts cover them all. */
@@ -321,10 +337,10 @@ export async function previewPriceImport(input: {
   list: string;
   upload: string;
 }): Promise<ImportPreviewResult> {
-  const client = await sessionClient();
-  const read = await readImport(client, input.list, input.upload);
+  const [client, t] = await Promise.all([sessionClient(), getT()]);
+  const read = await readImport(client, t, input.list, input.upload);
   if ("error" in read) return emptyPreview(read.error);
-  const { preview, byIds } = await matchImport(client, read.list, read.text);
+  const { preview, byIds } = await matchImport(client, t, read.list, read.text);
   if (preview.error) return emptyPreview(preview.error);
   const notable = preview.rows.filter((r) => r.status !== "unchanged");
   return {
@@ -353,10 +369,10 @@ export async function applyPriceImport(input: {
   upload: string;
   step: ImportStep;
 }): Promise<ImportStepResult> {
-  const client = await sessionClient();
-  const read = await readImport(client, input.list, input.upload);
+  const [client, t] = await Promise.all([sessionClient(), getT()]);
+  const read = await readImport(client, t, input.list, input.upload);
   if ("error" in read) return { failed: [], error: read.error };
-  const { preview } = await matchImport(client, read.list, read.text, input.step);
+  const { preview } = await matchImport(client, t, read.list, read.text, input.step);
   if (preview.error) return { failed: [], error: preview.error };
   const diff = stepDiff(preview.rows, preview.diff, input.step);
   if (diff.upserts.length === 0 && diff.clears.length === 0) return { failed: [] };
