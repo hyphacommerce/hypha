@@ -8,6 +8,7 @@ import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { type Currencies, type Format, moneyInput, parseMoney } from "./format";
 import { labelOr } from "./keys.ts";
 import type { TFor } from "./messages";
+import type { StoreT } from "./store-defaults.ts";
 
 type CheckoutT = TFor<"checkout">;
 
@@ -532,12 +533,12 @@ export type PresetKey =
 
 /**
  * A preset "Add rule" offers: a filled-in rule the merchant then edits. The rule's name
- * and the message shoppers read are stored content, so they stay English whatever the
- * staff member's language: the merchant rewrites them in the store's.
+ * and the message shoppers read are stored content, so they're written in the store's
+ * default language (`t` is `getStoreT()`'s), never the staff member's.
  */
 export type Preset = {
   key: PresetKey;
-  rule: () => RuleForm;
+  rule: (t: StoreT) => RuleForm;
 };
 
 const rule = (patch: Partial<RuleForm>): RuleForm => ({ ...blankRule(), ...patch });
@@ -550,75 +551,75 @@ const condition = (type: ConditionType, patch: Partial<ConditionForm>): Conditio
 export const PRESETS: Preset[] = [
   {
     key: "no_po_boxes",
-    rule: () =>
+    rule: (t) =>
       rule({
-        name: "No PO boxes",
+        name: t("defaults.checkout_rule_no_po_boxes_name"),
         conditions: [condition("address_is", { flag: "po_box" })],
-        message: "We can't deliver to PO boxes. Enter a street address.",
+        message: t("defaults.checkout_rule_no_po_boxes_message"),
         code: "po_box_not_allowed",
       }),
   },
   {
     key: "no_military",
-    rule: () =>
+    rule: (t) =>
       rule({
-        name: "No military addresses",
+        name: t("defaults.checkout_rule_no_military_name"),
         conditions: [condition("address_is", { flag: "military" })],
-        message: "We can't ship to APO, FPO or DPO addresses.",
+        message: t("defaults.checkout_rule_no_military_message"),
         code: "military_address_not_allowed",
       }),
   },
   {
     key: "house_number",
-    rule: () =>
+    rule: (t) =>
       rule({
-        name: "House number required",
+        name: t("defaults.checkout_rule_house_number_name"),
         countriesMode: "include",
         countries: ["NL", "DE", "BE"],
         conditions: [condition("field_not_matches", { field: "line1", pattern: "\\d" })],
-        message: "Add your house number to the first address line.",
+        message: t("defaults.checkout_rule_house_number_message"),
         code: "house_number_required",
       }),
   },
   {
     key: "phone_required",
-    rule: () =>
+    rule: (t) =>
       rule({
-        name: "Phone required",
+        name: t("defaults.checkout_rule_phone_required_name"),
         conditions: [condition("field_missing", { field: "phone" })],
-        message: "Add a phone number: the courier needs it to deliver.",
+        message: t("defaults.checkout_rule_phone_required_message"),
         code: "phone_required",
       }),
   },
   {
     key: "line_length",
-    rule: () =>
+    rule: (t) =>
       rule({
-        name: "Address lines of at most 35 characters",
+        name: t("defaults.checkout_rule_line_length_name"),
         conditions: [condition("field_longer_than", { field: "line1", length: "35" })],
-        message: "Keep the address line to 35 characters: the label cuts off the rest.",
+        message: t("defaults.checkout_rule_line_length_message"),
         code: "line_too_long",
       }),
   },
   {
     key: "canary_islands",
-    rule: () =>
+    rule: (t) =>
       rule({
-        name: "No Canary Islands, Ceuta or Melilla",
+        name: t("defaults.checkout_rule_canary_islands_name"),
         countriesMode: "include",
         countries: ["ES"],
         conditions: [condition("postal_code_in", { prefixes: "35\n38\n51\n52" })],
-        message: "We can't ship to the Canary Islands, Ceuta or Melilla.",
+        message: t("defaults.checkout_rule_canary_islands_message"),
         code: "region_not_served",
       }),
   },
   {
     key: "undeliverable",
-    rule: () =>
+    rule: (t) =>
       rule({
-        name: "Refuse undeliverable addresses",
+        name: t("defaults.checkout_rule_undeliverable_name"),
         conditions: [condition("verification_is", { verdicts: ["undeliverable"] })],
-        message: "We couldn't find this address. Check it and try again.",
+        message: t("defaults.checkout_rule_undeliverable_message"),
         path: "$.shipping_address",
         code: "address_undeliverable",
       }),

@@ -8,6 +8,7 @@ import {
   emptyItems,
   emptyValue,
 } from "./draft.ts";
+import type { StoreDefaults } from "../store-defaults.ts";
 
 export type TemplateKey =
   | "amount_off_products"
@@ -16,10 +17,16 @@ export type TemplateKey =
   | "volume"
   | "free_shipping";
 
+/** The stored text a template fills in, in the store's default language. */
+export type TemplateDefaults = StoreDefaults<"discount_free_shipping_title">;
+
+/** What a server page picks for `TemplateDefaults`. */
+export const TEMPLATE_DEFAULTS = ["discount_free_shipping_title"] as const;
+
 /** A starting point. `discounts.template_<key>` names it, with its `…_description`. */
 export type Template = {
   key: TemplateKey;
-  make: () => DiscountDraft;
+  make: (defaults: TemplateDefaults) => DiscountDraft;
 };
 
 function base(change: Partial<DiscountDraft>): DiscountDraft {
@@ -82,12 +89,12 @@ export function volumeTiers(): DiscountDraft {
   });
 }
 
-export function freeShipping(): DiscountDraft {
+export function freeShipping(defaults: TemplateDefaults): DiscountDraft {
   return base({
     method: "automatic",
     // Stored content: the title buyers see, in the store's language rather than the
-    // staff member's, so it isn't a message.
-    title: "Free shipping",
+    // staff member's.
+    title: defaults.discount_free_shipping_title,
     kind: {
       type: "standard",
       product: null,

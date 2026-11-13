@@ -4,6 +4,8 @@ import { test } from "node:test";
 import { classesOf } from "./draft.ts";
 import { TEMPLATES, templateOf } from "./templates.ts";
 
+const defaults = { discount_free_shipping_title: "Free shipping" };
+
 test("every template's key is unique and found by it", () => {
   const keys = TEMPLATES.map((t) => t.key);
   assert.equal(new Set(keys).size, keys.length);
@@ -13,7 +15,10 @@ test("every template's key is unique and found by it", () => {
 
 test("each template fills the kind and classes its name promises", () => {
   const classes = Object.fromEntries(
-    TEMPLATES.map((t) => [t.key, [t.make().kind.type, ...classesOf(t.make().kind)]]),
+    TEMPLATES.map((t) => [
+      t.key,
+      [t.make(defaults).kind.type, ...classesOf(t.make(defaults).kind)],
+    ]),
   );
   assert.deepEqual(classes, {
     amount_off_products: ["standard", "product"],
@@ -26,7 +31,7 @@ test("each template fills the kind and classes its name promises", () => {
 
 test("a template's discount never combines with its own class", () => {
   for (const t of TEMPLATES) {
-    const draft = t.make();
+    const draft = t.make(defaults);
     for (const c of classesOf(draft.kind)) assert.equal(draft.combinesWith[c], false, t.key);
   }
 });
@@ -34,12 +39,12 @@ test("a template's discount never combines with its own class", () => {
 test("each call gives a fresh draft", () => {
   const [first] = TEMPLATES;
   assert.ok(first);
-  const a = first.make();
+  const a = first.make(defaults);
   a.conditions.markets.push("mkt_a");
-  assert.deepEqual(first.make().conditions.markets, []);
+  assert.deepEqual(first.make(defaults).conditions.markets, []);
 });
 
 test("free shipping starts with a minimum to fill in", () => {
-  const draft = templateOf("free_shipping")?.make();
+  const draft = templateOf("free_shipping")?.make(defaults);
   assert.equal(draft?.conditions.minSubtotal.enabled, true);
 });

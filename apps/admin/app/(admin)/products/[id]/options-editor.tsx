@@ -17,13 +17,6 @@ import { useT } from "@/lib/use-t";
 
 import { type Draft, type OptionDraft, newKey, orphaned, variantTitle } from "./draft";
 
-/**
- * Names offered for a new option, the ones most products use. Not translated: a click
- * writes the word into the option's name, which is stored content in the store's
- * language, not the staff member's.
- */
-const COMMON_NAMES = ["Size", "Color", "Material", "Style"];
-
 /** Labels typed or pasted into "Add values", split on commas and new lines. */
 const splitLabels = (text: string) =>
   text
@@ -39,9 +32,16 @@ const splitLabels = (text: string) =>
 export function OptionsEditor({
   draft,
   savedTitles,
+  commonNames,
   onChange,
 }: {
   draft: Draft;
+  /**
+   * Names offered for a new option, the ones most products use. A click writes the word
+   * into the option's name, which is stored content: they're in the store's default
+   * language, not the staff member's.
+   */
+  commonNames: readonly string[];
   /** Variant ID → its saved title ("M / Blue"), to name the ones a save would remove. */
   savedTitles: Record<string, string>;
   onChange: (change: Partial<Draft>) => void;
@@ -135,6 +135,7 @@ export function OptionsEditor({
             {open.has(d.key) ? (
               <OptionForm
                 option={d}
+                commonNames={commonNames}
                 isFirst={index === 0}
                 isLast={index === list.length - 1}
                 onChange={(change) => update(d.key, change)}
@@ -204,6 +205,7 @@ function withoutTaken(option: OptionDraft, labels: string[]): string[] {
 /** One option, open: its name, its values as a list to rename, reorder and remove. */
 function OptionForm({
   option,
+  commonNames,
   isFirst,
   isLast,
   onChange,
@@ -212,6 +214,7 @@ function OptionForm({
   onDone,
 }: {
   option: OptionDraft;
+  commonNames: readonly string[];
   isFirst: boolean;
   isLast: boolean;
   onChange: (change: (d: OptionDraft) => OptionDraft) => void;
@@ -265,7 +268,7 @@ function OptionForm({
           <Text type="supporting" color="secondary">
             {t("products.option_common")}
           </Text>
-          {COMMON_NAMES.map((name) => (
+          {commonNames.map((name) => (
             <Button
               key={name}
               label={name}

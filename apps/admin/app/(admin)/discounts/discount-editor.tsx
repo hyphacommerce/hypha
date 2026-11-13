@@ -20,7 +20,7 @@ import type { DiscountOptions } from "@/components/discounts/fields";
 import { TemplatesPicker } from "@/components/discounts/templates-picker";
 import { SaveBar } from "@/components/save-bar";
 import type { DiscountDraft } from "@/lib/discounts/draft";
-import { type TemplateKey, templateOf } from "@/lib/discounts/templates";
+import { type TemplateDefaults, type TemplateKey, templateOf } from "@/lib/discounts/templates";
 import { useT } from "@/lib/use-t";
 import {
   type CheckContext,
@@ -112,15 +112,18 @@ export function NewDiscount({
   live,
   now,
   initial,
+  defaults,
 }: Common & {
   /** A template chosen by the URL (`?template=`). */
   initial: TemplateKey | null;
+  /** The stored text a template fills in, in the store's default language. */
+  defaults: TemplateDefaults;
 }) {
   const t = useT<"discounts">();
   const ctx = useCheckContext(options);
   const [template, setTemplate] = useState<TemplateKey | null>(initial);
   const [draft, setDraft] = useState<DiscountDraft | null>(
-    () => (initial && templateOf(initial)?.make()) || null,
+    () => (initial && templateOf(initial)?.make(defaults)) || null,
   );
   const [errors, setErrors] = useState<FieldErrors>({});
   const [names, setNames] = useState(initialNames);
@@ -141,6 +144,7 @@ export function NewDiscount({
         </Text>
         <TemplatesPicker
           value={template}
+          defaults={defaults}
           onChoose={(key, next) => {
             setTemplate(key);
             setDraft(next);

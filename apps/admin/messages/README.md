@@ -19,6 +19,8 @@ The app-side files and their exports are named as in the storefront:
 | --- | --- | --- |
 | `lib/messages.ts` | `en`, `Key`, `Namespace`, `KeyIn<N>`, `T`, `TFor<N>`, `SHARED_NAMESPACES`, `loadMessages(language)`, `pick`, `isKey` | values on the server, types anywhere |
 | `lib/i18n.ts` | `getT(language?)` | server components, actions, route handlers |
+| `lib/get-store-t.ts` | `getStoreT()`, `getStoreDefaults(names)` | server, behind the login: defaults saved as store content |
+| `lib/store-defaults.ts` | `StoreT`, `StoreDefaults`, `pickDefaults`, `storeLanguage` | anywhere |
 | `lib/use-t.ts` | `useT<N>()`, `useLanguage()` | client components |
 | `lib/keys.ts` | `hasKey(t, key)`, `labelOr(t, key, fallback)` | anywhere |
 | `lib/pseudo.ts` | `PSEUDO` (`"en-XA"`) | anywhere |
@@ -79,13 +81,21 @@ text in JSX is a lint error everywhere (`app/**`, `components/**`, `resources/**
   (its badge, a filter's option). Two uses that happen to read the same in English (a
   button "Edit address" and a dialog titled "Edit address", a nav entry and its page's
   title) keep a key each: another language may word, inflect or capitalise them apart.
-- **Text that is saved as store content stays a fixed English constant**, never a
-  message: the name and shopper message a checkout rule preset starts with, the setup
-  wizard's default names ("Standard", "Storefront", "Cash on delivery"), a discount
-  template's title, an option's suggested name. Content is in the store's language,
-  whatever the staff member's is, and a constant keeps a French-speaking employee from
-  writing French into an English store. The label that *offers* such a default is a
-  message; what gets saved isn't.
+- **A default that is saved as store content is written in the store's default
+  language, never the staff member's**: the name and shopper message a checkout rule
+  preset starts with, the setup wizard's default names ("Standard", "Storefront", "Cash
+  on delivery"), a discount template's title, an option's suggested name, a storefront
+  key's name. A store whose default language is `sr-Latn` gets "Plaćanje pouzećem" as its
+  source content, whoever clicks; a French-speaking employee doesn't write French into
+  it. These are the `defaults` namespace (`messages/en/defaults.json`), read only through
+  `getStoreT()` (`lib/get-store-t.ts`): a translator typed `TFor<"defaults">` for
+  `store.default_language`, matched against the admin's catalogs with the package's
+  `matchLanguage` (English when the admin has no catalog for it). Server code calls it
+  directly; a client component that prefills gets the resolved strings as a prop from its
+  server parent (`getStoreDefaults(names)`), so the browser never loads a second
+  catalog. The label that *offers* such a default (a preset's title and description) is
+  an ordinary message in the staff member's language; only what gets saved comes from
+  `defaults`. Never read `defaults.*` with `getT()` or `useT()`.
 
 ## Writing messages (ICU MessageFormat)
 

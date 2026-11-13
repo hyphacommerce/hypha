@@ -7,14 +7,17 @@ import { SelectableCard } from "@astryxdesign/core/SelectableCard";
 import { Text } from "@astryxdesign/core/Text";
 
 import type { DiscountDraft } from "@/lib/discounts/draft";
-import { TEMPLATES, type TemplateKey } from "@/lib/discounts/templates";
+import { TEMPLATES, type TemplateDefaults, type TemplateKey } from "@/lib/discounts/templates";
 import { useT } from "@/lib/use-t";
 
 export function TemplatesPicker({
   value,
+  defaults,
   onChoose,
 }: {
   value: TemplateKey | null;
+  /** The stored text a template fills in, in the store's default language. */
+  defaults: TemplateDefaults;
   onChoose: (key: TemplateKey, draft: DiscountDraft) => void;
 }) {
   const t = useT<"discounts">();
@@ -25,7 +28,7 @@ export function TemplatesPicker({
           key={template.key}
           label={t(`discounts.template_${template.key}`)}
           isSelected={value === template.key}
-          onChange={(isSelected) => isSelected && onChoose(template.key, template.make())}
+          onChange={(isSelected) => isSelected && onChoose(template.key, template.make(defaults))}
           padding={3}
         >
           <VStack gap={1}>
