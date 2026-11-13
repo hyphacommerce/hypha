@@ -32,17 +32,28 @@ export type ProgressParts = {
   current: number;
   /** Translated from a source that changed since. */
   outdated: number;
+  /** Not translated in exactly this language: the worklist's "missing". */
   missing: number;
+  /**
+   * Of those missing, the ones shoppers read in the language without its region (`de`
+   * for `de-AT`); 0 for a language without a region.
+   */
+  inherited: number;
+  /** Of those missing, the ones shoppers read in the default language. */
+  untranslated: number;
   /** The share translated (outdated included), 0 to 1; `null` with nothing to translate. */
   translated: number | null;
-  /** The bar's segments, each 0 to 1 of its width, adding up to 1 (or 0 when empty). */
-  shares: { current: number; outdated: number; missing: number };
+  /**
+   * The bar's segments, each 0 to 1 of its width, adding up to 1 (or 0 when empty):
+   * what's inherited is drawn apart from what's left in the default language.
+   */
+  shares: { current: number; outdated: number; inherited: number; untranslated: number };
 };
 
 /**
- * `progress` as parts. The API's counts hold `translated + missing = total` and
- * `outdated ≤ translated`; the parts are clamped to them anyway, so a bar never draws
- * past its track nor a negative segment.
+ * `progress` as parts. The API's counts hold `translated + missing = total`,
+ * `outdated <= translated` and `inherited <= missing`; the parts are clamped to them
+ * anyway, so a bar never draws past its track nor a negative segment.
  */
 export function progressParts(progress: LanguageProgress): ProgressParts {
   const total = Math.max(0, progress.total);
@@ -50,14 +61,23 @@ export function progressParts(progress: LanguageProgress): ProgressParts {
   const outdated = Math.min(translated, Math.max(0, progress.outdated));
   const current = translated - outdated;
   const missing = total - translated;
+  const inherited = Math.min(missing, Math.max(0, progress.inherited));
+  const untranslated = missing - inherited;
   const share = (count: number) => (total === 0 ? 0 : count / total);
   return {
     total,
     current,
     outdated,
     missing,
+    inherited,
+    untranslated,
     translated: total === 0 ? null : translated / total,
-    shares: { current: share(current), outdated: share(outdated), missing: share(missing) },
+    shares: {
+      current: share(current),
+      outdated: share(outdated),
+      inherited: share(inherited),
+      untranslated: share(untranslated),
+    },
   };
 }
 

@@ -39,7 +39,9 @@
   "progress_uncounted": "{count, plural, one {Još se broji: #} few {Još se broji: #} other {Još se broji: #}}. Brojevi su potpuni kada se tekstovi prodavnice indeksiraju, ubrzo posle nadogradnje.",
   "progress_nothing": "Još nema šta da se prevodi",
   "progress_share": "Prevedeno: {share} · {translated, number} od {total, number} polja",
+  "progress_share_inherited": "Prevedeno: {share} · {inherited, number} iz jezika {base}",
   "progress_current": "{count, plural, one {Ažurno: #} few {Ažurno: #} other {Ažurno: #}}",
   "progress_outdated": "{count, plural, one {Zastarelo: #} few {Zastarelo: #} other {Zastarelo: #}}",
+  "progress_inherited": "{count, plural, one {Iz jezika {base}: #} few {Iz jezika {base}: #} other {Iz jezika {base}: #}}",
   "progress_missing": "{count, plural, one {Nedostaje: #} few {Nedostaje: #} other {Nedostaje: #}}"
 }

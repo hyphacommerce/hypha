@@ -10,6 +10,7 @@ import {
   moved,
   offeredLanguages,
   sameTag,
+  withoutRegion,
 } from "./languages.ts";
 import { createFormat } from "./format.ts";
 import { formatLocale } from "./pick-language.ts";
@@ -36,6 +37,19 @@ test("what isn't a tag is refused", () => {
 test("every offered tag is canonical and listed once", () => {
   for (const tag of COMMON_LANGUAGES) assert.equal(canonicalTag(tag), tag);
   assert.equal(new Set(COMMON_LANGUAGES).size, COMMON_LANGUAGES.length);
+});
+
+test("a regional tag falls back to the tag without its region", () => {
+  assert.equal(withoutRegion("de-AT"), "de");
+  assert.equal(withoutRegion("sr-Latn-RS"), "sr-Latn");
+  assert.equal(withoutRegion("es-419"), "es");
+  assert.equal(withoutRegion("de-CH-1901"), "de");
+});
+
+test("a tag without a region has nothing to fall back to", () => {
+  assert.equal(withoutRegion("de"), null);
+  assert.equal(withoutRegion("sr-Latn"), null);
+  assert.equal(withoutRegion("sl-rozaj"), null);
 });
 
 test("tags are compared whatever their case", () => {

@@ -88,6 +88,20 @@ export function canonicalTag(input: string): string | null {
     .join("-");
 }
 
+/**
+ * The tag without its region and what follows it (`de-AT` → `de`, `sr-Latn-RS` →
+ * `sr-Latn`): the language a regional wording falls back to, as the API reads it.
+ * `null` for a tag that names no region. Takes a canonical tag, as the API answers them.
+ */
+export function withoutRegion(tag: string): string | null {
+  const subtags = tag.split("-");
+  // In canonical case only a region is two capitals or three digits.
+  const at = subtags.findIndex(
+    (subtag, index) => index > 0 && /^([A-Z]{2}|[0-9]{3})$/.test(subtag),
+  );
+  return at === -1 ? null : subtags.slice(0, at).join("-");
+}
+
 /** Whether two tags name the same language, whatever their case. */
 export function sameTag(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase();

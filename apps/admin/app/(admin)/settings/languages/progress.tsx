@@ -1,5 +1,6 @@
 // Settings → Languages: how far each language covers the store's text, as a bar of what's
-// translated, outdated and missing, each part a way into the worklist. A server
+// translated, outdated, inherited from the language without its region and missing, each
+// part a way into the worklist. A server
 // component: it renders once per read and holds no state.
 
 import { Button } from "@astryxdesign/core/Button";
@@ -13,7 +14,7 @@ import type { Format } from "@/lib/format";
 import { getFormat } from "@/lib/get-format";
 import { requireStaff, sessionClient } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
-import { languageLabel } from "@/lib/languages";
+import { languageLabel, withoutRegion } from "@/lib/languages";
 import type { T } from "@/lib/messages";
 import { hasScope } from "@/lib/navigation";
 import {
@@ -80,6 +81,10 @@ function LanguageRow({
   const parts = progressParts(progress);
   const name = languageLabel(format, progress.language);
   const tag = progress.language;
+  // What a regional language reads where it has no translation of its own: `de` for
+  // `de-AT`. Named only when something is inherited from it.
+  const base = withoutRegion(tag);
+  const inheritedFrom = base !== null && parts.inherited > 0 ? languageLabel(format, base) : null;
   return (
     <VStack gap={2}>
       <HStack gap={3} vAlign="center" hAlign="between" wrap="wrap">
@@ -89,11 +94,17 @@ function LanguageRow({
         <Text type="supporting" color="secondary">
           {parts.translated === null
             ? t("languages.progress_nothing")
-            : t("languages.progress_share", {
-                share: format.percent(shownShare(parts)),
-                translated: parts.current + parts.outdated,
-                total: parts.total,
-              })}
+            : inheritedFrom !== null
+              ? t("languages.progress_share_inherited", {
+                  share: format.percent(shownShare(parts)),
+                  inherited: parts.inherited,
+                  base: inheritedFrom,
+                })
+              : t("languages.progress_share", {
+                  share: format.percent(shownShare(parts)),
+                  translated: parts.current + parts.outdated,
+                  total: parts.total,
+                })}
         </Text>
       </HStack>
       <div
@@ -103,6 +114,7 @@ function LanguageRow({
       >
         <span className="tl-bar-current" style={{ width: `${parts.shares.current * 100}%` }} />
         <span className="tl-bar-outdated" style={{ width: `${parts.shares.outdated * 100}%` }} />
+        <span className="tl-bar-inherited" style={{ width: `${parts.shares.inherited * 100}%` }} />
       </div>
       <HStack gap={4} wrap="wrap">
         <Legend part="current">{t("languages.progress_current", { count: parts.current })}</Legend>
@@ -115,13 +127,21 @@ function LanguageRow({
             t("languages.progress_outdated", { count: parts.outdated })
           )}
         </Legend>
+        {inheritedFrom !== null && (
+          <Legend part="inherited">
+            {t("languages.progress_inherited", { count: parts.inherited, base: inheritedFrom })}
+          </Legend>
+        )}
         <Legend part="missing">
+          {/* The bar's rest: what shoppers read in the default language. The worklist's
+              "missing" is every field without a translation in exactly this language,
+              the inherited ones too, so the link opens it as it is. */}
           {parts.missing > 0 ? (
             <Link href={worklistHref({ language: tag, state: "missing" })}>
-              {t("languages.progress_missing", { count: parts.missing })}
+              {t("languages.progress_missing", { count: parts.untranslated })}
             </Link>
           ) : (
-            t("languages.progress_missing", { count: parts.missing })
+            t("languages.progress_missing", { count: parts.untranslated })
           )}
         </Legend>
       </HStack>
@@ -134,7 +154,7 @@ function Legend({
   part,
   children,
 }: {
-  part: "current" | "outdated" | "missing";
+  part: "current" | "outdated" | "inherited" | "missing";
   children: ReactNode;
 }) {
   return (

@@ -93,6 +93,7 @@
   "worklist_state_outdated": "Zastarelo",
   "worklist_state_complete": "Kompletno",
   "worklist_column_missing": "Nedostaje",
+  "worklist_column_inherited": "Nasleđeno",
   "worklist_column_outdated": "Zastarelo",
   "worklist_column_total": "Polja",
   "worklist_translate": "Prevedi",

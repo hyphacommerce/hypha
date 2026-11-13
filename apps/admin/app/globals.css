@@ -1075,8 +1075,9 @@ html[data-theme="dark"] .hypha-wordmark-dark {
   color: var(--color-error);
 }
 
-/* Settings → Languages: a language's progress, translated (up to date, then outdated)
-   over the track that stands for what's missing. */
+/* Settings → Languages: a language's progress, translated (up to date, then outdated),
+   then what a regional language inherits from the language without its region, over the
+   track that stands for what's missing. */
 .tl-bar {
   display: flex;
   overflow: hidden;
@@ -1093,6 +1094,11 @@ html[data-theme="dark"] .hypha-wordmark-dark {
 .tl-bar-outdated,
 .tl-swatch-outdated {
   background: var(--color-warning);
+}
+
+.tl-bar-inherited,
+.tl-swatch-inherited {
+  background: var(--color-icon-blue);
 }
 
 .tl-swatch {

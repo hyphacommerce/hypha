@@ -93,6 +93,7 @@
   "worklist_state_outdated": "Outdated",
   "worklist_state_complete": "Complete",
   "worklist_column_missing": "Missing",
+  "worklist_column_inherited": "Inherited",
   "worklist_column_outdated": "Outdated",
   "worklist_column_total": "Fields",
   "worklist_translate": "Translate",

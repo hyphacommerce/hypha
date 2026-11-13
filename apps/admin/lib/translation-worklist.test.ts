@@ -29,12 +29,13 @@ const catalog = (language: string) =>
 const translator = (language: string): TFor<"translations"> =>
   createTranslator(language, catalog(language), { fallback: catalog("en") });
 
-const progress = (total: number, translated: number, outdated: number) => ({
-  language: "de",
+const progress = (total: number, translated: number, outdated: number, inherited = 0) => ({
+  language: inherited === 0 ? "de" : "de-AT",
   total,
   translated,
   outdated,
   missing: total - translated,
+  inherited,
 });
 
 const item = (kind: string, id: string): WorklistItem => ({
@@ -44,6 +45,7 @@ const item = (kind: string, id: string): WorklistItem => ({
   total: 3,
   missing: 1,
   outdated: 0,
+  inherited: 0,
   fields: [],
 });
 
@@ -63,14 +65,14 @@ test("the share translated counts outdated translations in", () => {
 
 test("the bar's segments add up to its whole width", () => {
   const { shares } = progressParts(progress(3, 2, 1));
-  assert.equal(shares.current + shares.outdated + shares.missing, 1);
-  assert.equal(shares.missing, 1 / 3);
+  assert.equal(shares.current + shares.outdated + shares.inherited + shares.untranslated, 1);
+  assert.equal(shares.untranslated, 1 / 3);
 });
 
 test("nothing to translate has no share and an empty bar", () => {
   const parts = progressParts(progress(0, 0, 0));
   assert.equal(parts.translated, null);
-  assert.deepEqual(parts.shares, { current: 0, outdated: 0, missing: 0 });
+  assert.deepEqual(parts.shares, { current: 0, outdated: 0, inherited: 0, untranslated: 0 });
 });
 
 test("every field translated is the whole share, with nothing missing", () => {
@@ -80,12 +82,56 @@ test("every field translated is the whole share, with nothing missing", () => {
 });
 
 test("counts past their bounds are clamped, never drawn past the track", () => {
-  const parts = progressParts({ language: "de", total: 4, translated: 6, outdated: 9, missing: 0 });
+  const parts = progressParts({
+    language: "de",
+    total: 4,
+    translated: 6,
+    outdated: 9,
+    missing: 0,
+    inherited: 0,
+  });
   assert.deepEqual(
     { current: parts.current, outdated: parts.outdated, missing: parts.missing },
     { current: 0, outdated: 4, missing: 0 },
   );
   assert.equal(parts.translated, 1);
+});
+
+test("a regional language's inherited fields are among the missing, the rest untranslated", () => {
+  const parts = progressParts(progress(300, 12, 2, 270));
+  assert.deepEqual(
+    {
+      current: parts.current,
+      outdated: parts.outdated,
+      missing: parts.missing,
+      inherited: parts.inherited,
+      untranslated: parts.untranslated,
+    },
+    { current: 10, outdated: 2, missing: 288, inherited: 270, untranslated: 18 },
+  );
+});
+
+test("inherited is drawn as its own segment, and the four fill the bar", () => {
+  const { shares } = progressParts(progress(10, 2, 1, 5));
+  assert.deepEqual(shares, { current: 0.1, outdated: 0.1, inherited: 0.5, untranslated: 0.3 });
+});
+
+test("every missing field inherited leaves nothing in the default language", () => {
+  const parts = progressParts(progress(8, 2, 0, 6));
+  assert.equal(parts.untranslated, 0);
+  assert.equal(parts.shares.untranslated, 0);
+});
+
+test("inherited isn't counted into the share translated", () => {
+  const parts = progressParts(progress(100, 12, 0, 88));
+  assert.equal(parts.translated, 0.12);
+  assert.equal(shownShare(parts), 0.12);
+});
+
+test("inherited past the missing is clamped to them", () => {
+  const parts = progressParts({ ...progress(10, 6, 0), inherited: 9 });
+  assert.equal(parts.inherited, 4);
+  assert.equal(parts.untranslated, 0);
 });
 
 test("the shown share rounds down, so one field missing never reads 100%", () => {

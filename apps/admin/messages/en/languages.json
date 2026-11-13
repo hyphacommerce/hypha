@@ -39,7 +39,9 @@
   "progress_uncounted": "{count, plural, one {# still being counted} other {# still being counted}}: the numbers are complete once the store's texts are indexed, shortly after an upgrade.",
   "progress_nothing": "Nothing to translate yet",
   "progress_share": "{share} translated · {translated, number} of {total, number} fields",
+  "progress_share_inherited": "{share} translated · {inherited, number} from {base}",
   "progress_current": "{count, plural, one {# up to date} other {# up to date}}",
   "progress_outdated": "{count, plural, one {# outdated} other {# outdated}}",
+  "progress_inherited": "{count, plural, one {# from {base}} other {# from {base}}}",
   "progress_missing": "{count, plural, one {# missing} other {# missing}}"
 }

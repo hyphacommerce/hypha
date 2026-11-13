@@ -11,6 +11,7 @@ import { LanguageIcon } from "@heroicons/react/24/outline";
 
 import { type FilterDef, ResourceTable } from "@/components/resource-table/resource-table";
 import { shortId } from "@/lib/ids";
+import { withoutRegion } from "@/lib/languages";
 import {
   type WorklistItem,
   type WorklistState,
@@ -31,6 +32,8 @@ type WorklistRow = {
   /** Its editor on the worklist's language; none for a kind this build doesn't know. */
   href: string | undefined;
   missing: number;
+  /** Of those missing, the ones read in the language without its region. */
+  inherited: number;
   outdated: number;
   total: number;
 };
@@ -68,6 +71,7 @@ export function WorklistTable({
       name: names[nameKey(kind, id)],
       href: isKind(kind) ? translateHref(kind, id, language) : undefined,
       missing: item.missing,
+      inherited: item.inherited,
       outdated: item.outdated,
       total: item.total,
     };
@@ -115,6 +119,18 @@ export function WorklistTable({
       align: "end",
       renderCell: (row) => count(row.missing),
     },
+    // Only a regional language inherits: `de-AT` reads `de` where it has nothing.
+    ...(withoutRegion(language) === null
+      ? []
+      : [
+          {
+            key: "inherited",
+            header: t("translations.worklist_column_inherited"),
+            width: pixel(100),
+            align: "end",
+            renderCell: (row: WorklistRow) => count(row.inherited),
+          } satisfies TableColumn<WorklistRow>,
+        ]),
     {
       key: "outdated",
       header: t("translations.worklist_column_outdated"),
