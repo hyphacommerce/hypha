@@ -7,13 +7,13 @@
 
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Selector } from "@astryxdesign/core/Selector";
-import { usePathname } from "next/navigation";
 import { useTransition } from "react";
 
 import { setCountry } from "@/app/[country]/actions";
 
 import { useT } from "@/lib/use-t";
 
+import { pagePath, useLocale } from "./locale";
 import { useNavigationProgress } from "./navigation-progress";
 
 export type CountryOption = { code: string; name: string; currency: string };
@@ -29,8 +29,8 @@ export function CurrencySwitcher({
    * menu drawer, where a dropdown at the bottom opens below the screen). */
   layout?: "menu" | "segments";
 }) {
+  const locale = useLocale();
   const t = useT();
-  const path = usePathname();
   const [pending, start] = useTransition();
   const progress = useNavigationProgress();
   const currency = countries.find((c) => c.code === current)?.currency;
@@ -42,7 +42,7 @@ export function CurrencySwitcher({
     if (target) {
       // The action redirects: the navigation bar is started by hand.
       progress.start();
-      start(() => setCountry({ country: target.code, path }));
+      start(() => setCountry({ locale, country: target.code, path: pagePath() }));
     }
   };
   if (layout === "segments") {

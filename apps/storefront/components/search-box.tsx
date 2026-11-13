@@ -17,10 +17,12 @@ import { suggest } from "@/app/[country]/actions";
 import { useT } from "@/lib/use-t";
 
 import { useNavigationProgress } from "./navigation-progress";
+import { useLocale } from "@/components/locale";
 
 type Item = SearchableItem<{ href: string }>;
 
-export function SearchBox({ country, searchHref }: { country: string; searchHref: string }) {
+export function SearchBox({ searchHref }: { searchHref: string }) {
+  const locale = useLocale();
   const t = useT();
   const router = useRouter();
   const { start } = useNavigationProgress();
@@ -36,7 +38,7 @@ export function SearchBox({ country, searchHref }: { country: string; searchHref
           label: t("header.search_for", { words }),
           auxiliaryData: { href: `${searchHref}?q=${encodeURIComponent(words)}` },
         };
-        const found = await suggest(country, words);
+        const found = await suggest(locale, words);
         return [
           all,
           ...found.map((s) => ({
@@ -64,7 +66,7 @@ export function SearchBox({ country, searchHref }: { country: string; searchHref
         ];
       },
     }),
-    [country, searchHref, t],
+    [locale, searchHref, t],
   );
 
   return (

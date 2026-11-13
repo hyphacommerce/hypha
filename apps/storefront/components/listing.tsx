@@ -24,6 +24,7 @@ import { useT } from "@/lib/use-t";
 import { FacetPanel, ListingToolbar, go } from "./listing-controls";
 import { ProductGrid } from "./product-grid";
 import { WITHIN_PAGE, addTransitionType } from "./view-transition";
+import { useLocale } from "@/components/locale";
 
 /** The URL's listing parameters, in a stable order, to tell one listing from another. */
 function listingQuery(params: URLSearchParams): string {
@@ -64,7 +65,6 @@ function imagesReady(
 }
 
 export function Listing({
-  country,
   digits,
   currency,
   base,
@@ -74,7 +74,6 @@ export function Listing({
   initial,
   initialQuery,
 }: {
-  country: string;
   digits: number;
   currency: string;
   /** This page's URL, without a query. */
@@ -88,6 +87,7 @@ export function Listing({
   initial: ListingPage;
   initialQuery: string;
 }) {
+  const locale = useLocale();
   const t = useT();
   // The page the server rendered is for `initialQuery`; the URL's own comes once the
   // page is in the browser (`QueryWatch`).
@@ -112,7 +112,7 @@ export function Listing({
   useEffect(() => {
     if (query === shown.query || query === initialQuery) return;
     startLoading(async () => {
-      const page = await listingPage({ country, category, onSale, query });
+      const page = await listingPage({ locale, category, onSale, query });
       // New cards fade in with their picture, not empty then popping: the first images
       // are fetched and decoded first, waiting no more than a moment for them.
       await imagesReady(page.items, 12, 400);
@@ -123,7 +123,7 @@ export function Listing({
         setShown({ query, page });
       });
     });
-  }, [query, shown.query, initialQuery, country, category, onSale]);
+  }, [query, shown.query, initialQuery, locale, category, onSale]);
 
   // Paging starts the shopper at the top of the results, as a new page would.
   const top = useRef<HTMLDivElement>(null);

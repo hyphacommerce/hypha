@@ -1,31 +1,48 @@
 // Server-only: a page's metadata for search engines and link previews.
 
+import { localeOf } from "@hyphacommerce/i18n";
 import type { Metadata } from "next";
 
-import { loadCountries, loadStore } from "./api";
-import { countryAlternates } from "./seo";
+import { loadCountries, loadStore, pageLocale } from "./api";
+import { hreflangPlaces } from "./routing";
+import { localeAlternates } from "./seo";
 import { link, mode, siteUrl } from "./site";
 
 type Image = { url: string; width?: number | null; height?: number | null; alt?: string | null };
 
 /**
+ * A page's alternates by `hreflang`: its copy in every country and language
+ * (`hreflangPlaces`), `path` being its path inside a place (`/p/mug`).
+ */
+export async function alternatesOf(path: string): Promise<Record<string, string> | undefined> {
+  const countries = await loadCountries();
+  return localeAlternates(
+    hreflangPlaces(mode(), countries).map((p) => ({ tag: p.tag, href: link(p.segment, path) })),
+  );
+}
+
+/**
  * A shop page's metadata: its title (the layout's template adds the store's name),
- * description, canonical URL with every country's copy as alternates, and the Open
- * Graph and Twitter previews with `image`. `path` is the page's path inside a country
- * (`/p/mug`).
+ * description, its own URL as canonical with its copy in every country and language as
+ * alternates, and the Open Graph and Twitter previews with `image`. `segment` is the
+ * page's locale segment (`params.country`), `path` its path inside it (`/p/mug`).
  */
 export async function pageMetadata(input: {
-  country: string;
+  segment: string;
   path: string;
   title?: string;
   description?: string;
   image?: Image | null;
   type?: "website" | "article";
 }): Promise<Metadata> {
-  const [store, countries] = await Promise.all([loadStore(), loadCountries()]);
+  const place = await pageLocale(input.segment);
+  const [store, languages] = await Promise.all([
+    loadStore(place.country, place.language),
+    siteUrl() ? alternatesOf(input.path) : undefined,
+  ]);
   const description = input.description ?? store.description ?? undefined;
   const title = input.title ? `${input.title} · ${store.name}` : store.name;
-  const url = link(input.country, input.path);
+  const url = link(place.segment, input.path);
   const images = input.image
     ? [
         {
@@ -40,28 +57,15 @@ export async function pageMetadata(input: {
     ...(input.title ? { title: input.title } : {}),
     description,
     // Relative links need the origin to resolve against; without it, none.
-    ...(siteUrl()
-      ? {
-          alternates: {
-            canonical: url,
-            languages:
-              mode() === "folders"
-                ? countryAlternates(
-                    store.default_language,
-                    countries.map((c) => c.country),
-                    (c) => link(c, input.path),
-                  )
-                : undefined,
-          },
-        }
-      : {}),
+    ...(siteUrl() ? { alternates: { canonical: url, languages } } : {}),
     openGraph: {
       type: input.type ?? "website",
       siteName: store.name,
       title,
       description,
       ...(siteUrl() ? { url } : {}),
-      locale: `${store.default_language}_${input.country}`,
+      // Open Graph spells a locale `de_CH`.
+      locale: localeOf(place.language, place.country).replace(/-/g, "_"),
       images,
     },
     twitter: {

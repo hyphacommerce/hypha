@@ -15,20 +15,20 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { EnvelopeIcon, KeyIcon } from "@heroicons/react/24/outline";
 import { useState, useTransition } from "react";
 
-import { requestCode, signIn } from "@/app/[country]/account/actions";
+import { requestCode, signIn } from "@/app/[country]/(shop)/account/actions";
 import { useT } from "@/lib/use-t";
+import { useLocale } from "@/components/locale";
 
 export function SignInForm({
-  country,
   storeName,
   initialEmail = "",
   initialCode = "",
 }: {
-  country: string;
   storeName: string;
   initialEmail?: string;
   initialCode?: string;
 }) {
+  const locale = useLocale();
   const t = useT<"account">();
   const [email, setEmail] = useState(initialEmail);
   const [code, setCode] = useState(initialCode);
@@ -39,7 +39,7 @@ export function SignInForm({
   const ask = () => {
     if (email.trim() === "") return;
     start(async () => {
-      const result = await requestCode(country, email);
+      const result = await requestCode(locale, email);
       setError(result?.error);
       if (!result) setStep("code");
     });
@@ -48,7 +48,7 @@ export function SignInForm({
     if (code.trim() === "") return;
     start(async () => {
       // Signed in, the action redirects: only a refusal comes back.
-      const result = await signIn(country, email, code);
+      const result = await signIn(locale, email, code);
       setError(result?.error);
     });
   };

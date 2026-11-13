@@ -32,19 +32,19 @@ import {
   signOut,
   signOutEverywhere,
   updateProfile,
-} from "@/app/[country]/account/actions";
+} from "@/app/[country]/(shop)/account/actions";
+import { useLocale } from "@/components/locale";
 
 /** The account's messages and the address form's, beside the shared ones: the account's
  * layout sends them. */
 const useAccountT = () => useT<"account" | "address">();
 
 export function ProfileForm({
-  country,
   initial,
 }: {
-  country: string;
   initial: { first_name: string; last_name: string; phone: string };
 }) {
+  const locale = useLocale();
   const t = useAccountT();
   const [values, setValues] = useState(initial);
   const [error, setError] = useState<string>();
@@ -89,7 +89,7 @@ export function ProfileForm({
           isLoading={pending}
           clickAction={() =>
             start(async () => {
-              const result = await updateProfile(country, values);
+              const result = await updateProfile(locale, values);
               setError(result?.error);
               setSaved(!result);
             })
@@ -143,6 +143,7 @@ function AddressForm({
   initial?: AddressFields;
   onDone: () => void;
 }) {
+  const locale = useLocale();
   const t = useAccountT();
   const [values, setValues] = useState(initial);
   const [error, setError] = useState<string>();
@@ -172,7 +173,7 @@ function AddressForm({
       default_billing: values.default_billing,
     };
     start(async () => {
-      const result = await saveAddress(country, address, body);
+      const result = await saveAddress(locale, address, body);
       setError(result?.error);
       setProblems(result?.problems);
       if (!result) onDone();
@@ -245,6 +246,7 @@ export function AddressBook({
   format: AddressFormat;
   addresses: SavedAddress[];
 }) {
+  const locale = useLocale();
   const t = useAccountT();
   // An address's ID being edited, `NEW` for a new one, or nothing.
   const [editing, setEditing] = useState<string | null>(null);
@@ -299,7 +301,7 @@ export function AddressBook({
                     isLoading={pending}
                     clickAction={() =>
                       start(async () => {
-                        const result = await removeAddress(country, a.id);
+                        const result = await removeAddress(locale, a.id);
                         setError(result?.error);
                       })
                     }
@@ -335,22 +337,21 @@ export function AddressBook({
 
 /** "Email me with news and offers" and the SMS one, saved as they're ticked. */
 export function MarketingChoices({
-  country,
   email,
   sms,
   hasPhone,
 }: {
-  country: string;
   email: boolean;
   sms: boolean;
   hasPhone: boolean;
 }) {
+  const locale = useLocale();
   const t = useAccountT();
   const [error, setError] = useState<string>();
   const [pending, start] = useTransition();
   const change = (channel: "email" | "sms") => (value: boolean) =>
     start(async () => {
-      const result = await setMarketing(country, channel, value);
+      const result = await setMarketing(locale, channel, value);
       setError(result?.error);
     });
   return (
@@ -381,7 +382,8 @@ export function MarketingChoices({
 }
 
 /** Signing out, here or everywhere. */
-export function SignOutButtons({ country }: { country: string }) {
+export function SignOutButtons() {
+  const locale = useLocale();
   const t = useAccountT();
   const [pending, start] = useTransition();
   return (
@@ -390,13 +392,13 @@ export function SignOutButtons({ country }: { country: string }) {
         label={t("account.sign_out")}
         variant="secondary"
         isLoading={pending}
-        clickAction={() => start(() => signOut(country))}
+        clickAction={() => start(() => signOut(locale))}
       />
       <Button
         label={t("account.sign_out_everywhere")}
         variant="ghost"
         isLoading={pending}
-        clickAction={() => start(() => signOutEverywhere(country))}
+        clickAction={() => start(() => signOutEverywhere(locale))}
       />
     </HStack>
   );
@@ -404,13 +406,12 @@ export function SignOutButtons({ country }: { country: string }) {
 
 /** Asking for the account's data to be erased, and taking it back while it's pending. */
 export function ErasureControls({
-  country,
   dueAt,
 }: {
-  country: string;
   /** When a requested erasure runs, formatted; `null` without a request. */
   dueAt: string | null;
 }) {
+  const locale = useLocale();
   const t = useAccountT();
   const [error, setError] = useState<string>();
   const [confirming, setConfirming] = useState(false);
@@ -431,7 +432,7 @@ export function ErasureControls({
             isLoading={pending}
             clickAction={() =>
               start(async () => {
-                const result = await cancelErasure(country);
+                const result = await cancelErasure(locale);
                 setError(result?.error);
               })
             }
@@ -452,7 +453,7 @@ export function ErasureControls({
             isLoading={pending}
             clickAction={() =>
               start(async () => {
-                const result = await requestErasure(country);
+                const result = await requestErasure(locale);
                 setError(result?.error);
                 setConfirming(false);
               })

@@ -3,6 +3,7 @@
 
 import { api, describe } from "./api";
 import { actionT } from "./i18n";
+import type { Locale } from "./routing";
 import { cartId, forgetCart, rememberOrder } from "./site";
 
 /** What checking out came to: the order placed, or the API's refusal with the shopper's
@@ -10,18 +11,19 @@ import { cartId, forgetCart, rememberOrder } from "./site";
 export type CheckedOut = { order: string } | { code: string; error: string };
 
 /**
- * Checks out the shopper's cart in `country`, at `total` when the shopper confirmed one
+ * Checks out the shopper's cart in `place` (the page's: its answer is in the page's
+ * language), at `total` when the shopper confirmed one
  * (absent: back from a provider's page, the payment's own total). Keeps the order's
  * access token for this buyer and forgets the cart. A cart checked out already (the
  * provider's webhook got there first) answers with its order.
  */
 export async function checkOutCart(input: {
-  country: string;
+  place: Locale;
   total?: { amount: number; currency: string };
   attempt: string;
 }): Promise<CheckedOut> {
-  const t = await actionT(input.country);
-  const id = await cartId(input.country);
+  const t = await actionT(input.place.segment);
+  const id = await cartId(input.place.country);
   if (!id) return { code: "cart_not_found", error: t("errors.cart_not_found") };
   const { data, error } = await api().POST("/storefront/carts/{id}/checkout", {
     params: { path: { id }, header: { "Idempotency-Key": input.attempt } },
@@ -31,7 +33,7 @@ export async function checkOutCart(input: {
   // The confirmation reads the order with its access token, kept here for this buyer:
   // the order's ID alone reads nothing.
   await rememberOrder(data.id, data.access_token);
-  await forgetCart(input.country);
+  await forgetCart(input.place.country);
   return { order: data.id };
 }
 

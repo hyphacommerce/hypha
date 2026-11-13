@@ -16,6 +16,22 @@ export function formatDate(value: string | Date, locale: string): string {
   return format.format(typeof value === "string" ? new Date(value) : value);
 }
 
+/**
+ * A language's name in itself (`de` → "Deutsch", `sr-Latn` → "srpski (latinica)"), as
+ * a language picker shows it: a reader finds their own language whatever the page is
+ * in. Starts with a capital where the language has them; the tag where the runtime
+ * doesn't know the language.
+ */
+export function languageName(language: string): string {
+  try {
+    const name = new Intl.DisplayNames(withEnglish(language), { type: "language" }).of(language);
+    if (!name || name === language) return language;
+    return name.charAt(0).toLocaleUpperCase(language) + name.slice(1);
+  } catch {
+    return language;
+  }
+}
+
 /** A country's name in the locale's language where the runtime knows it, else
  * `fallback` (the API's English one). */
 export function countryName(code: string, fallback: string, locale: string): string {

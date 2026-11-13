@@ -42,6 +42,8 @@ type SearchResult =
 /** A search, as the API answers it: its results, or its refusal of the query (a stale
  * cursor, a bad filter: the listing says why). A failure (the API down, a 500, a rate
  * limit) throws instead, so the cached search below keeps nothing and asks again. */
+// shortcut: search answers in the store's default language until it takes a `language`;
+// then the page's (`pageLocale`) goes in `query`, and so in the cache key below.
 async function searchNow(query: SearchQuery): Promise<SearchResult> {
   const { data, error, response } = await api().GET("/storefront/search", {
     params: { query },

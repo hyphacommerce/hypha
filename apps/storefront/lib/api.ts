@@ -13,6 +13,7 @@ import { type AddressFormat, type FieldProblems, problemsOf } from "./address";
 import { FRESH_SECONDS, TAGS } from "./cache-tags";
 import { type FieldContext, type FieldPart, referenceIds } from "./custom-fields";
 import { type T as Translator, isKey } from "./messages";
+import { type Locale, canonicalSegment, localeOfSegment } from "./routing";
 import { link, segmentCountry } from "./site";
 
 export type Country = StorefrontSchemas["StorefrontCountryResponse"];
@@ -73,12 +74,30 @@ export function found<T>(result: { data?: T; response: Response }): T | null {
   throw new Error(`${result.response.url} failed with ${result.response.status}`);
 }
 
-/** The store's public details, once per request (and cached, tagged `store`). */
-export const loadStore = cache(
-  unstable_cache(async () => loaded(await api().GET("/storefront/store")), ["store"], {
-    tags: [TAGS.store],
-    revalidate: FRESH_SECONDS,
-  }),
+/**
+ * The query of a read in a language. Both or neither: a read without a place (the
+ * sitemap, the webhook, a page outside any country) is in the store's default language.
+ * `language` is always a page's own (`pageLocale`), one of the country's.
+ */
+function languageQuery(country: string | undefined, language: string | undefined) {
+  return country && language ? { country, language } : {};
+}
+
+/**
+ * The store's public details, once per request (and cached, tagged `store`), its
+ * description in `language` for a page in `country`.
+ */
+export const loadStore = cache((country?: string, language?: string) =>
+  unstable_cache(
+    async () =>
+      loaded(
+        await api().GET("/storefront/store", {
+          params: { query: languageQuery(country, language) },
+        }),
+      ),
+    ["store", country ?? "", language ?? ""],
+    { tags: [TAGS.store], revalidate: FRESH_SECONDS },
+  )(),
 );
 
 /** Every country a market sells to, with its currency and minor units. */
@@ -90,13 +109,42 @@ export const loadCountries = cache(
   ),
 );
 
-/** The country of a URL folder (`hr`), or 404 when no market sells there. */
-export async function countryOf(folder: string): Promise<Country> {
-  const code = segmentCountry(folder);
+/**
+ * The country of a URL's locale segment (`hr`, `en-hr`), or 404 when no market sells
+ * there, or when the segment isn't the one its page lives at (a language the country
+ * doesn't offer, its default spelled out, another spelling of an offered one). The
+ * proxy redirects those to the right URL before a page is asked; this is what's left
+ * when its list of countries is a minute behind.
+ */
+export async function countryOf(segment: string): Promise<Country> {
+  const code = segmentCountry(segment);
   const country = (await loadCountries()).find((c) => c.country === code);
-  if (!country) notFound();
+  if (!country || canonicalSegment(segment, country) !== segment.toLowerCase()) notFound();
   return country;
 }
+
+/**
+ * The place a locale segment names, for the API: the country and the language to ask in.
+ * The one place that decides a page's language: the one the segment names when the
+ * country offers it (or one it comes to), else the country's default, always one of the
+ * country's own in the API's spelling. Only the path decides it, never a cookie or a
+ * header, so static pages stay static. A segment naming a country nobody sells to
+ * answers the store's default language: its page is a 404 (`countryOf`), which still
+ * has to be written in something.
+ *
+ * What the page's words are written in is another matter (`lib/i18n.ts`): the catalog
+ * nearest to this language, English when there's none.
+ */
+export const pageLocale = cache(async (segment: string): Promise<Locale> => {
+  const place = localeOfSegment(segment, await loadCountries());
+  if (place) return place;
+  const country = segmentCountry(segment);
+  return {
+    country,
+    language: (await loadStore()).default_language,
+    segment: country.toLowerCase(),
+  };
+});
 
 /** A country's address form: its fields change only with a release, its `autocomplete`
  * with the store's settings, so it's read again as often as other cached reads. */
@@ -113,16 +161,19 @@ export const loadAddressFormat = cache((country: string) =>
   )(),
 );
 
-/** The shown category tree, once per request (and cached, tagged `categories`). */
-export const loadCategories = cache(
+/** The shown category tree, once per request (and cached, tagged `categories`), named
+ * in `language` for a page in `country`. */
+export const loadCategories = cache((country?: string, language?: string) =>
   unstable_cache(
-    async () => loaded(await api().GET("/storefront/categories")).items,
-    ["categories"],
-    {
-      tags: [TAGS.categories],
-      revalidate: FRESH_SECONDS,
-    },
-  ),
+    async () =>
+      loaded(
+        await api().GET("/storefront/categories", {
+          params: { query: languageQuery(country, language) },
+        }),
+      ).items,
+    ["categories", country ?? "", language ?? ""],
+    { tags: [TAGS.categories], revalidate: FRESH_SECONDS },
+  )(),
 );
 
 /**
@@ -130,35 +181,35 @@ export const loadCategories = cache(
  * metadata and the page share it). A missing or hidden one is `null` (the page 404s),
  * not cached as an error.
  */
-export const loadCategory = cache((handle: string) =>
+export const loadCategory = cache((handle: string, country?: string, language?: string) =>
   unstable_cache(
     async () => {
       return found(
         await api().GET("/storefront/categories/by-handle/{handle}", {
-          params: { path: { handle } },
+          params: { path: { handle }, query: languageQuery(country, language) },
         }),
       );
     },
-    ["category", handle],
+    ["category", handle, country ?? "", language ?? ""],
     { tags: [TAGS.categories, TAGS.category(handle)], revalidate: FRESH_SECONDS },
   )(),
 );
 
 /**
- * A product page's product, priced and stocked in `country`, cached and tagged with its
- * handle (the webhook expires it), once per request (its metadata and the page share
- * it). A missing one is `null`.
+ * A product page's product, priced and stocked in `country` and written in `language`,
+ * cached and tagged with its handle (the webhook expires it), once per request (its
+ * metadata and the page share it). A missing one is `null`.
  */
-export const loadProduct = cache((handle: string, country: string) =>
+export const loadProduct = cache((handle: string, country: string, language: string) =>
   unstable_cache(
     async () => {
       return found(
         await api().GET("/storefront/products/by-handle/{handle}", {
-          params: { path: { handle }, query: { country } },
+          params: { path: { handle }, query: { country, language } },
         }),
       );
     },
-    ["product", handle, country],
+    ["product", handle, country, language],
     { tags: [TAGS.products, TAGS.product(handle), TAGS.prices], revalidate: FRESH_SECONDS },
   )(),
 );
@@ -166,14 +217,19 @@ export const loadProduct = cache((handle: string, country: string) =>
 /**
  * The custom fields storefronts are given, to name, order and label values: once per
  * request, cached and tagged `custom-fields` (the webhook expires it when a definition
- * changes).
+ * changes), their names and choices in `language` for a page in `country`.
  */
-export const loadFieldDefinitions = cache(
+export const loadFieldDefinitions = cache((country?: string, language?: string) =>
   unstable_cache(
-    async () => loaded(await api().GET("/storefront/custom-field-definitions")).items,
-    ["custom-field-definitions"],
+    async () =>
+      loaded(
+        await api().GET("/storefront/custom-field-definitions", {
+          params: { query: languageQuery(country, language) },
+        }),
+      ).items,
+    ["custom-field-definitions", country ?? "", language ?? ""],
     { tags: [TAGS.fields], revalidate: FRESH_SECONDS },
-  ),
+  )(),
 );
 
 /** References resolved one by one on a page; more aren't shown as links. */
@@ -181,17 +237,17 @@ const MAX_REFERENCES = 10;
 
 /** A referenced product's handle and title, cached (tagged `products`, so any product's
  * change refreshes it); `null` when the storefront can't show it. */
-const loadReferencedProduct = (id: string, country: string) =>
+const loadReferencedProduct = (id: string, country: string, language: string) =>
   unstable_cache(
     async () => {
       const product = found(
         await api().GET("/storefront/products/{id}", {
-          params: { path: { id }, query: { country } },
+          params: { path: { id }, query: { country, language } },
         }),
       );
       return product ? { title: product.title, handle: product.handle } : null;
     },
-    ["product-ref", id, country],
+    ["product-ref", id, country, language],
     { tags: [TAGS.products], revalidate: FRESH_SECONDS },
   )();
 
@@ -202,34 +258,39 @@ function flatten(nodes: CategoryNode[]): CategoryNode[] {
 }
 
 /**
- * What custom fields need to be shown on a page: the page's locale and words (`t`), the
- * country's currency, and the product and category references among `values` as links to their
+ * What custom fields need to be shown on a page: the page's place (`locale`: its links
+ * and the language its names are read in), its formats and words (`t`), the country's
+ * currency, and the product and category references among `values` as links to their
  * pages (categories from the shown tree; products read by ID, at most `MAX_REFERENCES`).
  * A reference that can't be read isn't shown: a field is decoration, so its failure
  * never fails the page.
  */
 export async function fieldContext(
   country: Country,
+  locale: Locale,
   t: Translator,
   ...values: (Record<string, unknown> | undefined)[]
 ): Promise<FieldContext> {
   const ids = referenceIds(...values.filter((v) => v !== undefined));
-  const code = country.country;
+  const code = locale.country;
+  const place = locale.segment;
   const refs: Record<string, FieldPart> = {};
   const [categories, definitions] = await Promise.all([
-    ids.some((id) => id.startsWith("pcat_")) ? loadCategories() : Promise.resolve([]),
-    loadFieldDefinitions(),
+    ids.some((id) => id.startsWith("pcat_"))
+      ? loadCategories(code, locale.language)
+      : Promise.resolve([]),
+    loadFieldDefinitions(code, locale.language),
   ]);
   for (const c of flatten(categories)) {
-    if (ids.includes(c.id)) refs[c.id] = { text: c.name, href: link(code, `/c/${c.handle}`) };
+    if (ids.includes(c.id)) refs[c.id] = { text: c.name, href: link(place, `/c/${c.handle}`) };
   }
   const products = ids.filter((id) => id.startsWith("prod_")).slice(0, MAX_REFERENCES);
   const read = await Promise.all(
-    products.map((id) => loadReferencedProduct(id, code).catch(() => null)),
+    products.map((id) => loadReferencedProduct(id, code, locale.language).catch(() => null)),
   );
   products.forEach((id, i) => {
     const product = read[i];
-    if (product) refs[id] = { text: product.title, href: link(code, `/p/${product.handle}`) };
+    if (product) refs[id] = { text: product.title, href: link(place, `/p/${product.handle}`) };
   });
   return {
     locale: t.locale,
