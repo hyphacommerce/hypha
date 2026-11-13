@@ -25,6 +25,7 @@ import {
   type AddressValues,
   type FieldProblems,
   missingIn,
+  wordAddressMessage,
 } from "@/lib/address";
 import type { KeyIn, TFor } from "@/lib/messages";
 import { useFormat } from "@/lib/use-format";
@@ -160,7 +161,7 @@ export function AddressCheckCard({
           )}
           {check.warnings.map((w) => (
             <MetadataListItem key={`${w.code} ${w.path}`} label={t("orders.address_check_warning")}>
-              {w.message}
+              {wordAddressMessage(t, w, addressFormat)}
             </MetadataListItem>
           ))}
           {check.marked_valid && (

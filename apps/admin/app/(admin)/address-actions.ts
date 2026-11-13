@@ -4,7 +4,12 @@
 // order's shipping address): the store's autocomplete app, through the API, so its
 // provider's keys stay with the app.
 
-import { type AddressFormat, type AddressValues, type FieldProblems, asField } from "@/lib/address";
+import {
+  type AddressFormat,
+  type AddressValues,
+  type FieldProblems,
+  problemsByField,
+} from "@/lib/address";
 import { sessionClient } from "@/lib/hypha";
 
 /** An address the autocomplete app offers for what staff typed into line 1. */
@@ -49,11 +54,7 @@ export async function resolveAddress(input: {
   });
   if (!data) return null;
   const a = data.address;
-  const problems: FieldProblems = {};
-  for (const p of data.problems) {
-    const field = asField(p.field);
-    if (field) problems[field] ??= p.message;
-  }
+  const problems = problemsByField(data.problems);
   return {
     values: {
       company: a.company ?? "",

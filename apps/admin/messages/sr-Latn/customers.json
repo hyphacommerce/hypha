@@ -15,6 +15,7 @@
   "detail_first_order": "Prva porudžbina",
   "detail_last_order": "Poslednja porudžbina",
   "detail_since": "Kupac od",
+  "detail_language_default": "Jezik sadržaja prodavnice",
   "detail_last_changed": "Poslednja izmena",
   "edit_title": "Izmena kupca",
   "edit_subtitle": "Šta prodavnica zna o kupcu. Porudžbine zadržavaju podatke sa kojima su poslate.",
