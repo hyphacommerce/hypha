@@ -19,13 +19,18 @@ export function templateDescription(t: NotificationsT, key: string): string | un
   return labelOr(t, description, undefined);
 }
 
-const MESSAGE_STATUS_VARIANTS = {
+const MESSAGE_STATUSES = ["queued", "sending", "sent", "failed", "skipped"] as const;
+
+const MESSAGE_STATUS_VARIANTS: Record<
+  (typeof MESSAGE_STATUSES)[number],
+  "success" | "neutral" | "error" | "info"
+> = {
   queued: "info",
   sending: "info",
   sent: "success",
   failed: "error",
   skipped: "neutral",
-} as const;
+};
 
 /**
  * A message's status as a badge: its label, in `t`'s language, and its colour. The order's
@@ -36,9 +41,7 @@ export function messageStatus(
   t: TFor<"orders">,
   status: string,
 ): { label: string; variant: "success" | "neutral" | "error" | "info" } {
-  const known = (["queued", "sending", "sent", "failed", "skipped"] as const).find(
-    (s) => s === status,
-  );
+  const known = MESSAGE_STATUSES.find((s) => s === status);
   if (!known) return { label: status, variant: "neutral" };
   return { label: t(`orders.emails_status_${known}`), variant: MESSAGE_STATUS_VARIANTS[known] };
 }

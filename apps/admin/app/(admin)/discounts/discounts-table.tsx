@@ -15,16 +15,14 @@ import {
   ResourceTable,
   type View,
 } from "@/components/resource-table/resource-table";
+import type { DiscountsT } from "@/lib/discounts/validate";
 import { type Discount, methodLabel, usesLabel } from "@/lib/discounts/wire";
 import type { Format } from "@/lib/format";
-import type { TFor } from "@/lib/messages";
 import { phaseOptions } from "@/lib/price-lists";
 import { useFormat } from "@/lib/use-format";
 import { useT } from "@/lib/use-t";
 
 import { ListWindow } from "../markets/price-lists/price-lists-table";
-
-type DiscountsT = TFor<"common" | "components" | "discounts">;
 
 const filters = (t: DiscountsT): FilterDef[] => [
   {

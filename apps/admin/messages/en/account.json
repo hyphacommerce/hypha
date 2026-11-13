@@ -48,5 +48,6 @@
   "two_factor_codes_keep": "Keep these somewhere safe, like a password manager. Each works once to sign in without your authenticator. They won't be shown again.",
   "two_factor_codes_saved": "I've saved them",
   "two_factor_codes_file_title": "Hypha admin recovery codes",
-  "two_factor_codes_file_note": "Each works once, if you lose your authenticator."
+  "two_factor_codes_file_note": "Each works once, if you lose your authenticator.",
+  "sessions_sign_out": "Sign out"
 }

@@ -30,7 +30,7 @@ const generated = [
 /**
  * The admin's files: every word they show comes from its catalogs
  * (`apps/admin/messages/`), so literal text in their JSX is an error
- * (`i18n/no-literal-text`), and so is a format function that names no locale.
+ * (`i18n/no-literal-text`), and so is calling anything deprecated.
  */
 const adminTranslated = [
   "apps/admin/app/**",
@@ -95,8 +95,8 @@ export default defineConfig({
         jsPlugins: ["./scripts/oxlint-i18n.mjs"],
         rules: {
           "i18n/no-literal-text": "error",
-          // The format functions that name no locale (`lib/format.ts`, `lib/regions.ts`)
-          // write English: extracted code asks its `Format`.
+          // An interim overload (a helper kept in English for callers not moved yet) is
+          // marked `@deprecated`: nothing here may call one.
           "typescript/no-deprecated": "error",
           // A message's tags are given as functions (`t.rich(key, { link: (chunks, key) =>
           // <a key={key}>…</a> })`): called while rendering, never mounted as components.

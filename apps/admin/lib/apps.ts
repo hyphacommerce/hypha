@@ -128,11 +128,11 @@ export function scopeLabel(t: TFor<"apps">, scope: string): string {
   const own = action ? `apps.scope_${canonical}_${action}` : `apps.scope_${canonical}`;
   if (action === "read") {
     const key = `apps.scope_read_${canonical}`;
-    return labelOr(t, key, t("apps.scope_other_read", { area: areaWords(area) }));
+    return hasKey(t, key) ? t(key) : t("apps.scope_other_read", { area: areaWords(area) });
   }
   if (action === "write") {
     const key = `apps.scope_write_${canonical}`;
-    return labelOr(t, key, t("apps.scope_other_write", { area: areaWords(area) }));
+    return hasKey(t, key) ? t(key) : t("apps.scope_other_write", { area: areaWords(area) });
   }
   return labelOr(t, own, scope);
 }
@@ -142,5 +142,5 @@ type Actor = AdminSchemas["EventActor"] | null | undefined;
 /** Who did something, for a line of history ("a staff member", "the app itself"), in `t`'s language. */
 export function actorLabel(t: TFor<"apps">, actor: Actor): string {
   const key = `apps.actor_${actor?.type ?? "unknown"}`;
-  return labelOr(t, key, t("apps.actor_unknown"));
+  return hasKey(t, key) ? t(key) : t("apps.actor_unknown");
 }

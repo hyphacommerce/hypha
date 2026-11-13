@@ -257,7 +257,7 @@
   "import_no_variant_options": "{handle} has no variant {options}.",
   "import_options_required": "{handle} has options: fill in the {column} column.",
   "import_no_identifier": "No {column}, SKU or handle to find the variant by.",
-  "import_duplicate_variant": "The same variant as line {line, number}.",
+  "import_duplicate_variant": "The same variant as line {line}.",
   "import_break_incomplete": "Break {number, number} needs both a quantity and a price.",
   "import_not_whole_number": "{column}: {value} isn't a whole number.",
   "import_column_error": "{column}: {error}",

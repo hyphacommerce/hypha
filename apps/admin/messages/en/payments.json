@@ -11,6 +11,8 @@
   "methods_empty_title": "No payment methods yet",
   "methods_empty_description": "Add cash on delivery or a bank transfer to start taking orders.",
   "methods_column_method": "Method",
+  "methods_every_market": "Every market",
+  "methods_every_channel": "Every channel",
   "methods_column_offered_in": "Offered in",
   "method_offer": "Offer {name}",
   "method_name_required": "The method needs a name.",

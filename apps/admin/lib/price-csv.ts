@@ -329,7 +329,7 @@ export function previewPriceImport(
     if (earlier !== undefined) {
       return done(
         "invalid",
-        [t("price_lists.import_duplicate_variant", { line: earlier })],
+        [t("price_lists.import_duplicate_variant", { line: String(earlier) })],
         variant.variant,
       );
     }

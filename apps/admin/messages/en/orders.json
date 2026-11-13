@@ -19,6 +19,7 @@
   "list_filter_cancelled": "Cancelled",
   "list_filter_cancelled_no": "Not cancelled",
   "list_filter_cancelled_yes": "Cancelled",
+  "list_filter_financial_pending": "Pending",
   "list_filter_address_needs_review": "Needs review",
   "list_filter_placed": "Placed",
   "list_empty_title": "No orders yet",

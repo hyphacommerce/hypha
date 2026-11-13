@@ -112,7 +112,13 @@ export function OrdersTable({
       kind: "multi",
       param: "financial_status",
       label: t("orders.payment"),
-      options: statusOptions("financial", FINANCIAL, t),
+      // Named as the badges name them, but for "Payment pending": under a filter called
+      // Payment it's "Pending".
+      options: statusOptions("financial", FINANCIAL, t).map((option) =>
+        option.value === "pending"
+          ? { ...option, label: t("orders.list_filter_financial_pending") }
+          : option,
+      ),
     },
     {
       kind: "multi",

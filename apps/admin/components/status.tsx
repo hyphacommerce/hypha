@@ -32,6 +32,11 @@ export function ProductStatusBadge({
   return <Badge label={t(label)} variant={variant} />;
 }
 
+/** The look of `status` among `looks`, or none for one this build doesn't know. */
+function lookOf(looks: Record<string, Look>, status: string): Look | undefined {
+  return Object.hasOwn(looks, status) ? looks[status] : undefined;
+}
+
 /**
  * The badge of a status in `looks`. The SDK types open enums as strings (a new status
  * mustn't break old admins), so an unknown one shows as it is.
@@ -45,7 +50,7 @@ function StatusBadge({
   status: string;
   t: Translate;
 }) {
-  const look = Object.hasOwn(looks, status) ? looks[status] : undefined;
+  const look = lookOf(looks, status);
   return look ? (
     <Badge label={t(look.label)} variant={look.variant} />
   ) : (
@@ -213,8 +218,7 @@ const FAMILIES = {
  * status as it is.
  */
 export function statusLabel(family: keyof typeof FAMILIES, status: string, t: Translate): string {
-  const looks: Record<string, Look> = FAMILIES[family];
-  const look = Object.hasOwn(looks, status) ? looks[status] : undefined;
+  const look = lookOf(FAMILIES[family], status);
   return look ? t(look.label) : status;
 }
 

@@ -153,10 +153,15 @@ export function PaymentMethodsCard({
                   <TableCell>
                     <VStack gap={0.5}>
                       <Text type="supporting">
-                        {where(method.markets, markets, t("common.every_market"), list)}
+                        {where(method.markets, markets, t("payments.methods_every_market"), list)}
                       </Text>
                       <Text type="supporting" color="secondary">
-                        {where(method.channels, channels, t("common.every_channel"), list)}
+                        {where(
+                          method.channels,
+                          channels,
+                          t("payments.methods_every_channel"),
+                          list,
+                        )}
                       </Text>
                     </VStack>
                   </TableCell>

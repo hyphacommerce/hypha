@@ -11,8 +11,9 @@ export function hasKey<Keys extends string>(t: Translator<Keys>, key: string): k
 
 /**
  * The message under a key built from data, or `fallback` when `t` has none: a label by
- * an API enum's value, with the value itself (or another message) for one this build
- * doesn't know.
+ * an API enum's value, with the value itself for one this build doesn't know. Where the
+ * fallback is another message, write the choice out (`hasKey(t, key) ? t(key) : t(…)`),
+ * so it's formatted only when it's shown.
  */
 export function labelOr<Keys extends string, Fallback extends string | undefined>(
   t: Translator<Keys>,
