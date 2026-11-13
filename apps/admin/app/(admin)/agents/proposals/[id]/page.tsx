@@ -21,6 +21,7 @@ import {
   requireStaff,
   sessionClient,
   staffNames,
+  describeWith,
 } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
 import type { T } from "@/lib/messages";
@@ -280,9 +281,14 @@ function Outcome({
               status="error"
               title={t("agents.outcome_failed_title")}
               description={
-                message
-                  ? `${message}${code ? ` (${code})` : ""}`
-                  : t("agents.outcome_failed_description")
+                !message
+                  ? t("agents.outcome_failed_description")
+                  : code
+                    ? t("agents.outcome_failed_reason", {
+                        reason: describeWith(t, { code, error: message, details: body?.details }),
+                        code,
+                      })
+                    : message
               }
             />
             {decided}

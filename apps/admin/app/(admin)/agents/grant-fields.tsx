@@ -102,8 +102,6 @@ export function GrantFields({
       ? t("agents.grant_always_proposed")
       : (lacks(scope) ?? applyNote);
     const mode = value.write[scope] ?? "propose";
-    // The row's name inside a sentence, as the language writes it there.
-    const area = label.toLocaleLowerCase(t.locale);
     return (
       <div key={scope} className="grant-row">
         <VStack gap={0}>
@@ -113,7 +111,7 @@ export function GrantFields({
         </VStack>
         {read ? (
           <CheckboxInput
-            label={t("agents.grant_see_area", { area })}
+            label={t("agents.grant_see_area", { area: label })}
             isLabelHidden
             value={value.read.includes(read) || isReadIncluded}
             onChange={(on) => toggleRead(read, on)}
@@ -130,7 +128,7 @@ export function GrantFields({
           <span />
         )}
         <CheckboxInput
-          label={t("agents.grant_change_area", { area })}
+          label={t("agents.grant_change_area", { area: label })}
           isLabelHidden
           value={isWritten}
           onChange={(on) => toggleWrite(scope, read, on)}
@@ -140,7 +138,7 @@ export function GrantFields({
         <div className="grant-mode">
           {isWritten && (
             <SegmentedControl
-              label={t("agents.grant_how_area", { area })}
+              label={t("agents.grant_how_area", { area: label })}
               size="sm"
               value={isProposeOnly ? "propose" : mode}
               onChange={(next) => setMode(scope, next === "apply" ? "apply" : "propose")}
@@ -200,9 +198,7 @@ export function GrantFields({
                     {problemFor(read)}
                   </VStack>
                   <CheckboxInput
-                    label={t("agents.grant_see_area", {
-                      area: label.toLocaleLowerCase(t.locale),
-                    })}
+                    label={t("agents.grant_see_area", { area: label })}
                     isLabelHidden
                     value={value.read.includes(read)}
                     onChange={(on) => toggleRead(read, on)}

@@ -128,11 +128,11 @@ export function scopeLabel(t: TFor<"apps">, scope: string): string {
   const own = action ? `apps.scope_${canonical}_${action}` : `apps.scope_${canonical}`;
   if (action === "read") {
     const key = `apps.scope_read_${canonical}`;
-    return hasKey(t, key) ? t(key) : t("apps.scope_read_unknown", { area: areaWords(area) });
+    return hasKey(t, key) ? t(key) : t("apps.scope_other_read", { area: areaWords(area) });
   }
   if (action === "write") {
     const key = `apps.scope_write_${canonical}`;
-    return hasKey(t, key) ? t(key) : t("apps.scope_write_unknown", { area: areaWords(area) });
+    return hasKey(t, key) ? t(key) : t("apps.scope_other_write", { area: areaWords(area) });
   }
   return hasKey(t, own) ? t(own) : scope;
 }

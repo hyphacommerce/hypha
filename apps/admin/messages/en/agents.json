@@ -115,9 +115,9 @@
   "grant_cap_off": "This deployment lets agents only read ({setting}).",
   "grant_lacks_scope": "Your role doesn't have {scope}, so you can't give it.",
   "grant_always_proposed": "Always proposed: a person approves every use.",
-  "grant_see_area": "See {area}",
-  "grant_change_area": "Change {area}",
-  "grant_how_area": "How it changes {area}",
+  "grant_see_area": "{area}: see",
+  "grant_change_area": "{area}: change",
+  "grant_how_area": "{area}: how it changes",
   "grant_change_includes_see": "Changing includes seeing.",
   "grant_store_title": "Store access",
   "grant_store_description": "What it may see and change. A change it proposes waits in the proposals inbox until someone approves it; one it applies is written at once. Propose is the default.",
@@ -253,5 +253,6 @@
   "proposals_view_expired": "Expired",
   "outcome_applied_title": "Applied",
   "outcome_rejected_title": "Rejected",
-  "outcome_expired_title": "Expired"
+  "outcome_expired_title": "Expired",
+  "outcome_failed_reason": "{reason} ({code})"
 }
