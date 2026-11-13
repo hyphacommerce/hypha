@@ -143,7 +143,7 @@ function SettingsFields({
             width={240}
           />
           <RadioList
-            label={t("price_lists.kind")}
+            label={t("price_lists.form_kind")}
             value={form.kind}
             onChange={(kind) => set({ kind: kind === "sale" ? "sale" : "override" })}
             isDisabled={isReadOnly}
@@ -197,7 +197,7 @@ function SettingsFields({
             </Text>
           </VStack>
           <Switch
-            label={t("price_lists.phase_active")}
+            label={t("price_lists.form_active")}
             description={t("price_lists.form_active_description")}
             value={form.status === "active"}
             onChange={(on) => set({ status: on ? "active" : "draft" })}
@@ -253,7 +253,7 @@ function SettingsFields({
           ) : (
             <MultiSelector
               label={t("price_lists.form_groups")}
-              placeholder={t("price_lists.audience_everyone")}
+              placeholder={t("price_lists.form_groups_placeholder")}
               options={groupOptions}
               value={form.groups}
               onChange={(chosen) => set({ groups: chosen })}

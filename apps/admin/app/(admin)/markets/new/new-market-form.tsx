@@ -77,7 +77,7 @@ export function NewMarketForm({
         <HStack gap={2} hAlign="end">
           <Button label={t("common.cancel")} variant="ghost" href="/markets" />
           <Button
-            label={t("markets.add_market")}
+            label={t("markets.new_submit")}
             variant="primary"
             isLoading={isPending}
             isDisabled={!name.trim() || chosen.length === 0 || !currency}

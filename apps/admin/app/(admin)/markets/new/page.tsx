@@ -17,7 +17,7 @@ export default async function NewMarketPage() {
     <Section padding={6}>
       <VStack gap={5} maxWidth={640}>
         <PageHeader
-          title={t("markets.add_market")}
+          title={t("markets.new_title")}
           description={t("markets.new_description")}
           back={{ label: t("common.markets"), href: "/markets" }}
         />

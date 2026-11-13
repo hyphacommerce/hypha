@@ -2,8 +2,8 @@
 // ("10=8.00; 20=7.50"), so breaks copy, paste and fill like any other cell.
 
 import { formatAmount, parseAmount, type Parsed } from "./money.ts";
-import { type PriceT, say } from "./say.ts";
-import { MAX_BREAKS } from "./types.ts";
+import { say } from "./say.ts";
+import { MAX_BREAKS, type PriceT } from "./types.ts";
 
 /** A break in minor units of the list's currency. */
 export type BreakAmount = { min_quantity: number; amount: number };

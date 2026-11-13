@@ -26,7 +26,7 @@ export default async function NewPriceListPage({
     <Section padding={6}>
       <VStack gap={5} maxWidth={880}>
         <PageHeader
-          title={t("price_lists.new")}
+          title={t("price_lists.new_title")}
           description={t("price_lists.new_description")}
           back={[
             { label: t("common.markets"), href: "/markets" },

@@ -7,7 +7,8 @@
 // and what's written back is always plain decimals with a "."). Only the messages are
 // translated.
 
-import { type PriceT, say } from "./say.ts";
+import { say } from "./say.ts";
+import type { PriceT } from "./types.ts";
 
 /** The largest amount the API takes either way (2⁵³ − 1), so JSON keeps it exact. */
 export const MAX_AMOUNT = 2 ** 53 - 1;

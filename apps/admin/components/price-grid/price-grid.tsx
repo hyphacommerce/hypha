@@ -566,6 +566,12 @@ export function PriceGrid({
     (focusedRow?.kind === "variant" ? rowErrors[focusedRow.variant.variant] : undefined);
   const hasMoneyTargets = selectedTargets.some((target) => target.column !== "breaks");
   const parts = renderChrome({ isDirty, confirmLeave });
+  // The same in every row: read once per render, not once per cell.
+  const cellText = {
+    fromAdjustment: t("price_lists.grid_from_adjustment"),
+    fromFixed: t("price_lists.grid_from_fixed"),
+    add: t("common.add"),
+  };
 
   return (
     <div className="pe">
@@ -655,7 +661,7 @@ export function PriceGrid({
             // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-to-interactive-role
             role="grid"
             tabIndex={-1}
-            aria-label={label ?? t("price_lists.prices")}
+            aria-label={label ?? t("price_lists.grid_label")}
             aria-rowcount={rows.length + 1}
             aria-colcount={gridColumns.length}
             aria-multiselectable="true"
@@ -937,11 +943,7 @@ export function PriceGrid({
         return (
           <span
             className={price.isAdjusted ? "pg-derived" : undefined}
-            title={
-              price.isAdjusted
-                ? t("price_lists.grid_from_adjustment")
-                : t("price_lists.grid_from_fixed")
-            }
+            title={price.isAdjusted ? cellText.fromAdjustment : cellText.fromFixed}
           >
             {readOnlyAmount(price.money)}
           </span>
@@ -953,7 +955,7 @@ export function PriceGrid({
           return isReadOnly ? (
             <span className="pg-none">—</span>
           ) : (
-            <EmptyEditable label={t("common.add")} />
+            <EmptyEditable label={cellText.add} />
           );
         }
         const parsed = parseBreaks(text, digits, currency);

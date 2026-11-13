@@ -1,6 +1,8 @@
 {
   "list_description": "Countries that buy in one currency, with the catalog of what they can buy and its prices.",
   "add_market": "Add market",
+  "new_title": "Add market",
+  "new_submit": "Add market",
   "list_column_prices": "Prices",
   "list_column_catalog": "Catalog",
   "list_prices_include_tax": "Include tax",
@@ -26,6 +28,7 @@
   "catalog_title": "Catalog",
   "catalog_description": "The products this market can buy. A product also needs to be active and published to the storefront's channel.",
   "catalog_add_products": "Add products",
+  "catalog_picker_title": "Add products",
   "catalog_create": "Create catalog",
   "catalog_none": "This market has no catalog yet, so it sells nothing.",
   "catalog_no_products": "No products yet.",

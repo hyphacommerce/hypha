@@ -54,7 +54,7 @@ export function DeletePriceList({ id, name }: { id: string; name: string }) {
         onOpenChange={(open) => !open && setIsAsking(false)}
         title={t("common.delete_named", { name })}
         description={t("price_lists.delete_confirm_description")}
-        actionLabel={t("price_lists.delete_action")}
+        actionLabel={t("price_lists.delete_confirm_action")}
         isActionLoading={isPending}
         onAction={() =>
           startTransition(async () => {

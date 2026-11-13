@@ -6,7 +6,6 @@
 
 import { type BreakAmount, breakProblems, formatBreaks, parseBreaks } from "./breaks.ts";
 import { adjustAmount, formatAmount, parseAmount } from "./money.ts";
-import type { PriceT } from "./say.ts";
 import type { Cell, Rect } from "./selection.ts";
 import type { Placed } from "./tsv.ts";
 import type {
@@ -16,6 +15,7 @@ import type {
   Money,
   PriceGridDiff,
   PriceGridVariant,
+  PriceT,
 } from "./types.ts";
 import { EDITABLE_COLUMNS } from "./types.ts";
 

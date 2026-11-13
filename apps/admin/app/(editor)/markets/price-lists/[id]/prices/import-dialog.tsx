@@ -22,9 +22,8 @@ import {
   TableRow,
 } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
-import { useEffect, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 
-import type { PriceT } from "@/lib/price-grid/say";
 import type { PriceList } from "@/lib/price-lists";
 import { sendToStorage } from "@/lib/storage-upload";
 import { useT } from "@/lib/use-t";
@@ -67,16 +66,17 @@ type Phase =
  * preview, or why not.
  */
 async function uploadAndPreview(
-  t: PriceT,
   list: string,
   file: File,
   onUploaded: (upload: string) => boolean,
-): Promise<{ upload: string; preview: ImportPreviewResult } | { error: string } | null> {
+): Promise<
+  { upload: string; preview: ImportPreviewResult } | { error: string } | "not_stored" | null
+> {
   const started = await startPriceImport({ filename: file.name, byte_size: file.size });
   if ("error" in started) return started;
   if (!onUploaded(started.id)) return null;
   if (!(await sendToStorage(started.upload, file))) {
-    return { error: t("price_lists.import_not_stored") };
+    return "not_stored";
   }
   return { upload: started.id, preview: await previewPriceImport({ list, upload: started.id }) };
 }
@@ -96,6 +96,12 @@ export function ImportDialog({
   const [phase, setPhase] = useState<Phase>({ kind: "uploading" });
   const [error, setError] = useState<string>();
 
+  // Said when it happens, in the language of that moment: the effect below owns the
+  // upload and must not run again because the translator changed.
+  const report = useEffectEvent((why: "not_stored" | "check_failed") =>
+    setError(t(`price_lists.import_${why}`)),
+  );
+
   // The dialog owns its upload: deleted when it closes, applied or not.
   useEffect(() => {
     let isCurrent = true;
@@ -108,12 +114,13 @@ export function ImportDialog({
     };
     const run = async () => {
       try {
-        const result = await uploadAndPreview(t, list.id, file, uploaded);
+        const result = await uploadAndPreview(list.id, file, uploaded);
         if (!isCurrent || !result) return;
-        if ("error" in result) setError(result.error);
+        if (result === "not_stored") report(result);
+        else if ("error" in result) setError(result.error);
         else setPhase({ kind: "preview", ...result });
       } catch {
-        if (isCurrent) setError(t("price_lists.import_check_failed"));
+        if (isCurrent) report("check_failed");
       }
     };
     void run();
@@ -121,7 +128,7 @@ export function ImportDialog({
       isCurrent = false;
       if (upload) void discardPriceImport(upload);
     };
-  }, [t, list.id, file]);
+  }, [list.id, file]);
 
   const apply = async (preview: ImportPreviewResult, upload: string) => {
     const total = preview.upserts + preview.clears;

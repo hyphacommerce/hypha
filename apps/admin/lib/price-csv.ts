@@ -13,12 +13,12 @@
 import { formatBreaks } from "./price-grid/breaks.ts";
 import { checkDraft, sameFixed } from "./price-grid/edits.ts";
 import { formatAmount } from "./price-grid/money.ts";
-import type { PriceT } from "./price-grid/say.ts";
 import type {
   FixedPriceUpsert,
   Money,
   PriceGridDiff,
   PriceGridProduct,
+  PriceT,
   PriceGridVariant,
 } from "./price-grid/types.ts";
 
@@ -329,8 +329,7 @@ export function previewPriceImport(
     if (earlier !== undefined) {
       return done(
         "invalid",
-        // A line number is a place in the file, not a quantity: no grouping.
-        [t("price_lists.import_duplicate_variant", { line: String(earlier) })],
+        [t("price_lists.import_duplicate_variant", { line: earlier })],
         variant.variant,
       );
     }
@@ -344,7 +343,7 @@ export function previewPriceImport(
       const price = field.get(row, `break_${n}_price`);
       if (qty === "" && price === "") continue;
       if (qty === "" || price === "") {
-        reasons.push(t("price_lists.import_break_incomplete", { number: String(n) }));
+        reasons.push(t("price_lists.import_break_incomplete", { number: n }));
       } else if (!/^\d+$/.test(qty)) {
         reasons.push(
           t("price_lists.import_not_whole_number", {

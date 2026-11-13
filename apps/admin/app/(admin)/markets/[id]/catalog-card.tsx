@@ -154,7 +154,7 @@ export function CatalogCard({
       </VStack>
       {isAdding && catalog && (
         <ProductPicker
-          title={t("markets.catalog_add_products")}
+          title={t("markets.catalog_picker_title")}
           description={t("markets.catalog_picker_description", { market: market.name })}
           isAlreadyIn={(product) => listed.has(product.id)}
           alreadyInLabel={t("markets.catalog_already_in")}

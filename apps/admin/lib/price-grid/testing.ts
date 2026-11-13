@@ -8,7 +8,7 @@ import { createTranslator, mergeCatalogs } from "@hyphacommerce/i18n";
 
 import { createFormat } from "../format.ts";
 import { formatLocale } from "../pick-language.ts";
-import type { PriceT } from "./say.ts";
+import type { PriceT } from "./types.ts";
 
 const price_lists: Record<string, string> = JSON.parse(
   readFileSync(join(import.meta.dirname, "..", "..", "messages", "en", "price_lists.json"), "utf8"),

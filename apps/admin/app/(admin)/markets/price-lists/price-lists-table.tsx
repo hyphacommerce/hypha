@@ -87,15 +87,15 @@ export function PriceListsTable({
   ];
   const views: View[] = [
     { label: t("common.all"), params: {} },
-    { label: t("price_lists.phase_active"), params: { status: ["active"] } },
-    { label: t("price_lists.phase_scheduled"), params: { status: ["scheduled"] } },
+    { label: t("price_lists.view_active"), params: { status: ["active"] } },
+    { label: t("price_lists.view_scheduled"), params: { status: ["scheduled"] } },
     { label: t("price_lists.view_sales"), params: { kind: ["sale"] } },
   ];
   const filters: FilterDef[] = [
     {
       kind: "select",
       param: "kind",
-      label: t("price_lists.kind"),
+      label: t("price_lists.filter_kind"),
       options: KINDS.map((kind) => ({ value: kind, label: t(`price_lists.kind_${kind}`) })),
     },
     {
@@ -130,7 +130,7 @@ export function PriceListsTable({
     },
     {
       key: "kind",
-      header: t("price_lists.kind"),
+      header: t("price_lists.column_kind"),
       width: pixel(140),
       renderCell: (list) => (
         <Badge label={kindLabel(t, list.kind)} variant={list.kind === "sale" ? "pink" : "blue"} />
@@ -180,7 +180,7 @@ export function PriceListsTable({
     { key: "currency", header: t("common.currency"), width: pixel(96) },
     {
       key: "fixed_price_count",
-      header: t("price_lists.fixed_prices"),
+      header: t("price_lists.column_fixed_prices"),
       width: pixel(120),
       align: "end",
       renderCell: (list) => <Text>{format.number(list.fixed_price_count)}</Text>,

@@ -9,8 +9,8 @@ import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { type CategoryNode, subtree } from "./categories.ts";
 import type { Format } from "./format.ts";
 import { adjustAmount, parsePercent } from "./price-grid/money.ts";
-import { type PriceT, say } from "./price-grid/say.ts";
-import { MAX_BREAKS, type Money } from "./price-grid/types.ts";
+import { say } from "./price-grid/say.ts";
+import { MAX_BREAKS, type Money, type PriceT } from "./price-grid/types.ts";
 
 export type PriceList = AdminSchemas["PriceListResponse"];
 export type AppliesTo = AdminSchemas["AppliesToDto"];

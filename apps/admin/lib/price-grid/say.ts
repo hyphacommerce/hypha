@@ -8,10 +8,8 @@
 // `parsePercent`, `parseBreaks`, `phaseBadge` and `candidateReason`, and delete this
 // table.
 
-import type { KeyIn, TFor } from "../messages";
-
-/** A translator that has the price lists' messages: a server's `T`, or `useT<"price_lists">()`. */
-export type PriceT = TFor<"price_lists">;
+import type { KeyIn } from "../messages";
+import type { PriceT } from "./types.ts";
 
 type Values = Readonly<Record<string, string | number>>;
 
@@ -55,9 +53,8 @@ const ENGLISH = {
 export type LegacyKey = keyof typeof ENGLISH;
 
 /** Every legacy key, for the test that holds the table to the catalog. */
-export const LEGACY_KEYS: readonly LegacyKey[] = Object.keys(ENGLISH).filter(
-  (key): key is LegacyKey => key in ENGLISH,
-);
+// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- an object's own keys
+export const LEGACY_KEYS = Object.keys(ENGLISH) as LegacyKey[];
 
 /** The message under `key`: `t`'s, or today's English for a caller that has no translator yet. */
 export function say(t: PriceT | undefined, key: LegacyKey, values: Values = {}): string {

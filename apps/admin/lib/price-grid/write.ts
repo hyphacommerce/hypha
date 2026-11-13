@@ -3,8 +3,7 @@
 
 import { diffRequests } from "../price-csv.ts";
 import { entryErrors } from "../price-lists.ts";
-import type { PriceT } from "./say.ts";
-import type { FixedPriceUpsert, PriceGridDiff } from "./types.ts";
+import type { FixedPriceUpsert, PriceGridDiff, PriceT } from "./types.ts";
 
 /** An API error as the SDK answers it. */
 export type WriteError = { code: string; error: string; details?: unknown };

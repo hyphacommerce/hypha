@@ -192,10 +192,10 @@ async function Settings({ id }: { id: string }) {
         />
         <Card>
           <MetadataList title={t("price_lists.detail_about")}>
-            <MetadataListItem label={t("price_lists.column_when")}>
+            <MetadataListItem label={t("price_lists.detail_when")}>
               <ListWindow list={list} />
             </MetadataListItem>
-            <MetadataListItem label={t("price_lists.fixed_prices")}>
+            <MetadataListItem label={t("price_lists.detail_fixed_prices")}>
               <Text>{format.number(list.fixed_price_count)}</Text>
             </MetadataListItem>
             <MetadataListItem label={t("price_lists.detail_id")}>

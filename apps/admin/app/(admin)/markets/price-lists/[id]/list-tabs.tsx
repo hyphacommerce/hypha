@@ -12,7 +12,7 @@ export function ListTabs({ id, tab, children }: { id: string; tab: ListTab; chil
   const t = useT<"price_lists">();
   const tabs: { value: ListTab; label: string }[] = [
     { value: "settings", label: t("common.settings") },
-    { value: "prices", label: t("price_lists.prices") },
+    { value: "prices", label: t("price_lists.detail_tab_prices") },
   ];
   return (
     <UrlTabs
