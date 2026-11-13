@@ -24,7 +24,7 @@ export default async function AddressesPage({ params }: { params: Promise<{ coun
   const folder = (await params).country;
   const [country, t] = await Promise.all([countryOf(folder), pageT(folder)]);
   const code = country.country;
-  const to = (path: string) => link(code, path);
+  const to = (path: string) => link(folder, path);
   const [account, format] = await Promise.all([loadAccount(), loadAddressFormat(code)]);
   if (!account) redirect(to("/account"));
   return (

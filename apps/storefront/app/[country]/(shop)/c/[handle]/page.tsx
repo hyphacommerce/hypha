@@ -8,13 +8,13 @@ import { notFound } from "next/navigation";
 import { CustomFields } from "@/components/custom-fields";
 import { JsonLd } from "@/components/json-ld";
 import { Listing } from "@/components/listing";
-import { countryOf, fieldContext, loadCategory } from "@/lib/api";
+import { countryOf, fieldContext, loadCategory, pageLocale } from "@/lib/api";
 import { presentFields } from "@/lib/custom-fields";
 import { pageT } from "@/lib/i18n";
 import { readListingPage } from "@/lib/listing-data";
 import { pageMetadata } from "@/lib/metadata";
 import { breadcrumbLd, plainText } from "@/lib/seo";
-import { absolute, link, segmentCountry } from "@/lib/site";
+import { absolute, link } from "@/lib/site";
 
 /** Static, refreshed at most every five minutes. */
 export const revalidate = 300;
@@ -29,17 +29,18 @@ type Props = {
   params: Promise<{ country: string; handle: string }>;
 };
 
-async function load(handle: string) {
-  const category = await loadCategory(handle);
+async function load(handle: string, segment: string) {
+  const { country, language } = await pageLocale(segment);
+  const category = await loadCategory(handle, country, language);
   if (!category) notFound();
   return category;
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const { country, handle } = await params;
-  const category = await load(handle);
+  const { country: segment, handle } = await params;
+  const category = await load(handle, segment);
   return pageMetadata({
-    country: segmentCountry(country),
+    segment,
     path: `/c/${handle}`,
     title: category.name,
     description: plainText(category.description),
@@ -58,9 +59,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
  */
 export default async function CategoryPage({ params }: Props) {
   const { country: folder, handle } = await params;
-  const [country, category, t] = await Promise.all([
+  const [country, place, category, t] = await Promise.all([
     countryOf(folder),
-    load(handle),
+    pageLocale(folder),
+    load(handle, folder),
     pageT(folder),
   ]);
   const code = country.country;
@@ -73,26 +75,29 @@ export default async function CategoryPage({ params }: Props) {
       params: {},
       category: category.id,
     }),
-    fieldContext(country, t, category.custom_fields),
+    fieldContext(country, place, t, category.custom_fields),
   ]);
   // The merchant's custom fields shown to storefronts.
   const fields = presentFields("category", category.custom_fields, context);
-  const productBase = link(code, "/p");
+  const productBase = link(folder, "/p");
 
   return (
     <VStack gap={6}>
       <JsonLd
         data={breadcrumbLd([
-          { name: t("common.home"), url: absolute(link(code, "/")) },
-          ...ancestors.map((a) => ({ name: a.name, url: absolute(link(code, `/c/${a.handle}`)) })),
-          { name: category.name, url: absolute(link(code, `/c/${category.handle}`)) },
+          { name: t("common.home"), url: absolute(link(folder, "/")) },
+          ...ancestors.map((a) => ({
+            name: a.name,
+            url: absolute(link(folder, `/c/${a.handle}`)),
+          })),
+          { name: category.name, url: absolute(link(folder, `/c/${category.handle}`)) },
         ])}
       />
       <VStack gap={3}>
         <Breadcrumbs variant="supporting">
-          <BreadcrumbItem href={link(code, "/")}>{t("common.home")}</BreadcrumbItem>
+          <BreadcrumbItem href={link(folder, "/")}>{t("common.home")}</BreadcrumbItem>
           {ancestors.map((a) => (
-            <BreadcrumbItem key={a.id} href={link(code, `/c/${a.handle}`)}>
+            <BreadcrumbItem key={a.id} href={link(folder, `/c/${a.handle}`)}>
               {a.name}
             </BreadcrumbItem>
           ))}
@@ -117,16 +122,15 @@ export default async function CategoryPage({ params }: Props) {
         {category.children.length > 0 && (
           <HStack gap={2} wrap="wrap">
             {category.children.map((c) => (
-              <Button key={c.id} label={c.name} href={link(code, `/c/${c.handle}`)} size="sm" />
+              <Button key={c.id} label={c.name} href={link(folder, `/c/${c.handle}`)} size="sm" />
             ))}
           </HStack>
         )}
       </VStack>
       <Listing
-        country={code}
         digits={country.minor_units}
         currency={country.currency}
-        base={link(code, `/c/${handle}`)}
+        base={link(folder, `/c/${handle}`)}
         productBase={productBase}
         category={category.id}
         initial={first}

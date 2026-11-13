@@ -13,7 +13,7 @@ import { CustomFields } from "@/components/custom-fields";
 import { statusLabel } from "@/components/order-details";
 import { SiteLink } from "@/components/site-link";
 import { accountApi, loadAccount } from "@/lib/account";
-import { countryOf, fieldContext, loadStore } from "@/lib/api";
+import { countryOf, fieldContext, loadStore, pageLocale } from "@/lib/api";
 import { presentFields } from "@/lib/custom-fields";
 import { formatDate } from "@/lib/format";
 import { pageT } from "@/lib/i18n";
@@ -39,16 +39,15 @@ export async function generateMetadata({
 export default async function AccountPage({ params }: { params: Promise<{ country: string }> }) {
   const folder = (await params).country;
   const [country, t] = await Promise.all([countryOf(folder), pageT(folder)]);
-  const code = country.country;
-  const to = (path: string) => link(code, path);
+  const to = (path: string) => link(folder, path);
   const account = await loadAccount();
   if (!account) {
-    return <SignInForm country={code} storeName={(await loadStore()).name} />;
+    return <SignInForm storeName={(await loadStore()).name} />;
   }
   const client = (await accountApi())!;
   const [orders, context] = await Promise.all([
     client.GET("/storefront/account/orders", { params: { query: { limit: 5 } } }),
-    fieldContext(country, t, account.custom_fields),
+    fieldContext(country, await pageLocale(folder), t, account.custom_fields),
   ]);
   const recent = orders.data?.items ?? [];
   const name = [account.first_name, account.last_name].filter(Boolean).join(" ");
@@ -116,7 +115,7 @@ export default async function AccountPage({ params }: { params: Promise<{ countr
               <CustomFields entries={fields} columns="single" />
             </Card>
           )}
-          <SignOutButtons country={code} />
+          <SignOutButtons />
         </VStack>
       </Grid>
     </AccountShell>

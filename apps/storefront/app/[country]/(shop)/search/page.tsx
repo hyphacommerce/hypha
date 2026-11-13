@@ -58,11 +58,10 @@ export default async function SearchPage({
         {page.state.q ? t("search.results_for", { query: page.state.q }) : t("search.all_products")}
       </Heading>
       <Listing
-        country={code}
         digits={country.minor_units}
         currency={country.currency}
-        base={link(code, "/search")}
-        productBase={link(code, "/p")}
+        base={link(folder, "/search")}
+        productBase={link(folder, "/p")}
         initial={page}
         initialQuery={queryOf(query)}
       />

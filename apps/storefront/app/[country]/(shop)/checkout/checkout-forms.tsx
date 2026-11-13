@@ -40,6 +40,7 @@ import { type CartMessage, type PlacedMessages, statusOf } from "@/lib/cart-mess
 import { saleLabel } from "@/lib/prices";
 import { useT } from "@/lib/use-t";
 import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
+import { useLocale } from "@/components/locale";
 
 /** Checkout's messages and the address form's, beside the shared ones: the checkout's
  * layout sends them. */
@@ -48,7 +49,6 @@ const useCheckoutT = () => useT<"checkout" | "address">();
 /** Contact and shipping address, saved together; the address laid out as its country
  * does (`format`). */
 export function DetailsForm({
-  country,
   countryName,
   format,
   initial,
@@ -58,7 +58,6 @@ export function DetailsForm({
   messages,
   suggestion,
 }: {
-  country: string;
   countryName: string;
   format: AddressFormat;
   initial: Details;
@@ -73,6 +72,7 @@ export function DetailsForm({
   /** A corrected address the store's verification app is confident of. */
   suggestion?: Suggestion;
 }) {
+  const locale = useLocale();
   const t = useCheckoutT();
   const [details, setDetails] = useState(initial);
   const [optIn, setOptIn] = useState(initialOptIn);
@@ -112,7 +112,7 @@ export function DetailsForm({
   const save = (next: Details) =>
     start(async () => {
       // A save answers with the page re-rendered (`refresh` in the action).
-      const result = await saveDetails(country, next, optIn);
+      const result = await saveDetails(locale, next, optIn);
       setError(result?.error);
       setProblems(result?.problems);
       if (!result) setEdited(new Set());
@@ -277,7 +277,6 @@ export type Offer = { option: string; label: string; price: string; was?: string
 
 /** One group's shipping options; choosing one saves it. */
 export function ShippingChoice({
-  country,
   group,
   heading,
   offers,
@@ -285,7 +284,6 @@ export function ShippingChoice({
   problem,
   messages,
 }: {
-  country: string;
   group: string;
   heading?: string;
   offers: Offer[];
@@ -294,6 +292,7 @@ export function ShippingChoice({
   /** The cart's messages about this group and its chosen option. */
   messages?: CartMessage[];
 }) {
+  const locale = useLocale();
   const t = useCheckoutT();
   const [value, setValue] = useState(selected ?? "");
   const [error, setError] = useState<string>();
@@ -301,7 +300,7 @@ export function ShippingChoice({
   const choose = (option: string) => {
     setValue(option);
     start(async () => {
-      const result = await selectShipping({ country, group, option });
+      const result = await selectShipping({ locale, group, option });
       setError(result?.error);
       if (result) setValue(selected ?? "");
     });
@@ -363,13 +362,11 @@ export const PAYMENT_STEP = "payment";
  * saves it. The chosen method's card holds its instructions (bank details) or, paid
  * online, its payment form (`detail`), as Shopify's checkout does. */
 export function PaymentChoice({
-  country,
   methods,
   selected,
   problem,
   detail,
 }: {
-  country: string;
   methods: Method[];
   selected?: string;
   /** The cart's method isn't offered any more (disabled, or not in this market). */
@@ -377,6 +374,7 @@ export function PaymentChoice({
   /** What the saved method's card holds below its name (the online payment form). */
   detail?: React.ReactNode;
 }) {
+  const locale = useLocale();
   const t = useCheckoutT();
   const [value, setValue] = useState(selected ?? "");
   const [error, setError] = useState<string>();
@@ -384,7 +382,7 @@ export function PaymentChoice({
   const choose = (method: string) => {
     setValue(method);
     start(async () => {
-      const result = await selectPaymentMethod({ country, method });
+      const result = await selectPaymentMethod({ locale, method });
       setError(result?.error);
       if (result) setValue(selected ?? "");
     });
@@ -443,13 +441,11 @@ function ChoiceDetail({ children }: { children: React.ReactNode }) {
 
 /** "Place order", at the total the shopper sees. */
 export function PlaceOrder({
-  country,
   total,
   attempt,
   ready,
   missing,
 }: {
-  country: string;
   total: { amount: number; currency: string };
   /** One per render of the checkout: a double click places one order. */
   attempt: string;
@@ -457,6 +453,7 @@ export function PlaceOrder({
   /** What's left to do before the order can be placed. */
   missing?: string;
 }) {
+  const locale = useLocale();
   const t = useCheckoutT();
   const [error, setError] = useState<string>();
   const [pending, start] = useTransition();
@@ -471,7 +468,7 @@ export function PlaceOrder({
         isLoading={pending}
         clickAction={() =>
           start(async () => {
-            const result = await placeOrder({ country, total, attempt });
+            const result = await placeOrder({ locale, total, attempt });
             if (result) setError(result.error);
             if (result?.step === "payment") {
               document.getElementById(PAYMENT_STEP)?.scrollIntoView({ behavior: "smooth" });
@@ -527,16 +524,15 @@ function usePayment(): OnlinePayment {
 
 /** The checkout's payment state, for the form and the button it holds. */
 export function CheckoutPayment({
-  country,
   total,
   attempt,
   children,
 }: {
-  country: string;
   total: { amount: number; currency: string };
   attempt: string;
   children: React.ReactNode;
 }) {
+  const locale = useLocale();
   const t = useCheckoutT();
   const [element, setElement] = useState<HTMLElement | null>(null);
   const [ready, setReady] = useState(false);
@@ -552,7 +548,7 @@ export function CheckoutPayment({
       setError(null);
       for (let tries = 0; tries < CONFIRM_TRIES; tries++) {
         // Success leaves this page (the action redirects to the confirmation).
-        const result = await placeOrder({ country, total: { amount, currency }, attempt });
+        const result = await placeOrder({ locale, total: { amount, currency }, attempt });
         if (!result?.pending) {
           setPaying(false);
           if (result) setError(result.error);
@@ -581,7 +577,7 @@ export function CheckoutPayment({
       setError,
       place,
     };
-  }, [element, ready, redirect, committed, paying, error, country, amount, currency, attempt, t]);
+  }, [element, ready, redirect, committed, paying, error, locale, amount, currency, attempt, t]);
   return <PaymentContext.Provider value={value}>{children}</PaymentContext.Provider>;
 }
 
@@ -591,13 +587,8 @@ export function CheckoutPayment({
  * button hidden: the summary's "Pay" pays). Restarted (by its `key`) when the method
  * or the total changes.
  */
-export function OnlinePaymentForm({
-  country,
-  total,
-}: {
-  country: string;
-  total: { amount: number; currency: string };
-}) {
+export function OnlinePaymentForm({ total }: { total: { amount: number; currency: string } }) {
+  const locale = useLocale();
   const t = useCheckoutT();
   const payment = usePayment();
   const [started, setStarted] = useState<CartPaymentResult | null>(null);
@@ -614,7 +605,7 @@ export function OnlinePaymentForm({
       ).toString();
       // The guard after the answer is the point: a form gone meanwhile drops it.
       // react-doctor-disable-next-line react-doctor/async-defer-await -- see above
-      const result = await startCartPayment({ country, total, returnUrl });
+      const result = await startCartPayment({ locale, total, returnUrl });
       if (!current) return;
       setStarted(result);
       payment.setCommitted(result.committed);

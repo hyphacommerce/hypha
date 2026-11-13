@@ -21,15 +21,13 @@ export async function generateMetadata({
 
 export default async function MarketingPage({ params }: { params: Promise<{ country: string }> }) {
   const folder = (await params).country;
-  const [country, t] = await Promise.all([countryOf(folder), pageT(folder)]);
-  const code = country.country;
-  const to = (path: string) => link(code, path);
+  const [, t] = await Promise.all([countryOf(folder), pageT(folder)]);
+  const to = (path: string) => link(folder, path);
   const account = await loadAccount();
   if (!account) redirect(to("/account"));
   return (
     <AccountShell t={t} title={t("account.marketing")} current="/account/marketing" link={to}>
       <MarketingChoices
-        country={code}
         email={account.email_marketing.state === "subscribed"}
         sms={account.sms_marketing.state === "subscribed"}
         hasPhone={Boolean(account.phone)}

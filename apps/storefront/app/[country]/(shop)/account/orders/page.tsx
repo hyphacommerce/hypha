@@ -37,8 +37,7 @@ export default async function OrdersPage({
 }) {
   const folder = (await params).country;
   const [country, t] = await Promise.all([countryOf(folder), pageT(folder)]);
-  const code = country.country;
-  const to = (path: string) => link(code, path);
+  const to = (path: string) => link(folder, path);
   const client = await accountApi();
   if (!client) redirect(to("/account"));
   const given = (await searchParams).cursor;

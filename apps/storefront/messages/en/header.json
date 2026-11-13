@@ -10,5 +10,6 @@
   "all_products": "All products",
   "currency": "Currency",
   "search_for": "Search for “{words}”",
-  "search_placeholder": "Search products"
+  "search_placeholder": "Search products",
+  "language": "Language"
 }

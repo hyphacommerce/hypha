@@ -1,10 +1,12 @@
-// Every page worth finding, per country: home, the sale, each shown category and each
-// product the country's market sells, with the other countries' copies as alternates.
+// Every page worth finding, in every place it has a URL (each country in each of its
+// languages: `alternatePlaces`): home, the sale, each shown category and each product the
+// country's market sells, with the page's other copies as alternates.
 
-import { loadCategories, loadCountries, loadStore } from "@/lib/api";
+import { loadCategories, loadCountries } from "@/lib/api";
 import { search } from "@/lib/listing-data";
-import { countryAlternates } from "@/lib/seo";
-import { link, mode, siteUrl } from "@/lib/site";
+import { alternatePlaces } from "@/lib/routing";
+import { localeAlternates } from "@/lib/seo";
+import { link, mode, segmentCountry, siteUrl } from "@/lib/site";
 
 /** Search answers 100 a page and goes 1,000 results deep. */
 const PAGE = 100;
@@ -41,31 +43,28 @@ async function productHandles(country: string): Promise<string[]> {
 const escape = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+type Place = { tag: string; segment: string };
+
 export async function GET(request: Request) {
   const origin = siteUrl()?.origin ?? new URL(request.url).origin;
-  const [store, countries, categories] = await Promise.all([
-    loadStore(),
-    loadCountries(),
-    loadCategories(),
-  ]);
-  // A single tree has one URL per page, its country from a cookie: the first's.
-  const codes = countries.map((c) => c.country);
-  const listed = mode() === "folders" ? codes : codes.slice(0, 1);
-  const perCountry = await Promise.all(
-    listed.map(async (country) => ({ country, products: await productHandles(country) })),
+  const [countries, categories] = await Promise.all([loadCountries(), loadCategories()]);
+  const places = alternatePlaces(mode(), countries);
+  const codes = [...new Set(places.map((p) => segmentCountry(p.segment)))];
+  const perCountry = new Map(
+    await Promise.all(codes.map(async (c) => [c, await productHandles(c)] as const)),
   );
-  const sellers = new Map<string, string[]>();
-  for (const { country, products } of perCountry)
-    for (const h of products) sellers.set(h, [...(sellers.get(h) ?? []), country]);
+  // Where each product is sold, for its alternates: only those places have its page.
+  const sellers = new Map<string, Set<string>>();
+  for (const [country, products] of perCountry)
+    for (const h of products) sellers.set(h, (sellers.get(h) ?? new Set()).add(country));
 
-  const entry = (country: string, path: string, alsoIn: string[]) => {
-    const alternates =
-      mode() === "folders"
-        ? countryAlternates(store.default_language, alsoIn, (c) => link(c, path))
-        : undefined;
+  const entry = (place: Place, path: string, alsoIn: Place[]) => {
+    const alternates = localeAlternates(
+      alsoIn.map((p) => ({ tag: p.tag, href: link(p.segment, path) })),
+    );
     return [
       "<url>",
-      `<loc>${escape(origin + link(country, path))}</loc>`,
+      `<loc>${escape(origin + link(place.segment, path))}</loc>`,
       ...Object.entries(alternates ?? {}).map(
         ([lang, href]) =>
           `<xhtml:link rel="alternate" hreflang="${lang}" href="${escape(origin + href)}"/>`,
@@ -73,12 +72,21 @@ export async function GET(request: Request) {
       "</url>",
     ].join("");
   };
-  const urls = perCountry.flatMap(({ country, products }) => [
-    entry(country, "/", listed),
-    entry(country, "/sale", listed),
-    ...handles(categories).map((h) => entry(country, `/c/${h}`, listed)),
-    ...products.map((h) => entry(country, `/p/${h}`, sellers.get(h) ?? [country])),
-  ]);
+  const urls = places.flatMap((place) => {
+    const products = perCountry.get(segmentCountry(place.segment)) ?? [];
+    return [
+      entry(place, "/", places),
+      entry(place, "/sale", places),
+      ...handles(categories).map((h) => entry(place, `/c/${h}`, places)),
+      ...products.map((h) =>
+        entry(
+          place,
+          `/p/${h}`,
+          places.filter((p) => sellers.get(h)?.has(segmentCountry(p.segment))),
+        ),
+      ),
+    ];
+  });
   const xml = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">',

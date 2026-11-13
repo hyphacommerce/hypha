@@ -30,8 +30,7 @@ export default async function AccountOrderPage({
 }) {
   const { country: folder, id } = await params;
   const [country, t] = await Promise.all([countryOf(folder), pageT(folder)]);
-  const code = country.country;
-  const to = (path: string) => link(code, path);
+  const to = (path: string) => link(folder, path);
   const client = await accountApi();
   if (!client) redirect(to("/account"));
   const { data: order, response } = await client.GET("/storefront/account/orders/{id}", {

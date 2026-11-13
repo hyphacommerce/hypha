@@ -7,7 +7,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
-import { countryOf } from "@/lib/api";
+import { countryOf, pageLocale } from "@/lib/api";
 import { checkOutCart, paysOnline } from "@/lib/checkout";
 import { link } from "@/lib/site";
 
@@ -27,10 +27,11 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ country: string }> },
 ) {
-  const country = (await countryOf((await params).country)).country;
-  const checkout = link(country, "/checkout");
-  if (!(await paysOnline(country))) return to(checkout);
-  const result = await checkOutCart({ country, attempt: crypto.randomUUID() });
-  if ("order" in result) return to(link(country, `/order/${result.order}/confirmed`));
+  const segment = (await params).country;
+  const [, place] = await Promise.all([countryOf(segment), pageLocale(segment)]);
+  const checkout = link(place.segment, "/checkout");
+  if (!(await paysOnline(place.country))) return to(checkout);
+  const result = await checkOutCart({ place, attempt: crypto.randomUUID() });
+  if ("order" in result) return to(link(place.segment, `/order/${result.order}/confirmed`));
   return to(`${checkout}?payment=${encodeURIComponent(result.error)}`);
 }

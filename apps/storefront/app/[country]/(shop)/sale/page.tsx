@@ -9,7 +9,7 @@ import { countryOf } from "@/lib/api";
 import { pageT } from "@/lib/i18n";
 import { readListingPage } from "@/lib/listing-data";
 import { pageMetadata } from "@/lib/metadata";
-import { link, segmentCountry } from "@/lib/site";
+import { link } from "@/lib/site";
 
 /** Static, refreshed at most every five minutes (and when prices change: the search
  * behind it is tagged `prices`, which a price list starting or ending expires). */
@@ -28,7 +28,7 @@ export async function generateMetadata({
   const folder = (await params).country;
   const t = await pageT(folder);
   return pageMetadata({
-    country: segmentCountry(folder),
+    segment: folder,
     path: "/sale",
     title: t("sale.title"),
     description: t("sale.meta_description"),
@@ -56,7 +56,7 @@ export default async function SalePage({ params }: { params: Promise<{ country: 
     <VStack gap={6}>
       <VStack gap={3}>
         <Breadcrumbs variant="supporting">
-          <BreadcrumbItem href={link(code, "/")}>{t("common.home")}</BreadcrumbItem>
+          <BreadcrumbItem href={link(folder, "/")}>{t("common.home")}</BreadcrumbItem>
           <BreadcrumbItem isCurrent>{t("sale.title")}</BreadcrumbItem>
         </Breadcrumbs>
         <Heading level={1} type="display-2">
@@ -65,11 +65,10 @@ export default async function SalePage({ params }: { params: Promise<{ country: 
         <Text color="secondary">{t("sale.intro")}</Text>
       </VStack>
       <Listing
-        country={code}
         digits={country.minor_units}
         currency={country.currency}
-        base={link(code, "/sale")}
-        productBase={link(code, "/p")}
+        base={link(folder, "/sale")}
+        productBase={link(folder, "/p")}
         onSale
         initial={first}
         initialQuery=""

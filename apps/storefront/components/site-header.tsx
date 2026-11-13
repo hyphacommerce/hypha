@@ -24,6 +24,7 @@ import { useT } from "@/lib/use-t";
 import { useCart } from "./cart/cart-provider";
 import { CloseOnNavigate } from "./close-on-navigate";
 import { type CountryOption, CurrencySwitcher } from "./currency-switcher";
+import { type LanguageOption, LanguageSwitcher } from "./language-switcher";
 import MobileNav from "./mobile-nav";
 import { type NavCategory, NavMenu } from "./nav-menu";
 import { SearchBox } from "./search-box";
@@ -39,6 +40,8 @@ export type HeaderProps = {
   searchHref: string;
   accountHref: string;
   countries: CountryOption[];
+  /** The country's languages; the switcher shows only with more than one. */
+  languages: LanguageOption[];
   categories: NavCategory[];
 };
 
@@ -84,6 +87,7 @@ export function SiteHeader(props: HeaderProps) {
                   accountHref={props.accountHref}
                   country={props.country}
                   countries={props.countries}
+                  languages={props.languages}
                 />
               )}
             </div>
@@ -113,7 +117,7 @@ export function SiteHeader(props: HeaderProps) {
               placement="below"
               alignment="end"
               width={420}
-              content={<SearchBox country={props.country} searchHref={props.searchHref} />}
+              content={<SearchBox searchHref={props.searchHref} />}
             >
               <Button
                 label={t("header.search")}
@@ -123,6 +127,7 @@ export function SiteHeader(props: HeaderProps) {
               />
             </Popover>
             <div className="shop-nav-currency">
+              <LanguageSwitcher languages={props.languages} />
               <CurrencySwitcher current={props.country} countries={props.countries} />
             </div>
             <div className="shop-nav-account">

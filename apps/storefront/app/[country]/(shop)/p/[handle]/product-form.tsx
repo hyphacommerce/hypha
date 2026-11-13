@@ -41,6 +41,7 @@ import { readPromotions } from "@/lib/discounts";
 import { breakLabel, sortedBreaks, unitPriceFor } from "@/lib/prices";
 import { hasSessionFlag } from "@/lib/session-flag";
 import { useT } from "@/lib/use-t";
+import { useLocale } from "@/components/locale";
 
 type Product = StorefrontSchemas["StorefrontProductResponse"];
 type Variant = StorefrontSchemas["StorefrontVariantResponse"];
@@ -70,14 +71,15 @@ function offered(product: Product, selections: string[], index: number, value: s
  * shows everyone's. Asked only when the browser's cookies say there's a session, so a
  * guest's page makes no call.
  */
-function useCustomerPrices(country: string, handle: string) {
+function useCustomerPrices(handle: string) {
+  const locale = useLocale();
   const [prices, setPrices] = useState<Record<string, VariantPrices> | null>(null);
   useEffect(() => {
     if (!hasSessionFlag()) return;
     let current = true;
     const read = async () => {
       try {
-        const found = await customerPrices({ country, handle });
+        const found = await customerPrices({ locale, handle });
         if (current) setPrices(found);
       } catch {
         // The shop's server didn't answer: everyone's prices stay, as the page has them.
@@ -87,7 +89,7 @@ function useCustomerPrices(country: string, handle: string) {
     return () => {
       current = false;
     };
-  }, [country, handle]);
+  }, [locale, handle]);
   return prices;
 }
 
@@ -111,7 +113,7 @@ export function ProductForm({
   const [wanted, setQuantity] = useState(1);
   const [error, setError] = useState<string>();
   const [pending, startAdding] = useTransition();
-  const own = useCustomerPrices(cart.country, product.handle);
+  const own = useCustomerPrices(product.handle);
   const chosen = variantWith(product, selections);
   // The shopper's own prices replace everyone's, amount for amount in the same place.
   const variant = chosen && own?.[chosen.id] ? { ...chosen, ...own[chosen.id] } : chosen;

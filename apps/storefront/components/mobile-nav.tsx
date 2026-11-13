@@ -18,6 +18,7 @@ import { useT } from "@/lib/use-t";
 
 import { CloseOnNavigate } from "./close-on-navigate";
 import { type CountryOption, CurrencySwitcher } from "./currency-switcher";
+import { type LanguageOption, LanguageSwitcher } from "./language-switcher";
 import type { NavCategory } from "./nav-menu";
 import { SiteLink } from "./site-link";
 
@@ -29,6 +30,7 @@ export default function MobileNav({
   accountHref,
   country,
   countries,
+  languages,
 }: {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
@@ -37,6 +39,7 @@ export default function MobileNav({
   accountHref: string;
   country: string;
   countries: CountryOption[];
+  languages: LanguageOption[];
 }) {
   const t = useT();
   return (
@@ -94,6 +97,12 @@ export default function MobileNav({
             <Text color="secondary">{t("header.currency")}</Text>
             <CurrencySwitcher current={country} countries={countries} layout="segments" />
           </VStack>
+          {languages.length > 1 && (
+            <VStack gap={2}>
+              <Text color="secondary">{t("header.language")}</Text>
+              <LanguageSwitcher languages={languages} layout="segments" />
+            </VStack>
+          )}
         </VStack>
       </Dialog>
     </>

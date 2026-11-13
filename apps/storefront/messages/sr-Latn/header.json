@@ -10,5 +10,6 @@
   "all_products": "Svi proizvodi",
   "currency": "Valuta",
   "search_for": "Pretraži „{words}”",
-  "search_placeholder": "Pretražite proizvode"
+  "search_placeholder": "Pretražite proizvode",
+  "language": "Jezik"
 }

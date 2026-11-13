@@ -29,9 +29,8 @@ export async function generateMetadata({
 /** The person's data: download it, or ask for it to be erased. */
 export default async function PrivacyPage({ params }: { params: Promise<{ country: string }> }) {
   const folder = (await params).country;
-  const [country, t] = await Promise.all([countryOf(folder), pageT(folder)]);
-  const code = country.country;
-  const to = (path: string) => link(code, path);
+  const [, t] = await Promise.all([countryOf(folder), pageT(folder)]);
+  const to = (path: string) => link(folder, path);
   const account = await loadAccount();
   if (!account) redirect(to("/account"));
   return (
@@ -54,7 +53,6 @@ export default async function PrivacyPage({ params }: { params: Promise<{ countr
           <VStack gap={3}>
             <Heading level={2}>{t("account.erase_title")}</Heading>
             <ErasureControls
-              country={code}
               dueAt={account.erasure_due_at ? formatDate(account.erasure_due_at, t.locale) : null}
             />
           </VStack>

@@ -42,7 +42,6 @@ export default async function OrderConfirmedPage({ params, searchParams }: Props
     redirect(`/order/${encodeURIComponent(id)}?token=${encodeURIComponent(given)}`);
   }
   const [country, t] = await Promise.all([countryOf(folder), pageT(folder)]);
-  const code = country.country;
   const token = (await cookies()).get(orderTokenCookie(id))?.value;
   const order = token
     ? (
@@ -59,7 +58,7 @@ export default async function OrderConfirmedPage({ params, searchParams }: Props
         title={t("order.cant_show_title")}
         description={t("order.cant_show_description")}
         actions={
-          <Button label={t("common.back_to_shop")} href={link(code, "/")} variant="primary" />
+          <Button label={t("common.back_to_shop")} href={link(folder, "/")} variant="primary" />
         }
       />
     );
@@ -86,7 +85,7 @@ export default async function OrderConfirmedPage({ params, searchParams }: Props
         country={country}
         after={
           <div>
-            <Button label={t("common.keep_shopping")} href={link(code, "/")} variant="primary" />
+            <Button label={t("common.keep_shopping")} href={link(folder, "/")} variant="primary" />
           </div>
         }
       />

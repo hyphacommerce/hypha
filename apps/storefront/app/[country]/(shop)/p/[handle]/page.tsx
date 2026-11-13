@@ -8,7 +8,7 @@ import { notFound } from "next/navigation";
 import { AppElements } from "@/components/app-element";
 import { JsonLd } from "@/components/json-ld";
 import { ProductGrid } from "@/components/product-grid";
-import { countryOf, fieldContext, loadProduct } from "@/lib/api";
+import { countryOf, fieldContext, loadProduct, pageLocale } from "@/lib/api";
 import { elementsFor } from "@/lib/app-elements";
 import { presentFields } from "@/lib/custom-fields";
 import { countryName } from "@/lib/format";
@@ -16,7 +16,7 @@ import { pageT } from "@/lib/i18n";
 import { relatedProducts } from "@/lib/listing-data";
 import { pageMetadata } from "@/lib/metadata";
 import { breadcrumbLd, plainText, productLd } from "@/lib/seo";
-import { absolute, link, segmentCountry } from "@/lib/site";
+import { absolute, link } from "@/lib/site";
 
 import { ProductForm } from "./product-form";
 
@@ -31,19 +31,19 @@ type Props = {
   params: Promise<{ country: string; handle: string }>;
 };
 
-async function load(handle: string, country: string) {
-  const product = await loadProduct(handle, country);
+async function load(handle: string, segment: string) {
+  const { country, language } = await pageLocale(segment);
+  const product = await loadProduct(handle, country, language);
   if (!product) notFound();
   return product;
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const { country, handle } = await params;
-  const code = segmentCountry(country);
-  const product = await load(handle, code);
+  const { country: segment, handle } = await params;
+  const product = await load(handle, segment);
   const image = product.media.find((m) => m.kind === "image");
   return pageMetadata({
-    country: code,
+    segment,
     path: `/p/${handle}`,
     title: product.title,
     description: plainText(product.description),
@@ -59,9 +59,10 @@ export default async function ProductPage({ params }: Props) {
   const { country: folder, handle } = await params;
   // Both at once: the folder is the country's code (the proxy lets only sold-to
   // countries' folders through), and an unknown one 404s either way.
-  const [country, product, appBlocks, t] = await Promise.all([
+  const [country, place, product, appBlocks, t] = await Promise.all([
     countryOf(folder),
-    load(handle, segmentCountry(folder)),
+    pageLocale(folder),
+    load(handle, folder),
     // What installed apps show on a product: elements, loaded in the browser, so the
     // page stays static.
     elementsFor("product.block"),
@@ -73,13 +74,14 @@ export default async function ProductPage({ params }: Props) {
   const [context, related] = await Promise.all([
     fieldContext(
       country,
+      place,
       t,
       product.custom_fields,
       ...product.variants.map((v) => v.custom_fields),
     ),
     relatedProducts(product, code),
   ]);
-  const url = absolute(link(code, `/p/${product.handle}`));
+  const url = absolute(link(folder, `/p/${product.handle}`));
   const fields = {
     product: presentFields("product", product.custom_fields, context),
     variants: Object.fromEntries(
@@ -89,15 +91,15 @@ export default async function ProductPage({ params }: Props) {
 
   return (
     <VStack gap={5}>
-      <JsonLd data={productLd(product, url, country.minor_units)} />
+      <JsonLd data={productLd(product, url, country.minor_units, place.language)} />
       <JsonLd
         data={breadcrumbLd([
-          { name: t("common.home"), url: absolute(link(code, "/")) },
+          { name: t("common.home"), url: absolute(link(folder, "/")) },
           { name: product.title, url },
         ])}
       />
       <Breadcrumbs variant="supporting">
-        <BreadcrumbItem href={link(code, "/")}>{t("common.home")}</BreadcrumbItem>
+        <BreadcrumbItem href={link(folder, "/")}>{t("common.home")}</BreadcrumbItem>
         <BreadcrumbItem isCurrent>{product.title}</BreadcrumbItem>
       </Breadcrumbs>
       {product.sold_in_country === false ? (
@@ -124,7 +126,7 @@ export default async function ProductPage({ params }: Props) {
             t={t}
             hits={related}
             digits={country.minor_units}
-            productBase={link(code, "/p")}
+            productBase={link(folder, "/p")}
             minWidth={200}
           />
         </VStack>

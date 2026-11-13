@@ -23,9 +23,8 @@ export async function generateMetadata({
 
 export default async function ProfilePage({ params }: { params: Promise<{ country: string }> }) {
   const folder = (await params).country;
-  const [country, t] = await Promise.all([countryOf(folder), pageT(folder)]);
-  const code = country.country;
-  const to = (path: string) => link(code, path);
+  const [, t] = await Promise.all([countryOf(folder), pageT(folder)]);
+  const to = (path: string) => link(folder, path);
   const account = await loadAccount();
   if (!account) redirect(to("/account"));
   return (
@@ -39,7 +38,6 @@ export default async function ProfilePage({ params }: { params: Promise<{ countr
           </Text>
         </VStack>
         <ProfileForm
-          country={code}
           initial={{
             first_name: account.first_name ?? "",
             last_name: account.last_name ?? "",

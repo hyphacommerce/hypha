@@ -13,14 +13,14 @@ import type { Metadata } from "next";
 
 import { JsonLd } from "@/components/json-ld";
 import { ProductGrid } from "@/components/product-grid";
-import { countryOf, loadCategories, loadCategory, loadStore } from "@/lib/api";
+import { countryOf, loadCategories, loadCategory, loadStore, pageLocale } from "@/lib/api";
 import { countryName } from "@/lib/format";
 import { pageT } from "@/lib/i18n";
 import type { T } from "@/lib/messages";
 import { search } from "@/lib/listing-data";
 import { pageMetadata } from "@/lib/metadata";
 import { storeLd } from "@/lib/seo";
-import { absolute, link, segmentCountry } from "@/lib/site";
+import { absolute, link } from "@/lib/site";
 
 type Hit = StorefrontSchemas["SearchHitResponse"];
 
@@ -50,13 +50,14 @@ export async function generateMetadata({
 }: {
   params: Promise<{ country: string }>;
 }): Promise<Metadata> {
-  const code = segmentCountry((await params).country);
+  const segment = (await params).country;
+  const { country: code, language } = await pageLocale(segment);
   const [categories, newest] = await Promise.all([
-    loadCategories(),
+    loadCategories(code, language),
     shelf({ country: code, sort: "newest", limit: 8 }),
   ]);
-  const lead = categories[0] ? await loadCategory(categories[0].handle) : null;
-  return pageMetadata({ country: code, path: "/", image: heroOf(lead, newest) });
+  const lead = categories[0] ? await loadCategory(categories[0].handle, code, language) : null;
+  return pageMetadata({ segment, path: "/", image: heroOf(lead, newest) });
 }
 
 /** A row of products under a heading, with a link to all of them. */
@@ -106,15 +107,15 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
   // countries' folders through), and the category shelves start as soon as the
   // categories are in, without waiting for the other reads.
   const folder = (await params).country;
-  const code = segmentCountry(folder);
+  const { country: code, language } = await pageLocale(folder);
   const [country, t, store, categories, newest, value, shelves] = await Promise.all([
     countryOf(folder),
     pageT(folder),
-    loadStore(),
-    loadCategories(),
+    loadStore(code, language),
+    loadCategories(code, language),
     shelf({ country: code, sort: "newest", limit: 8 }),
     shelf({ country: code, sort: "price_asc", limit: 4 }),
-    loadCategories().then((all) =>
+    loadCategories(code, language).then((all) =>
       Promise.all(
         all
           .slice(0, 3)
@@ -124,9 +125,9 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
   ]);
   const featured = categories.slice(0, 3);
   const digits = country.minor_units;
-  const productBase = link(code, "/p");
+  const productBase = link(folder, "/p");
   // In a portrait frame, the shape product photos are shot in.
-  const lead = featured[0] ? await loadCategory(featured[0].handle) : null;
+  const lead = featured[0] ? await loadCategory(featured[0].handle, code, language) : null;
   const hero = heroOf(lead, newest);
 
   if (newest.length === 0) {
@@ -142,7 +143,7 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
 
   return (
     <VStack gap={10} paddingBlockEnd={10}>
-      <JsonLd data={storeLd(store, absolute(link(code, "/")))} />
+      <JsonLd data={storeLd(store, absolute(link(folder, "/")), language)} />
       <div className="shop-hero">
         <VStack gap={6} vAlign="center">
           <VStack gap={4}>
@@ -158,7 +159,7 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
           <HStack gap={3} wrap="wrap">
             <Button
               label={t("home.shop_everything")}
-              href={link(code, "/search")}
+              href={link(folder, "/search")}
               variant="primary"
               size="lg"
               endContent={<ArrowRightIcon width={16} height={16} aria-hidden />}
@@ -166,7 +167,7 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
             {featured[0] && (
               <Button
                 label={t("home.browse_category", { category: featured[0].name })}
-                href={link(code, `/c/${featured[0].handle}`)}
+                href={link(folder, `/c/${featured[0].handle}`)}
                 variant="secondary"
                 size="lg"
               />
@@ -190,7 +191,7 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
               <ClickableCard
                 key={c.id}
                 label={c.name}
-                href={link(code, `/c/${c.handle}`)}
+                href={link(folder, `/c/${c.handle}`)}
                 variant="muted"
                 padding={6}
               >
@@ -214,7 +215,7 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
         t={t}
         title={t("home.new_arrivals")}
         description={t("home.new_arrivals_description")}
-        href={link(code, "/search?sort=newest")}
+        href={link(folder, "/search?sort=newest")}
         hits={newest}
         digits={digits}
         productBase={productBase}
@@ -225,7 +226,7 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
           t={t}
           key={c.id}
           title={c.name}
-          href={link(code, `/c/${c.handle}`)}
+          href={link(folder, `/c/${c.handle}`)}
           hits={shelves[i]}
           digits={digits}
           productBase={productBase}
@@ -237,7 +238,7 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
           t={t}
           title={t("home.best_prices")}
           description={t("home.best_prices_description", { currency: country.currency })}
-          href={link(code, "/search?sort=price_asc")}
+          href={link(folder, "/search?sort=price_asc")}
           hits={value}
           digits={digits}
           productBase={productBase}

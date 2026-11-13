@@ -1,19 +1,16 @@
-import { Grid } from "@astryxdesign/core/Grid";
-import { Layout, LayoutContent, LayoutFooter, LayoutHeader } from "@astryxdesign/core/Layout";
-import { Link } from "@astryxdesign/core/Link";
-import { HStack, VStack } from "@astryxdesign/core/Stack";
-import { Text } from "@astryxdesign/core/Text";
+import { directionOf } from "@hyphacommerce/i18n";
+import type { Metadata } from "next";
 
-import { CartDrawer } from "@/components/cart/cart-drawer";
-import { CartProvider } from "@/components/cart/cart-provider";
+import "../globals.css";
+import { LocaleProvider } from "@/components/locale";
 import { ClientMessages } from "@/components/messages";
-import { PageTransition } from "@/components/page-transition";
-import { SiteHeader } from "@/components/site-header";
-import { countryOf, loadCategories, loadCountries, loadStore } from "@/lib/api";
-import { countryName } from "@/lib/format";
+import { loadStore, pageLocale } from "@/lib/api";
+import { astryxMessages } from "@/lib/astryx-messages";
 import { pageT } from "@/lib/i18n";
 import { SHARED_NAMESPACES } from "@/lib/messages";
-import { link } from "@/lib/site";
+import { link, siteUrl } from "@/lib/site";
+
+import { Providers } from "../providers";
 
 /** Pages under a country are static and regenerated in the background: none is built ahead,
  * since there's no API to read at build time; each is rendered on its first visit and kept,
@@ -24,131 +21,81 @@ export function generateStaticParams() {
   return [];
 }
 
-/** Every page of a country: the header, the cart drawer, the page, the footer, and the
- * page's language for the client components under it (`ClientMessages`: the namespaces
- * every page reads). Nothing here reads the request, so the pages under it can be
- * static; the cart comes in the browser (`CartProvider`). */
-export default async function CountryLayout({
-  children,
+type Props = { children: React.ReactNode; params: Promise<{ country: string }> };
+
+export async function generateMetadata({
   params,
 }: {
-  children: React.ReactNode;
   params: Promise<{ country: string }>;
-}) {
-  const { country: folder } = await params;
-  const country = await countryOf(folder);
-  const code = country.country;
-  const [store, countries, categories, t] = await Promise.all([
-    loadStore(),
-    loadCountries(),
-    loadCategories(),
-    pageT(folder),
-  ]);
-  const base = link(code, "/").replace(/\/$/, "");
-  const category = (c: { id: string; name: string; handle: string }) => ({
-    id: c.id,
-    name: c.name,
-    href: link(code, `/c/${c.handle}`),
-  });
+}): Promise<Metadata> {
+  const { country, language } = await pageLocale((await params).country);
+  const store = await loadStore(country, language);
+  return {
+    // What relative canonical and preview URLs resolve against.
+    metadataBase: siteUrl(),
+    title: { default: store.name, template: `%s · ${store.name}` },
+    description: store.description ?? undefined,
+    applicationName: store.name,
+    // The shop's icons in public/: replace them with the store's own.
+    icons: {
+      icon: [
+        { url: "/favicon.ico", sizes: "32x32" },
+        { url: "/favicon.svg", type: "image/svg+xml" },
+      ],
+      apple: "/apple-touch-icon.png",
+    },
+  };
+}
 
+/**
+ * The document of a place (a country, in one of its languages): its `lang` and `dir`
+ * follow the URL's locale segment, so it's the root layout, under the segment. It holds
+ * what every page and its not-found page need: the theme, the page's language for
+ * Astryx and for the client components (`ClientMessages`: the namespaces every page
+ * reads) and the place for server actions (`LocaleProvider`). The shop around a page is
+ * `(shop)/layout.tsx`. Nothing here reads the request, so the pages under it can be
+ * static.
+ *
+ * Routes outside a place (the order link, the webhook, the sitemap) are route handlers,
+ * and a path no route matches gets `app/global-not-found.tsx`. A segment naming a
+ * country nobody sells to renders here in the store's language, and `(shop)` answers 404.
+ */
+export default async function PlaceLayout({ children, params }: Props) {
+  const { country: segment } = await params;
+  const [place, t] = await Promise.all([pageLocale(segment), pageT(segment)]);
+  // The words' language, `<html lang>` and Astryx's: what the page is written in
+  // (`lib/i18n.ts` says which that is for a language without a catalog).
+  const language = t.language;
+  const direction = directionOf(language);
   return (
-    <ClientMessages t={t} namespaces={SHARED_NAMESPACES}>
-      <CartProvider country={code} digits={country.minor_units} base={base}>
-        <CartDrawer />
-        <Layout
-          height="auto"
-          contentWidth={1280}
-          padding={6}
-          header={
-            <LayoutHeader hasDivider>
-              <SiteHeader
-                storeName={store.name}
-                country={code}
-                homeHref={link(code, "/")}
-                searchHref={link(code, "/search")}
-                accountHref={link(code, "/account")}
-                countries={countries.map((c) => ({
-                  code: c.country,
-                  name: countryName(c.country, c.name, t.locale),
-                  currency: c.currency,
-                }))}
-                categories={categories.map((c) => ({
-                  ...category(c),
-                  children: c.children.map(category),
-                }))}
-              />
-            </LayoutHeader>
-          }
-          content={
-            <LayoutContent>
-              <PageTransition>
-                <VStack gap={8}>{children}</VStack>
-              </PageTransition>
-            </LayoutContent>
-          }
-          footer={
-            <LayoutFooter hasDivider>
-              <VStack gap={6} paddingBlock={4}>
-                <Grid columns={{ minWidth: 200, repeat: "fit" }} gap={6}>
-                  <VStack gap={2}>
-                    <Text type="large" weight="semibold">
-                      {store.name}
-                    </Text>
-                    {store.description && <Text color="secondary">{store.description}</Text>}
-                  </VStack>
-                  <VStack gap={2}>
-                    <Text type="label">{t("footer.shop")}</Text>
-                    {categories.map((c) => (
-                      <Link key={c.id} href={link(code, `/c/${c.handle}`)} color="secondary">
-                        {c.name}
-                      </Link>
-                    ))}
-                    <Link href={link(code, "/search")} color="secondary">
-                      {t("footer.all_products")}
-                    </Link>
-                    <Link href={link(code, "/sale")} color="secondary">
-                      {t("footer.sale")}
-                    </Link>
-                  </VStack>
-                  <VStack gap={2}>
-                    <Text type="label">{t("footer.help")}</Text>
-                    <Link href={link(code, "/cart")} color="secondary">
-                      {t("footer.cart")}
-                    </Link>
-                    <Link href={link(code, "/account")} color="secondary">
-                      {t("footer.account")}
-                    </Link>
-                    {store.contact_email && (
-                      <Link href={`mailto:${store.contact_email}`} color="secondary">
-                        {store.contact_email}
-                      </Link>
-                    )}
-                  </VStack>
-                </Grid>
-                <HStack hAlign="between" wrap="wrap" gap={2}>
-                  <Text type="supporting" color="secondary">
-                    {/* Hypha's credit, like a theme's: a merchant may remove it. */}
-                    {t.rich("footer.credit", {
-                      store: store.name,
-                      link: (chunks, key) => (
-                        <a key={key} className="shop-built-with" href="https://hyphacommerce.com">
-                          {chunks}
-                        </a>
-                      ),
-                    })}
-                  </Text>
-                  <Text type="supporting" color="secondary">
-                    {t("footer.shipping_to", {
-                      country: countryName(code, country.name, t.locale),
-                      currency: country.currency,
-                    })}
-                  </Text>
-                </HStack>
-              </VStack>
-            </LayoutFooter>
-          }
+    // `data-astryx-theme` on <html> from the server: the theme's tokens are scoped to it,
+    // and Astryx's Theme only sets it there once hydrated, so until then the body showed
+    // the default theme's background.
+    <html lang={language} dir={direction} data-astryx-theme="shop" data-theme="light">
+      <head>
+        {/* The Latin typeface (globals.css) fetched with the page, not once the CSS
+          has been parsed: less time in the fallback font. */}
+        <link
+          rel="preload"
+          href="/fonts/geist-latin-wght-normal.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin="anonymous"
         />
-      </CartProvider>
-    </ClientMessages>
+      </head>
+      <body>
+        <Providers
+          language={language}
+          direction={direction}
+          astryxMessages={await astryxMessages(language)}
+        >
+          <LocaleProvider segment={place.segment} home={link(place.segment, "/")}>
+            <ClientMessages t={t} namespaces={SHARED_NAMESPACES}>
+              {children}
+            </ClientMessages>
+          </LocaleProvider>
+        </Providers>
+      </body>
+    </html>
   );
 }

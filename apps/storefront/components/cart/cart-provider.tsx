@@ -26,6 +26,7 @@ import {
   removeDiscountCode,
   setQuantity,
 } from "@/app/[country]/actions";
+import { useLocale } from "@/components/locale";
 import { CloseOnNavigate } from "@/components/close-on-navigate";
 import { WITHIN_PAGE, addTransitionType } from "@/components/view-transition";
 import { hasCartFlag } from "@/lib/cart-flag";
@@ -80,6 +81,8 @@ export function CartProvider({
   const [isOpen, setIsOpen] = useState(false);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
+  // The page's place: actions answer in its language.
+  const locale = useLocale();
 
   // Which read is the latest: an older one answering late is dropped.
   const reads = useRef(0);
@@ -112,7 +115,7 @@ export function CartProvider({
 
   const add = useCallback(
     async (variant: string, quantity: number) => {
-      const result = await addToCart({ country, variant, quantity });
+      const result = await addToCart({ locale, variant, quantity });
       // Within the page: the caller's transition would otherwise start a view
       // transition, which snapshots the page while the drawer animates open.
       startTransition(() => {
@@ -123,7 +126,7 @@ export function CartProvider({
       });
       return result.error;
     },
-    [country],
+    [locale],
   );
 
   // Changes go one at a time: each writes the cart, so two at once would race.
@@ -142,22 +145,22 @@ export function CartProvider({
   const change = useCallback(
     (variant: string, quantity: number) =>
       startTransition(async () => {
-        const failed = await write(() => setQuantity({ country, variant, quantity }));
+        const failed = await write(() => setQuantity({ locale, variant, quantity }));
         startTransition(() => setError(failed));
       }),
-    [country, write],
+    [locale, write],
   );
   const applyCode = useCallback(
-    (code: string) => write(() => applyDiscountCode({ country, code })),
-    [country, write],
+    (code: string) => write(() => applyDiscountCode({ locale, code })),
+    [locale, write],
   );
   const removeCode = useCallback(
     (code: string) =>
       startTransition(async () => {
-        const failed = await write(() => removeDiscountCode({ country, code }));
+        const failed = await write(() => removeDiscountCode({ locale, code }));
         startTransition(() => setError(failed));
       }),
-    [country, write],
+    [locale, write],
   );
 
   const value = useMemo<CartContext>(

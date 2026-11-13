@@ -1,8 +1,27 @@
-// How URLs carry the shopper's country. Shared by the proxy, server pages and
-// client components: it reads nothing but its arguments.
+// How URLs carry the shopper's country and language. Shared by the proxy, server pages
+// and client components: it reads nothing but its arguments.
+//
+// With folders (the default), a URL's first segment is its locale: `/de/…` is Germany
+// in its market's default language, `/en-de/…` Germany in English (the last part is the
+// country). In a single tree (`STOREFRONT_ROUTING=single`) the country stays out of
+// URLs: `/…` is the default language, `/en/…` another, and the proxy rewrites both to
+// the folder form, so the `[country]` segment pages read is a locale segment either
+// way.
+
+import {
+  canonicalLanguage,
+  formatLocaleSegment,
+  localeOf,
+  matchLanguage,
+  parseAcceptLanguage,
+  parseLocaleSegment,
+} from "@hyphacommerce/i18n";
 
 /** The cookie holding the shopper's country code (`HR`). */
 export const COUNTRY_COOKIE = "country";
+
+/** The cookie holding the language the shopper picked (`sr-Latn`, the API's spelling). */
+export const LANGUAGE_COOKIE = "language";
 
 export type Routing = "folders" | "single";
 
@@ -11,15 +30,118 @@ export function routing(value: string | undefined): Routing {
   return value === "single" ? "single" : "folders";
 }
 
+/** A country and the languages it's offered in (`/storefront/countries`): the first is
+ * its default. */
+export type Offer = { country: string; languages: readonly string[] };
+
+/** Where a page is: the country, the language to ask the API in (one of the country's
+ * own) and the locale segment that names both. */
+export type Locale = { country: string; language: string; segment: string };
+
+/** A language the API always has an answer for, when a country lists none (it never
+ * does: the API fills in the store's default). */
+const FALLBACK_LANGUAGE = "en";
+
+/** A country's default language: its first. */
+export function defaultLanguage(offer: Offer): string {
+  return offer.languages[0] ?? FALLBACK_LANGUAGE;
+}
+
+/** The country code a locale segment names (`hr` and `en-hr` → `HR`); empty for a
+ * segment that names none, so nothing else in it can reach a link. */
+export function segmentCountry(segment: string): string {
+  return parseLocaleSegment(segment)?.country.toUpperCase() ?? "";
+}
+
 /**
- * A link to `path` (`/p/mug`, `/`) for `country` (`HR`): `/hr/p/mug` with folders, the
- * path itself in a single tree, where the proxy adds the country back.
+ * The country's language a wanted one comes to, in the country's spelling: itself, the
+ * same without its region (`de-AT` → `de`), or the same language wider (`en` →
+ * `en-GB`), as the API resolves it; `undefined` when the country offers none of them.
  */
-export function href(mode: Routing, country: string, path: string): string {
-  if (mode === "single") return path;
-  const folder = `/${country.toLowerCase()}`;
+export function offered(wanted: string | undefined, offer: Offer): string | undefined {
+  return wanted === undefined ? undefined : matchLanguage([wanted], offer.languages);
+}
+
+/** The language of a locale segment in its country: the one it names when the country
+ * offers it (or one it comes to, `offered`), else the country's default. */
+export function segmentLanguage(segment: string, offer: Offer): string {
+  return offered(parseLocaleSegment(segment)?.language, offer) ?? defaultLanguage(offer);
+}
+
+/** The segment for `language` in a country: the country alone for its default (and
+ * for no language), `en-de` for another. */
+export function localeSegment(offer: Offer, language?: string): string {
+  const country = offer.country.toLowerCase();
+  if (language === undefined || language.toLowerCase() === defaultLanguage(offer).toLowerCase()) {
+    return country;
+  }
+  return formatLocaleSegment({ language, country });
+}
+
+/** The one segment a page in a segment's country and language lives at: `de-de` and
+ * `fr-de` (not offered) are `de`, `en-de` stays, `en-gb-de` is `en-de` where the
+ * country offers plain `en`. */
+export function canonicalSegment(segment: string, offer: Offer): string {
+  return localeSegment(offer, segmentLanguage(segment, offer));
+}
+
+/** The place a locale segment names, among `countries`; `undefined` for a country none
+ * sells to. */
+export function localeOfSegment(segment: string, countries: readonly Offer[]): Locale | undefined {
+  const country = segmentCountry(segment);
+  const offer = countries.find((c) => c.country === country);
+  if (!offer) return undefined;
+  const language = segmentLanguage(segment, offer);
+  return { country, language, segment: localeSegment(offer, language) };
+}
+
+/** Every place the store sells in: each country in each of its languages, the
+ * country's default first. */
+export function locales(countries: readonly Offer[]): Locale[] {
+  return countries.flatMap((offer) =>
+    (offer.languages.length > 0 ? offer.languages : [defaultLanguage(offer)]).map((language) => ({
+      country: offer.country,
+      language,
+      segment: localeSegment(offer, language),
+    })),
+  );
+}
+
+/**
+ * The places a page has a URL of its own in, for `hreflang` and the sitemap, each with
+ * its tag (`de-CH`: the language in the country; a language that names its region
+ * keeps it). With folders every country in each of its languages; a single tree has one
+ * URL per language, its country the shopper's, so it lists the first country's
+ * languages (its default unprefixed), tagged by the language alone.
+ */
+export function alternatePlaces(
+  mode: Routing,
+  countries: readonly Offer[],
+): { tag: string; segment: string }[] {
+  if (mode === "single") {
+    const [first] = countries;
+    return first ? locales([first]).map((l) => ({ tag: l.language, segment: l.segment })) : [];
+  }
+  return locales(countries).map((l) => ({
+    tag: localeOf(l.language, l.country),
+    segment: l.segment,
+  }));
+}
+
+/**
+ * A link to `path` (`/p/mug`, `/`) in a place, named by its locale segment (`en-hr`) or
+ * by a country alone (`HR`: its default language). With folders that's
+ * `/en-hr/p/mug`; in a single tree `/en/p/mug`, or the path itself for the default
+ * language, where the proxy adds the country back.
+ */
+export function href(mode: Routing, segment: string, path: string): string {
+  const prefix =
+    mode === "single"
+      ? (parseLocaleSegment(segment)?.language?.toLowerCase() ?? "")
+      : segment.toLowerCase();
+  if (prefix === "") return path;
   // No trailing slash: Next.js redirects `/hr/` to `/hr` anyway.
-  return path === "/" ? folder : `${folder}${path}`;
+  return path === "/" || path === "" ? `/${prefix}` : `/${prefix}${path}`;
 }
 
 /** The country to use, from the cookie, then the host's geolocation, then the first. */
@@ -33,4 +155,131 @@ export function pickCountry(
     if (code && available.includes(code)) return code;
   }
   return available[0];
+}
+
+/**
+ * The language for a shopper whose URL names none: the one they picked (the `language`
+ * cookie), then what their browser asks for (`Accept-Language`), then the country's
+ * default. Always one of the country's own.
+ */
+export function pickLanguage(
+  offer: Offer,
+  cookie: string | undefined,
+  acceptLanguage: string | undefined | null,
+): string {
+  const picked = cookie === undefined ? undefined : canonicalLanguage(cookie);
+  return (
+    offered(picked, offer) ??
+    matchLanguage(parseAcceptLanguage(acceptLanguage), offer.languages) ??
+    defaultLanguage(offer)
+  );
+}
+
+/** A language tag as a URL part: a two or three letter language, then its other parts. */
+const LANGUAGE_PART = /^[a-z]{2,3}(-[a-z0-9]{1,8})*$/i;
+
+/**
+ * A single tree's path, split into the language its first part names and the rest
+ * (`/en/p/mug` → `en`, `/p/mug`). A first part is a language only when some country
+ * offers it (or one it comes to): no page's own path starts with a language tag, but
+ * `/search` and `/order` would read as ones by their shape alone.
+ */
+export function splitLanguage(
+  pathname: string,
+  countries: readonly Offer[],
+): { language?: string; rest: string } {
+  const first = pathname.split("/")[1] ?? "";
+  const tag = LANGUAGE_PART.test(first) ? canonicalLanguage(first) : undefined;
+  if (tag === undefined || !countries.some((offer) => offered(tag, offer) !== undefined)) {
+    return { rest: pathname === "" ? "/" : pathname };
+  }
+  return { language: tag, rest: pathname.slice(first.length + 1) || "/" };
+}
+
+/**
+ * A page's path without its locale: `/en-de/p/mug` → `/p/mug` with folders, `/en/p/mug`
+ * → `/p/mug` in a single tree. A query string stays.
+ */
+export function withoutLocale(mode: Routing, path: string, countries: readonly Offer[]): string {
+  const cut = path.search(/[?#]/);
+  const pathname = cut === -1 ? path : path.slice(0, cut);
+  const tail = cut === -1 ? "" : path.slice(cut);
+  if (mode === "single") return splitLanguage(pathname, countries).rest + tail;
+  const first = pathname.split("/")[1] ?? "";
+  const names = parseLocaleSegment(first);
+  const known = names && countries.some((c) => c.country === names.country.toUpperCase());
+  return (known ? pathname.slice(first.length + 1) || "/" : pathname || "/") + tail;
+}
+
+/** What the proxy does with a page request. */
+export type Route =
+  | { kind: "next" }
+  /** To another URL: `path` has no query (the caller keeps the request's). */
+  | { kind: "redirect"; path: string }
+  /** Rendered from the folder form, the URL unchanged. */
+  | { kind: "rewrite"; path: string };
+
+const join = (prefix: string, rest: string) => (rest === "/" ? `/${prefix}` : `/${prefix}${rest}`);
+
+/**
+ * Where a page request goes.
+ *
+ * With folders: a path under a country the store sells to is served as it is, unless
+ * it names a language that isn't the one its URL should (`/de-de`, a language the
+ * country doesn't offer, `en-gb` where it offers `en`): that's redirected to the URL of
+ * the language it comes to, the country's default when to none. Any other path is bare:
+ * it's redirected into the shopper's country, in the language `pickLanguage` finds.
+ *
+ * In a single tree every path is rewritten to the shopper's country's folder: `/en/…`
+ * in English when the country offers it (else redirected like a folder's: to the
+ * language it comes to, or to the path without a prefix), a path without a language in
+ * the country's default, which is that language's URL: a single tree has no bare paths,
+ * so the cookie and `Accept-Language` decide nothing there.
+ *
+ * A URL that names a language is never redirected because of a cookie or a header.
+ */
+export function routeFor(input: {
+  mode: Routing;
+  pathname: string;
+  countries: readonly Offer[];
+  countryCookie?: string;
+  geolocated?: string | null;
+  languageCookie?: string;
+  acceptLanguage?: string | null;
+}): Route {
+  const { mode, pathname, countries } = input;
+  const code = pickCountry(
+    countries.map((c) => c.country),
+    input.countryCookie,
+    input.geolocated,
+  );
+  const shopper = countries.find((c) => c.country === code);
+  // No market sells anywhere yet: the pages say so.
+  if (!shopper) return { kind: "next" };
+  const chosen = () => pickLanguage(shopper, input.languageCookie, input.acceptLanguage);
+
+  if (mode === "single") {
+    const { language, rest } = splitLanguage(pathname, countries);
+    // No prefix is the default language's URL, not a bare one: served as it is.
+    if (language === undefined) {
+      return { kind: "rewrite", path: join(localeSegment(shopper), pathname) };
+    }
+    const segment = localeSegment(shopper, offered(language, shopper));
+    const prefix = parseLocaleSegment(segment)?.language?.toLowerCase();
+    if (prefix === undefined) return { kind: "redirect", path: rest };
+    if (prefix !== pathname.split("/")[1]) return { kind: "redirect", path: join(prefix, rest) };
+    return { kind: "rewrite", path: join(segment, rest) };
+  }
+
+  const first = pathname.split("/")[1] ?? "";
+  const names = parseLocaleSegment(first);
+  const named = names && countries.find((c) => c.country === names.country.toUpperCase());
+  if (named) {
+    // A country alone is served in any case (`/DE`), as before languages.
+    if (names.language === undefined) return { kind: "next" };
+    const segment = canonicalSegment(first, named);
+    if (segment === first) return { kind: "next" };
+    return { kind: "redirect", path: join(segment, pathname.slice(first.length + 1) || "/") };
+  }
+  return { kind: "redirect", path: join(localeSegment(shopper, chosen()), pathname || "/") };
 }

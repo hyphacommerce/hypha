@@ -63,7 +63,7 @@ export default async function CheckoutPage({
   const code = country.country;
   const digits = country.minor_units;
   const id = await cartId(code);
-  if (!id) redirect(link(code, "/cart"));
+  if (!id) redirect(link(folder, "/cart"));
   const client = api();
   // The options alongside the cart, not after it: they only count once the cart has an
   // address and something to ship, and otherwise the API refuses them (unused here).
@@ -76,7 +76,7 @@ export default async function CheckoutPage({
     // How the country lays out its addresses.
     loadAddressFormat(code),
   ]);
-  if (!cart || cart.order || cart.lines.length === 0) redirect(link(code, "/cart"));
+  if (!cart || cart.order || cart.lines.length === 0) redirect(link(folder, "/cart"));
 
   const discounts = readCartDiscounts(cart);
   // Each under what it's about: errors stop "Place order" (`checkout_blocked`).
@@ -118,7 +118,7 @@ export default async function CheckoutPage({
 
   const total = { amount: cart.total.amount, currency: cart.total.currency };
   return (
-    <CheckoutPayment country={code} total={total} attempt={attempt}>
+    <CheckoutPayment total={total} attempt={attempt}>
       <VStack gap={6}>
         <Heading level={1} type="display-2">
           {t("checkout.title")}
@@ -127,7 +127,6 @@ export default async function CheckoutPage({
         <Grid columns={{ minWidth: 360, repeat: "fit" }} gap={8}>
           <VStack gap={8}>
             <DetailsForm
-              country={code}
               countryName={countryName(code, country.name, t.locale)}
               format={format}
               saved={detailsDone}
@@ -167,7 +166,6 @@ export default async function CheckoutPage({
                     return (
                       <ShippingChoice
                         key={group.group}
-                        country={code}
                         group={group.group}
                         heading={
                           offers.length > 1
@@ -219,7 +217,6 @@ export default async function CheckoutPage({
                     </Text>
                   ) : (
                     <PaymentChoice
-                      country={code}
                       methods={methods.map((m) => ({
                         id: m.id,
                         name: m.name,
@@ -232,7 +229,6 @@ export default async function CheckoutPage({
                           <OnlinePaymentForm
                             // A new method or total starts a new payment.
                             key={`${method?.id}:${cart.total.amount}`}
-                            country={code}
                             total={total}
                           />
                         ) : undefined
@@ -319,7 +315,6 @@ export default async function CheckoutPage({
                   />
                 ) : (
                   <PlaceOrder
-                    country={code}
                     total={{ amount: cart.total.amount, currency: cart.total.currency }}
                     attempt={attempt}
                     ready={ready}

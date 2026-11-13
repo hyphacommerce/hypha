@@ -31,12 +31,12 @@ export default async function LoginPage({
   params: Promise<{ country: string }>;
   searchParams: Promise<{ email?: string | string[]; code?: string | string[] }>;
 }) {
-  const country = await countryOf((await params).country);
-  if (await sessionToken()) redirect(link(country.country, "/account"));
+  const segment = (await params).country;
+  await countryOf(segment);
+  if (await sessionToken()) redirect(link(segment, "/account"));
   const q = await searchParams;
   return (
     <SignInForm
-      country={country.country}
       storeName={(await loadStore()).name}
       initialEmail={one(q.email)}
       initialCode={one(q.code)}
