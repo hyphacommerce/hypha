@@ -29,8 +29,7 @@ export async function uploadFile(
 ): Promise<{ id: string } | { error: string }> {
   const started = await startUpload({ name: file.name, type: file.type, size: file.size });
   if ("error" in started) return started;
-  if (!(await sendToStorage(started.upload, file)))
-    return { error: t("media.upload_not_stored") };
+  if (!(await sendToStorage(started.upload, file))) return { error: t("media.upload_not_stored") };
   const completed = await completeUpload(started.id);
   return completed.error ? { error: completed.error } : { id: started.id };
 }

@@ -523,7 +523,12 @@ function BulkBar({
           tooltip={canRemove ? undefined : t("products.keeps_one_variant")}
           onClick={onRemove}
         />
-        <Button label={t("products.variants_bulk_clear")} size="sm" variant="ghost" onClick={onClear} />
+        <Button
+          label={t("products.variants_bulk_clear")}
+          size="sm"
+          variant="ghost"
+          onClick={onClear}
+        />
       </HStack>
     </div>
   );
@@ -927,7 +932,13 @@ function AddVariantDialog({
           />
         ))}
         {isTaken && <Banner status="warning" title={t("products.variant_add_taken")} />}
-        <TextInput label={t("common.sku")} isOptional value={sku} onChange={setSku} onEnter={submit} />
+        <TextInput
+          label={t("common.sku")}
+          isOptional
+          value={sku}
+          onChange={setSku}
+          onEnter={submit}
+        />
         <TextInput
           label={t("products.variants_column_price", { currency })}
           placeholder="18.00"

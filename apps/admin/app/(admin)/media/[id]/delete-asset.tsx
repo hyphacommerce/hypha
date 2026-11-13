@@ -17,7 +17,9 @@ export function DeleteAsset({ id }: { id: string }) {
   const [isPending, startTransition] = useTransition();
 
   if (!isConfirming) {
-    return <Button label={t("common.delete")} variant="ghost" onClick={() => setIsConfirming(true)} />;
+    return (
+      <Button label={t("common.delete")} variant="ghost" onClick={() => setIsConfirming(true)} />
+    );
   }
   return (
     <HStack gap={2} vAlign="center">

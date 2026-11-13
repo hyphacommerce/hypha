@@ -17,7 +17,7 @@ import { definitionsOf } from "@/lib/custom-fields-server";
 import { type Format, getFormat } from "@/lib/get-format";
 import { describe, isMissingScope, loaded, requireStaff, sessionClient } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
-import type { T } from "@/lib/messages";
+import type { KeyIn, T } from "@/lib/messages";
 
 import type { Stock } from "../actions";
 import { MediaSection } from "./media-section";
@@ -193,6 +193,13 @@ function stockOf(product: Product, items: Stock[]): Record<string, Stock> {
   return Object.fromEntries(items.map((stock) => [stock.variant, stock]));
 }
 
+/** What each status means for shoppers. */
+const STATUS_HINT: Record<AdminSchemas["ProductStatus"], KeyIn<"products">> = {
+  active: "products.summary_status_active",
+  draft: "products.summary_status_draft",
+  archived: "products.summary_status_archived",
+};
+
 /** At a glance: what status means for shoppers, how many variants, what they cost. */
 function SummaryCard({ product, t, format }: { product: Product; t: T; format: Format }) {
   const amounts = product.variants.map((v) => v.price.amount);
@@ -208,7 +215,7 @@ function SummaryCard({ product, t, format }: { product: Product; t: T; format: F
           {t("common.summary")}
         </Text>
         <Text type="supporting" color="secondary">
-          {t(`products.summary_status_${product.status}`)}
+          {t(STATUS_HINT[product.status])}
         </Text>
         <MetadataList>
           <MetadataListItem label={t("common.variants")}>

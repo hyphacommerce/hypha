@@ -291,52 +291,52 @@ function OptionForm({
         {option.values.map((v, i) => {
           const value = { named: v.label ? "yes" : "no", value: v.label };
           return (
-          <HStack key={v.key} gap={1} vAlign="center">
-            <TextInput
-              label={t("products.option_value_label", { ...named, number: i + 1 })}
-              isLabelHidden
-              size="sm"
-              value={v.label}
-              onChange={(label) =>
-                setValues(option.values.map((x) => (x.key === v.key ? { ...x, label } : x)))
-              }
-              status={
-                v.label.trim() === ""
-                  ? { type: "error", message: t("products.option_value_blank") }
-                  : isRepeated(i)
-                    ? { type: "error", message: t("products.option_value_repeated") }
-                    : undefined
-              }
-              statusVariant="detached"
-              width={240}
-            />
-            <IconButton
-              label={t("products.option_value_move_up", value)}
-              tooltip={t("products.move_up")}
-              size="sm"
-              variant="ghost"
-              icon={<ArrowUpIcon width={14} />}
-              isDisabled={i === 0}
-              onClick={() => moveValue(i, i - 1)}
-            />
-            <IconButton
-              label={t("products.option_value_move_down", value)}
-              tooltip={t("products.move_down")}
-              size="sm"
-              variant="ghost"
-              icon={<ArrowDownIcon width={14} />}
-              isDisabled={i === option.values.length - 1}
-              onClick={() => moveValue(i, i + 1)}
-            />
-            <IconButton
-              label={t("products.option_value_remove", value)}
-              tooltip={t("products.option_value_remove_tooltip")}
-              size="sm"
-              variant="ghost"
-              icon={<TrashIcon width={14} />}
-              onClick={() => setValues(option.values.filter((x) => x.key !== v.key))}
-            />
-          </HStack>
+            <HStack key={v.key} gap={1} vAlign="center">
+              <TextInput
+                label={t("products.option_value_label", { ...named, number: i + 1 })}
+                isLabelHidden
+                size="sm"
+                value={v.label}
+                onChange={(label) =>
+                  setValues(option.values.map((x) => (x.key === v.key ? { ...x, label } : x)))
+                }
+                status={
+                  v.label.trim() === ""
+                    ? { type: "error", message: t("products.option_value_blank") }
+                    : isRepeated(i)
+                      ? { type: "error", message: t("products.option_value_repeated") }
+                      : undefined
+                }
+                statusVariant="detached"
+                width={240}
+              />
+              <IconButton
+                label={t("products.option_value_move_up", value)}
+                tooltip={t("products.move_up")}
+                size="sm"
+                variant="ghost"
+                icon={<ArrowUpIcon width={14} />}
+                isDisabled={i === 0}
+                onClick={() => moveValue(i, i - 1)}
+              />
+              <IconButton
+                label={t("products.option_value_move_down", value)}
+                tooltip={t("products.move_down")}
+                size="sm"
+                variant="ghost"
+                icon={<ArrowDownIcon width={14} />}
+                isDisabled={i === option.values.length - 1}
+                onClick={() => moveValue(i, i + 1)}
+              />
+              <IconButton
+                label={t("products.option_value_remove", value)}
+                tooltip={t("products.option_value_remove_tooltip")}
+                size="sm"
+                variant="ghost"
+                icon={<TrashIcon width={14} />}
+                onClick={() => setValues(option.values.filter((x) => x.key !== v.key))}
+              />
+            </HStack>
           );
         })}
         <TextInput

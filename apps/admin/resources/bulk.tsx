@@ -476,8 +476,7 @@ export function CustomerBulkActions({
                 label: g.name,
                 onClick: () =>
                   run(
-                    (changed) =>
-                      t("bulk.customers_group_added", { group: g.name, count: changed }),
+                    (changed) => t("bulk.customers_group_added", { group: g.name, count: changed }),
                     () => setCustomersGroup(g.id, items, true),
                   ),
               })),

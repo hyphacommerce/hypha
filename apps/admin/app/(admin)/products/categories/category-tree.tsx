@@ -54,11 +54,7 @@ export function CategoryTree({ tree }: { tree: CategoryNode[] }) {
           <Text type="display-3" as="h2">
             {t("categories.tree_title")}
           </Text>
-          <Button
-            label={t("categories.add")}
-            variant="primary"
-            onClick={() => setIsAdding(true)}
-          />
+          <Button label={t("categories.add")} variant="primary" onClick={() => setIsAdding(true)} />
         </HStack>
         {error && <Banner status="error" title={error} />}
         {rows.length === 0 ? (
@@ -157,10 +153,7 @@ function AddCategoryDialog({ tree, onClose }: { tree: CategoryNode[]; onClose: (
 
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={520} purpose="form">
-      <DialogHeader
-        title={t("categories.add")}
-        onOpenChange={(isOpen) => !isOpen && onClose()}
-      />
+      <DialogHeader title={t("categories.add")} onOpenChange={(isOpen) => !isOpen && onClose()} />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
         <TextInput

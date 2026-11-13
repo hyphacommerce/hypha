@@ -121,7 +121,11 @@ export function PricesCard({
               isLoading={isPending}
               width={160}
             />
-            <Switch label={t("products.prices_show_every_list")} value={isWhyShown} onChange={setIsWhyShown} />
+            <Switch
+              label={t("products.prices_show_every_list")}
+              value={isWhyShown}
+              onChange={setIsWhyShown}
+            />
           </HStack>
         </HStack>
         {error && <Banner status="error" title={error} />}
@@ -222,7 +226,7 @@ function MarketTable({
                       v.candidates
                         .filter((c) => c.price_list !== v.price_list)
                         .map((c) => {
-                          const link = (chunks: ReactNode, key: string) => (
+                          const link = (chunks: ReactNode, key: number) => (
                             <Link key={key} href={`/markets/price-lists/${c.price_list}`}>
                               {chunks}
                             </Link>

@@ -307,7 +307,9 @@ export function ProductsCard({
                   <TableCell>
                     <HStack hAlign="end">
                       <IconButton
-                        label={t("categories.product_remove", { name: product.title ?? product.id })}
+                        label={t("categories.product_remove", {
+                          name: product.title ?? product.id,
+                        })}
                         icon={<TrashIcon />}
                         size="sm"
                         variant="ghost"

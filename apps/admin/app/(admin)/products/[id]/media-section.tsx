@@ -122,8 +122,7 @@ export function MediaSection({ id, media }: { id: string; media: Item[] }) {
         const result = await uploadFile(file, t);
         if ("error" in result) {
           failed.push(t("media.upload_file_error", { file: file.name, error: result.error }));
-        }
-        else uploaded.push(result.id);
+        } else uploaded.push(result.id);
       }
       if (uploaded.length > 0) {
         const attachError = await attach(uploaded);

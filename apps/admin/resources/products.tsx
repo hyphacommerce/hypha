@@ -238,9 +238,7 @@ export function ProductsTable({
   ];
   return (
     <VStack gap={3}>
-      {outcome && (
-        <BulkOutcomeBanner outcome={outcome} onClose={() => setOutcome(undefined)} />
-      )}
+      {outcome && <BulkOutcomeBanner outcome={outcome} onClose={() => setOutcome(undefined)} />}
       <ResourceTable<Product>
         renderBulkActions={(selected, clear) => (
           <ProductBulkActions

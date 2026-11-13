@@ -165,7 +165,9 @@ export function ProductEditor({
     });
   };
 
-  const savedTitles = Object.fromEntries(base.variants.map((v) => [v.id, v.title ?? t("common.default")]));
+  const savedTitles = Object.fromEntries(
+    base.variants.map((v) => [v.id, v.title ?? t("common.default")]),
+  );
 
   return (
     <>
