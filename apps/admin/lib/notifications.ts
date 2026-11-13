@@ -3,9 +3,47 @@
 // client code alike: the ones that build text take the caller's translator.
 
 import { labelOr } from "./keys.ts";
+import { sameTag } from "./languages.ts";
 import type { TFor } from "./messages";
 
 type NotificationsT = TFor<"notifications">;
+
+/**
+ * Whether a template is written per language: the buyer's emails, which go out in the
+ * order's or the customer's language, and the layout they're framed in. Staff and
+ * supplier emails are always in the store's content language, and an audience this build
+ * doesn't know is treated like them.
+ */
+export function isTranslated(audience: string | null | undefined): boolean {
+  return audience === "buyer" || audience === null || audience === undefined;
+}
+
+/**
+ * The language a template page shows, from its `?language=`: one of `others` in its
+ * canonical case, or `null` for the store's content language (asked for by name, not
+ * asked, or a language the store doesn't have).
+ */
+export function templateLanguage(
+  asked: string | undefined,
+  others: readonly string[],
+): string | null {
+  if (asked === undefined) return null;
+  return others.find((tag) => sameTag(tag, asked)) ?? null;
+}
+
+/**
+ * The `?language=` of a template's routes: none for the store's content language, whose
+ * template is the one read and written without it.
+ */
+export function templateQuery(language: string | null): { language?: string } {
+  return language ? { language } : {};
+}
+
+/** A template's editor, in `language` (`null`: the store's content language). */
+export function templateHref(key: string, language: string | null): string {
+  const path = `/settings/notifications/${encodeURIComponent(key)}`;
+  return language ? `${path}?language=${encodeURIComponent(language)}` : path;
+}
 
 /** A template key as people read it; an unknown one as it is. */
 export function templateName(t: NotificationsT, key: string): string {

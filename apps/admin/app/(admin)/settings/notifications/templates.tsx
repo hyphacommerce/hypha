@@ -23,12 +23,18 @@ import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { useState } from "react";
 
 import type { KeyIn } from "@/lib/messages";
-import { describeProblem, templateDescription, templateName } from "@/lib/notifications";
+import {
+  describeProblem,
+  templateDescription,
+  templateHref,
+  templateName,
+} from "@/lib/notifications";
+import { useFormat } from "@/lib/use-format";
 import { useT } from "@/lib/use-t";
 
 import { setTemplateEnabled } from "./actions";
 
-type Template = AdminSchemas["NotificationTemplateSummary"];
+type Template = AdminSchemas["NotificationTemplateListItem"];
 
 type GroupKey = KeyIn<"notifications">;
 
@@ -123,6 +129,7 @@ function TemplateRow({
   onError: (error: string | undefined) => void;
 }) {
   const t = useT<"notifications">();
+  const format = useFormat();
   const name = templateName(t, template.key);
   return (
     <TableRow>
@@ -141,6 +148,15 @@ function TemplateRow({
           ) : (
             <Badge label={t("common.default")} variant="neutral" />
           )}
+          {template.languages.map((tag) => (
+            <Badge
+              key={tag}
+              label={t("notifications.template_customized_in", {
+                language: format.languageName(tag),
+              })}
+              variant="info"
+            />
+          ))}
           {!template.enabled && <Badge label={t("common.off")} variant="warning" />}
           {template.problem && (
             <Tooltip
@@ -179,7 +195,7 @@ function TemplateRow({
             label={canWrite ? t("common.edit") : t("common.view")}
             variant="ghost"
             size="sm"
-            href={`/settings/notifications/${template.key}`}
+            href={templateHref(template.key, null)}
           />
         </HStack>
       </TableCell>
