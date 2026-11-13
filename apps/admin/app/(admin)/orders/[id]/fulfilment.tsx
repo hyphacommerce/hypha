@@ -20,6 +20,7 @@ import { useState, useTransition } from "react";
 import { DateTime } from "@/components/date-time";
 import { ShipmentBadge } from "@/components/status";
 import { CANCEL_REASONS, cancelReasonLabel } from "@/lib/format";
+import { useFormat } from "@/lib/use-format";
 import { useT } from "@/lib/use-t";
 import { COLLECTED } from "@/lib/payments";
 
@@ -31,6 +32,10 @@ type Order = AdminSchemas["AdminOrderResponse"];
 type Line = AdminSchemas["OrderLineResponse"];
 type Fulfillment = AdminSchemas["FulfillmentResponse"];
 export type Place = { id: string; name: string };
+
+/** Examples in the tracking fields: a carrier's name and a link's start, the same in every language. */
+const CARRIER_EXAMPLE = "DHL";
+const LINK_EXAMPLE = "https://";
 
 function lineName(line: Line): string {
   return [line.product_title, line.variant_title].filter(Boolean).join(" · ");
@@ -56,6 +61,7 @@ function TrackingList({
   rows: TrackingInput[];
   onChange: (rows: TrackingInput[]) => void;
 }) {
+  const t = useT<"orders">();
   const set = (index: number, row: TrackingInput) =>
     onChange(rows.map((old, i) => (i === index ? row : old)));
   return (
@@ -67,20 +73,20 @@ function TrackingList({
         <VStack key={index} gap={2}>
           <HStack gap={3} wrap="wrap" vAlign="end">
             <TextInput
-              label="Carrier"
+              label={t("orders.tracking_carrier")}
               isOptional
-              placeholder="DHL"
+              placeholder={CARRIER_EXAMPLE}
               value={row.carrier}
               onChange={(carrier) => set(index, { ...row, carrier })}
             />
             <TextInput
-              label="Tracking number"
+              label={t("orders.tracking_number")}
               value={row.number}
               onChange={(number) => set(index, { ...row, number })}
             />
             {rows.length > 1 && (
               <Button
-                label="Remove"
+                label={t("common.remove")}
                 size="sm"
                 variant="ghost"
                 onClick={() => onChange(rows.filter((_, i) => i !== index))}
@@ -88,9 +94,9 @@ function TrackingList({
             )}
           </HStack>
           <TextInput
-            label="Tracking link"
+            label={t("orders.tracking_link")}
             isOptional
-            placeholder="https://"
+            placeholder={LINK_EXAMPLE}
             value={row.url}
             onChange={(url) => set(index, { ...row, url })}
           />
@@ -99,7 +105,7 @@ function TrackingList({
       {rows.length < MAX_TRACKING && (
         <HStack>
           <Button
-            label="Add another tracking number"
+            label={t("orders.tracking_add")}
             size="sm"
             variant="ghost"
             onClick={() => onChange([...rows, NO_TRACKING])}
@@ -112,10 +118,11 @@ function TrackingList({
 
 /** "Fulfil items": where they leave from, how many of each, and the tracking. */
 export function FulfilButton({ order, places }: { order: Order; places: Place[] }) {
+  const t = useT<"orders">();
   const [isOpen, setIsOpen] = useState(false);
   return (
     <>
-      <Button label="Fulfil items" variant="primary" onClick={() => setIsOpen(true)} />
+      <Button label={t("orders.fulfil_button")} variant="primary" onClick={() => setIsOpen(true)} />
       {isOpen && <FulfilDialog order={order} places={places} onClose={() => setIsOpen(false)} />}
     </>
   );
@@ -130,6 +137,7 @@ function FulfilDialog({
   places: Place[];
   onClose: () => void;
 }) {
+  const t = useT<"orders">();
   // Where most of it waits first; any location will do for untracked items.
   const first = order.unfulfilled.find((left) => left.location)?.location ?? places[0]?.id;
   const [location, setLocation] = useState(first);
@@ -148,7 +156,7 @@ function FulfilDialog({
 
   const submit = () => {
     if (!location || lines.length === 0) return;
-    const problem = trackingProblem(tracking);
+    const problem = trackingProblem(t, tracking);
     if (problem) return setError(problem);
     startTransition(async () => {
       const result = await fulfilOrder(order.id, { key, location, lines, tracking, notify });
@@ -160,14 +168,14 @@ function FulfilDialog({
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={600} purpose="form">
       <DialogHeader
-        title={`Fulfil order #${order.number}`}
-        subtitle="Record what left, and from where. Its stock there goes down."
+        title={t("orders.fulfil_dialog_title", { number: String(order.number) })}
+        subtitle={t("orders.fulfil_dialog_subtitle")}
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
         <Selector
-          label="Ships from"
+          label={t("orders.fulfil_ships_from")}
           options={places.map((place) => ({ value: place.id, label: place.name }))}
           value={location}
           onChange={(next) => {
@@ -183,11 +191,11 @@ function FulfilDialog({
                 <VStack gap={0}>
                   <Text weight="medium">{lineName(line)}</Text>
                   <Text type="supporting" color="secondary">
-                    {left} of {line.quantity} left to ship
+                    {t("orders.fulfil_line_left", { left, quantity: line.quantity })}
                   </Text>
                 </VStack>
                 <NumberInput
-                  label={`Quantity of ${lineName(line)}`}
+                  label={t("orders.fulfil_line_quantity", { name: lineName(line) })}
                   isLabelHidden
                   min={0}
                   max={left}
@@ -200,15 +208,15 @@ function FulfilDialog({
         </VStack>
         <TrackingList rows={tracking} onChange={setTracking} />
         <CheckboxInput
-          label="Email the customer"
-          description="A shipping confirmation with the tracking."
+          label={t("orders.notify_customer")}
+          description={t("orders.fulfil_notify_description")}
           value={notify}
           onChange={setNotify}
         />
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label="Fulfil"
+            label={t("orders.fulfil_submit")}
             variant="primary"
             isLoading={isPending}
             isDisabled={!location || lines.length === 0}
@@ -230,13 +238,14 @@ export function ShipmentsCard({
   fulfillments: Fulfillment[];
   places: Place[];
 }) {
+  const t = useT<"orders">();
   const nameOf = (id: string) => places.find((place) => place.id === id)?.name ?? id;
   const lineOf = (id: string) => order.lines.find((line) => line.id === id);
   return (
     <Card>
       <VStack gap={4}>
         <Text type="display-3" as="h2">
-          Shipments
+          {t("orders.shipments_title")}
         </Text>
         {fulfillments.map((fulfillment) => (
           <Shipment
@@ -266,7 +275,8 @@ function Shipment({
   from: string;
   describe: (line: string) => string;
 }) {
-  const t = useT();
+  const t = useT<"orders">();
+  const format = useFormat();
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string>();
@@ -279,18 +289,26 @@ function Shipment({
         <HStack gap={2} vAlign="center">
           <ShipmentBadge status={fulfillment.status} t={t} />
           <Text type="supporting" color="secondary">
-            From {from}, <DateTime value={fulfillment.created_at} />
+            {t.rich("orders.shipment_from", {
+              location: from,
+              time: <DateTime key="time" value={fulfillment.created_at} />,
+            })}
           </Text>
         </HStack>
         {stands &&
           (confirming ? (
             <HStack gap={1} vAlign="center">
               <Text type="supporting" color="secondary">
-                Its items go back in stock.
+                {t("orders.shipment_take_back_note")}
               </Text>
-              <Button label="Keep" size="sm" variant="ghost" onClick={() => setConfirming(false)} />
               <Button
-                label="Take back"
+                label={t("orders.shipment_keep")}
+                size="sm"
+                variant="ghost"
+                onClick={() => setConfirming(false)}
+              />
+              <Button
+                label={t("orders.shipment_take_back")}
                 size="sm"
                 variant="destructive"
                 isLoading={isPending}
@@ -305,13 +323,13 @@ function Shipment({
           ) : (
             <HStack gap={1}>
               <Button
-                label="Edit tracking"
+                label={t("orders.tracking_edit")}
                 size="sm"
                 variant="ghost"
                 onClick={() => setEditing(true)}
               />
               <Button
-                label="Take back"
+                label={t("orders.shipment_take_back")}
                 size="sm"
                 variant="ghost"
                 onClick={() => setConfirming(true)}
@@ -321,7 +339,12 @@ function Shipment({
       </HStack>
       {error && <Banner status="error" title={error} />}
       <Text>
-        {fulfillment.lines.map((line) => `${line.quantity} × ${describe(line.line)}`).join(", ")}
+        {format.list(
+          fulfillment.lines.map((line) =>
+            t("orders.shipment_line", { quantity: line.quantity, name: describe(line.line) }),
+          ),
+          "unit",
+        )}
       </Text>
       {fulfillment.tracking.map((tracking) => (
         <Text key={tracking.number} type="supporting">
@@ -353,17 +376,18 @@ function TrackingDialog({
   const [tracking, setTracking] = useState<TrackingInput[]>(() =>
     fulfillment.tracking.length === 0
       ? [NO_TRACKING]
-      : fulfillment.tracking.map((t) => ({
-          carrier: t.carrier ?? "",
-          number: t.number,
-          url: t.url ?? "",
+      : fulfillment.tracking.map((row) => ({
+          carrier: row.carrier ?? "",
+          number: row.number,
+          url: row.url ?? "",
         })),
   );
+  const t = useT<"orders">();
   const [notify, setNotify] = useState(true);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
   const submit = () => {
-    const problem = trackingProblem(tracking);
+    const problem = trackingProblem(t, tracking);
     if (problem) return setError(problem);
     startTransition(async () => {
       const result = await updateTracking(orderId, fulfillment.id, tracking, notify);
@@ -375,22 +399,27 @@ function TrackingDialog({
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={560} purpose="form">
       <DialogHeader
-        title="Edit tracking"
-        subtitle="Clear a row, or remove it, to drop that number."
+        title={t("orders.tracking_dialog_title")}
+        subtitle={t("orders.tracking_dialog_subtitle")}
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
         <TrackingList rows={tracking} onChange={setTracking} />
         <CheckboxInput
-          label="Email the customer"
-          description="Only if the tracking changed."
+          label={t("orders.notify_customer")}
+          description={t("orders.tracking_notify_description")}
           value={notify}
           onChange={setNotify}
         />
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
-          <Button label="Save" variant="primary" isLoading={isPending} onClick={submit} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
+          <Button
+            label={t("common.save")}
+            variant="primary"
+            isLoading={isPending}
+            onClick={submit}
+          />
         </HStack>
       </VStack>
     </Dialog>
@@ -399,15 +428,16 @@ function TrackingDialog({
 
 /** "Cancel order": refused while shipments stand, so it says so instead. */
 export function CancelOrderButton({ order }: { order: Order }) {
+  const t = useT<"orders">();
   const [isOpen, setIsOpen] = useState(false);
   const shipped = order.fulfillment_status !== "unfulfilled";
   return (
     <>
       <Button
-        label="Cancel order"
+        label={t("orders.cancel_button")}
         variant="ghost"
         isDisabled={shipped}
-        tooltip={shipped ? "Take back its shipments first." : undefined}
+        tooltip={shipped ? t("orders.cancel_shipped_tooltip") : undefined}
         onClick={() => setIsOpen(true)}
       />
       {isOpen && <CancelOrderDialog order={order} onClose={() => setIsOpen(false)} />}
@@ -425,24 +455,29 @@ function CancelOrderDialog({ order, onClose }: { order: Order; onClose: () => vo
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={520} purpose="form">
       <DialogHeader
-        title={`Cancel order #${order.number}?`}
+        title={t("orders.cancel_dialog_title", { number: String(order.number) })}
         subtitle={
           COLLECTED.includes(order.financial_status)
-            ? "Its stock is released. What was paid stays paid: refund the customer outside Hypha."
+            ? t("orders.cancel_dialog_paid")
             : order.payments.some((p) => p.status === "pending")
-              ? "Its stock is released and its pending payment voided. This can't be undone."
-              : "Its stock is released. This can't be undone."
+              ? t("orders.cancel_dialog_pending")
+              : t("orders.cancel_dialog_unpaid")
         }
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
-        <Selector label="Reason" options={reasons} value={reason} onChange={setReason} />
-        <CheckboxInput label="Email the customer" value={notify} onChange={setNotify} />
+        <Selector
+          label={t("orders.cancel_dialog_reason")}
+          options={reasons}
+          value={reason}
+          onChange={setReason}
+        />
+        <CheckboxInput label={t("orders.notify_customer")} value={notify} onChange={setNotify} />
         <HStack gap={2} hAlign="end">
-          <Button label="Keep order" variant="ghost" onClick={onClose} />
+          <Button label={t("orders.cancel_keep")} variant="ghost" onClick={onClose} />
           <Button
-            label="Cancel order"
+            label={t("orders.cancel_button")}
             variant="destructive"
             isLoading={isPending}
             onClick={() =>

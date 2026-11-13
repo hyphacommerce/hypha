@@ -20,9 +20,11 @@ import { Fragment, type ReactNode, useEffect, useState, useTransition } from "re
 import { CountryPicker } from "@/components/country-picker";
 import { useCurrencies } from "@/components/currencies";
 import { currencyCodes } from "@/lib/format";
+import type { KeyIn } from "@/lib/messages";
+import { paymentPresets } from "@/lib/payments";
 import { type Country, countryLabel, currencyOptions, takenCountries } from "@/lib/regions";
-
-import { PAYMENT_PRESETS } from "@/lib/payments";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { createPaymentMethod } from "../settings/payments/actions";
 import type { SetupKey } from "../setup-checklist";
@@ -56,82 +58,77 @@ export type WizardData = {
   countries: Country[];
 };
 
+type StepKey = "store" | "market" | "shipping" | "payment" | "product" | "sell";
+
 type StepDef = {
-  /** What the store remembers it by (`setup.step`). */
-  key: string;
-  label: string;
-  description: string;
+  /** What the store remembers it by (`setup.step`), and what its messages are named by. */
+  key: StepKey;
   isDone: (done: WizardData["done"]) => boolean;
-  /** The "why" beside the form. */
-  why: string[];
+  /** The "why" beside the form: a message per line. */
+  why: KeyIn<"setup">[];
 };
 
 const STEPS: StepDef[] = [
   {
     key: "store",
-    label: "Store",
-    description: "Name and contact email",
     isDone: (d) => d.store,
     why: [
-      "Your storefront shows the store's name and the email shoppers can write to.",
-      "The time zone decides how dates show; everything is stored in UTC.",
-      "The language says what your content is written in. Translations come later.",
+      "setup.step_store_why_name",
+      "setup.step_store_why_time_zone",
+      "setup.step_store_why_language",
     ],
   },
   {
     key: "market",
-    label: "Market",
-    description: "Where you sell, in which currency",
     isDone: (d) => d.market,
     why: [
-      "A market is a group of countries that buy in one currency.",
-      "Each country belongs to one market at most; add more markets for other currencies.",
-      "A market sells the products in its catalog, created with it.",
+      "setup.step_market_why_group",
+      "setup.step_market_why_one_market",
+      "setup.step_market_why_catalog",
     ],
   },
   {
     key: "shipping",
-    label: "Shipping",
-    description: "A zone and a flat rate",
     isDone: (d) => d.shipping,
-    why: [
-      "Checkout offers the options of the zone the address is in.",
-      "Start with one flat rate; tiers by weight or order value, and carrier rates, are in Settings → Shipping.",
-    ],
+    why: ["setup.step_shipping_why_zone", "setup.step_shipping_why_flat_rate"],
   },
   {
     key: "payment",
-    label: "Payment",
-    description: "How shoppers pay you",
     isDone: (d) => d.payment,
     why: [
-      "Checkout refuses carts with something to pay until a payment method is enabled.",
-      "With cash on delivery or a bank transfer you collect the money yourself, then mark the order paid.",
-      "Instructions (bank details, what to pay the courier) are shown to the shopper after checkout.",
+      "setup.step_payment_why_refused",
+      "setup.step_payment_why_manual",
+      "setup.step_payment_why_instructions",
     ],
   },
   {
     key: "product",
-    label: "First product",
-    description: "Priced, stocked and active",
     isDone: (d) => d.product && d.stock,
     why: [
-      "A product starts with one variant; options like size and colour are added on its page.",
-      "Leave stock blank to not track it: it can always be sold.",
-      "Drafts can't be sold, so the product is made active.",
+      "setup.step_product_why_variant",
+      "setup.step_product_why_stock",
+      "setup.step_product_why_active",
     ],
   },
   {
     key: "sell",
-    label: "Start selling",
-    description: "Publish it and connect a storefront",
     isDone: (d) => d.publish && d.key,
-    why: [
-      "A sales channel is where products are sold; a storefront sells what's published to its channel.",
-      "The storefront calls the API with a publishable key. It's safe in a storefront's settings, but shown only once.",
-    ],
+    why: ["setup.step_sell_why_channel", "setup.step_sell_why_key"],
   },
 ];
+
+/** Examples and names the wizard shows as they are in every language. */
+const EMAIL_EXAMPLE = "hello@example.com";
+const KEY_SETTING = "STOREFRONT_KEY";
+const KEY_FILE = "apps/storefront/.dev.vars";
+
+/**
+ * Names the forms start with. They're saved as the store's content (shoppers pick the
+ * option at checkout), which is in the store's language whatever the staff member's is,
+ * so they aren't translated: staff type their own.
+ */
+const OPTION_NAME = "Standard";
+const KEY_NAME = "Storefront";
 
 export function SetupWizard({
   data,
@@ -144,6 +141,7 @@ export function SetupWizard({
   savedStep?: string | null;
 }) {
   const router = useRouter();
+  const t = useT<"setup">();
   const firstOpen = STEPS.findIndex((s) => !s.isDone(data.done));
   const saved = STEPS.findIndex((s) => s.key === savedStep);
   const [active, setActive] = useState(() =>
@@ -201,28 +199,25 @@ export function SetupWizard({
       <HStack gap={4} hAlign="between" vAlign="start" wrap="wrap">
         <VStack gap={1}>
           <Text type="display-1" as="h1">
-            Set up your store
+            {t("setup.title")}
           </Text>
-          <Text color="secondary">
-            Six steps to a storefront that can take orders. Each saves as you go; leave and come
-            back, and it opens where you were.
-          </Text>
+          <Text color="secondary">{t("setup.description")}</Text>
         </VStack>
-        <Button
-          label="Hide the setup guide"
-          variant="ghost"
-          isLoading={isFinishing}
-          onClick={finish}
-        />
+        <Button label={t("setup.hide")} variant="ghost" isLoading={isFinishing} onClick={finish} />
       </HStack>
       {finishError && <Banner status="error" title={finishError} />}
       {allDone && (
         <Banner
           status="success"
-          title="Your store is ready to sell"
-          description="Every step is done. Finish to put the guide away; Settings → Store can show it again."
+          title={t("setup.all_done_title")}
+          description={t("setup.all_done_description")}
           endContent={
-            <Button label="Finish" variant="primary" isLoading={isFinishing} onClick={finish} />
+            <Button
+              label={t("setup.finish")}
+              variant="primary"
+              isLoading={isFinishing}
+              onClick={finish}
+            />
           }
         />
       )}
@@ -233,18 +228,20 @@ export function SetupWizard({
               activeStep={active}
               orientation="vertical"
               onStepClick={setActive}
-              label="Setup"
+              label={t("setup.stepper_label")}
             >
               {STEPS.map((s, i) => {
                 const isDone = s.isDone(data.done);
                 return (
                   <Step
-                    key={s.label}
+                    key={s.key}
                     step={i}
-                    label={s.label}
-                    description={s.description}
+                    label={t(`setup.step_${s.key}_label`)}
+                    description={t(`setup.step_${s.key}_description`)}
                     status={isDone ? "success" : undefined}
-                    indicator={isDone ? <CheckIcon width={14} aria-label="Done" /> : "number"}
+                    indicator={
+                      isDone ? <CheckIcon width={14} aria-label={t("common.done")} /> : "number"
+                    }
                   />
                 );
               })}
@@ -254,15 +251,15 @@ export function SetupWizard({
         <VStack gap={4} width="100%" maxWidth={560}>
           <VStack gap={1}>
             <Text type="display-2" as="h2">
-              {step.label}
+              {t(`setup.step_${step.key}_label`)}
             </Text>
-            <Text color="secondary">{step.description}</Text>
+            <Text color="secondary">{t(`setup.step_${step.key}_description`)}</Text>
           </VStack>
           {step.isDone(data.done) && (
             <Banner
               status="success"
-              title="Done"
-              description="Change or add to it below, or go on."
+              title={t("common.done")}
+              description={t("setup.step_done_description")}
             />
           )}
           {/* Starts the form again once a save's refresh brings what it made, so its
@@ -274,16 +271,21 @@ export function SetupWizard({
           </Fragment>
           <HStack gap={2} hAlign="between">
             <Button
-              label="Back"
+              label={t("common.back")}
               variant="ghost"
               isDisabled={active === 0}
               onClick={() => setActive(active - 1)}
             />
             {isLast ? (
-              <Button label="Finish" variant="primary" isLoading={isFinishing} onClick={finish} />
+              <Button
+                label={t("setup.finish")}
+                variant="primary"
+                isLoading={isFinishing}
+                onClick={finish}
+              />
             ) : (
               <Button
-                label={step.isDone(data.done) ? "Next" : "Skip for now"}
+                label={step.isDone(data.done) ? t("common.next") : t("setup.skip")}
                 variant="secondary"
                 onClick={() => setActive(active + 1)}
               />
@@ -292,7 +294,7 @@ export function SetupWizard({
         </VStack>
         <VStack gap={2} width={260}>
           <Text type="label" as="h2">
-            Why this matters
+            {t("setup.why_title")}
           </Text>
           <List listStyle="disc" density="compact">
             {step.why.map((line) => (
@@ -300,7 +302,7 @@ export function SetupWizard({
                 key={line}
                 label={
                   <Text type="supporting" color="secondary">
-                    {line}
+                    {t(line)}
                   </Text>
                 }
               />
@@ -342,6 +344,8 @@ function StoreStep({ store, onSaved }: { store: WizardData["store"]; onSaved: ()
   const [language, setLanguage] = useState(store.default_language);
   const [currency, setCurrency] = useState(store.currency ?? "");
   const currencies = useCurrencies();
+  const t = useT<"setup">();
+  const format = useFormat();
   const { error, isPending, run } = useSave(onSaved);
   const canSave = name.trim() !== "" && email.trim() !== "" && language.trim() !== "";
 
@@ -349,44 +353,44 @@ function StoreStep({ store, onSaved }: { store: WizardData["store"]; onSaved: ()
     <Card>
       <VStack gap={4}>
         {error && <Banner status="error" title={error} />}
-        <TextInput label="Store name" value={name} onChange={setName} hasAutoFocus />
+        <TextInput label={t("setup.store_name")} value={name} onChange={setName} hasAutoFocus />
         <TextInput
-          label="Contact email"
-          description="Where shoppers can write to you. Storefronts show it."
-          placeholder="hello@example.com"
+          label={t("setup.store_email")}
+          description={t("setup.store_email_description")}
+          placeholder={EMAIL_EXAMPLE}
           value={email}
           onChange={setEmail}
         />
         <Selector
-          label="Time zone"
+          label={t("common.time_zone")}
           options={timezoneOptions(timezone)}
           value={timezone}
           onChange={setTimezone}
           hasSearch
         />
         <TextInput
-          label="Content language"
-          description="A BCP 47 tag: en, en-GB, hr…"
+          label={t("setup.store_language")}
+          description={t("setup.store_language_description")}
           value={language}
           onChange={setLanguage}
         />
         <Selector
-          label="Base currency"
-          description="What you pay suppliers and your stock's value are kept in. Needed before you record a cost."
+          label={t("setup.store_currency")}
+          description={t("setup.store_currency_description")}
           options={[
-            { value: "", label: "Choose later" },
-            ...currencyOptions(currencyCodes(currencies)),
+            { value: "", label: t("setup.store_currency_later") },
+            ...currencyOptions(currencyCodes(currencies), format.locale),
           ]}
           value={currency}
           onChange={setCurrency}
           hasSearch
         />
         <Text type="supporting" color="secondary">
-          Legal details and a description are in Settings → Store.
+          {t("setup.store_more")}
         </Text>
         <HStack hAlign="end">
           <Button
-            label="Save and continue"
+            label={t("setup.store_save")}
             variant="primary"
             isLoading={isPending}
             isDisabled={!canSave}
@@ -436,6 +440,8 @@ function Existing({
 
 function MarketStep({ data, onSaved }: { data: WizardData; onSaved: () => void }) {
   const currencies = useCurrencies();
+  const t = useT<"setup">();
+  const format = useFormat();
   const [isAdding, setIsAdding] = useState(data.markets.length === 0);
   const [name, setName] = useState("");
   const [chosen, setChosen] = useState<string[]>([]);
@@ -447,15 +453,24 @@ function MarketStep({ data, onSaved }: { data: WizardData; onSaved: () => void }
   // A market selling everywhere lists its count, not two hundred names.
   const where = (codes: string[]) =>
     codes.length > 6
-      ? `${codes.length} countries`
-      : codes.map((c) => countryLabel(c, data.countries)).join(", ");
+      ? t("setup.countries_count", { count: codes.length })
+      : format.list(
+          codes.map((c) => countryLabel(c, data.countries, format.locale)),
+          "unit",
+        );
 
   return (
     <VStack gap={4}>
       <Existing
-        title="Your markets"
-        lines={data.markets.map((m) => `${m.name}: ${where(m.countries)} · ${m.currency}`)}
-        addLabel="Add another market"
+        title={t("setup.market_existing")}
+        lines={data.markets.map((m) =>
+          t("setup.market_line", {
+            name: m.name,
+            where: where(m.countries),
+            currency: m.currency,
+          }),
+        )}
+        addLabel={t("setup.market_add_another")}
         isAdding={isAdding}
         onAdd={() => setIsAdding(true)}
       />
@@ -464,9 +479,9 @@ function MarketStep({ data, onSaved }: { data: WizardData; onSaved: () => void }
           <VStack gap={4}>
             {error && <Banner status="error" title={error} />}
             <TextInput
-              label="Name"
-              placeholder="Eurozone"
-              description="For staff only; shoppers see their country."
+              label={t("common.name")}
+              placeholder={t("setup.market_name_placeholder")}
+              description={t("setup.market_name_description")}
               value={name}
               onChange={setName}
             />
@@ -475,26 +490,26 @@ function MarketStep({ data, onSaved }: { data: WizardData; onSaved: () => void }
               taken={taken}
               value={chosen}
               onChange={setChosen}
-              description="A country belongs to one market at most. Selling everywhere? Pick all available."
+              description={t("setup.market_countries_description")}
             />
             <Selector
-              label="Currency"
-              description="What its prices are in. It can't change later."
-              options={currencyOptions(currencyCodes(currencies))}
+              label={t("common.currency")}
+              description={t("setup.market_currency_description")}
+              options={currencyOptions(currencyCodes(currencies), format.locale)}
               value={currency}
               onChange={setCurrency}
               hasSearch
-              placeholder="Choose a currency"
+              placeholder={t("setup.market_currency_placeholder")}
             />
             <Switch
-              label="Prices include tax"
-              description="On for most of Europe; off where tax is added at checkout, as in the US."
+              label={t("setup.market_prices_include_tax")}
+              description={t("setup.market_prices_include_tax_description")}
               value={pricesIncludeTax}
               onChange={setPricesIncludeTax}
             />
             <HStack hAlign="end">
               <Button
-                label="Add market"
+                label={t("setup.market_add")}
                 variant="primary"
                 isLoading={isPending}
                 isDisabled={!canSave}
@@ -513,12 +528,19 @@ function MarketStep({ data, onSaved }: { data: WizardData; onSaved: () => void }
 
 /** A step that needs a market first says so, with a way back to that step. */
 function NeedsMarket({ goTo }: { goTo: (step: number) => void }) {
+  const t = useT<"setup">();
   return (
     <Banner
       status="info"
-      title="Add a market first"
-      description="This step uses the market's countries and currency."
-      endContent={<Button label="Go to Market" variant="secondary" onClick={() => goTo(1)} />}
+      title={t("setup.needs_market_title")}
+      description={t("setup.needs_market_description")}
+      endContent={
+        <Button
+          label={t("setup.needs_market_action")}
+          variant="secondary"
+          onClick={() => goTo(1)}
+        />
+      }
     />
   );
 }
@@ -532,6 +554,8 @@ function ShippingStep({
   onSaved: () => void;
   goTo: (step: number) => void;
 }) {
+  const t = useT<"setup">();
+  const format = useFormat();
   const zoned = new Set(data.zones.flatMap((z) => z.countries));
   // The form starts from the first market with countries no zone covers yet.
   const first = data.markets.find((m) => m.countries.some((c) => !zoned.has(c))) ?? data.markets[0];
@@ -540,7 +564,7 @@ function ShippingStep({
   const [chosen, setChosen] = useState<string[]>(() =>
     first ? first.countries.filter((c) => !zoned.has(c)) : [],
   );
-  const [optionName, setOptionName] = useState("Standard");
+  const [optionName, setOptionName] = useState(OPTION_NAME);
   const [price, setPrice] = useState("");
   const [currency, setCurrency] = useState(first?.currency);
   const { error, isPending, run } = useSave(onSaved);
@@ -553,12 +577,18 @@ function ShippingStep({
   return (
     <VStack gap={4}>
       <Existing
-        title="Your shipping zones"
-        lines={data.zones.map(
-          (z) =>
-            `${z.name}: ${z.countries.length > 6 ? `${z.countries.length} countries` : z.countries.join(", ")} · ${z.options.length} ${z.options.length === 1 ? "option" : "options"}`,
+        title={t("setup.shipping_existing")}
+        lines={data.zones.map((z) =>
+          t("setup.shipping_line", {
+            name: z.name,
+            where:
+              z.countries.length > 6
+                ? t("setup.countries_count", { count: z.countries.length })
+                : format.list(z.countries, "unit"),
+            options: z.options.length,
+          }),
         )}
-        addLabel="Add another zone"
+        addLabel={t("setup.shipping_add_another")}
         isAdding={isAdding}
         onAdd={() => setIsAdding(true)}
       />
@@ -566,32 +596,37 @@ function ShippingStep({
         <Card>
           <VStack gap={4}>
             {error && <Banner status="error" title={error} />}
-            <TextInput label="Zone name" value={name} onChange={setName} />
+            <TextInput label={t("setup.shipping_zone_name")} value={name} onChange={setName} />
             <CountryPicker
               countries={data.countries}
               taken={takenCountries(data.zones)}
               value={chosen}
               onChange={setChosen}
-              description="A country is in one zone at most."
+              description={t("setup.shipping_countries_description")}
             />
             <TextInput
-              label="Option name"
-              description="What shoppers pick at checkout."
+              label={t("setup.shipping_option_name")}
+              description={t("setup.shipping_option_description")}
               value={optionName}
               onChange={setOptionName}
             />
             <HStack gap={3}>
-              <TextInput label="Flat rate" placeholder="4.90" value={price} onChange={setPrice} />
+              <TextInput
+                label={t("setup.shipping_rate")}
+                placeholder="4.90"
+                value={price}
+                onChange={setPrice}
+              />
               <Selector
-                label="Currency"
-                options={currencyOptions(currencies)}
+                label={t("common.currency")}
+                options={currencyOptions(currencies, format.locale)}
                 value={currency}
                 onChange={setCurrency}
               />
             </HStack>
             <HStack hAlign="end">
               <Button
-                label="Add shipping"
+                label={t("setup.shipping_add")}
                 variant="primary"
                 isLoading={isPending}
                 isDisabled={!canSave}
@@ -609,9 +644,11 @@ function ShippingStep({
 }
 
 function PaymentStep({ data, onSaved }: { data: WizardData; onSaved: () => void }) {
+  const t = useT<"setup" | "orders">();
+  const presets = paymentPresets(t);
   const [isAdding, setIsAdding] = useState(data.paymentMethods.length === 0);
-  const [presetValue, setPresetValue] = useState<string>(PAYMENT_PRESETS[0].value);
-  const preset = PAYMENT_PRESETS.find((p) => p.value === presetValue) ?? PAYMENT_PRESETS[0];
+  const [presetValue, setPresetValue] = useState<string>(presets[0].value);
+  const preset = presets.find((p) => p.value === presetValue) ?? presets[0];
   const [name, setName] = useState(preset.name);
   const [instructions, setInstructions] = useState("");
   const { error, isPending, run } = useSave(onSaved);
@@ -619,11 +656,11 @@ function PaymentStep({ data, onSaved }: { data: WizardData; onSaved: () => void 
   return (
     <VStack gap={4}>
       <Existing
-        title="Your payment methods"
-        lines={data.paymentMethods.map(
-          (m) => `${m.name}${m.enabled ? "" : " (off: turn it on in Settings → Payments)"}`,
+        title={t("setup.payment_existing")}
+        lines={data.paymentMethods.map((m) =>
+          m.enabled ? m.name : t("setup.payment_line_off", { name: m.name }),
         )}
-        addLabel="Add another method"
+        addLabel={t("setup.payment_add_another")}
         isAdding={isAdding}
         onAdd={() => setIsAdding(true)}
       />
@@ -632,28 +669,28 @@ function PaymentStep({ data, onSaved }: { data: WizardData; onSaved: () => void 
           <VStack gap={4}>
             {error && <Banner status="error" title={error} />}
             <Selector
-              label="Kind"
-              options={PAYMENT_PRESETS.map(({ value, label, description }) => ({
+              label={t("setup.payment_kind")}
+              options={presets.map(({ value, label, description }) => ({
                 value,
                 label,
                 description,
               }))}
               value={presetValue}
               onChange={(value) => {
-                const next = PAYMENT_PRESETS.find((p) => p.value === value) ?? PAYMENT_PRESETS[0];
+                const next = presets.find((p) => p.value === value) ?? presets[0];
                 if (name === preset.name) setName(next.name);
                 setPresetValue(next.value);
               }}
             />
             <TextInput
-              label="Name"
-              description="What shoppers see at checkout."
+              label={t("common.name")}
+              description={t("setup.payment_name_description")}
               value={name}
               onChange={setName}
             />
             <TextArea
-              label="Instructions"
-              description="Shown to the shopper after checkout."
+              label={t("setup.payment_instructions")}
+              description={t("setup.payment_instructions_description")}
               placeholder={preset.instructionsPlaceholder}
               isOptional
               maxLength={2000}
@@ -663,7 +700,7 @@ function PaymentStep({ data, onSaved }: { data: WizardData; onSaved: () => void 
             />
             <HStack hAlign="end">
               <Button
-                label="Add payment method"
+                label={t("setup.payment_add")}
                 variant="primary"
                 isLoading={isPending}
                 isDisabled={name.trim() === ""}
@@ -696,6 +733,7 @@ function ProductStep({
   onSaved: () => void;
   goTo: (step: number) => void;
 }) {
+  const t = useT<"setup">();
   const [isAdding, setIsAdding] = useState(data.products.length === 0);
   const [title, setTitle] = useState("");
   const [price, setPrice] = useState("");
@@ -717,22 +755,22 @@ function ProductStep({
   return (
     <VStack gap={4}>
       <Existing
-        title="Your active products"
+        title={t("setup.product_existing")}
         lines={[
           ...shown.map((p) => p.title),
           ...(data.products.length > shown.length
-            ? [`and ${data.products.length - shown.length} more`]
+            ? [t("common.and_more", { count: data.products.length - shown.length })]
             : []),
         ]}
-        addLabel="Add another product"
+        addLabel={t("setup.product_add_another")}
         isAdding={isAdding}
         onAdd={() => setIsAdding(true)}
       />
       {data.products.length > 0 && !data.done.stock && (
         <Banner
           status="warning"
-          title="None of your first active products can be sold yet"
-          description="Set stock on a product's page, or add one here with stock."
+          title={t("setup.product_unsellable_title")}
+          description={t("setup.product_unsellable_description")}
         />
       )}
       {isAdding && (
@@ -740,51 +778,47 @@ function ProductStep({
           <VStack gap={4}>
             {error && <Banner status="error" title={error} />}
             <TextInput
-              label="Title"
-              placeholder="Stoneware mug"
-              description="Its handle (the URL) is made from it; both can change on its page."
+              label={t("common.title")}
+              placeholder={t("setup.product_title_placeholder")}
+              description={t("setup.product_title_description")}
               value={title}
               onChange={setTitle}
             />
             {/* Each pair has a description on both fields, so the inputs line up. */}
             <div className="form-grid">
               <TextInput
-                label={currency ? `Price (${currency})` : "Price"}
-                description="In the market's currency."
+                label={currency ? t("setup.product_price_in", { currency }) : t("common.price")}
+                description={t("setup.product_price_description")}
                 placeholder="18.50"
                 value={price}
                 onChange={setPrice}
               />
               <Selector
-                label="Market"
-                description="It's added to this market's catalog."
+                label={t("common.market")}
+                description={t("setup.product_market_description")}
                 options={data.markets.map((m) => ({ value: m.id, label: m.name }))}
                 value={market}
                 onChange={setMarket}
               />
             </div>
             <Switch
-              label="Track stock"
-              description={
-                track
-                  ? "Counted at a warehouse; it can't be sold once it runs out."
-                  : "Not counted: it can always be sold, as for made-to-order or digital goods."
-              }
+              label={t("setup.product_track")}
+              description={track ? t("setup.product_track_on") : t("setup.product_track_off")}
               value={track}
               onChange={setTrack}
             />
             {track && (
               <div className="form-grid">
                 <TextInput
-                  label="On hand"
-                  description="How many you have now."
+                  label={t("setup.product_on_hand")}
+                  description={t("setup.product_on_hand_description")}
                   value={stock}
                   onChange={setStock}
                 />
                 {data.locations.length > 0 && (
                   <Selector
-                    label="Warehouse"
-                    description="Where they are."
+                    label={t("setup.product_warehouse")}
+                    description={t("setup.product_warehouse_description")}
                     options={data.locations.map((l) => ({ value: l.id, label: l.name }))}
                     value={location}
                     onChange={setLocation}
@@ -794,7 +828,7 @@ function ProductStep({
             )}
             <HStack hAlign="end">
               <Button
-                label="Add product"
+                label={t("setup.product_add")}
                 variant="primary"
                 isLoading={isPending}
                 isDisabled={!canSave}
@@ -822,6 +856,7 @@ function SellStep({
   onSaved: () => void;
   goTo: (step: number) => void;
 }) {
+  const t = useT<"setup">();
   const online = data.channels.find((c) => c.kind === "online_store") ?? data.channels[0];
   const [channel, setChannel] = useState(online?.id);
   // Until one is picked, the newest product not yet on the channel, worked out on every
@@ -829,7 +864,7 @@ function SellStep({
   const [picked, setProduct] = useState<string>();
   const unpublished = data.products.find((p) => !channel || !p.channels.includes(channel));
   const product = picked ?? unpublished?.id ?? data.products[0]?.id;
-  const [keyName, setKeyName] = useState("Storefront");
+  const [keyName, setKeyName] = useState(KEY_NAME);
   const [token, setToken] = useState<string>();
   const published = useSave(onSaved);
   const key = useSave(onSaved);
@@ -838,9 +873,13 @@ function SellStep({
     return (
       <Banner
         status="info"
-        title="Add an active product first"
+        title={t("setup.needs_product_title")}
         endContent={
-          <Button label="Go to First product" variant="secondary" onClick={() => goTo(4)} />
+          <Button
+            label={t("setup.needs_product_action")}
+            variant="secondary"
+            onClick={() => goTo(4)}
+          />
         }
       />
     );
@@ -848,7 +887,10 @@ function SellStep({
   const channelOptions = data.channels.map((c) => ({ value: c.id, label: c.name }));
   const productOptions = data.products.map((p) => ({
     value: p.id,
-    label: channel && p.channels.includes(channel) ? `${p.title} (published)` : p.title,
+    label:
+      channel && p.channels.includes(channel)
+        ? t("setup.sell_product_published", { title: p.title })
+        : p.title,
   }));
   const isPublished = Boolean(
     channel && product && data.products.find((p) => p.id === product)?.channels.includes(channel),
@@ -859,17 +901,17 @@ function SellStep({
       <Card>
         <VStack gap={4}>
           <Text type="display-3" as="h3">
-            Publish a product
+            {t("setup.sell_publish_title")}
           </Text>
           {published.error && <Banner status="error" title={published.error} />}
           <Selector
-            label="Channel"
+            label={t("common.channel")}
             options={channelOptions}
             value={channel}
             onChange={setChannel}
           />
           <Selector
-            label="Product"
+            label={t("common.product")}
             options={productOptions}
             value={product}
             onChange={setProduct}
@@ -877,7 +919,7 @@ function SellStep({
           />
           <HStack hAlign="end">
             <Button
-              label={isPublished ? "Published" : "Publish"}
+              label={isPublished ? t("setup.sell_published") : t("setup.sell_publish")}
               variant="primary"
               isLoading={published.isPending}
               isDisabled={!channel || !product || isPublished}
@@ -890,12 +932,10 @@ function SellStep({
         <VStack gap={4}>
           <VStack gap={1}>
             <Text type="display-3" as="h3">
-              Connect a storefront
+              {t("setup.sell_connect_title")}
             </Text>
             <Text type="supporting" color="secondary">
-              {data.done.key
-                ? "You have a storefront key already; make another for a second storefront."
-                : "A publishable key for the storefront that sells through this channel."}
+              {data.done.key ? t("setup.sell_connect_has_key") : t("setup.sell_connect_no_key")}
             </Text>
           </VStack>
           {key.error && <Banner status="error" title={key.error} />}
@@ -903,21 +943,20 @@ function SellStep({
             <VStack gap={2}>
               <Banner
                 status="warning"
-                title="Copy it now"
-                description="The key is shown only once."
+                title={t("setup.sell_key_copy_title")}
+                description={t("setup.sell_key_copy_description")}
               />
-              <CodeBlock code={token} title="Publishable key" isWrapped />
+              <CodeBlock code={token} title={t("setup.sell_key_title")} isWrapped />
               <Text type="supporting" color="secondary">
-                It goes in the storefront&apos;s STOREFRONT_KEY setting (apps/storefront/.dev.vars
-                when you run it locally).
+                {t("setup.sell_key_where", { setting: KEY_SETTING, file: KEY_FILE })}
               </Text>
             </VStack>
           ) : (
             <>
-              <TextInput label="Key name" value={keyName} onChange={setKeyName} />
+              <TextInput label={t("setup.sell_key_name")} value={keyName} onChange={setKeyName} />
               <HStack hAlign="end">
                 <Button
-                  label="Create storefront key"
+                  label={t("setup.sell_key_create")}
                   variant="primary"
                   isLoading={key.isPending}
                   isDisabled={!channel || keyName.trim() === ""}

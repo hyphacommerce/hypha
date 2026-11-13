@@ -26,8 +26,8 @@ import {
   PaymentBadge,
 } from "@/components/status";
 import type { Definition } from "@/lib/custom-fields";
-import { type Currencies, formatMoney } from "@/lib/format";
 import { UNPAID } from "@/lib/payments";
+import { useFormat } from "@/lib/use-format";
 import { useT } from "@/lib/use-t";
 
 import { type BulkOutcome, BulkOutcomeBanner, OrderBulkActions } from "./bulk";
@@ -37,28 +37,20 @@ const NO_FIELDS: Definition[] = [];
 const NO_NAMES: Record<string, string> = {};
 const NO_OPTIONS: { value: string; label: string }[] = [];
 const NO_CODES: string[] = [];
-const NO_CURRENCIES: Currencies = {};
 
 type Order = AdminSchemas["OrderSummaryResponse"];
 
-const SORT_OPTIONS: SortOption[] = [
-  { value: "newest", label: "Newest" },
-  { value: "oldest", label: "Oldest" },
-  { value: "total_desc", label: "Highest total", unavailable: "pick a currency" },
-  { value: "total_asc", label: "Lowest total", unavailable: "pick a currency" },
-];
-
-const VIEWS: View[] = [
-  { label: "All", params: {} },
-  {
-    label: "Unfulfilled",
-    params: { fulfillment_status: ["unfulfilled", "partially_fulfilled"], cancelled: ["false"] },
-  },
-  { label: "Unpaid", params: { financial_status: UNPAID, cancelled: ["false"] } },
-  { label: "Cancelled", params: { cancelled: ["true"] } },
-  { label: "Needs review", params: { address: ["needs_review"], cancelled: ["false"] } },
-];
-
+/** The payment and fulfilment statuses the list filters by, in the order offered. */
+const FINANCIAL = [
+  "pending",
+  "authorized",
+  "partially_paid",
+  "paid",
+  "partially_refunded",
+  "refunded",
+  "voided",
+] as const;
+const FULFILLMENT = ["unfulfilled", "partially_fulfilled", "fulfilled"] as const;
 const SORTS: Record<string, SortDef> = {
   placed: { asc: "oldest", desc: "newest" },
   total: { asc: "total_asc", desc: "total_desc" },
@@ -66,7 +58,6 @@ const SORTS: Record<string, SortDef> = {
 
 export function OrdersTable({
   page,
-  currencies = NO_CURRENCIES,
   channels = NO_NAMES,
   countries = NO_OPTIONS,
   orderCurrencies = NO_CODES,
@@ -74,7 +65,6 @@ export function OrdersTable({
 }: {
   /** The page of rows; absent while it loads (the table shows its toolbar meanwhile). */
   page?: { items: Order[]; next_cursor: string | null; error?: string };
-  currencies?: Currencies;
   /** Channel names by ID. */
   channels?: Record<string, string>;
   /** The countries markets sell to: code and name. */
@@ -84,66 +74,84 @@ export function OrdersTable({
   /** Filterable custom fields, offered as filters. */
   fieldFilters?: Definition[];
 }) {
-  const t = useT();
+  const t = useT<"orders">();
+  const format = useFormat();
   const [outcome, setOutcome] = useState<BulkOutcome>();
+  const needsCurrency = t("orders.list_sort_needs_currency");
+  const sortOptions: SortOption[] = [
+    { value: "newest", label: t("orders.list_sort_newest") },
+    { value: "oldest", label: t("orders.list_sort_oldest") },
+    { value: "total_desc", label: t("orders.list_sort_total_desc"), unavailable: needsCurrency },
+    { value: "total_asc", label: t("orders.list_sort_total_asc"), unavailable: needsCurrency },
+  ];
+  const views: View[] = [
+    { label: t("common.all"), params: {} },
+    {
+      label: t("orders.list_view_unfulfilled"),
+      params: { fulfillment_status: ["unfulfilled", "partially_fulfilled"], cancelled: ["false"] },
+    },
+    {
+      label: t("orders.list_view_unpaid"),
+      params: { financial_status: UNPAID, cancelled: ["false"] },
+    },
+    { label: t("orders.list_view_cancelled"), params: { cancelled: ["true"] } },
+    {
+      label: t("orders.list_view_needs_review"),
+      params: { address: ["needs_review"], cancelled: ["false"] },
+    },
+  ];
   const filters: FilterDef[] = [
     {
       kind: "search",
       param: "q",
-      label: "Search",
-      placeholder: "Search orders by number or email",
+      label: t("common.search"),
+      placeholder: t("orders.list_search_placeholder"),
     },
     {
       kind: "multi",
       param: "financial_status",
-      label: "Payment",
-      options: [
-        { value: "pending", label: "Pending" },
-        { value: "authorized", label: "Authorized" },
-        { value: "partially_paid", label: "Partly paid" },
-        { value: "paid", label: "Paid" },
-        { value: "partially_refunded", label: "Partly refunded" },
-        { value: "refunded", label: "Refunded" },
-        { value: "voided", label: "Voided" },
-      ],
+      label: t("orders.payment"),
+      options: FINANCIAL.map((value) => ({
+        value,
+        label: t(`orders.list_filter_financial_${value}`),
+      })),
     },
     {
       kind: "multi",
       param: "fulfillment_status",
-      label: "Fulfilment",
-      options: [
-        { value: "unfulfilled", label: "Unfulfilled" },
-        { value: "partially_fulfilled", label: "Partially fulfilled" },
-        { value: "fulfilled", label: "Fulfilled" },
-      ],
+      label: t("orders.fulfilment"),
+      options: FULFILLMENT.map((value) => ({
+        value,
+        label: t(`orders.list_filter_fulfillment_${value}`),
+      })),
     },
     {
       kind: "select",
       param: "cancelled",
-      label: "Cancelled",
+      label: t("orders.list_filter_cancelled"),
       options: [
-        { value: "false", label: "Not cancelled" },
-        { value: "true", label: "Cancelled" },
+        { value: "false", label: t("orders.list_filter_cancelled_no") },
+        { value: "true", label: t("orders.list_filter_cancelled_yes") },
       ],
     },
     {
       kind: "select",
       param: "address",
-      label: "Address",
-      options: [{ value: "needs_review", label: "Needs review" }],
+      label: t("common.address"),
+      options: [{ value: "needs_review", label: t("orders.list_filter_address_needs_review") }],
     },
-    { kind: "dates", param: "placed", label: "Placed" },
+    { kind: "dates", param: "placed", label: t("orders.list_filter_placed") },
     {
       kind: "select",
       param: "channel",
-      label: "Channel",
+      label: t("common.channel"),
       options: Object.entries(channels).map(([value, label]) => ({ value, label })),
     },
-    { kind: "select", param: "country", label: "Country", options: countries },
+    { kind: "select", param: "country", label: t("common.country"), options: countries },
     {
       kind: "select",
       param: "currency",
-      label: "Currency",
+      label: t("common.currency"),
       options: orderCurrencies.map((c) => ({ value: c, label: c })),
     },
     ...customFieldFilters(fieldFilters),
@@ -151,7 +159,7 @@ export function OrdersTable({
   const columns: TableColumn<Order>[] = [
     {
       key: "number",
-      header: "Order",
+      header: t("common.order"),
       width: pixel(130),
       renderCell: (order) => (
         <VStack gap={0.5} hAlign="start">
@@ -164,7 +172,7 @@ export function OrdersTable({
             <NeedsReviewBadge t={t} />
           ) : (
             <Text type="supporting" color="secondary">
-              {order.item_count} {order.item_count === 1 ? "item" : "items"}
+              {t("common.items_count", { count: order.item_count })}
             </Text>
           )}
         </VStack>
@@ -172,7 +180,7 @@ export function OrdersTable({
     },
     {
       key: "placed",
-      header: "Date",
+      header: t("common.date"),
       width: pixel(150),
       renderCell: (order) => (
         <Text color="secondary">
@@ -182,7 +190,7 @@ export function OrdersTable({
     },
     {
       key: "email",
-      header: "Customer",
+      header: t("common.customer"),
       width: proportional(2, { minWidth: 180 }),
       renderCell: (order) => (
         <VStack gap={0.5}>
@@ -195,44 +203,48 @@ export function OrdersTable({
     },
     {
       key: "payment",
-      header: "Payment",
+      header: t("orders.payment"),
       width: pixel(130),
       renderCell: (order) =>
         order.cancelled_at ? (
-          <Text color="secondary">—</Text>
+          <Text color="secondary">{t("common.empty_value")}</Text>
         ) : (
           <PaymentBadge status={order.financial_status} t={t} />
         ),
     },
     {
       key: "fulfilment",
-      header: "Fulfilment",
+      header: t("orders.fulfilment"),
       width: pixel(150),
       renderCell: (order) =>
         order.cancelled_at ? (
-          <Text color="secondary">—</Text>
+          <Text color="secondary">{t("common.empty_value")}</Text>
         ) : (
           <FulfillmentBadge status={order.fulfillment_status} t={t} />
         ),
     },
     {
       key: "total",
-      header: "Total",
+      header: t("common.total"),
       width: pixel(130),
       align: "end",
-      renderCell: (order) => <Text weight="medium">{formatMoney(order.total, currencies)}</Text>,
+      renderCell: (order) => <Text weight="medium">{format.money(order.total)}</Text>,
     },
   ];
   return (
     <VStack gap={3}>
       {outcome && (
-        <BulkOutcomeBanner outcome={outcome} noun="order" onClose={() => setOutcome(undefined)} />
+        <BulkOutcomeBanner
+          outcome={outcome}
+          noun={t("orders.list_bulk_noun")}
+          onClose={() => setOutcome(undefined)}
+        />
       )}
       <ResourceTable<Order>
         renderBulkActions={(selected, clear) => (
           <OrderBulkActions selected={selected} clear={clear} onDone={setOutcome} />
         )}
-        rowLabel={(o) => `Order #${o.number}`}
+        rowLabel={(o) => t("orders.detail_title", { number: String(o.number) })}
         rows={page?.items}
         nextCursor={page?.next_cursor}
         isLoading={!page}
@@ -240,21 +252,20 @@ export function OrdersTable({
         idKey="id"
         rowHref={(o) => `/orders/${o.id}`}
         filters={filters}
-        views={VIEWS}
+        views={views}
         sorts={SORTS}
-        sortOptions={SORT_OPTIONS}
+        sortOptions={sortOptions}
         defaultSort="newest"
         sortRequires={{ total_asc: "currency", total_desc: "currency" }}
         error={page?.error}
         empty={{
           icon: <ShoppingBagIcon width={32} />,
-          title: "No orders yet",
-          description: "Orders placed through checkout show up here, newest first.",
+          title: t("orders.list_empty_title"),
+          description: t("orders.list_empty_description"),
         }}
         noResults={{
-          title: "No orders match these filters",
-          description:
-            "Search finds an order by its number (1001 or #1001) or by text in its email.",
+          title: t("orders.list_no_results_title"),
+          description: t("orders.list_no_results_description"),
         }}
       />
     </VStack>

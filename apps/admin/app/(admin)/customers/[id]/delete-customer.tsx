@@ -9,6 +9,8 @@ import { TrashIcon } from "@heroicons/react/24/outline";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
+import { useT } from "@/lib/use-t";
+
 import { deleteCustomer } from "../actions";
 
 export function DeleteCustomer({
@@ -23,6 +25,7 @@ export function DeleteCustomer({
   canDelete: boolean;
 }) {
   const router = useRouter();
+  const t = useT<"customers">();
   const [isOpen, setIsOpen] = useState(false);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -30,17 +33,19 @@ export function DeleteCustomer({
   if (!canDelete) return null;
   return (
     <>
-      <Button label="Delete" variant="ghost" icon={<TrashIcon />} onClick={() => setIsOpen(true)} />
+      <Button
+        label={t("common.delete")}
+        variant="ghost"
+        icon={<TrashIcon />}
+        onClick={() => setIsOpen(true)}
+      />
       {isOpen && (
         <AlertDialog
           isOpen
           onOpenChange={(open) => !open && setIsOpen(false)}
-          title={`Delete ${name}?`}
-          description={
-            error ??
-            "The customer, their addresses and custom field values go for good. Their open carts stay, without a customer."
-          }
-          actionLabel="Delete customer"
+          title={t("common.delete_named", { name })}
+          description={error ?? t("customers.delete_description")}
+          actionLabel={t("customers.delete_action")}
           isActionLoading={isPending}
           onAction={() =>
             startTransition(async () => {

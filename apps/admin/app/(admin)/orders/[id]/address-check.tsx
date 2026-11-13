@@ -19,12 +19,16 @@ import { useState, useTransition } from "react";
 
 import { AddressFields } from "@/components/address-fields";
 import { DateTime } from "@/components/date-time";
+import { NeedsReviewBadge } from "@/components/status";
 import {
   type AddressFormat,
   type AddressValues,
   type FieldProblems,
   missingIn,
 } from "@/lib/address";
+import type { KeyIn, TFor } from "@/lib/messages";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { changeOrderAddress, markAddressValid } from "../actions";
 
@@ -33,28 +37,29 @@ type Suggested = AdminSchemas["SuggestedAddressResponse"];
 
 const VERDICTS: Record<
   string,
-  { label: string; variant: "success" | "warning" | "error" | "neutral" }
+  { label: KeyIn<"orders">; variant: "success" | "warning" | "error" | "neutral" }
 > = {
-  deliverable: { label: "Deliverable", variant: "success" },
-  deliverable_with_fixes: { label: "Deliverable with corrections", variant: "warning" },
-  missing_subpremise: { label: "Apartment or unit missing", variant: "warning" },
-  ambiguous: { label: "Ambiguous", variant: "warning" },
-  undeliverable: { label: "Undeliverable", variant: "error" },
-  unknown: { label: "Not verified", variant: "neutral" },
+  deliverable: { label: "orders.address_verdict_deliverable", variant: "success" },
+  deliverable_with_fixes: {
+    label: "orders.address_verdict_deliverable_with_fixes",
+    variant: "warning",
+  },
+  missing_subpremise: { label: "orders.address_verdict_missing_subpremise", variant: "warning" },
+  ambiguous: { label: "orders.address_verdict_ambiguous", variant: "warning" },
+  undeliverable: { label: "orders.address_verdict_undeliverable", variant: "error" },
+  unknown: { label: "orders.address_verdict_unknown", variant: "neutral" },
 };
 
-const FLAGS: Record<string, string> = {
-  po_box: "PO box",
-  residential: "Residential",
-  business: "Business",
-  vacant: "Vacant",
-};
+const FLAGS = ["po_box", "residential", "business", "vacant"] as const;
 
-/** The flags the provider said hold. */
-function flagsOf(flags: AdminSchemas["VerificationFlags"]): string[] {
+/** The flags the provider said hold, as the admin names them (an unknown one as it is). */
+function flagsOf(t: TFor<"orders">, flags: AdminSchemas["VerificationFlags"]): string[] {
   return Object.entries(flags)
     .filter(([, on]) => on === true)
-    .map(([flag]) => FLAGS[flag] ?? flag);
+    .map(([flag]) => {
+      const known = FLAGS.find((f) => f === flag);
+      return known ? t(`orders.address_flag_${known}`) : flag;
+    });
 }
 
 /** A suggestion as one line. */
@@ -77,7 +82,7 @@ export function canChangeAddress(order: Order): boolean {
 
 export function AddressCheckCard({
   order,
-  format,
+  format: addressFormat,
   canWrite,
   names,
 }: {
@@ -89,6 +94,8 @@ export function AddressCheckCard({
   names: Record<string, string>;
 }) {
   const router = useRouter();
+  const t = useT<"orders">();
+  const format = useFormat();
   const [error, setError] = useState<string>();
   const [editing, setEditing] = useState<"current" | "suggested" | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -96,7 +103,7 @@ export function AddressCheckCard({
   if (!order.shipping_address || !check) return null;
   const verification = check.verification;
   const verdict = verification ? (VERDICTS[verification.verdict] ?? VERDICTS.unknown) : null;
-  const flags = verification ? flagsOf(verification.flags) : [];
+  const flags = verification ? flagsOf(t, verification.flags) : [];
   const changeable = canWrite && canChangeAddress(order);
 
   const markValid = () =>
@@ -111,45 +118,57 @@ export function AddressCheckCard({
       <VStack gap={3}>
         <HStack gap={2} vAlign="center">
           <Text type="display-3" as="h2">
-            Address check
+            {t("orders.address_check_title")}
           </Text>
-          {order.address_review && <Badge label="Needs review" variant="warning" />}
+          {order.address_review && <NeedsReviewBadge t={t} />}
         </HStack>
         {error && <Banner status="error" title={error} />}
         <MetadataList>
-          <MetadataListItem label="Verification">
+          <MetadataListItem label={t("orders.address_check_verification")}>
             {verdict ? (
-              <Badge label={verdict.label} variant={verdict.variant} />
+              <Badge label={t(verdict.label)} variant={verdict.variant} />
             ) : (
-              "No verification app"
+              t("orders.address_check_no_app")
             )}
           </MetadataListItem>
           {verification?.failure && (
-            <MetadataListItem label="Why not verified">{verification.failure}</MetadataListItem>
+            <MetadataListItem label={t("orders.address_check_failure")}>
+              {verification.failure}
+            </MetadataListItem>
           )}
           {flags.length > 0 && (
-            <MetadataListItem label="Flags">{flags.join(", ")}</MetadataListItem>
+            <MetadataListItem label={t("orders.address_check_flags")}>
+              {format.list(flags, "unit")}
+            </MetadataListItem>
           )}
           {verification && (
-            <MetadataListItem label="Checked">
-              <DateTime value={verification.checked_at} />
-              {verification.app ? ` by ${names[verification.app] ?? verification.app}` : ""}
+            <MetadataListItem label={t("orders.address_check_checked")}>
+              {verification.app ? (
+                t.rich("orders.address_check_time_by", {
+                  time: <DateTime key="time" value={verification.checked_at} />,
+                  name: names[verification.app] ?? verification.app,
+                })
+              ) : (
+                <DateTime value={verification.checked_at} />
+              )}
             </MetadataListItem>
           )}
           {verification?.suggested && (
-            <MetadataListItem label="Suggested">
+            <MetadataListItem label={t("orders.address_check_suggested")}>
               {suggestionLine(verification.suggested)}
             </MetadataListItem>
           )}
           {check.warnings.map((w) => (
-            <MetadataListItem key={`${w.code} ${w.path}`} label="Warning">
+            <MetadataListItem key={`${w.code} ${w.path}`} label={t("orders.address_check_warning")}>
               {w.message}
             </MetadataListItem>
           ))}
           {check.marked_valid && (
-            <MetadataListItem label="Marked valid">
-              <DateTime value={check.marked_valid.at} /> by{" "}
-              {names[check.marked_valid.by] ?? check.marked_valid.by}
+            <MetadataListItem label={t("orders.address_check_marked_valid")}>
+              {t.rich("orders.address_check_time_by", {
+                time: <DateTime key="time" value={check.marked_valid.at} />,
+                name: names[check.marked_valid.by] ?? check.marked_valid.by,
+              })}
             </MetadataListItem>
           )}
         </MetadataList>
@@ -157,22 +176,25 @@ export function AddressCheckCard({
           <HStack gap={2} wrap="wrap">
             {order.address_review && (
               <Button
-                label="Mark as valid"
+                label={t("orders.address_check_mark_valid")}
                 variant="primary"
                 isLoading={isPending}
                 onClick={markValid}
               />
             )}
-            {changeable && format && verification?.suggested && (
-              <Button label="Use suggested address" onClick={() => setEditing("suggested")} />
+            {changeable && addressFormat && verification?.suggested && (
+              <Button
+                label={t("orders.address_check_use_suggested")}
+                onClick={() => setEditing("suggested")}
+              />
             )}
           </HStack>
         )}
       </VStack>
-      {editing && format && (
+      {editing && addressFormat && (
         <EditAddressDialog
           order={order}
-          format={format}
+          format={addressFormat}
           suggested={editing === "suggested" ? (verification?.suggested ?? undefined) : undefined}
           onClose={() => setEditing(null)}
         />
@@ -183,11 +205,12 @@ export function AddressCheckCard({
 
 /** "Edit address" for the "Ships to" card, while nothing has shipped. */
 export function EditAddressButton({ order, format }: { order: Order; format: AddressFormat }) {
+  const t = useT<"orders">();
   const [open, setOpen] = useState(false);
   if (!order.shipping_address || !canChangeAddress(order)) return null;
   return (
     <>
-      <Button label="Edit address" size="sm" onClick={() => setOpen(true)} />
+      <Button label={t("orders.edit_address_button")} size="sm" onClick={() => setOpen(true)} />
       {open && <EditAddressDialog order={order} format={format} onClose={() => setOpen(false)} />}
     </>
   );
@@ -215,6 +238,7 @@ function EditAddressDialog({
   onClose: () => void;
 }) {
   const router = useRouter();
+  const t = useT<"orders">();
   const current = order.shipping_address;
   const [draft, setDraft] = useState<AddressValues>(() => ({
     first_name: blankless(current?.first_name),
@@ -265,8 +289,10 @@ function EditAddressDialog({
   return (
     <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={560} purpose="form">
       <DialogHeader
-        title={suggested ? "Use suggested address" : "Edit shipping address"}
-        subtitle="Before anything ships. Shipping isn't charged again; the address is verified again."
+        title={
+          suggested ? t("orders.edit_address_suggested_title") : t("orders.edit_address_title")
+        }
+        subtitle={t("orders.edit_address_subtitle")}
         onOpenChange={(open) => !open && onClose()}
       />
       <VStack gap={4} padding={4}>
@@ -283,8 +309,13 @@ function EditAddressDialog({
           }}
         />
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
-          <Button label="Save address" variant="primary" isLoading={isPending} onClick={submit} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
+          <Button
+            label={t("orders.edit_address_save")}
+            variant="primary"
+            isLoading={isPending}
+            onClick={submit}
+          />
         </HStack>
       </VStack>
     </Dialog>

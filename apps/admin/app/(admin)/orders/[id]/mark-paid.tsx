@@ -7,6 +7,8 @@ import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { useState, useTransition } from "react";
 
+import { useT } from "@/lib/use-t";
+
 import { markOrderPaid } from "../actions";
 
 /** "Mark as paid", asking for what staff have to show for it (optional). */
@@ -22,10 +24,15 @@ export function MarkPaid({
   hasPayment: boolean;
   variant?: "primary" | "secondary";
 }) {
+  const t = useT<"orders">();
   const [isOpen, setIsOpen] = useState(false);
   return (
     <>
-      <Button label="Mark as paid" variant={variant} onClick={() => setIsOpen(true)} />
+      <Button
+        label={t("orders.mark_paid_button")}
+        variant={variant}
+        onClick={() => setIsOpen(true)}
+      />
       {isOpen && (
         <MarkPaidDialog
           id={id}
@@ -49,6 +56,7 @@ function MarkPaidDialog({
   hasPayment: boolean;
   onClose: () => void;
 }) {
+  const t = useT<"orders">();
   const [reference, setReference] = useState("");
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -61,27 +69,31 @@ function MarkPaidDialog({
   return (
     <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={480} purpose="form">
       <DialogHeader
-        title={`Mark order #${number} as paid?`}
+        // An order's number is shown as it is, never grouped like a count.
+        title={t("orders.mark_paid_dialog_title", { number: String(number) })}
         subtitle={
-          hasPayment
-            ? "For money you collected yourself: the courier's cash, a bank transfer."
-            : "It has no payment yet, so a manual payment of the total is recorded."
+          hasPayment ? t("orders.mark_paid_dialog_collected") : t("orders.mark_paid_dialog_manual")
         }
         onOpenChange={(open) => !open && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
         <TextInput
-          label="Reference"
-          description="What you have to show for it: a bank reference, the courier's receipt."
+          label={t("orders.reference")}
+          description={t("orders.mark_paid_reference_description")}
           isOptional
           value={reference}
           onChange={setReference}
           onEnter={submit}
         />
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
-          <Button label="Mark as paid" variant="primary" isLoading={isPending} onClick={submit} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
+          <Button
+            label={t("orders.mark_paid_button")}
+            variant="primary"
+            isLoading={isPending}
+            onClick={submit}
+          />
         </HStack>
       </VStack>
     </Dialog>

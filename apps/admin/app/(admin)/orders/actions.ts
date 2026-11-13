@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 
 import { type FieldProblems, problemsOf } from "@/lib/address";
 import { describe, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import { type TrackingInput, trackingBody, trackingProblem } from "@/lib/tracking";
 
 export type ActionResult = { error?: string };
@@ -45,7 +46,7 @@ export async function fulfilOrder(
     notify: boolean;
   },
 ): Promise<ActionResult> {
-  const problem = trackingProblem(input.tracking);
+  const problem = trackingProblem(await getT(), input.tracking);
   if (problem) return { error: problem };
   const client = await sessionClient();
   const { error } = await client.POST("/admin/orders/{id}/fulfillments", {
@@ -68,7 +69,7 @@ export async function updateTracking(
   input: TrackingInput[],
   notify: boolean,
 ): Promise<ActionResult> {
-  const problem = trackingProblem(input);
+  const problem = trackingProblem(await getT(), input);
   if (problem) return { error: problem };
   const client = await sessionClient();
   const { error } = await client.PATCH("/admin/fulfillments/{id}", {
@@ -147,7 +148,8 @@ export async function changeOrderAddress(
   if (error) {
     const problems = problemsOf(error);
     if (problems && Object.keys(problems).length > 0) {
-      return { error: "Check the highlighted fields.", problems };
+      const t = await getT();
+      return { error: t("orders.edit_address_check_fields"), problems };
     }
     return { error: await describe(error) };
   }

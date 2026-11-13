@@ -29,12 +29,14 @@ import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 
 import { toHandle } from "@/lib/categories";
+import { useT } from "@/lib/use-t";
 
 import { createGroup, deleteGroup, updateGroup } from "./actions";
 
 export type Group = AdminSchemas["CustomerGroupResponse"];
 
 export function GroupsCard({ groups, canWrite }: { groups: Group[]; canWrite: boolean }) {
+  const t = useT<"customers">();
   const [editing, setEditing] = useState<Group | "new">();
   const [deleting, setDeleting] = useState<Group>();
   return (
@@ -43,16 +45,15 @@ export function GroupsCard({ groups, canWrite }: { groups: Group[]; canWrite: bo
         <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Groups
+              {t("customers.groups_title")}
             </Text>
             <Text type="supporting" color="secondary">
-              Sets of customers that prices and payment methods can refer to. A customer can be in
-              any number of them.
+              {t("customers.groups_description")}
             </Text>
           </VStack>
           {canWrite && (
             <Button
-              label="Add group"
+              label={t("customers.groups_add")}
               variant="primary"
               icon={<PlusIcon />}
               onClick={() => setEditing("new")}
@@ -62,17 +63,17 @@ export function GroupsCard({ groups, canWrite }: { groups: Group[]; canWrite: bo
         {groups.length === 0 ? (
           <EmptyState
             icon={<UserGroupIcon width={32} />}
-            title="No groups yet"
-            description="Add one, then put customers in it from their pages or the customers list."
+            title={t("customers.groups_empty_title")}
+            description={t("customers.groups_empty_description")}
           />
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHeaderCell>Group</TableHeaderCell>
-                <TableHeaderCell>Description</TableHeaderCell>
+                <TableHeaderCell>{t("customers.group")}</TableHeaderCell>
+                <TableHeaderCell>{t("common.description")}</TableHeaderCell>
                 <TableHeaderCell>
-                  <span className="visually-hidden">Actions</span>
+                  <span className="visually-hidden">{t("common.actions")}</span>
                 </TableHeaderCell>
               </TableRow>
             </TableHeader>
@@ -91,21 +92,21 @@ export function GroupsCard({ groups, canWrite }: { groups: Group[]; canWrite: bo
                   </TableCell>
                   <TableCell>
                     <Text color={group.description ? "primary" : "secondary"}>
-                      {group.description ?? "—"}
+                      {group.description ?? t("common.empty_value")}
                     </Text>
                   </TableCell>
                   <TableCell>
                     {canWrite && (
                       <HStack gap={1} hAlign="end">
                         <IconButton
-                          label={`Edit ${group.name}`}
+                          label={t("customers.groups_edit_named", { name: group.name })}
                           icon={<PencilSquareIcon />}
                           size="sm"
                           variant="ghost"
                           onClick={() => setEditing(group)}
                         />
                         <IconButton
-                          label={`Delete ${group.name}`}
+                          label={t("customers.groups_delete_named", { name: group.name })}
                           icon={<TrashIcon />}
                           size="sm"
                           variant="ghost"
@@ -133,6 +134,7 @@ export function GroupsCard({ groups, canWrite }: { groups: Group[]; canWrite: bo
 
 function GroupDialog({ group, onClose }: { group?: Group; onClose: () => void }) {
   const router = useRouter();
+  const t = useT<"customers">();
   const [name, setName] = useState(group?.name ?? "");
   const [handle, setHandle] = useState(group?.handle ?? "");
   // Whether the handle was typed by hand: until then it follows the name.
@@ -143,7 +145,7 @@ function GroupDialog({ group, onClose }: { group?: Group; onClose: () => void })
 
   const submit = () => {
     if (name.trim() === "" || handle.trim() === "") {
-      setError("A group needs a name and a handle.");
+      setError(t("customers.groups_dialog_incomplete"));
       return;
     }
     startTransition(async () => {
@@ -165,14 +167,18 @@ function GroupDialog({ group, onClose }: { group?: Group; onClose: () => void })
   return (
     <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={480} purpose="form">
       <DialogHeader
-        title={group ? `Edit ${group.name}` : "Add group"}
-        subtitle="The handle names the group to apps and in URLs; it changes nothing for customers."
+        title={
+          group
+            ? t("customers.groups_dialog_edit_title", { name: group.name })
+            : t("customers.groups_dialog_add_title")
+        }
+        subtitle={t("customers.groups_dialog_subtitle")}
         onOpenChange={(open) => !open && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
         <TextInput
-          label="Name"
+          label={t("common.name")}
           isRequired
           value={name}
           onChange={(value) => {
@@ -181,8 +187,8 @@ function GroupDialog({ group, onClose }: { group?: Group; onClose: () => void })
           }}
         />
         <TextInput
-          label="Handle"
-          description="Lowercase letters, digits and dashes; unique among groups."
+          label={t("common.handle")}
+          description={t("customers.groups_dialog_handle_description")}
           isRequired
           value={handle}
           onChange={(value) => {
@@ -191,7 +197,7 @@ function GroupDialog({ group, onClose }: { group?: Group; onClose: () => void })
           }}
         />
         <TextArea
-          label="Description"
+          label={t("common.description")}
           isOptional
           rows={3}
           maxLength={1000}
@@ -199,9 +205,9 @@ function GroupDialog({ group, onClose }: { group?: Group; onClose: () => void })
           onChange={setDescription}
         />
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label={group ? "Save" : "Add group"}
+            label={group ? t("common.save") : t("customers.groups_add")}
             variant="primary"
             isLoading={isPending}
             onClick={submit}
@@ -214,18 +220,16 @@ function GroupDialog({ group, onClose }: { group?: Group; onClose: () => void })
 
 function DeleteGroupDialog({ group, onClose }: { group: Group; onClose: () => void }) {
   const router = useRouter();
+  const t = useT<"customers">();
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
   return (
     <AlertDialog
       isOpen
       onOpenChange={(open) => !open && onClose()}
-      title={`Delete ${group.name}?`}
-      description={
-        error ??
-        "Its customers leave the group and stay customers. Anything pointing at the group stops working."
-      }
-      actionLabel="Delete group"
+      title={t("common.delete_named", { name: group.name })}
+      description={error ?? t("customers.groups_delete_description")}
+      actionLabel={t("customers.groups_delete_action")}
       isActionLoading={isPending}
       onAction={() =>
         startTransition(async () => {

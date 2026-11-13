@@ -36,11 +36,17 @@ const generated = [
  */
 const adminTranslated = [
   "apps/admin/app/(admin)/account/**",
+  "apps/admin/app/(admin)/address-actions.ts",
   "apps/admin/app/(admin)/admin-shell.tsx",
+  "apps/admin/app/(admin)/customers/**",
   "apps/admin/app/(admin)/forbidden.tsx",
   "apps/admin/app/(admin)/layout.tsx",
   "apps/admin/app/(admin)/media/**",
+  "apps/admin/app/(admin)/orders/**",
+  "apps/admin/app/(admin)/page.tsx",
   "apps/admin/app/(admin)/products/**",
+  "apps/admin/app/(admin)/setup-checklist.ts",
+  "apps/admin/app/(admin)/setup/**",
   "apps/admin/app/(editor)/forbidden.tsx",
   "apps/admin/app/(editor)/layout.tsx",
   "apps/admin/app/*.tsx",
@@ -52,7 +58,9 @@ const adminTranslated = [
   "apps/admin/components/app-extensions/**",
   "apps/admin/components/resource-table/**",
   "apps/admin/resources/bulk.tsx",
+  "apps/admin/resources/customers.tsx",
   "apps/admin/resources/media.tsx",
+  "apps/admin/resources/orders.tsx",
   "apps/admin/resources/products.tsx",
 ];
 
