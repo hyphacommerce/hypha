@@ -1,6 +1,15 @@
 // Dates and names as a locale writes them. Pure: every function takes the locale (a
 // translator's `locale`), never assumes one.
 
+/**
+ * What an `Intl` formatter is asked for: the locale, then English. A runtime that lacks
+ * the locale's data would otherwise use its own default, which differs between the
+ * server and each shopper's browser: the same amount written two ways on one page.
+ */
+export function withEnglish(locale: string): string[] {
+  return [locale, "en"];
+}
+
 /** Formatters by locale, built once: a page formats many dates. */
 const dateFormats = new Map<string, Intl.DateTimeFormat>();
 
@@ -8,7 +17,7 @@ const dateFormats = new Map<string, Intl.DateTimeFormat>();
 export function formatDate(value: string | Date, locale: string): string {
   let format = dateFormats.get(locale);
   if (!format) {
-    format = new Intl.DateTimeFormat(locale, { dateStyle: "long" });
+    format = new Intl.DateTimeFormat(withEnglish(locale), { dateStyle: "long" });
     dateFormats.set(locale, format);
   }
   return format.format(typeof value === "string" ? new Date(value) : value);
@@ -18,7 +27,7 @@ export function formatDate(value: string | Date, locale: string): string {
  * `fallback` (the API's English one). */
 export function countryName(code: string, fallback: string, locale: string): string {
   try {
-    return new Intl.DisplayNames([locale], { type: "region" }).of(code) ?? fallback;
+    return new Intl.DisplayNames(withEnglish(locale), { type: "region" }).of(code) ?? fallback;
   } catch {
     return fallback;
   }

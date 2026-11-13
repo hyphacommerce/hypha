@@ -3,11 +3,13 @@
 // EUR but 1050 JPY). How it's written is the page's locale's (a translator's `locale`):
 // "€10.50" in `en-IE`, "10,50 €" in `de-DE`.
 
+import { withEnglish } from "./format.ts";
+
 export type Money = { amount: number; currency: string };
 
 /** "€10.50". `digits` is the currency's minor units. */
 export function formatMoney({ amount, currency }: Money, digits: number, locale: string): string {
-  return new Intl.NumberFormat(locale, {
+  return new Intl.NumberFormat(withEnglish(locale), {
     style: "currency",
     currency,
     minimumFractionDigits: digits,

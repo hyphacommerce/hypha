@@ -11,6 +11,7 @@
 // component, gets plain strings and never formats in the browser (no hydration
 // mismatch from a different ICU).
 
+import { withEnglish } from "./format";
 import { formatMoney } from "./money";
 
 /** One piece of a value: text, or a link. */
@@ -232,7 +233,7 @@ function dateFormat(locale: string, withTime: boolean): Intl.DateTimeFormat {
   const id = `${withTime}:${locale}`;
   let made = dateFormats.get(id);
   if (!made) {
-    made = new Intl.DateTimeFormat(locale, {
+    made = new Intl.DateTimeFormat(withEnglish(locale), {
       dateStyle: "long",
       timeStyle: withTime ? "short" : undefined,
       timeZone: "UTC",
@@ -245,7 +246,7 @@ function dateFormat(locale: string, withTime: boolean): Intl.DateTimeFormat {
 function numberFormat(locale: string): Intl.NumberFormat {
   let made = numberFormats.get(locale);
   if (!made) {
-    made = new Intl.NumberFormat(locale);
+    made = new Intl.NumberFormat(withEnglish(locale));
     numberFormats.set(locale, made);
   }
   return made;
