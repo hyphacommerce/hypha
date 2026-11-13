@@ -55,7 +55,7 @@ test("matchLanguage: wanted order decides, each tried fully before the next", ()
   assert.equal(matchLanguage(["it", "de"], ["de", "fr"]), "de");
 });
 
-test("matchLanguage widens to the same language as a last resort", () => {
+test("matchLanguage widens to the same language when nothing closer has it", () => {
   assert.equal(matchLanguage(["sr"], ["en", "sr-Latn"]), "sr-Latn");
   assert.equal(matchLanguage(["sr-RS"], ["en", "sr-Latn"]), "sr-Latn");
   assert.equal(matchLanguage(["de"], ["de-AT"]), "de-AT");
@@ -84,9 +84,24 @@ test("matchLanguage: a script refused for one wanted tag doesn't stop the next",
   assert.equal(matchLanguage(["sr-Cyrl", "de"], ["sr-Latn", "de-AT"]), "de-AT");
 });
 
-test("matchLanguage: any exact or shortened match beats a widened one", () => {
-  assert.equal(matchLanguage(["sr", "en-GB"], ["en", "sr-Latn"]), "en");
-  assert.equal(matchLanguage(["de", "fr"], ["de-AT", "fr"]), "fr");
+test("matchLanguage: a widened match for an earlier tag beats an exact one for a later tag", () => {
+  assert.equal(matchLanguage(["sr", "en-GB"], ["en", "sr-Latn"]), "sr-Latn");
+  assert.equal(matchLanguage(["de", "fr"], ["de-AT", "fr"]), "de-AT");
+});
+
+test("matchLanguage: a Serbian browser gets Serbian, though English matches exactly", () => {
+  const wanted = parseAcceptLanguage("sr-RS,sr;q=0.9,en-US;q=0.8,en;q=0.7");
+  assert.deepEqual(wanted, ["sr-RS", "sr", "en-US", "en"]);
+  assert.equal(matchLanguage(wanted, ["en", "sr-Latn"]), "sr-Latn");
+  assert.equal(
+    matchLanguage(parseAcceptLanguage("sr-RS,sr,en-US,en"), ["en", "sr-Latn"]),
+    "sr-Latn",
+  );
+});
+
+test("matchLanguage: for one wanted tag, exact and shortened still beat wider", () => {
+  assert.equal(matchLanguage(["de-CH"], ["de-AT", "de"]), "de");
+  assert.equal(matchLanguage(["sr-Latn-RS"], ["sr-Cyrl", "sr-Latn"]), "sr-Latn");
 });
 
 test("matchLanguage: widening follows the wanted order", () => {

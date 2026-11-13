@@ -5,7 +5,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
 import { TextInput } from "@astryxdesign/core/TextInput";
-import { type FormEvent, useActionState, useState, startTransition } from "react";
+import { type SubmitEvent, useActionState, useState, startTransition } from "react";
 
 import { useT } from "@/lib/use-t";
 
@@ -25,7 +25,7 @@ export function LoginForm({ notice }: { notice?: string }) {
   // credentials into the fields without the change events React's state follows, so
   // the state alone would send nothing (or what was there before) while the fields
   // show the saved login.
-  const submit = (e: FormEvent<HTMLFormElement>) => {
+  const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     const fields = new FormData(e.currentTarget);
     const emailField = fields.get("email");

@@ -9,13 +9,13 @@ import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { withEnglish } from "@hyphacommerce/i18n";
 
 import type { TFor } from "./messages";
-import { DEFAULT_LANGUAGE, localeOf } from "./pick-language.ts";
+import { DEFAULT_LANGUAGE, formatLocale } from "./pick-language.ts";
 
 /**
  * The locale of a call that names none: the admin's English. Code that has a translator
  * or a `Format` passes theirs; this is for what hasn't been moved onto them yet.
  */
-export const ENGLISH = localeOf(DEFAULT_LANGUAGE);
+export const ENGLISH = formatLocale(DEFAULT_LANGUAGE);
 
 /** `Intl` formatters by kind, locale and options, built once: a table formats hundreds of cells. */
 const formatters = new Map<string, unknown>();
@@ -71,11 +71,14 @@ function minorUnits(currencies: Currencies, currency: string): number {
   return digits;
 }
 
+/** @deprecated Names no locale, so it writes English: use `format.money(money)`. Deleted once every area is extracted. */
+export function formatMoney(money: Money, currencies: Currencies): string;
 /**
  * "€18.00". Amounts are integers in minor units, never floats. In a component or an
  * action, `format.money(money)` (`useFormat()` / `getFormat()`) knows the locale and the
  * currency table already.
  */
+export function formatMoney(money: Money, currencies: Currencies, locale: string): string;
 export function formatMoney(
   { amount, currency }: Money,
   currencies: Currencies,
@@ -115,11 +118,14 @@ function costInMajorUnits({ amount, currency }: UnitCost, currencies: Currencies
   return decimals ? `${major}.${decimals}` : major;
 }
 
+/** @deprecated Names no locale, so it writes English: use `format.unitCost(cost)`. Deleted once every area is extracted. */
+export function formatUnitCost(cost: UnitCost, currencies: Currencies): string;
 /**
  * "€4.125": a unit cost, with the currency's digits and the extra ones it carries (up to
  * 4 more), trailing zeros beyond the currency's dropped. `format.unitCost(cost)` where
  * there's a `Format`.
  */
+export function formatUnitCost(cost: UnitCost, currencies: Currencies, locale: string): string;
 export function formatUnitCost(cost: UnitCost, currencies: Currencies, locale = ENGLISH): string {
   const digits = minorUnits(currencies, cost.currency);
   return numberFormat(locale, {
@@ -184,12 +190,24 @@ export function parseMoney(input: string, currency: string, currencies: Currenci
   return Number.isSafeInteger(amount) ? amount : null;
 }
 
+/** @deprecated Names no locale, so it writes English: use `format.dateTime(value, style)` or `<DateTime>`. Deleted once every area is extracted. */
+export function formatDateTime(
+  rfc3339: string,
+  timeZone?: string,
+  style?: "long" | "short",
+): string;
 /**
  * A time in `timeZone` (the store's; `components/date-time.tsx` passes it). `long`:
  * "15 Oct 2026, 09:30 CEST", for detail pages. `short`, for tables: "15 Oct, 09:30" this
  * year, "15 Oct 2025" before. `<DateTime>` in JSX and `format.dateTime(value, style)` in
  * text pass the zone and the locale themselves.
  */
+export function formatDateTime(
+  rfc3339: string,
+  timeZone: string,
+  style: "long" | "short",
+  locale: string,
+): string;
 export function formatDateTime(
   rfc3339: string,
   timeZone = "UTC",
@@ -236,10 +254,13 @@ function formatCalendarDate(rfc3339: string, style: "long" | "short", locale: st
   }).format(at);
 }
 
+/** @deprecated Names no locale, so it writes English: use `format.bytes(bytes)`. Deleted once every area is extracted. */
+export function formatBytes(bytes: number): string;
 /**
  * "980 B", "1.4 MB": file sizes in powers of 1024, one decimal above a kilobyte.
  * `format.bytes(bytes)` where there's a `Format`.
  */
+export function formatBytes(bytes: number, locale: string): string;
 export function formatBytes(bytes: number, locale = ENGLISH): string {
   const units = ["B", "KB", "MB", "GB"];
   let value = bytes;

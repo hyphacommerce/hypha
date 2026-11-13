@@ -5,7 +5,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
 import { TextInput } from "@astryxdesign/core/TextInput";
-import { type FormEvent, useActionState, useState, startTransition } from "react";
+import { type SubmitEvent, useActionState, useState, startTransition } from "react";
 
 import { useT } from "@/lib/use-t";
 
@@ -26,7 +26,7 @@ export function MfaForm() {
 
   // Read from the form, like the login: a password manager can fill the code without
   // the change events the state follows. Spaces never matter ("123 456").
-  const submit = (e: FormEvent<HTMLFormElement>) => {
+  const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     const field = new FormData(e.currentTarget).get("code");
     const submitted = typeof field === "string" ? field.replace(/\s+/g, "") : "";
