@@ -1,5 +1,5 @@
 use hypha_core::{
-    CountryCode, Currency, CustomerGroupId, ErrorCode, MoneyError, PriceListId, TextError,
+    CountryCode, Currency, CustomerGroupId, ErrorCode, Language, MoneyError, PriceListId, TextError,
 };
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
@@ -20,6 +20,8 @@ pub enum MarketError {
     TooManyPriceLists { max: usize },
     #[error("price list {0} isn't on this catalog")]
     PriceListNotInCatalog(PriceListId),
+    #[error("language {0} is listed twice")]
+    DuplicateLanguage(Language),
 }
 
 /// What's wrong with one entry of a list of fixed prices.
@@ -80,6 +82,7 @@ impl ErrorCode for MarketError {
             MarketError::DuplicatePriceList(_) => "duplicate_price_list",
             MarketError::TooManyPriceLists { .. } => "too_many_price_lists",
             MarketError::PriceListNotInCatalog(_) => "price_list_not_in_catalog",
+            MarketError::DuplicateLanguage(_) => "duplicate_language",
         }
     }
 }

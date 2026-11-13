@@ -9,8 +9,8 @@ pub const MARKET: &str = "market";
 pub const CATALOG: &str = "catalog";
 pub const PRICE_LIST: &str = "price_list";
 
-/// `market.changed`: what changed, among `created`, `name`, `countries` and
-/// `prices_include_tax` (search rebuilds only for what documents depend on, so a rename
+/// `market.changed`: what changed, among `created`, `name`, `countries`,
+/// `prices_include_tax` and `languages` (search rebuilds only for what documents depend on, so a rename
 /// costs nothing).
 #[derive(Debug, Serialize)]
 pub struct MarketChanged {

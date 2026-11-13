@@ -4116,6 +4116,73 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/translations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The store's translations, by kind, then resource, then language: what has been
+         *     translated. What's missing or outdated is each resource's to say (`GET
+         *     /admin/translations/{kind}/{id}`).
+         */
+        get: operations["admin.translations.list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/translations/{kind}/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A resource's translatable fields: each one's source text, its digest and every
+         *     language's translation, `outdated` when the source changed since it was translated.
+         *     Beside `translations:read` it takes the resource's own read scope (`products:read`
+         *     for products, categories and search facets, `custom_fields:read`, `shipping:read`,
+         *     `payments:read`, `discounts:read`, `checkout_rules:read`, `media:read`; `stores:read`
+         *     and `notifications:read` for the store).
+         */
+        get: operations["admin.translations.fetch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/translations/{kind}/{id}/{language}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Sets a resource's translation into one of the store's other languages, replacing the
+         *     fields it had. Answers the resource's translations as they are then. Beside
+         *     `translations:write` it takes the resource's own read scope.
+         */
+        put: operations["admin.translations.put"];
+        post?: never;
+        /** Removes a resource's translation into one language: its source text shows again. */
+        delete: operations["admin.translations.remove"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/uploads": {
         parameters: {
             query?: never;
@@ -6847,6 +6914,32 @@ export interface components {
          * @enum {string}
          */
         FieldStatus: string;
+        /** @description One field of a translation being written. */
+        FieldTranslationRequest: {
+            /**
+             * @description The field's `digest` as the translator read it. Given, it must still be the
+             *     field's digest (`source_changed` otherwise) and the translation is recorded as
+             *     up to date. Left out, a new or changed value is recorded against the source as
+             *     it is now, and an unchanged value stays as it was (outdated, if it was).
+             */
+            source_digest?: string | null;
+            /**
+             * @description The translation, by the rule of the field it replaces. Blank removes the field:
+             *     the source shows again.
+             */
+            value: string;
+        };
+        /** @description One field's translation into one language. */
+        FieldTranslationResponse: {
+            /**
+             * @description Whether the source text changed since: `source_digest` isn't the field's
+             *     `digest` now. Storefronts still get the translation.
+             */
+            outdated: boolean;
+            /** @description The digest of the source text it translated. */
+            source_digest: string;
+            value: string;
+        };
         /**
          * @description `FinancialStatus` on the wire. A DTO of its own, so the domain enum carries no serde and
          *     renaming a variant can't silently change the API. Derived from the order's payments:
@@ -7275,6 +7368,11 @@ export interface components {
             countries: components["schemas"]["CountryCode"][];
             currency: components["schemas"]["Currency"];
             id: components["schemas"]["MarketId"];
+            /**
+             * @description The languages shoppers are offered here, in order: the first is the market's
+             *     default. Empty means the store's default language alone.
+             */
+            languages: components["schemas"]["Language"][];
             name: string;
             /** @description The catalog's price lists, by ID: the lowest live price among them wins. */
             price_lists: components["schemas"]["PriceListId"][];
@@ -8678,6 +8776,15 @@ export interface components {
             supplier_name: string;
             total?: components["schemas"]["Money"] | null;
         };
+        PutTranslationRequest: {
+            /**
+             * @description Every translated field of this language, by key. A field left out is removed, so
+             *     send the whole language; no fields at all deletes the translation.
+             */
+            fields: {
+                [key: string]: components["schemas"]["FieldTranslationRequest"];
+            };
+        };
         /** @description How an option's price is found: one of a provider's services, or a built-in rate. */
         RateDto: {
             basis: components["schemas"]["BasisDto"];
@@ -9159,7 +9266,7 @@ export interface components {
             title?: string;
         };
         /**
-         * @description Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `customers:erase`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `custom_fields:read`, `custom_fields:write`, `agents:read`, `agents:write`, `discounts:read`, `discounts:write`, `purchasing:read`, `purchasing:write`, `purchasing:send`, `checkout_rules:read`, `checkout_rules:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`, `customer_data:profile`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @description Known values: `products:read`, `products:write`, `markets:read`, `markets:write`, `pricing:read`, `pricing:write`, `carts:read`, `carts:write`, `taxes:read`, `taxes:write`, `inventory:read`, `inventory:write`, `customers:read`, `customers:write`, `customers:erase`, `stores:read`, `stores:write`, `orders:read`, `orders:write`, `checkout`, `users:read`, `users:write`, `api_keys:read`, `api_keys:write`, `media:read`, `media:write`, `shipping:read`, `shipping:write`, `apps:read`, `apps:write`, `fulfillments:read`, `fulfillments:write`, `channels:read`, `channels:write`, `payments:read`, `payments:write`, `notifications:read`, `notifications:write`, `custom_fields:read`, `custom_fields:write`, `agents:read`, `agents:write`, `discounts:read`, `discounts:write`, `purchasing:read`, `purchasing:write`, `purchasing:send`, `checkout_rules:read`, `checkout_rules:write`, `translations:read`, `translations:write`, `customer_data:name`, `customer_data:email`, `customer_data:phone`, `customer_data:address`, `customer_data:profile`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
          * @enum {string}
          */
         Scope: string;
@@ -9663,6 +9770,20 @@ export interface components {
          * @example store_0190f1a2b3c47d8e9f00112233445566
          */
         StoreId: string;
+        StoreLanguageRequest: {
+            /** @description A BCP 47 tag such as `de` or `sr-Latn`. */
+            language: string;
+            /** @description Whether shoppers are served it; `false` when absent. */
+            published?: boolean;
+        };
+        StoreLanguageResponse: {
+            language: components["schemas"]["Language"];
+            /**
+             * @description Whether shoppers are served it: an unpublished language can be translated, but no
+             *     storefront read answers in it and no market offers it.
+             */
+            published: boolean;
+        };
         StoreResponse: {
             contact_email?: components["schemas"]["Email"] | null;
             currency?: components["schemas"]["Currency"] | null;
@@ -9674,6 +9795,11 @@ export interface components {
             /** @description Plain text, at most 500 characters. */
             description?: string | null;
             id: components["schemas"]["StoreId"];
+            /**
+             * @description The languages the content is translated into beside the default one, in the
+             *     merchant's order.
+             */
+            languages: components["schemas"]["StoreLanguageResponse"][];
             legal_address?: components["schemas"]["PostalAddressResponse"] | null;
             /** @description The registered business name, for invoices and legal pages. */
             legal_name?: string | null;
@@ -10078,6 +10204,86 @@ export interface components {
              */
             units: number;
         };
+        /** @description One translatable field of a resource: its source text and its translations. */
+        TranslatableFieldResponse: {
+            /**
+             * @description SHA-256 of `source`, in hex: send it back as a field's `source_digest` to say
+             *     which text was translated.
+             */
+            digest: string;
+            /** @description `text` (plain, trimmed) or `html` (sanitised like a description). */
+            format: string;
+            /**
+             * @description `title`, or a child's field by the child's ID: `options.<opt_…>.name`,
+             *     `option_values.<optval_…>.label`, `choices.<key>.label`, `facets.<key>.label`.
+             */
+            key: string;
+            /** @description The longest translation: characters for `text`, bytes of HTML for `html`. */
+            max_length: number;
+            /** @description The text in the store's default language; empty when the resource has none. */
+            source: string;
+            /** @description By language tag; a language without a translation of this field is absent. */
+            translations: {
+                [key: string]: components["schemas"]["FieldTranslationResponse"];
+            };
+        };
+        /** @description The resource a translation is of. */
+        TranslatedResourceResponse: {
+            /** @description The resource's ID (`prod_…`); the store's for `store` and `search_facet`. */
+            id: string;
+            /**
+             * @description `product`, `category`, `custom_field_definition`, `shipping_option`,
+             *     `payment_method`, `discount`, `checkout_rule`, `asset`, `store` or `search_facet`.
+             */
+            kind: string;
+        };
+        /** @description One language's translation of a resource, as a whole. */
+        TranslationStateResponse: {
+            /** @description RFC 3339. */
+            created_at: string;
+            language: components["schemas"]["Language"];
+            /** @description How many of those translate a source text that has changed since. */
+            outdated: number;
+            /** @description How many of the resource's fields it translates. */
+            translated: number;
+            updated_at: string;
+        };
+        /** @description A page of a list, newest first. */
+        TranslationSummaryPage: {
+            /** @description Whether there are more after these. */
+            has_more: boolean;
+            items: components["schemas"]["TranslationSummaryResponse"][];
+            /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
+            next_cursor?: string | null;
+        };
+        /** @description A translation in a list: which resource, which language, which fields. */
+        TranslationSummaryResponse: {
+            /** @description RFC 3339. */
+            created_at: string;
+            /** @description The keys it translates. Read the resource's translations for the text. */
+            fields: string[];
+            language: components["schemas"]["Language"];
+            resource: components["schemas"]["TranslatedResourceResponse"];
+            updated_at: string;
+        };
+        /** @description A resource's translatable fields with every language's translation. */
+        TranslationsResponse: {
+            /** @description The language `source` is in. */
+            default_language: components["schemas"]["Language"];
+            /**
+             * @description Every field the resource has now, in the order an editor shows them. A
+             *     translated field whose option, value, choice or facet is gone isn't listed.
+             */
+            fields: components["schemas"]["TranslatableFieldResponse"][];
+            /**
+             * @description The store's other languages, published or not: what the resource can be
+             *     translated into.
+             */
+            languages: components["schemas"]["Language"][];
+            resource: components["schemas"]["TranslatedResourceResponse"];
+            /** @description The languages it has a translation in, by tag. */
+            translations: components["schemas"]["TranslationStateResponse"][];
+        };
         /** @description Units of a line still to ship, and where they wait. */
         UnfulfilledDto: {
             line: components["schemas"]["OrderLineId"];
@@ -10286,6 +10492,13 @@ export interface components {
             priority?: number;
         };
         UpdateMarketRequest: {
+            /**
+             * @description The languages shoppers are offered here, replacing the list: BCP 47 tags in
+             *     order, the first the market's default, each the store's default language or one
+             *     of its published ones (`422 language_not_offered`), each once. Empty for the
+             *     store's default language alone.
+             */
+            languages?: string[];
             /** @description 1 to 255 characters, trimmed. */
             name?: string;
             prices_include_tax?: boolean;
@@ -10435,10 +10648,21 @@ export interface components {
             contact_email?: string | null;
             /** @description An ISO 4217 code: the base currency costs are kept in. `null` clears it. */
             currency?: string | null;
-            /** @description A BCP 47 tag such as `en` or `sr-Latn`. */
+            /**
+             * @description A BCP 47 tag such as `en` or `sr-Latn`. Not one of `languages` (`409
+             *     default_language_listed`, unless the same request takes it off that list), and
+             *     markets that name the old one must still be offered it (`409 language_in_use`).
+             */
             default_language?: string;
             /** @description Plain text, at most 500 characters, trimmed; `null` or blank clears it. */
             description?: string | null;
+            /**
+             * @description The other languages, replacing the list: at most 20, each once, never the default
+             *     one. A language markets offer can't be removed or unpublished (`409
+             *     language_in_use`, `details.markets: [{id, languages}]` for callers with
+             *     `markets:read`).
+             */
+            languages?: components["schemas"]["StoreLanguageRequest"][];
             legal_address?: components["schemas"]["PostalAddressRequest"] | null;
             /** @description At most 255 characters, trimmed; `null` or blank clears it. */
             legal_name?: string | null;
@@ -38286,6 +38510,387 @@ export interface operations {
                 };
             };
             /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.translations.list": {
+        parameters: {
+            query?: {
+                /**
+                 * @description Only translations of this kind of resource (and its read scope is needed);
+                 *     without it, of every kind the caller may read.
+                 */
+                kind?: string;
+                /** @description Only translations into this language. */
+                language?: string;
+                /** @description The previous page's `next_cursor`; absent for the first page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 100 (default 50). */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranslationSummaryPage"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). A `cursor` this list didn't return (`invalid_cursor`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.translations.fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /**
+                 * @description The kind of resource: `product`, `category`, `custom_field_definition`, `shipping_option`, `payment_method`, `discount`, `checkout_rule`, `asset`, `store`, `search_facet`.
+                 * @example product
+                 */
+                kind: string;
+                /**
+                 * @description The resource's ID; the store's for `store` and `search_facet`.
+                 * @example prod_00000000000000000000000000000000
+                 */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranslationsResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.translations.put": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path: {
+                /**
+                 * @description The kind of resource.
+                 * @example product
+                 */
+                kind: string;
+                /**
+                 * @description The resource's ID; the store's for `store` and `search_facet`.
+                 * @example prod_00000000000000000000000000000000
+                 */
+                id: string;
+                /**
+                 * @description A language on the store's list, published or not; never its default.
+                 * @example de
+                 */
+                language: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutTranslationRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranslationsResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.translations.remove": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path: {
+                /**
+                 * @description The kind of resource.
+                 * @example product
+                 */
+                kind: string;
+                /**
+                 * @description The resource's ID; the store's for `store` and `search_facet`.
+                 * @example prod_00000000000000000000000000000000
+                 */
+                id: string;
+                /**
+                 * @description The translation's language.
+                 * @example de
+                 */
+                language: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
             422: {
                 headers: {
                     [name: string]: unknown;

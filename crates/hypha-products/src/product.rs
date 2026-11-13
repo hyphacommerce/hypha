@@ -322,6 +322,16 @@ impl Product {
     /// product's variant, which has no options, and for a variant this product doesn't
     /// have.
     pub fn variant_title(&self, variant: VariantId) -> Option<String> {
+        self.variant_title_with(variant, OptionValue::label)
+    }
+
+    /// `variant_title` with each value's label as `label` gives it: for whoever shows
+    /// the labels in another language than they're stored in.
+    pub fn variant_title_with<'a>(
+        &'a self,
+        variant: VariantId,
+        label: impl Fn(&'a OptionValue) -> &'a str,
+    ) -> Option<String> {
         let variant = self.variants.iter().find(|v| v.id() == variant)?;
         if variant.selections().is_empty() {
             return None;
@@ -336,7 +346,7 @@ impl Product {
                     .values()
                     .iter()
                     .find(|value| value.id() == *selected)
-                    .map(|value| value.label())
+                    .map(&label)
             })
             .collect();
         Some(labels.join(" / "))
@@ -834,6 +844,16 @@ mod tests {
         p.add_variant(new_var(2, vec![val(12), val(22)])).unwrap();
         assert_eq!(p.variant_title(var(1)), Some("S / Red".to_string()));
         assert_eq!(p.variant_title(var(2)), Some("M / Blue".to_string()));
+    }
+
+    #[test]
+    fn variant_title_with_joins_the_labels_it_is_given() {
+        let p = shirt();
+        let title = p.variant_title_with(var(1), |value| match value.label() {
+            "S" => "Klein",
+            label => label,
+        });
+        assert_eq!(title, Some("Klein / Red".to_string()));
     }
 
     #[test]

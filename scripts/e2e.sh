@@ -99,6 +99,19 @@ replayed() {
     fi
 }
 
+# in_language NAME TAG CURL_ARGS...: asserts the response's `Content-Language` is TAG.
+in_language() {
+    local name=$1 tag=$2
+    shift 2
+    pick_creds "$@"
+    if curl -s -o /dev/null -D - ${CREDS[@]+"${CREDS[@]}"} "$@" | tr -d '\r' | grep -q "^[Cc]ontent-[Ll]anguage: $tag\$"; then
+        echo "ok   $name"
+    else
+        echo "FAIL $name: no Content-Language: $tag"
+        FAILED=$((FAILED + 1))
+    fi
+}
+
 # fresh NAME CURL_ARGS...: asserts the response does NOT carry `Idempotent-Replayed`.
 fresh() {
     local name=$1
@@ -279,6 +292,12 @@ contains "the email is lowercased" '"contact_email":"hello@e2e.example"'
 contains "the address is kept" '"city":"Zagreb"'
 step "an unknown time zone" 422 unknown_timezone -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"timezone":"Mars/Base"}'
 step "a malformed language" 422 invalid_language -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"default_language":"en_GB"}'
+step "the store's other languages" 200 - -X PATCH "$BASE/admin/store" -H "$JSON" \
+    -d '{"languages":[{"language":"DE","published":true},{"language":"fr"}]}'
+contains "in canonical case, unpublished unless said" '"languages":[{"language":"de","published":true},{"language":"fr","published":false}]'
+step "the default language among the others" 422 language_is_default -X PATCH "$BASE/admin/store" -H "$JSON" \
+    -d '{"languages":[{"language":"en","published":true}]}'
+step "a listed language as the default" 409 default_language_listed -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"default_language":"de"}'
 step "clear the legal address" 200 - -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"legal_address":null}'
 contains "it is gone" '"legal_address":null'
 step "choose the base currency costs are kept in" 200 - -X PATCH "$BASE/admin/store" -H "$JSON" -d '{"currency":"EUR"}'
@@ -292,6 +311,31 @@ if [[ $BODY == *'"code":"handle_taken"'* ]]; then
 fi
 MUG=$(id)
 MUG_VAR=$(variant)
+step "the mug's translatable fields" 200 - "$BASE/admin/translations/product/$MUG"
+contains "what it can be translated from and into" '"default_language":"en","languages":["de","fr"]'
+contains "the title's source text" '"key":"title","format":"text","max_length":255,"source":"Mug"'
+step "translate the mug into German" 200 - -X PUT "$BASE/admin/translations/product/$MUG/de" -H "$JSON" \
+    -d '{"fields":{"title":{"value":" Tasse "},"description":{"value":"<p>Eine Tasse.</p><script>x</script>"}}}'
+contains "the title, trimmed" '"de":{"value":"Tasse","source_digest":"'
+contains "the description, sanitised" '"de":{"value":"<p>Eine Tasse.</p>","source_digest":"'
+contains "both up to date" '"language":"de","translated":2,"outdated":0'
+step "into an unpublished language too" 200 - -X PUT "$BASE/admin/translations/product/$MUG/fr" -H "$JSON" \
+    -d '{"fields":{"title":{"value":"Tasse"}}}'
+step "never into the default language" 422 translation_into_default_language -X PUT "$BASE/admin/translations/product/$MUG/en" \
+    -H "$JSON" -d '{"fields":{"title":{"value":"Mug"}}}'
+step "nor into a language the store doesn't list" 422 language_not_listed -X PUT "$BASE/admin/translations/product/$MUG/es" \
+    -H "$JSON" -d '{"fields":{"title":{"value":"Taza"}}}'
+step "a field a product doesn't have" 422 invalid_translation -X PUT "$BASE/admin/translations/product/$MUG/de" \
+    -H "$JSON" -d '{"fields":{"handle":{"value":"tasse"}}}'
+contains "says which" '"code":"unknown_field"'
+step "a kind that has no translations" 404 unknown_resource_kind "$BASE/admin/translations/variant/$MUG"
+step "what's translated into German" 200 - "$BASE/admin/translations?kind=product&language=de"
+contains "the mug's title and description" "{\"resource\":{\"kind\":\"product\",\"id\":\"$MUG\"},\"language\":\"de\",\"fields\":[\"description\",\"title\"]"
+step "the default language is fixed while anything is translated" 409 default_language_in_use -X PATCH "$BASE/admin/store" \
+    -H "$JSON" -d '{"default_language":"es"}'
+step "remove the German translation" 204 - -X DELETE "$BASE/admin/translations/product/$MUG/de"
+step "it is gone" 404 translation_not_found -X DELETE "$BASE/admin/translations/product/$MUG/de"
+step "remove the French one" 204 - -X DELETE "$BASE/admin/translations/product/$MUG/fr"
 step "create cup" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
     -d '{"handle":"cup","title":"Cup","price":{"amount":250,"currency":"EUR"}}'
 CUP=$(id)
@@ -496,6 +540,12 @@ contains "prices exclude tax by default" '"prices_include_tax":false'
 step "prices include tax" 200 - -X PATCH "$BASE/admin/markets/$MARKET" -H "$JSON" -d '{"prices_include_tax":true}'
 contains "market now includes tax" '"prices_include_tax":true'
 step "back to excluding tax" 200 - -X PATCH "$BASE/admin/markets/$MARKET" -H "$JSON" -d '{"prices_include_tax":false}'
+step "the market's languages" 200 - -X PATCH "$BASE/admin/markets/$MARKET" -H "$JSON" -d '{"languages":["en","DE"]}'
+contains "in order, the first its default" '"languages":["en","de"]'
+step "a language the store hasn't published" 422 language_not_offered -X PATCH "$BASE/admin/markets/$MARKET" -H "$JSON" -d '{"languages":["en","fr"]}'
+step "unpublishing a language the market offers" 409 language_in_use -X PATCH "$BASE/admin/store" -H "$JSON" \
+    -d '{"languages":[{"language":"de","published":false}]}'
+contains "names the market and the language" "\"markets\":[{\"id\":\"$MARKET\",\"languages\":[\"de\"]}]"
 step "sell to Slovenia too" 200 - -X POST "$BASE/admin/markets/$MARKET/countries" -H "$JSON" -d '{"country":"SI"}'
 contains "Slovenia added" '"countries":["HR","DE","SI"]'
 step "stop selling to Slovenia" 200 - -X DELETE "$BASE/admin/markets/$MARKET/countries/SI"
@@ -674,8 +724,21 @@ step "a page without a country has no prices" 200 - "$BASE/storefront/products/b
 contains "none" '"price":null,"available":null'
 step "an unknown handle" 404 product_not_found "$BASE/storefront/products/by-handle/no-such-thing?country=HR"
 step "an unknown parameter" 400 invalid_query "$BASE/storefront/products/by-handle/mug?currency=EUR"
+step "the mug in German" 200 - -X PUT "$BASE/admin/translations/product/$MUG/de" -H "$JSON" \
+    -d '{"fields":{"title":{"value":"Tasse"}}}'
+step "its page in German" 200 - "$BASE/storefront/products/by-handle/mug?country=HR&language=de"
+contains "the translated title" '"title":"Tasse"'
+in_language "named in Content-Language" de "$BASE/storefront/products/by-handle/mug?country=HR&language=DE"
+step "a language the store hasn't published" 200 - "$BASE/storefront/products/by-handle/mug?country=HR&language=fr"
+lacks "is the market's default, not an error" '"title":"Tasse"'
+in_language "English, the market's first" en "$BASE/storefront/products/by-handle/mug?country=HR&language=fr"
+in_language "as without a language" en "$BASE/storefront/products/$MUG?country=HR"
+in_language "the categories take it too" de "$BASE/storefront/categories?language=de"
+in_language "and the country, for its market's default" en "$BASE/storefront/categories?country=HR"
+step "back to the source alone" 204 - -X DELETE "$BASE/admin/translations/product/$MUG/de"
 step "where the store sells" 200 - "$BASE/storefront/countries"
 contains "Croatia, in euros" "{\"country\":\"HR\",\"name\":\"Croatia\",\"market\":\"$MARKET\",\"currency\":\"EUR\",\"minor_units\":2"
+contains "in the market's languages" '"languages":["en","de"]'
 step "the US address form" 200 - "$BASE/storefront/address-formats/US"
 contains "city, state and ZIP code on one row" '["city","province","postal_code"]'
 contains "its labels" '"postal_code":"ZIP code","province":"State"'

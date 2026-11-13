@@ -642,7 +642,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The categories a storefront shows, as a tree (navigation menus). */
+        /** The categories a storefront shows, as a tree (navigation menus), named in `language`. */
         get: operations["storefront.categories.list"];
         put?: never;
         post?: never;
@@ -660,9 +660,9 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * A category page: the category by handle, with its ancestors and shown children. Its
-         *     products come through `/storefront/search?category=…`. A hidden category (or one under a
-         *     hidden one) is `404 category_not_found`.
+         * A category page: the category by handle, with its ancestors and shown children, in
+         *     `language`. Its products come through `/storefront/search?category=…`. A hidden
+         *     category (or one under a hidden one) is `404 category_not_found`.
          */
         get: operations["storefront.categories.fetch_by_handle"];
         put?: never;
@@ -702,7 +702,7 @@ export interface paths {
         };
         /**
          * The custom fields storefronts read (`access.storefront: read`) on products, variants
-         *     and categories, to name, order and label their values.
+         *     and categories, to name, order and label their values, in `language`.
          */
         get: operations["storefront.custom_fields.list"];
         put?: never;
@@ -804,7 +804,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The store's public details. */
+        /** The store's public details, its description in `language`. */
         get: operations["storefront.stores.fetch"];
         put?: never;
         post?: never;
@@ -2168,6 +2168,11 @@ export interface components {
         StorefrontCountryResponse: {
             country: components["schemas"]["CountryCode"];
             currency: components["schemas"]["Currency"];
+            /**
+             * @description The languages shoppers are offered here, in order: the first is the country's
+             *     default. Never empty: the store's default language when its market lists none.
+             */
+            languages: components["schemas"]["Language"][];
             market: components["schemas"]["MarketId"];
             /**
              * Format: int32
@@ -5985,7 +5990,22 @@ export interface operations {
     };
     "storefront.categories.list": {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
+                 *     `country`'s market offers (`/storefront/countries`): without it, or with one the
+                 *     market doesn't offer, the market's default answers. Without `country`, out of the
+                 *     store's default and the languages it has published, the store's default
+                 *     otherwise. `Content-Language` names the one served. Text without a translation
+                 *     stays in the store's default language.
+                 */
+                language?: string;
+                /**
+                 * @description Where the shopper is (ISO 3166-1 alpha-2): its market's languages are the ones
+                 *     `language` chooses from, as on a product read. Changes nothing else.
+                 */
+                country?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5995,10 +6015,21 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["StorefrontCategoryTreeResponse"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
@@ -6032,7 +6063,22 @@ export interface operations {
     };
     "storefront.categories.fetch_by_handle": {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
+                 *     `country`'s market offers (`/storefront/countries`): without it, or with one the
+                 *     market doesn't offer, the market's default answers. Without `country`, out of the
+                 *     store's default and the languages it has published, the store's default
+                 *     otherwise. `Content-Language` names the one served. Text without a translation
+                 *     stays in the store's default language.
+                 */
+                language?: string;
+                /**
+                 * @description Where the shopper is (ISO 3166-1 alpha-2): its market's languages are the ones
+                 *     `language` chooses from, as on a product read. Changes nothing else.
+                 */
+                country?: string;
+            };
             header?: never;
             path: {
                 /**
@@ -6048,13 +6094,15 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["StorefrontCategoryResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6153,6 +6201,20 @@ export interface operations {
             query?: {
                 /** @description Only this owner type's. */
                 owner_type?: "product" | "variant" | "category" | "customer" | "order";
+                /**
+                 * @description The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
+                 *     `country`'s market offers (`/storefront/countries`): without it, or with one the
+                 *     market doesn't offer, the market's default answers. Without `country`, out of the
+                 *     store's default and the languages it has published, the store's default
+                 *     otherwise. `Content-Language` names the one served. Text without a translation
+                 *     stays in the store's default language.
+                 */
+                language?: string;
+                /**
+                 * @description Where the shopper is (ISO 3166-1 alpha-2): its market's languages are the ones
+                 *     `language` chooses from, as on a product read. Changes nothing else.
+                 */
+                country?: string;
             };
             header?: never;
             path?: never;
@@ -6163,6 +6225,8 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -6285,6 +6349,15 @@ export interface operations {
                  *     variants. Without it, the product comes without prices.
                  */
                 country?: string;
+                /**
+                 * @description The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
+                 *     `country`'s market offers (`/storefront/countries`): without it, or with one the
+                 *     market doesn't offer, the market's default answers. Without `country`, out of the
+                 *     store's default and the languages it has published, the store's default
+                 *     otherwise. `Content-Language` names the one served. Text without a translation
+                 *     stays in the store's default language.
+                 */
+                language?: string;
             };
             header?: never;
             path: {
@@ -6301,6 +6374,8 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -6362,6 +6437,15 @@ export interface operations {
                  *     variants. Without it, the product comes without prices.
                  */
                 country?: string;
+                /**
+                 * @description The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
+                 *     `country`'s market offers (`/storefront/countries`): without it, or with one the
+                 *     market doesn't offer, the market's default answers. Without `country`, out of the
+                 *     store's default and the languages it has published, the store's default
+                 *     otherwise. `Content-Language` names the one served. Text without a translation
+                 *     stays in the store's default language.
+                 */
+                language?: string;
             };
             header?: never;
             path: {
@@ -6374,6 +6458,8 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -6530,7 +6616,22 @@ export interface operations {
     };
     "storefront.stores.fetch": {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
+                 *     `country`'s market offers (`/storefront/countries`): without it, or with one the
+                 *     market doesn't offer, the market's default answers. Without `country`, out of the
+                 *     store's default and the languages it has published, the store's default
+                 *     otherwise. `Content-Language` names the one served. Text without a translation
+                 *     stays in the store's default language.
+                 */
+                language?: string;
+                /**
+                 * @description Where the shopper is (ISO 3166-1 alpha-2): its market's languages are the ones
+                 *     `language` chooses from, as on a product read. Changes nothing else.
+                 */
+                country?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6540,10 +6641,21 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["StorefrontStoreResponse"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */

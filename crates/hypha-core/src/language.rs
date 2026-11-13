@@ -89,6 +89,20 @@ impl Language {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// The tag without its region and what follows it (`de-AT` → `de`, `sr-Latn-RS` →
+    /// `sr-Latn`): the language a regional wording falls back to. `None` for a tag
+    /// that names no region.
+    pub fn without_region(&self) -> Option<Language> {
+        // In canonical case only a region is two capitals or three digits.
+        let region = |subtag: &str| {
+            (subtag.len() == 2 && subtag.bytes().all(|b| b.is_ascii_uppercase()))
+                || (subtag.len() == 3 && subtag.bytes().all(|b| b.is_ascii_digit()))
+        };
+        let subtags: Vec<&str> = self.0.split('-').collect();
+        let at = subtags.iter().skip(1).position(|s| region(s))? + 1;
+        Some(Self(subtags[..at].join("-")))
+    }
 }
 
 /// `latn` → `Latn`. Only called on ASCII letters.
@@ -131,6 +145,23 @@ mod tests {
 
     fn invalid(tag: &str) -> Result<Language, LanguageError> {
         Err(LanguageError::Invalid(tag.to_string()))
+    }
+
+    #[test]
+    fn without_region_drops_the_region_and_what_follows() {
+        let parent = |tag: &str| {
+            Language::new(tag)
+                .unwrap()
+                .without_region()
+                .map(|l| l.as_str().to_string())
+        };
+        assert_eq!(parent("de-AT"), Some("de".to_string()));
+        assert_eq!(parent("sr-Latn-RS"), Some("sr-Latn".to_string()));
+        assert_eq!(parent("es-419"), Some("es".to_string()));
+        assert_eq!(parent("de-CH-1996"), Some("de".to_string()));
+        assert_eq!(parent("de"), None);
+        assert_eq!(parent("sr-Latn"), None);
+        assert_eq!(parent("de-1996"), None);
     }
 
     #[test]

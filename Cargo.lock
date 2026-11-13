@@ -1335,6 +1335,7 @@ dependencies = [
  "hypha-store-s3",
  "hypha-stores",
  "hypha-tax",
+ "hypha-translations",
  "hypha-users",
  "ipnet",
  "jiff",
@@ -1742,6 +1743,7 @@ dependencies = [
  "hypha-stores",
  "hypha-tax",
  "hypha-testkit",
+ "hypha-translations",
  "hypha-users",
  "serde",
  "serde_json",
@@ -1772,6 +1774,8 @@ dependencies = [
  "hypha-core",
  "hypha-testkit",
  "pollster",
+ "serde",
+ "serde_json",
  "thiserror",
  "uuid",
 ]
@@ -1821,11 +1825,26 @@ dependencies = [
  "hypha-shipping",
  "hypha-stores",
  "hypha-tax",
+ "hypha-translations",
  "hypha-users",
  "pollster",
  "serde",
  "serde_json",
  "sha2",
+ "uuid",
+]
+
+[[package]]
+name = "hypha-translations"
+version = "0.1.0-beta.4"
+dependencies = [
+ "hypha-core",
+ "hypha-testkit",
+ "pollster",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
  "uuid",
 ]
 

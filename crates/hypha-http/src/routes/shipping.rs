@@ -8,18 +8,22 @@ use hypha_core::{Currency, Money, Price, ShippingOptionId, ShippingZoneId, TaxCl
 use hypha_shipping::{
     AddOption, AppProvider, BuiltinRate, CommandError, CreateAppProvider, CreateZone,
     DeliveryEstimate, HasAppProviders, HasShippingZones, OptionPatch, OptionRate, ProviderKey,
-    RateBasis, RateTable, ServiceInfo, ShippingOption, ShippingZone, Tier, UpdateAppProvider,
-    UpdateZone, add_option, create_app_provider, create_zone, delete_app_provider, delete_zone,
-    get_app_provider, get_zone, list_app_providers, list_zones, provider_services, remove_option,
-    reorder_options, update_app_provider, update_option, update_zone,
+    RateBasis, RateTable, ServiceInfo, ShippingOption, ShippingZone, ShippingZoneRepo, Tier,
+    UpdateAppProvider, UpdateZone, add_option, create_app_provider, create_zone,
+    delete_app_provider, delete_zone, get_app_provider, get_zone, list_app_providers, list_zones,
+    provider_services, remove_option, reorder_options, update_app_provider, update_option,
+    update_zone,
 };
 use serde::{Deserialize, Serialize};
+
+use hypha_translations::ResourceKind;
 
 use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, PathId},
     patch,
     state::{SharedState, Storage},
+    translations::forget,
 };
 
 // ---------- DTOs ----------
@@ -345,7 +349,13 @@ pub async fn delete_zone_handler<S: Storage>(
     PathId(id): PathId<ShippingZoneId>,
 ) -> Result<StatusCode, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
+    // No event names the options that go with a zone, so their translations go here.
+    let options: Vec<_> = match ports.shipping_zones().get(id).await? {
+        Some(zone) => zone.options().iter().map(|o| o.id().as_uuid()).collect(),
+        None => Vec::new(),
+    };
     delete_zone(&ctx, ports.shipping_zones(), id).await?;
+    forget(&ports, ResourceKind::ShippingOption, options).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -481,6 +491,7 @@ pub async fn remove_option_handler<S: Storage>(
     let zone = remove_option(&ctx, ports.shipping_zones(), id, option)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("shipping_option_not_found"))?;
+    forget(&ports, ResourceKind::ShippingOption, [option.as_uuid()]).await?;
     Ok(Json(ShippingZoneResponse::new(&zone)?))
 }
 

@@ -1,8 +1,12 @@
 use axum::{Json, extract::State};
-use hypha_core::{Ctx, Currency, Email, Language, StoreId, Timezone};
+use hypha_core::{Ctx, Currency, Email, Language, Scope, StoreId, Timezone};
 use hypha_inventory::{HasStockMovements, StockMovementRepo};
+use hypha_markets::{HasMarkets, MarketRepo};
 use hypha_purchasing::{HasPurchaseOrders, PurchaseOrderRepo};
-use hypha_stores::{Store, UpdateStore, get_store, update_store};
+use hypha_stores::{
+    LanguageInput, MarketLanguages, Store, StoreLanguage, UpdateStore, get_store, update_store,
+};
+use hypha_translations::{HasTranslations, TranslationRepo};
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -11,7 +15,8 @@ use super::{
 };
 use crate::{
     error::ApiError,
-    extract::{Caller, JsonBody, Storefront},
+    extract::{Caller, JsonBody, Query, Storefront},
+    language::{self, LanguageParams, Localized},
     patch,
     state::{AppState, SharedState, Storage},
 };
@@ -32,11 +37,31 @@ pub struct StoreResponse {
     /// The language the store's content (titles, descriptions, option labels) is written
     /// in.
     default_language: Language,
+    /// The languages the content is translated into beside the default one, in the
+    /// merchant's order.
+    languages: Vec<StoreLanguageResponse>,
     /// The base currency every cost (purchase orders, stock value, an order line's cost)
     /// is kept in; `null` until it's chosen, and it must be before any cost is recorded.
     currency: Option<Currency>,
     /// How far the admin's setup guide got.
     setup: SetupProgressResponse,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct StoreLanguageResponse {
+    language: Language,
+    /// Whether shoppers are served it: an unpublished language can be translated, but no
+    /// storefront read answers in it and no market offers it.
+    published: bool,
+}
+
+impl From<&StoreLanguage> for StoreLanguageResponse {
+    fn from(l: &StoreLanguage) -> Self {
+        Self {
+            language: l.language.clone(),
+            published: l.published,
+        }
+    }
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -68,6 +93,7 @@ impl From<&Store> for StoreResponse {
             legal_address: s.legal_address().map(PostalAddressResponse::from),
             timezone: s.timezone(),
             default_language: s.default_language().clone(),
+            languages: s.languages().iter().map(Into::into).collect(),
             currency: s.currency(),
             setup: SetupProgressResponse {
                 step: s
@@ -126,10 +152,19 @@ pub struct UpdateStoreRequest {
     #[serde(default, deserialize_with = "patch::nullable")]
     #[schema(value_type = Option<String>, required = false)]
     timezone: Option<Option<String>>,
-    /// A BCP 47 tag such as `en` or `sr-Latn`.
+    /// A BCP 47 tag such as `en` or `sr-Latn`. Not one of `languages` (`409
+    /// default_language_listed`, unless the same request takes it off that list), and
+    /// markets that name the old one must still be offered it (`409 language_in_use`).
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = String, required = false)]
     default_language: Option<String>,
+    /// The other languages, replacing the list: at most 20, each once, never the default
+    /// one. A language markets offer can't be removed or unpublished (`409
+    /// language_in_use`, `details.markets: [{id, languages}]` for callers with
+    /// `markets:read`).
+    #[serde(default, deserialize_with = "patch::non_null")]
+    #[schema(value_type = Vec<StoreLanguageRequest>, required = false)]
+    languages: Option<Vec<StoreLanguageRequest>>,
     /// An ISO 4217 code: the base currency costs are kept in. `null` clears it.
     #[serde(default, deserialize_with = "patch::nullable")]
     #[schema(value_type = Option<String>, required = false)]
@@ -144,6 +179,16 @@ pub struct UpdateStoreRequest {
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = bool, required = false)]
     setup_finished: Option<bool>,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StoreLanguageRequest {
+    /// A BCP 47 tag such as `de` or `sr-Latn`.
+    language: String,
+    /// Whether shoppers are served it; `false` when absent.
+    #[serde(default)]
+    published: bool,
 }
 
 /// Changes the store's details.
@@ -172,6 +217,42 @@ pub async fn update<S: Storage>(
         }
         None => false,
     };
+    // What markets offer holds the store to offering it, checked like the currency:
+    // before the write, so a market changed at the same instant can slip through.
+    let market_languages = if req.default_language.is_some() || req.languages.is_some() {
+        let markets = ports.markets().list_all().await?;
+        markets
+            .iter()
+            .map(|m| MarketLanguages {
+                market: m.id(),
+                languages: m.languages().to_vec(),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    // Every translation is one from the default language, which fixes it; checked like
+    // the currency, before the write.
+    // Only translations into the languages the store keeps count: the others go with
+    // their language (and may still be there, waiting for that cleanup).
+    let has_translations = match req.default_language {
+        Some(_) => {
+            let kept: Vec<Language> = match &req.languages {
+                Some(languages) => languages
+                    .iter()
+                    .filter_map(|l| Language::new(&l.language).ok())
+                    .collect(),
+                None => store_as_system(&state, &ports)
+                    .await?
+                    .languages()
+                    .iter()
+                    .map(|l| l.language.clone())
+                    .collect(),
+            };
+            ports.translations().any_in(&kept).await?
+        }
+        None => false,
+    };
     let input = UpdateStore {
         name: req.name,
         contact_email: req.contact_email,
@@ -180,20 +261,41 @@ pub async fn update<S: Storage>(
         legal_address: req.legal_address.map(|a| a.map(Into::into)),
         timezone: req.timezone,
         default_language: req.default_language,
+        languages: req.languages.map(|languages| {
+            languages
+                .into_iter()
+                .map(|l| LanguageInput {
+                    language: l.language,
+                    published: l.published,
+                })
+                .collect()
+        }),
+        market_languages,
         currency: req.currency,
         currency_locked,
+        has_translations,
         setup_step: req.setup_step,
         setup_finished: req.setup_finished,
     };
     // Through the request's ports when they hold the directory (`read_store`).
-    let store = match state.storage.directory_in(&ports) {
-        Some(directory) => update_store(&ctx, directory, &state.clock, state.store, input).await?,
+    let updated = match state.storage.directory_in(&ports) {
+        Some(directory) => update_store(&ctx, directory, &state.clock, state.store, input).await,
         None => {
             drop(ports);
             let directory = state.storage.directory().await?;
-            update_store(&ctx, &directory, &state.clock, state.store, input).await?
+            update_store(&ctx, &directory, &state.clock, state.store, input).await
         }
     };
+    let store = updated.map_err(|e| {
+        // Which markets are in the way is theirs to read: `stores:write` alone gets the
+        // code.
+        let names_markets = matches!(e, hypha_stores::CommandError::LanguageInUse(_));
+        let error = ApiError::from(e);
+        if names_markets && !ctx.has_scope(Scope::MarketsRead) {
+            return error.with_details(None);
+        }
+        error
+    })?;
     Ok(Json(StoreResponse::new(&store)?))
 }
 
@@ -209,25 +311,40 @@ pub struct StorefrontStoreResponse {
     default_language: Language,
 }
 
-/// The store's public details.
+/// The store's public details, its description in `language`.
 #[utoipa::path(
     get,
     path = "/storefront/store",
-    responses((status = 200, description = "OK", body = StorefrontStoreResponse)),
+    params(LanguageParams),
+    responses((
+        status = 200,
+        description = "OK",
+        body = StorefrontStoreResponse,
+        headers(("Content-Language" = String, description = "The language the response is in.")),
+    )),
     extensions(("x-hypha-scopes" = json!(["stores:read"]))),
 )]
 pub async fn fetch_storefront<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
-) -> Result<Json<StorefrontStoreResponse>, ApiError> {
+    query: Query<LanguageParams>,
+) -> Result<Localized<StorefrontStoreResponse>, ApiError> {
+    use hypha_translations::{ResourceKind, ResourceRef, fields as keys};
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let store = read_store(&state, &ctx, ports).await?;
-    Ok(Json(StorefrontStoreResponse {
+    let params = query.parse()?;
+    let store = store_for(&state, &ctx, &ports).await?;
+    let served = language::served_in(&state, &ports, &params).await?;
+    let of_store = ResourceRef::new(ResourceKind::Store, state.store.as_uuid());
+    let overlay = served.overlay(&ports, &[of_store]).await?;
+    let response = StorefrontStoreResponse {
         name: store.name().to_string(),
-        description: store.description().map(str::to_string),
+        description: overlay
+            .optional(of_store, keys::store::DESCRIPTION, store.description())
+            .map(str::to_string),
         contact_email: store.contact_email().cloned(),
         default_language: store.default_language().clone(),
-    }))
+    };
+    Ok(served.respond(response))
 }
 
 /// The store's details: through the request's `ports` when the storage keeps the
@@ -252,13 +369,38 @@ pub(crate) async fn store_currency<S: Storage>(
     state: &AppState<S>,
     ports: &S::Ports<'_>,
 ) -> Result<Option<Currency>, ApiError> {
-    let ctx = Ctx::system();
-    let store = match state.storage.directory_in(ports) {
-        Some(directory) => get_store(&ctx, directory, state.store).await?,
+    Ok(store_as_system(state, ports).await?.currency())
+}
+
+/// The languages shoppers may be served, the store's default first, for the routes that
+/// hold a market's languages to them. Read as the system: a market's languages need
+/// `markets:write` or a storefront's `markets:read`, not `stores:read`.
+pub(crate) async fn offered_languages<S: Storage>(
+    state: &AppState<S>,
+    ports: &S::Ports<'_>,
+) -> Result<Vec<Language>, ApiError> {
+    Ok(store_as_system(state, ports).await?.offered_languages())
+}
+
+pub(crate) async fn store_as_system<S: Storage>(
+    state: &AppState<S>,
+    ports: &S::Ports<'_>,
+) -> Result<Store, ApiError> {
+    store_for(state, &Ctx::system(), ports).await
+}
+
+/// The store's details for `ctx`, keeping `ports`: through them when they hold the
+/// directory, else through the directory beside them.
+pub(crate) async fn store_for<S: Storage>(
+    state: &AppState<S>,
+    ctx: &Ctx,
+    ports: &S::Ports<'_>,
+) -> Result<Store, ApiError> {
+    Ok(match state.storage.directory_in(ports) {
+        Some(directory) => get_store(ctx, directory, state.store).await?,
         None => {
             let directory = state.storage.directory().await?;
-            get_store(&ctx, &directory, state.store).await?
+            get_store(ctx, &directory, state.store).await?
         }
-    };
-    Ok(store.currency())
+    })
 }

@@ -37,6 +37,10 @@ mod addresses;
 mod agents;
 // Checkout rules and the messages they put on carts.
 mod checkout_rules;
+// Translations of the store's content.
+mod translations;
+// The language storefront reads are answered in.
+mod languages;
 // Apps installed through OAuth, and personal data.
 mod app_extensions;
 // Apps' custom fields, synced with their manifests.
@@ -5783,8 +5787,208 @@ async fn a_product_page_is_one_read_priced_in_the_shoppers_country() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         countries["items"],
-        json!([{"country": "HR", "name": "Croatia", "market": market, "currency": "EUR", "minor_units": 2, "prices_include_tax": false}])
+        json!([{"country": "HR", "name": "Croatia", "market": market, "currency": "EUR", "minor_units": 2, "prices_include_tax": false, "languages": ["en"]}])
     );
+}
+
+#[tokio::test]
+async fn a_store_lists_languages_and_markets_offer_the_published_ones() {
+    let app = app().await;
+    let (market, _) = market_selling_a_mug(&app).await;
+    let market_url = format!("/admin/markets/{market}");
+    let shop = publishable(&app).await;
+    let (_, store) = send(&app, "GET", "/admin/store", None).await;
+    assert_eq!(store["languages"], json!([]));
+    let (_, fetched) = send(&app, "GET", &market_url, None).await;
+    assert_eq!(fetched["languages"], json!([]));
+
+    // Tags are stored in canonical case, in the order sent; `published` is false unless
+    // said.
+    let body = r#"{"languages":[{"language":"DE","published":true},{"language":"sr-latn","published":true},{"language":"fr"}]}"#;
+    let (status, store) = send(&app, "PATCH", "/admin/store", Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{store}");
+    let three = json!([
+        {"language": "de", "published": true},
+        {"language": "sr-Latn", "published": true},
+        {"language": "fr", "published": false}
+    ]);
+    assert_eq!(store["languages"], three);
+    let (_, store) = send(&app, "GET", "/admin/store", None).await;
+    assert_eq!(store["languages"], three);
+    let event = outbox_events(&app)
+        .await
+        .into_iter()
+        .rfind(|e| e.event_type == "store.updated")
+        .unwrap();
+    assert_eq!(event.data["fields"], json!(["languages"]));
+    let (_, public) = send_as(&app, &shop, "GET", "/storefront/store", None).await;
+    assert!(
+        public.get("languages").is_none(),
+        "a storefront reads languages per country"
+    );
+
+    for (body, status, want) in [
+        (
+            r#"{"languages":[{"language":"de_DE","published":true}]}"#,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_language",
+        ),
+        (
+            r#"{"languages":[{"language":"en","published":true}]}"#,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "language_is_default",
+        ),
+        (
+            r#"{"languages":[{"language":"de"},{"language":"DE"}]}"#,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "duplicate_language",
+        ),
+        (
+            r#"{"languages":null}"#,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_body",
+        ),
+        (
+            r#"{"languages":[{"language":"de","primary":true}]}"#,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_body",
+        ),
+        (
+            r#"{"default_language":"de"}"#,
+            StatusCode::CONFLICT,
+            "default_language_listed",
+        ),
+    ] {
+        let (got, error) = send(&app, "PATCH", "/admin/store", Some(body)).await;
+        assert_eq!((got, code(&error)), (status, want), "{body}");
+    }
+    let many: Vec<Value> = (b'a'..=b'u')
+        .map(|c| json!({"language": format!("a{}", c as char)}))
+        .collect();
+    let body = json!({ "languages": many }).to_string();
+    let (status, error) = send(&app, "PATCH", "/admin/store", Some(&body)).await;
+    assert_eq!(
+        (status, code(&error)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "too_many_languages")
+    );
+
+    // A market offers the store's default or published languages, in its own order.
+    let countries = async || {
+        let (_, countries) = send_as(&app, &shop, "GET", "/storefront/countries", None).await;
+        countries["items"][0]["languages"].clone()
+    };
+    assert_eq!(countries().await, json!(["en"]), "the store's default");
+    let (status, changed) = send(
+        &app,
+        "PATCH",
+        &market_url,
+        Some(r#"{"languages":["DE","en"]}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, &changed["languages"]),
+        (StatusCode::OK, &json!(["de", "en"]))
+    );
+    let (_, listed) = send(&app, "GET", "/admin/markets", None).await;
+    assert_eq!(listed["items"][0]["languages"], json!(["de", "en"]));
+    assert_eq!(countries().await, json!(["de", "en"]));
+    let event = outbox_events(&app)
+        .await
+        .into_iter()
+        .rfind(|e| e.event_type == "market.changed")
+        .unwrap();
+    assert_eq!(event.data["fields"], json!(["languages"]));
+
+    for (body, want) in [
+        (r#"{"languages":["de","fr"]}"#, "language_not_offered"),
+        (r#"{"languages":["de","hr"]}"#, "language_not_offered"),
+        (r#"{"languages":["de","de"]}"#, "duplicate_language"),
+        (r#"{"languages":["de_DE"]}"#, "invalid_language"),
+        (r#"{"languages":null}"#, "invalid_body"),
+    ] {
+        let (status, error) = send(&app, "PATCH", &market_url, Some(body)).await;
+        assert_eq!(
+            (status, code(&error)),
+            (StatusCode::UNPROCESSABLE_ENTITY, want),
+            "{body}"
+        );
+    }
+    let (_, fetched) = send(&app, "GET", &market_url, None).await;
+    assert_eq!(fetched["languages"], json!(["de", "en"]), "nothing changed");
+
+    // What the market offers, the store keeps offering: not removed, not unpublished,
+    // and the default it names not replaced.
+    let in_use = |languages: Value| json!({"markets": [{"id": market, "languages": languages}]});
+    for (body, languages) in [
+        (
+            r#"{"languages":[{"language":"sr-Latn","published":true}]}"#,
+            json!(["de"]),
+        ),
+        (
+            r#"{"languages":[{"language":"de","published":false},{"language":"sr-Latn","published":true}]}"#,
+            json!(["de"]),
+        ),
+        (r#"{"default_language":"hr"}"#, json!(["en"])),
+        (
+            r#"{"default_language":"hr","languages":[]}"#,
+            json!(["de", "en"]),
+        ),
+    ] {
+        let (status, error) = send(&app, "PATCH", "/admin/store", Some(body)).await;
+        assert_eq!(
+            (status, code(&error), &error["details"]),
+            (StatusCode::CONFLICT, "language_in_use", &in_use(languages)),
+            "{body}"
+        );
+    }
+    let (_, store) = send(&app, "GET", "/admin/store", None).await;
+    assert_eq!(
+        (&store["default_language"], &store["languages"]),
+        (&json!("en"), &three),
+        "nothing changed"
+    );
+    // Which markets are in the way is for callers who may read markets.
+    let stores_only = key(
+        &app,
+        json!({"kind": "secret", "name": "Store settings", "scopes": ["stores:write"]}),
+    )
+    .await;
+    let (status, error) = send_as(
+        &app,
+        &stores_only,
+        "PATCH",
+        "/admin/store",
+        Some(r#"{"languages":[]}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&error), &error["details"]),
+        (StatusCode::CONFLICT, "language_in_use", &Value::Null)
+    );
+
+    // Languages no market names change freely; the default and another swap in one
+    // request, since the market is still offered both.
+    let body = r#"{"languages":[{"language":"de","published":true}]}"#;
+    let (status, _) = send(&app, "PATCH", "/admin/store", Some(body)).await;
+    assert_eq!(status, StatusCode::OK);
+    let body = r#"{"default_language":"de","languages":[{"language":"en","published":true}]}"#;
+    let (status, store) = send(&app, "PATCH", "/admin/store", Some(body)).await;
+    assert_eq!(
+        (status, &store["default_language"], &store["languages"]),
+        (
+            StatusCode::OK,
+            &json!("de"),
+            &json!([{"language": "en", "published": true}])
+        )
+    );
+    assert_eq!(countries().await, json!(["de", "en"]));
+
+    // Once the market lists none, it's the store's default alone and nothing is in use.
+    let (status, _) = send(&app, "PATCH", &market_url, Some(r#"{"languages":[]}"#)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(countries().await, json!(["de"]));
+    let (status, store) = send(&app, "PATCH", "/admin/store", Some(r#"{"languages":[]}"#)).await;
+    assert_eq!((status, &store["languages"]), (StatusCode::OK, &json!([])));
 }
 
 #[tokio::test]

@@ -906,6 +906,7 @@ mod tests {
                 "get /admin/suppliers",
                 "get /admin/suppliers/{id}/variants",
                 "get /admin/transfers",
+                "get /admin/translations",
                 "get /admin/variants"
             ]
         );

@@ -47,6 +47,7 @@ pub mod stores;
 pub mod suppliers;
 pub mod taxes;
 pub mod transfers;
+pub mod translations;
 pub mod uploads;
 
 use hypha_core::{Stamps, Timestamp};
@@ -238,6 +239,10 @@ macro_rules! route_table {
             [admin, DELETE, "/admin/checkout-rules/{id}", checkout_rules::remove],
             [admin, GET, "/admin/checkout-settings", checkout_rules::settings],
             [admin, PATCH, "/admin/checkout-settings", checkout_rules::update_settings],
+            [admin, GET, "/admin/translations", translations::list],
+            [admin, GET, "/admin/translations/{kind}/{id}", translations::fetch],
+            [admin, PUT, "/admin/translations/{kind}/{id}/{language}", translations::put],
+            [admin, DELETE, "/admin/translations/{kind}/{id}/{language}", translations::remove],
             // discounts and their codes
             [admin, GET, "/admin/discounts", discounts::list],
             [admin, POST, "/admin/discounts", discounts::create],

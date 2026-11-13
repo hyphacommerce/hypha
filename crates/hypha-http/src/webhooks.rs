@@ -118,6 +118,7 @@ fn subject_id(kind: &str, id: Uuid) -> String {
         "receipt" => hypha_core::ReceiptId::PREFIX,
         "transfer" => hypha_core::TransferId::PREFIX,
         "checkout_rule" => hypha_core::CheckoutRuleId::PREFIX,
+        "store" => hypha_core::StoreId::PREFIX,
         _ => return id.to_string(),
     };
     format!("{prefix}_{}", id.simple())
