@@ -15,14 +15,12 @@ use hypha_payments::{
 use serde::{Deserialize, Serialize};
 
 use super::{orders::FinancialStatusDto, rfc3339, stamp_times};
-use hypha_translations::ResourceKind;
 
 use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, KeyedJson, PathId, idempotent_response},
     patch,
     state::{SharedState, Storage},
-    translations::forget,
 };
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -363,8 +361,6 @@ pub async fn delete<S: Storage>(
     delete_payment_method(&ctx, &ports, id)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("payment_method_not_found"))?;
-    // No event names a deleted method, so its translations go here.
-    forget(&ports, ResourceKind::PaymentMethod, [id.as_uuid()]).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -484,8 +480,9 @@ impl PlacedPaymentResponse {
     pub(crate) fn new(p: &Payment) -> Self {
         Self {
             status: p.status().into(),
-            method_name: p.method_name().map(str::to_string),
-            instructions: p.instructions().map(str::to_string),
+            // As the buyer read them: in the order's language where it had them.
+            method_name: p.buyer_method_name().map(str::to_string),
+            instructions: p.buyer_instructions().map(str::to_string),
             amount: p.amount(),
         }
     }
@@ -538,12 +535,23 @@ pub struct CartPaymentMethodResponse {
 }
 
 impl CartPaymentMethodResponse {
-    pub(crate) fn new(m: &PaymentMethod) -> Self {
+    /// The method with its name and instructions as `overlay` translates them.
+    pub(crate) fn translated(m: &PaymentMethod, overlay: &hypha_translations::Overlay) -> Self {
+        use hypha_translations::{ResourceKind, ResourceRef, fields};
+        let resource = ResourceRef::new(ResourceKind::PaymentMethod, m.id().as_uuid());
         Self {
             id: m.id(),
-            name: m.name().to_string(),
+            name: overlay
+                .text_or(resource, fields::payment_method::NAME, m.name())
+                .to_string(),
             provider: m.provider().to_string(),
-            instructions: m.instructions().map(str::to_string),
+            instructions: overlay
+                .optional(
+                    resource,
+                    fields::payment_method::INSTRUCTIONS,
+                    m.instructions(),
+                )
+                .map(str::to_string),
         }
     }
 }

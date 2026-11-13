@@ -2,9 +2,14 @@
 //! reply-to, who gets the staff's new-order email, and where order links point. One per
 //! store; none stored until the merchant first saves.
 
-use std::fmt;
+use std::{collections::BTreeSet, fmt};
 
-use hypha_core::{AssetId, Email, OrderId, Stamped, Stamps, Version, Versioned, optional_text};
+use hypha_core::{
+    AssetId, Email, Event, OrderId, PendingEvent, Recorded, Recorder, Stamped, Stamps, Subject,
+    Version, Versioned, optional_text,
+};
+use serde::Serialize;
+use uuid::Uuid;
 
 use crate::SettingsError;
 
@@ -119,6 +124,42 @@ pub struct NotificationSettings {
     /// Who gets `staff_new_order`.
     staff_recipients: Vec<Email>,
     order_url: Option<OrderUrl>,
+    events: Recorder,
+    /// The fields set since it was loaded: one `notification_settings.updated` names them
+    /// all when its events are taken.
+    changed: BTreeSet<&'static str>,
+}
+
+/// The subject kind of the settings' events; there's one per store, so the subject ID is
+/// nil.
+pub const NOTIFICATION_SETTINGS: &str = "notification_settings";
+
+/// `notification_settings.updated`: which of `logo`, `accent`, `footer`, `sender_name`,
+/// `reply_to`, `staff_recipients` and `order_url` were set, one event per write (the
+/// first save's too). The values aren't in it: read the settings.
+#[derive(Debug, Serialize)]
+pub struct NotificationSettingsUpdated {
+    pub fields: Vec<&'static str>,
+}
+
+impl Event for NotificationSettingsUpdated {
+    const TYPE: &'static str = "notification_settings.updated";
+    const VERSION: u16 = 1;
+}
+
+impl Recorded for NotificationSettings {
+    fn take_events(&mut self) -> Vec<PendingEvent> {
+        let changed = std::mem::take(&mut self.changed);
+        if !changed.is_empty() {
+            self.events.record(
+                Subject::new(NOTIFICATION_SETTINGS, Uuid::nil()),
+                &NotificationSettingsUpdated {
+                    fields: changed.into_iter().collect(),
+                },
+            );
+        }
+        self.events.take()
+    }
 }
 
 impl Versioned for NotificationSettings {
@@ -153,6 +194,8 @@ impl Default for NotificationSettings {
             reply_to: None,
             staff_recipients: Vec::new(),
             order_url: None,
+            events: Recorder::default(),
+            changed: BTreeSet::new(),
         }
     }
 }
@@ -165,37 +208,44 @@ impl NotificationSettings {
 
     pub fn set_logo(&mut self, logo: Option<AssetId>) {
         self.logo = logo;
+        self.changed.insert("logo");
     }
 
     pub fn set_accent(&mut self, accent: Colour) {
         self.accent = accent;
+        self.changed.insert("accent");
     }
 
     /// Trimmed; blank clears it.
     pub fn set_footer(&mut self, footer: Option<String>) -> Result<(), SettingsError> {
         self.footer = footer_text(footer)?;
+        self.changed.insert("footer");
         Ok(())
     }
 
     /// Trimmed; blank clears it (the store's name is used).
     pub fn set_sender_name(&mut self, name: Option<String>) -> Result<(), SettingsError> {
         self.sender_name = optional_text("sender name", name)?;
+        self.changed.insert("sender_name");
         Ok(())
     }
 
     pub fn set_reply_to(&mut self, reply_to: Option<Email>) {
         self.reply_to = reply_to;
+        self.changed.insert("reply_to");
     }
 
     /// Repeats are dropped, keeping the first; more than `MAX_STAFF_RECIPIENTS` is
     /// refused.
     pub fn set_staff_recipients(&mut self, recipients: Vec<Email>) -> Result<(), SettingsError> {
         self.staff_recipients = recipient_list(recipients)?;
+        self.changed.insert("staff_recipients");
         Ok(())
     }
 
     pub fn set_order_url(&mut self, order_url: Option<OrderUrl>) {
         self.order_url = order_url;
+        self.changed.insert("order_url");
     }
 
     pub fn logo(&self) -> Option<AssetId> {
@@ -296,6 +346,8 @@ impl NotificationSettings {
             reply_to: s.reply_to,
             staff_recipients: recipient_list(s.staff_recipients)?,
             order_url: s.order_url,
+            events: Recorder::default(),
+            changed: BTreeSet::new(),
         })
     }
 }
@@ -410,6 +462,25 @@ mod tests {
         s.set_accent(Colour::new("#ff0000").unwrap());
         s.set_reply_to(Some(email("help@shop.com")));
         s.set_order_url(Some(OrderUrl::new("https://s.com/{order}").unwrap()));
+        s.take_events();
         assert_eq!(NotificationSettings::restore(s.snapshot()), Ok(s));
+    }
+
+    #[test]
+    fn a_write_is_one_event_naming_the_fields_set() {
+        let mut s = NotificationSettings::default();
+        assert!(s.take_events().is_empty(), "nothing set");
+        s.set_footer(Some("Ilica 1".to_string())).unwrap();
+        s.set_accent(Colour::new("#ff0000").unwrap());
+        s.set_footer(None).unwrap();
+        let events = s.take_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "notification_settings.updated");
+        assert_eq!(events[0].subject.kind, NOTIFICATION_SETTINGS);
+        assert_eq!(
+            events[0].data["fields"],
+            serde_json::json!(["accent", "footer"])
+        );
+        assert!(s.take_events().is_empty(), "taken once");
     }
 }

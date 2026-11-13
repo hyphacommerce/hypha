@@ -5,7 +5,8 @@
 // checkout and account are static (ISR), so they never read the cookie: the header and
 // the cart drawer read the cart through `loadCart` once the page is in the browser,
 // and the cart's actions answer with the cart, for the drawer to show. The forms take
-// typed input and get the shopper's message back when the API refused.
+// typed input and get the shopper's message back when the API refused, in the page's
+// language (`actionT`).
 
 import { refresh } from "next/cache";
 import { cookies } from "next/headers";
@@ -14,12 +15,21 @@ import { redirect } from "next/navigation";
 import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 
 import { type AddressValues, type FieldProblems, asField } from "@/lib/address";
-import { api, describe, loadCountries, refusedWith, shopperApi } from "@/lib/api";
+import { api, describe, loadCountries, pageLocale, refusedWith, shopperApi } from "@/lib/api";
 import { type ListingPage, readListingPage } from "@/lib/listing-data";
 import { formatRange } from "@/lib/money";
-import { COUNTRY_COOKIE } from "@/lib/routing";
+import {
+  COUNTRY_COOKIE,
+  LANGUAGE_COOKIE,
+  type Locale,
+  localeSegment,
+  offered,
+  withoutLocale,
+} from "@/lib/routing";
 import { paymentElementModule } from "@/lib/app-elements";
+import { readCart } from "@/lib/cart";
 import { checkOutCart } from "@/lib/checkout";
+import { actionT } from "@/lib/i18n";
 import { accountApi, forgetSession, sessionHeaders } from "@/lib/account";
 import { cartId, forgetCart, link, mode, rememberCart } from "@/lib/site";
 
@@ -34,8 +44,8 @@ export type CartResult = { cart: Cart | null; error?: string };
 
 type ApiError = { code: string; error: string; details?: unknown };
 
-function refused(error: ApiError): ActionResult {
-  return refusedWith(error);
+async function refused(locale: string, error: ApiError): Promise<ActionResult> {
+  return refusedWith(await actionT(locale), error);
 }
 
 /** `value` trimmed, or `null` for a blank optional field. */
@@ -44,19 +54,21 @@ function optional(value: string | undefined): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
-/** A new cart in `country`, remembered in the shopper's cookies; a signed-in shopper's
- * is theirs from the start. */
-async function newCart(country: string): Promise<string> {
+/** A new cart in the page's place, in the page's language (so its messages and the
+ * order placed from it follow the page), remembered in the shopper's cookies; a signed-in
+ * shopper's is theirs from the start. */
+async function newCart(place: Locale): Promise<string> {
   const session = await sessionHeaders();
-  let answer = await (await shopperApi(session)).POST("/storefront/carts", { body: { country } });
+  const body = { country: place.country, language: place.language };
+  let answer = await (await shopperApi(session)).POST("/storefront/carts", { body });
   if (answer.error?.code === "invalid_token" && "authorization" in session) {
     // The session ended meanwhile (signed out everywhere, expired): the cookie goes,
     // and the shopper carries on as a guest.
     await forgetSession();
-    answer = await (await shopperApi()).POST("/storefront/carts", { body: { country } });
+    answer = await (await shopperApi()).POST("/storefront/carts", { body });
   }
   if (answer.error) throw new Error(`couldn't create a cart: ${answer.error.code}`);
-  await rememberCart(country, answer.data.id);
+  await rememberCart(place.country, answer.data.id);
   return answer.data.id;
 }
 
@@ -67,23 +79,23 @@ function cartClosed(error: ApiError): boolean {
 }
 
 /** The cart in the cookie, or back to the (empty) cart page without one. */
-async function currentCart(country: string): Promise<string> {
-  const id = await cartId(country);
-  if (!id) redirect(link(country, "/cart"));
+async function currentCart(place: Locale): Promise<string> {
+  const id = await cartId(place.country);
+  if (!id) redirect(link(place.segment, "/cart"));
   return id;
 }
 
-/** The shopper's open cart in `country`, priced; `null` without one (or once it's an
+/** The shopper's open cart in the page's country (`locale` is its locale segment),
+ * priced and in the page's language (`readCart`); `null` without one (or once it's an
  * order). For the header and the drawer, which can't read it while the page renders. */
-export async function loadCart(country: string): Promise<Cart | null> {
-  const id = await cartId(country);
+export async function loadCart(locale: string): Promise<Cart | null> {
+  const place = await pageLocale(locale);
+  const id = await cartId(place.country);
   if (!id) return null;
-  const { data, response } = await api().GET("/storefront/carts/{id}", {
-    params: { path: { id } },
-  });
-  if (data && !data.order) return data;
+  const { cart, status } = await readCart(id, place);
+  if (cart && !cart.order) return cart;
   // Gone or an order now: forget it (and its flag), so pages stop asking.
-  if (data || response.status === 404) await forgetCart(country);
+  if (cart || status === 404) await forgetCart(place.country);
   return null;
 }
 
@@ -101,13 +113,17 @@ export type VariantPrices = Pick<
  * when the product can't be read.
  */
 export async function customerPrices(input: {
-  country: string;
+  locale: string;
   handle: string;
 }): Promise<Record<string, VariantPrices> | null> {
+  const place = await pageLocale(input.locale);
   const client = await accountApi();
   if (!client) return null;
   const { data, response } = await client.GET("/storefront/products/by-handle/{handle}", {
-    params: { path: { handle: input.handle }, query: { country: input.country } },
+    params: {
+      path: { handle: input.handle },
+      query: { country: place.country, language: place.language },
+    },
   });
   if (!data) {
     if (response.status === 401) await forgetSession();
@@ -128,32 +144,38 @@ export async function customerPrices(input: {
 
 /** Adds a variant to the cart (opening one if needed), and answers with the cart. */
 export async function addToCart(input: {
-  country: string;
+  locale: string;
   variant: string;
   quantity: number;
 }): Promise<CartResult> {
+  const place = await pageLocale(input.locale);
   const body = { variant: input.variant, quantity: Math.max(1, Math.floor(input.quantity) || 1) };
   const add = (id: string) =>
     api().POST("/storefront/carts/{id}/lines", { params: { path: { id } }, body });
   // Straight to the cart in the cookie; only a cart that's gone or checked out makes a
   // new one (no read first: one call for the usual case).
-  const existing = await cartId(input.country);
+  const existing = await cartId(place.country);
   let result = existing ? await add(existing) : undefined;
   if (!result || (result.error && cartClosed(result.error))) {
-    result = await add(await newCart(input.country));
+    result = await add(await newCart(place));
   }
   const { data, error } = result;
-  if (error) return { cart: await loadCart(input.country), error: describe(error) };
+  if (error)
+    return {
+      cart: await loadCart(input.locale),
+      error: describe(await actionT(input.locale), error),
+    };
   return { cart: data };
 }
 
 /** Sets a line's quantity (0 removes it), and answers with the cart. */
 export async function setQuantity(input: {
-  country: string;
+  locale: string;
   variant: string;
   quantity: number;
 }): Promise<CartResult> {
-  const id = await cartId(input.country);
+  const place = await pageLocale(input.locale);
+  const id = await cartId(place.country);
   if (!id) return { cart: null };
   const client = api();
   const path = { id, variant: input.variant };
@@ -164,44 +186,61 @@ export async function setQuantity(input: {
           body: { quantity: Math.floor(input.quantity) },
         })
       : await client.DELETE("/storefront/carts/{id}/lines/{variant}", { params: { path } });
-  if (error) return { cart: await loadCart(input.country), error: describe(error) };
-  return { cart: data ?? (await loadCart(input.country)) };
+  if (error)
+    return {
+      cart: await loadCart(input.locale),
+      error: describe(await actionT(input.locale), error),
+    };
+  return { cart: data ?? (await loadCart(input.locale)) };
 }
 
 /** Adds a discount code to the cart, and answers with the cart. A code that's known but
  * doesn't apply yet is kept, with its state on the cart; an unknown one is refused
  * (`discount_code_invalid`) and the form shows why. */
 export async function applyDiscountCode(input: {
-  country: string;
+  locale: string;
   code: string;
 }): Promise<CartResult> {
-  const id = await cartId(input.country);
+  const place = await pageLocale(input.locale);
+  const id = await cartId(place.country);
   if (!id) return { cart: null };
   const code = input.code.trim();
-  if (code === "") return { cart: await loadCart(input.country), error: "Enter a code." };
+  if (code === "") {
+    const t = await actionT(input.locale);
+    return { cart: await loadCart(input.locale), error: t("discounts.enter_code") };
+  }
   // The shopper's address goes on: the API limits code entry per client.
   const client = await shopperApi();
   const { data, error } = await client.POST("/storefront/carts/{id}/discount-codes", {
     params: { path: { id } },
     body: { code },
   });
-  if (error) return { cart: await loadCart(input.country), error: describe(error) };
-  return { cart: data ?? (await loadCart(input.country)) };
+  if (error)
+    return {
+      cart: await loadCart(input.locale),
+      error: describe(await actionT(input.locale), error),
+    };
+  return { cart: data ?? (await loadCart(input.locale)) };
 }
 
 /** Takes a code off the cart, and answers with the cart. */
 export async function removeDiscountCode(input: {
-  country: string;
+  locale: string;
   code: string;
 }): Promise<CartResult> {
-  const id = await cartId(input.country);
+  const place = await pageLocale(input.locale);
+  const id = await cartId(place.country);
   if (!id) return { cart: null };
   const client = await shopperApi();
   const { data, error } = await client.DELETE("/storefront/carts/{id}/discount-codes/{code}", {
     params: { path: { id, code: input.code } },
   });
-  if (error) return { cart: await loadCart(input.country), error: describe(error) };
-  return { cart: data ?? (await loadCart(input.country)) };
+  if (error)
+    return {
+      cart: await loadCart(input.locale),
+      error: describe(await actionT(input.locale), error),
+    };
+  return { cart: data ?? (await loadCart(input.locale)) };
 }
 
 export type Details = AddressValues & { email: string };
@@ -210,17 +249,18 @@ export type Details = AddressValues & { email: string };
  * together. One after the other: all write the cart, so at once they'd race for its
  * version. */
 export async function saveDetails(
-  country: string,
+  locale: string,
   details: Details,
   marketingOptIn: boolean,
 ): Promise<ActionResult> {
-  const id = await currentCart(country);
+  const place = await pageLocale(locale);
+  const id = await currentCart(place);
   const client = api();
   const email = await client.PUT("/storefront/carts/{id}/email", {
     params: { path: { id } },
     body: { email: details.email.trim() },
   });
-  if (email.error) return refused(email.error);
+  if (email.error) return refused(locale, email.error);
   // "Email me with news and offers": checkout records the consent when it's
   // ticked; unticked never unsubscribes anyone.
   if (email.data.marketing_opt_in !== marketingOptIn) {
@@ -228,7 +268,7 @@ export async function saveDetails(
       params: { path: { id } },
       body: { opt_in: marketingOptIn },
     });
-    if (marketing.error) return refused(marketing.error);
+    if (marketing.error) return refused(locale, marketing.error);
   }
   const address = await client.PUT("/storefront/carts/{id}/shipping-address", {
     params: { path: { id } },
@@ -242,42 +282,44 @@ export async function saveDetails(
         city: details.city.trim(),
         postal_code: optional(details.postal_code),
         province: optional(details.province),
-        country,
+        country: place.country,
         phone: optional(details.phone),
       },
     },
   });
-  if (address.error) return refused(address.error);
+  if (address.error) return refused(locale, address.error);
   // The page re-renders in this action's answer: no second request to refresh it.
   refresh();
 }
 
 /** Checkout's second step: a shipping option for one group of lines. */
 export async function selectShipping(input: {
-  country: string;
+  locale: string;
   group: string;
   option: string;
 }): Promise<ActionResult> {
-  const id = await currentCart(input.country);
+  const place = await pageLocale(input.locale);
+  const id = await currentCart(place);
   const { error } = await api().PUT("/storefront/carts/{id}/shipping/{group_id}", {
     params: { path: { id, group_id: input.group } },
     body: { option: input.option },
   });
-  if (error) return refused(error);
+  if (error) return refused(input.locale, error);
   refresh();
 }
 
 /** Checkout's third step, when there's something to pay: how the shopper pays. */
 export async function selectPaymentMethod(input: {
-  country: string;
+  locale: string;
   method: string;
 }): Promise<ActionResult> {
-  const id = await currentCart(input.country);
+  const place = await pageLocale(input.locale);
+  const id = await currentCart(place);
   const { error } = await api().PUT("/storefront/carts/{id}/payment-method", {
     params: { path: { id } },
     body: { payment_method: input.method },
   });
-  if (error) return refused(error);
+  if (error) return refused(input.locale, error);
   refresh();
 }
 
@@ -295,13 +337,14 @@ export type PlaceOrderResult = { error: string; step?: "payment"; pending?: bool
  * order.
  */
 export async function placeOrder(input: {
-  country: string;
+  locale: string;
   /** Absent when coming back from a payment provider's page: the payment's own total. */
   total?: { amount: number; currency: string };
   attempt: string;
 }): Promise<PlaceOrderResult> {
-  await currentCart(input.country);
-  const result = await checkOutCart(input);
+  const place = await pageLocale(input.locale);
+  await currentCart(place);
+  const result = await checkOutCart({ place, total: input.total, attempt: input.attempt });
   if ("error" in result) {
     if (result.code === "payment_method_required" || result.code === "payment_method_unavailable") {
       // Back to the payment step, re-rendered with the methods offered now.
@@ -322,7 +365,7 @@ export async function placeOrder(input: {
   }
   // Instructions (cash on delivery, bank transfer) are on the confirmation, read from
   // the order's payment; an online payment was made before the order.
-  redirect(link(input.country, `/order/${result.order}/confirmed`));
+  redirect(link(place.segment, `/order/${result.order}/confirmed`));
 }
 
 /** What starting the cart's payment answered. */
@@ -343,11 +386,12 @@ export type CartPaymentResult = {
  * page sends the shopper back (`/checkout/complete`), made absolute in the browser.
  */
 export async function startCartPayment(input: {
-  country: string;
+  locale: string;
   total: { amount: number; currency: string };
   returnUrl: string;
 }): Promise<CartPaymentResult> {
-  const id = await currentCart(input.country);
+  const place = await pageLocale(input.locale);
+  const id = await currentCart(place);
   const returnUrl = /^https?:\/\//.test(input.returnUrl) ? input.returnUrl : undefined;
   const { data, error } = await api().POST("/storefront/carts/{id}/payment", {
     params: { path: { id } },
@@ -364,36 +408,78 @@ export async function startCartPayment(input: {
     ) {
       refresh();
     }
-    return { ...none, error: describe(error) };
+    return { ...none, error: describe(await actionT(input.locale), error) };
   }
   const next = data.next_action ?? null;
   return {
     nextAction: next,
-    error: data.payment_error ? describe(data.payment_error) : null,
+    error: data.payment_error ? describe(await actionT(input.locale), data.payment_error) : null,
     module: next?.type === "client_widget" ? await paymentElementModule(next.element) : null,
     committed: false,
   };
 }
 
+/** `path` when it's a path on this site, else home: `//host` or `/\host` would leave it. */
+function onSite(path: string): string {
+  return /^\/(?![/\\])/.test(path) ? path : "/";
+}
+
+const YEAR = 60 * 60 * 24 * 365;
+
 /**
- * Switches country (the picker): remembers it, and goes to the same page there. With
- * folders, that's the page under the new country's folder.
+ * Switches country (the currency picker): remembers it, and goes to the same page there,
+ * in the language the page is in when the new country offers it (or one it comes to),
+ * else in the country's default. `locale` is the page's locale segment, `path` the
+ * page's URL path (with its query).
  */
-export async function setCountry(input: { country: string; path: string }) {
-  const country = input.country.toUpperCase();
-  // A path on this site only: `//host` or `/\host` would leave it, and so would a
-  // "country" that isn't one (it becomes the folder).
-  const path = /^\/(?![/\\])/.test(input.path) ? input.path : "/";
-  if (!/^[A-Z]{2}$/.test(country)) redirect(path);
-  (await cookies()).set(COUNTRY_COOKIE, country, {
+export async function setCountry(input: { locale: string; country: string; path: string }) {
+  const code = input.country.toUpperCase();
+  const path = onSite(input.path);
+  const countries = await loadCountries();
+  const offer = countries.find((c) => c.country === code);
+  // A "country" that isn't one would become the folder.
+  if (!offer) redirect(path);
+  (await cookies()).set(COUNTRY_COOKIE, code, { sameSite: "lax", path: "/", maxAge: YEAR });
+  const { language } = await pageLocale(input.locale);
+  const segment = localeSegment(offer, offered(language, offer));
+  // `/en-hr/p/mug` → `/p/mug`, then into the new place.
+  redirect(link(segment, withoutLocale(mode(), path, countries)));
+}
+
+/**
+ * Switches language (the language picker): remembers it for the next URL that names
+ * none (the proxy reads the cookie), and goes to the same page, its query and all, in
+ * that language. `target` is the locale segment picked, in the page's country.
+ */
+export async function setLanguage(input: { locale: string; target: string; path: string }) {
+  const path = onSite(input.path);
+  const countries = await loadCountries();
+  const [here, there] = await Promise.all([pageLocale(input.locale), pageLocale(input.target)]);
+  // Only the page's own country's languages: the currency picker moves countries.
+  if (there.country !== here.country || !countries.some((c) => c.country === there.country)) {
+    redirect(path);
+  }
+  (await cookies()).set(LANGUAGE_COOKIE, there.language, {
     sameSite: "lax",
     path: "/",
-    maxAge: 60 * 60 * 24 * 365,
+    maxAge: YEAR,
   });
-  if (mode() === "single") redirect(path);
-  // `/hr/p/mug` → `/p/mug`, then into the new folder.
-  const rest = path.replace(/^\/[a-z]{2}(?=\/|$)/, "") || "/";
-  redirect(link(country, rest));
+  // The cart follows: its lines, messages and the order placed from it in the language
+  // picked. A cart that's gone or checked out has nothing to follow, and the page is
+  // what the shopper asked for, so neither a refusal nor an API that didn't answer
+  // stops the switch (the next read for the page moves the cart, `readCart`).
+  const cart = await cartId(there.country);
+  if (cart) {
+    try {
+      await api().PUT("/storefront/carts/{id}/language", {
+        params: { path: { id: cart } },
+        body: { language: there.language },
+      });
+    } catch (error) {
+      console.error("setLanguage: the cart's language wasn't set", error);
+    }
+  }
+  redirect(link(there.segment, withoutLocale(mode(), path, countries)));
 }
 
 /** A search suggestion: a product to go to, priced in the shopper's country. */
@@ -406,19 +492,29 @@ export type Suggestion = {
 };
 
 /** The header's suggestions: the first five search results for `q`. */
-export async function suggest(country: string, q: string): Promise<Suggestion[]> {
+export async function suggest(segment: string, q: string): Promise<Suggestion[]> {
   const text = q.trim();
   if (text === "") return [];
-  const known = (await loadCountries()).find((c) => c.country === country);
+  const place = await pageLocale(segment);
+  const known = (await loadCountries()).find((c) => c.country === place.country);
   if (!known) return [];
+  const { locale } = await actionT(segment);
   const { data } = await api().GET("/storefront/search", {
-    params: { query: { country, q: text, sort: "relevance", limit: 5 } },
+    params: {
+      query: {
+        country: place.country,
+        language: place.language,
+        q: text,
+        sort: "relevance",
+        limit: 5,
+      },
+    },
   });
   return (data?.items ?? []).map((hit) => ({
     id: hit.listing,
     title: hit.title,
-    price: formatRange(hit.listing_price.min, hit.listing_price.max, known.minor_units),
-    href: link(country, `/p/${hit.handle}`),
+    price: formatRange(hit.listing_price.min, hit.listing_price.max, known.minor_units, locale),
+    href: link(place.segment, `/p/${hit.handle}`),
     image: hit.image?.kind === "image" ? (hit.image.thumbnail_url ?? hit.image.url) : null,
   }));
 }
@@ -473,7 +569,7 @@ export async function resolveAddress(input: {
   const problems: FieldProblems = {};
   for (const p of data.problems) {
     const field = asField(p.field);
-    if (field) problems[field] ??= p.message;
+    if (field) problems[field] ??= { code: p.code, message: p.message, params: p.params };
   }
   return {
     values: {
@@ -494,17 +590,19 @@ export async function resolveAddress(input: {
  * dynamic.
  */
 export async function listingPage(input: {
-  country: string;
+  locale: string;
   category?: string;
   /** Only what's on sale (the sale page). */
   onSale?: boolean;
   query: string;
 }): Promise<ListingPage> {
-  const known = (await loadCountries()).find((c) => c.country === input.country);
+  const place = await pageLocale(input.locale);
+  const known = (await loadCountries()).find((c) => c.country === place.country);
   const params: Record<string, string[]> = {};
   for (const [key, value] of new URLSearchParams(input.query)) (params[key] ??= []).push(value);
   return readListingPage({
-    country: input.country,
+    t: await actionT(input.locale),
+    place,
     digits: known?.minor_units ?? 2,
     params,
     category: input.category,

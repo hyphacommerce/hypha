@@ -8,6 +8,7 @@ import {
   onSaleOnly,
   previousPage,
   readListing,
+  searchKey,
   toMinor,
   withOnSale,
 } from "./listing.ts";
@@ -70,4 +71,32 @@ test("turning the on-sale toggle off drops every on_sale filter", () => {
   const state = readListing({ filter: ["on_sale:true", "on_sale:false", "tag:new"] });
   assert.deepEqual(withOnSale(state, false).filters, ["tag:new"]);
   assert.equal(onSaleOnly(withOnSale(state, false)), false);
+});
+
+test("a search in another language is another cache entry", () => {
+  const query = { country: "DE", sort: "newest", limit: 8 };
+  const de = searchKey({ ...query, language: "de" });
+  assert.notDeepEqual(de, searchKey({ ...query, language: "en" }));
+  assert.deepEqual(de.slice(0, 3), ["search", "DE", "de"]);
+  assert.notDeepEqual(de, searchKey(query));
+});
+
+test("a search in another country is another cache entry", () => {
+  const query = { language: "de", sort: "newest" };
+  assert.notDeepEqual(
+    searchKey({ ...query, country: "DE" }),
+    searchKey({ ...query, country: "AT" }),
+  );
+});
+
+test("one search written in another order is one cache entry", () => {
+  assert.deepEqual(
+    searchKey({ country: "DE", language: "de", filter: ["tag:a", "tag:b"], limit: 4 }),
+    searchKey({ limit: 4, filter: ["tag:a", "tag:b"], language: "de", country: "DE" }),
+  );
+  // An absent parameter is no parameter.
+  assert.deepEqual(
+    searchKey({ country: "DE", language: "de", cursor: undefined }),
+    searchKey({ country: "DE", language: "de" }),
+  );
 });

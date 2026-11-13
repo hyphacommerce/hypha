@@ -13,8 +13,8 @@ use uuid::Uuid;
 
 use crate::{
     columns::{
-        col, currency_from_db, micros, opt_micros, opt_ts, stamp_columns, stamps_from_row, ts,
-        version_from_db, version_to_db, write_stamps,
+        col, currency_from_db, json_from_db, json_to_db, micros, opt_micros, opt_ts, stamp_columns,
+        stamps_from_row, ts, version_from_db, version_to_db, write_stamps,
     },
     error::{corrupt, repo_error},
     outbox::insert_events,
@@ -96,6 +96,8 @@ impl<C: PgConnection> PaymentMethodRepo for PgStore<C> {
     async fn insert(&self, method: &mut PaymentMethod) -> Result<(), RepoError> {
         stamp_insert(method, self.now());
         let s = method.snapshot();
+        let events = method.take_events();
+        let stamp = self.event_stamp();
         let settings = s.settings.to_string();
         in_transaction!(self, |tx| {
             tx.query_typed(
@@ -124,7 +126,8 @@ impl<C: PgConnection> PaymentMethodRepo for PgStore<C> {
                 Type::UUID,
                 s.stamps,
             )
-            .await
+            .await?;
+            insert_events(tx, &events, Some(Version::NEW.next()), stamp).await
         })?;
         method.set_version(Version::NEW.next());
         Ok(())
@@ -133,6 +136,8 @@ impl<C: PgConnection> PaymentMethodRepo for PgStore<C> {
     async fn update(&self, method: &mut PaymentMethod) -> Result<(), RepoError> {
         stamp_update(method, self.now());
         let s = method.snapshot();
+        let events = method.take_events();
+        let stamp = self.event_stamp();
         let settings = s.settings.to_string();
         let version = in_transaction!(self, |tx| {
             let row = tx
@@ -167,44 +172,47 @@ impl<C: PgConnection> PaymentMethodRepo for PgStore<C> {
                 s.stamps,
             )
             .await?;
+            insert_events(tx, &events, Some(version), stamp).await?;
             Ok(version)
         })?;
         method.set_version(version);
         Ok(())
     }
 
-    async fn delete(&self, method: &PaymentMethod) -> Result<(), RepoError> {
+    async fn delete(&self, method: &mut PaymentMethod) -> Result<(), RepoError> {
         let id = method.id().as_uuid();
         let version = version_to_db(method.version())?;
-        let mut conn = self.conn().await;
-        // One statement: a checkout starting a payment with the method can't slip in
-        // between the check and the delete.
-        let deleted = conn
-            .db()
-            .query_typed_opt(
-                "DELETE FROM payment_methods WHERE id = $1 AND version = $2
-                     AND NOT EXISTS (SELECT 1 FROM payments WHERE method_id = $1
-                                     AND status IN ('pending', 'authorized', 'processing'))
-                 RETURNING id",
-                &[(&id, Type::UUID), (&version, Type::INT8)],
-            )
-            .await
-            .map_err(repo_error)?;
-        if deleted.is_some() {
-            return Ok(());
-        }
-        // Nothing deleted: still there at its version means an open payment held it.
-        let held = conn
-            .db()
-            .query_typed_opt(
-                "SELECT 1 AS found FROM payment_methods WHERE id = $1 AND version = $2",
-                &[(&id, Type::UUID), (&version, Type::INT8)],
-            )
-            .await
-            .map_err(repo_error)?;
-        Err(match held {
-            Some(_) => RepoError::Reference(keys::OPEN_PAYMENT_METHOD),
-            None => RepoError::StaleVersion,
+        let events = method.take_events();
+        let stamp = self.event_stamp();
+        in_transaction!(self, |tx| {
+            // One statement: a checkout starting a payment with the method can't slip in
+            // between the check and the delete.
+            let deleted = tx
+                .query_typed_opt(
+                    "DELETE FROM payment_methods WHERE id = $1 AND version = $2
+                         AND NOT EXISTS (SELECT 1 FROM payments WHERE method_id = $1
+                                         AND status IN ('pending', 'authorized', 'processing'))
+                     RETURNING id",
+                    &[(&id, Type::UUID), (&version, Type::INT8)],
+                )
+                .await
+                .map_err(repo_error)?;
+            if deleted.is_some() {
+                // No version: the method is gone.
+                return insert_events(tx, &events, None, stamp).await;
+            }
+            // Nothing deleted: still there at its version means an open payment held it.
+            let held = tx
+                .query_typed_opt(
+                    "SELECT 1 AS found FROM payment_methods WHERE id = $1 AND version = $2",
+                    &[(&id, Type::UUID), (&version, Type::INT8)],
+                )
+                .await
+                .map_err(repo_error)?;
+            Err(match held {
+                Some(_) => RepoError::Reference(keys::OPEN_PAYMENT_METHOD),
+                None => RepoError::StaleVersion,
+            })
         })
     }
 }
@@ -212,7 +220,8 @@ impl<C: PgConnection> PaymentMethodRepo for PgStore<C> {
 fn payment_columns() -> String {
     format!(
         "id, version, cart_id, order_id, method_id, method_name, provider, currency, amount, refunded,
-         status, reference, refund_references, attempt, instructions, {}, {}, {}",
+         status, reference, refund_references, attempt, instructions,
+         localized::text AS localized, {}, {}, {}",
         micros("paid_at"),
         micros("voided_at"),
         stamp_columns("")
@@ -250,6 +259,7 @@ fn payment_from_row(row: &Row) -> Result<Payment, RepoError> {
         instructions: col(row, "instructions")?,
         paid_at: opt_ts(col(row, "paid_at")?),
         voided_at: opt_ts(col(row, "voided_at")?),
+        localized: json_from_db(col(row, "localized")?, "payment's names")?,
     })
     .map_err(|e| corrupt(format!("payment {id}: {e}")))
 }
@@ -362,8 +372,9 @@ pub(crate) async fn insert_payment(
         &format!(
             "INSERT INTO payments (id, version, order_id, method_id, method_name, provider,
                  currency, amount, refunded, status, reference, instructions, paid_at,
-                 voided_at, refund_references, attempt, cart_id)
-             VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, {}, {}, $14, $15, $16)",
+                 voided_at, refund_references, attempt, cart_id, localized)
+             VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, {}, {}, $14, $15, $16,
+                 $17::text::jsonb)",
             ts(12),
             ts(13)
         ),
@@ -384,6 +395,10 @@ pub(crate) async fn insert_payment(
             (&s.refund_references, Type::TEXT_ARRAY),
             (&s.attempt, Type::TEXT),
             (&s.cart.map(|c| c.as_uuid()), Type::UUID),
+            (
+                &json_to_db(s.localized.as_ref(), "payment's names")?,
+                Type::TEXT,
+            ),
         ],
     )
     .await
@@ -404,7 +419,7 @@ pub(crate) async fn update_payment(
                      method_name = $5, provider = $6, currency = $7, amount = $8,
                      refunded = $9, status = $10, reference = $11, instructions = $12,
                      paid_at = {}, voided_at = {}, refund_references = $15,
-                     attempt = $16, cart_id = $17
+                     attempt = $16, cart_id = $17, localized = $18::text::jsonb
                  WHERE id = $1 AND version = $2 RETURNING version",
                 ts(13),
                 ts(14)
@@ -427,6 +442,10 @@ pub(crate) async fn update_payment(
                 (&s.refund_references, Type::TEXT_ARRAY),
                 (&s.attempt, Type::TEXT),
                 (&s.cart.map(|c| c.as_uuid()), Type::UUID),
+                (
+                    &json_to_db(s.localized.as_ref(), "payment's names")?,
+                    Type::TEXT,
+                ),
             ],
         )
         .await

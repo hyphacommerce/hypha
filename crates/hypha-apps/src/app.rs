@@ -156,12 +156,14 @@ pub fn event_scope(subject_kind: &str) -> Option<Scope> {
         "inventory_item" | "location" => Scope::InventoryRead,
         "customer" | "customer_group" => Scope::CustomersRead,
         "order" | "payment" => Scope::OrdersRead,
+        "payment_method" => Scope::PaymentsRead,
         "fulfillment" => Scope::FulfillmentsRead,
         "shipping_zone" => Scope::ShippingRead,
         "asset" => Scope::MediaRead,
         "supplier" | "purchase_order" | "receipt" => Scope::PurchasingRead,
         "transfer" => Scope::InventoryRead,
         "checkout_rule" | "checkout_settings" => Scope::CheckoutRulesRead,
+        "notification_settings" => Scope::NotificationsRead,
         "translation" => Scope::TranslationsRead,
         // Definitions; `<owner>.custom_fields_updated` events are about their owner
         // (`product`, `category`, `customer`, `order`) and go by its read scope.

@@ -442,6 +442,11 @@ export interface components {
          */
         FulfillmentId: string;
         /**
+         * @description A BCP 47 language tag: a language, then optionally a script, region and variants (`en`, `en-GB`, `sr-Latn`). Responses show it in canonical case.
+         * @example en-GB
+         */
+        Language: string;
+        /**
          * @description A MarketId: `mkt_` and 32 hex digits.
          * @example mkt_0190f1a2b3c47d8e9f00112233445566
          */
@@ -548,6 +553,7 @@ export interface components {
             channel: components["schemas"]["ChannelId"];
             country: components["schemas"]["CountryCode"];
             customer_email?: components["schemas"]["Email"] | null;
+            language?: components["schemas"]["Language"] | null;
             market: components["schemas"]["MarketId"];
             /** @description The payment method the buyer chose (`pm_…`), whose provider is this app. */
             method: components["schemas"]["PaymentMethodId"];
@@ -672,6 +678,7 @@ export interface components {
             currency: components["schemas"]["Currency"];
             destination: components["schemas"]["PostalAddressResponse"];
             items: components["schemas"]["RateItemBody"][];
+            language?: components["schemas"]["Language"] | null;
             origin?: components["schemas"]["PostalAddressResponse"] | null;
             /** @description The group's lines, as priced. */
             subtotal: components["schemas"]["Money"];
@@ -739,6 +746,7 @@ export interface components {
             filters?: components["schemas"]["SearchFilter"][];
             /** @description What one hit stands for. */
             group: components["schemas"]["SearchGroup"];
+            language?: components["schemas"]["Language"] | null;
             /** Format: int32 */
             limit: number;
             /** @description The shopper's market: what's sold to them, at its prices. */
@@ -825,6 +833,7 @@ export interface components {
              */
             email?: string | null;
             id: components["schemas"]["CartId"];
+            language?: components["schemas"]["Language"] | null;
             lines: components["schemas"]["ValidatedLine"][];
             market: components["schemas"]["MarketId"];
             /** @description The cart's personal fields left out for this app (`email`). */

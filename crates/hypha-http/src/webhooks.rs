@@ -112,6 +112,7 @@ fn subject_id(kind: &str, id: Uuid) -> String {
         "location" => LocationId::PREFIX,
         "fulfillment" => FulfillmentId::PREFIX,
         "payment" => PaymentId::PREFIX,
+        "payment_method" => hypha_core::PaymentMethodId::PREFIX,
         "asset" => AssetId::PREFIX,
         "supplier" => hypha_core::SupplierId::PREFIX,
         "purchase_order" => hypha_core::PurchaseOrderId::PREFIX,
