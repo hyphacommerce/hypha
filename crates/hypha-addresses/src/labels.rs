@@ -166,6 +166,7 @@ mod tests {
             .filter(|label| *label != AddressField::Country.label())
             .filter(|label| LabelKey::of(label).is_none())
             .collect();
+        missing.sort_unstable();
         missing.dedup();
         assert_eq!(missing, Vec::<&str>::new(), "add a key for each");
     }

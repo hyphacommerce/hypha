@@ -1557,9 +1557,8 @@ export interface components {
             /**
              * @description The language the shopper reads the storefront in (a BCP 47 tag), out of the store's
              *     default and published languages: one it doesn't offer is tried without its region,
-             *     then counts as the store's default; never an error. The code's email is written in
-             *     it when the customer has no language of their own, and a customer created now
-             *     keeps it.
+             *     then counts as none asked; never an error. The code's email is written in it when
+             *     the customer has no language of their own, and a customer created now keeps it.
              */
             language?: string | null;
         };
@@ -1593,7 +1592,8 @@ export interface components {
          *       `validation_unavailable`: none (a suggested address is the cart's
          *       `shipping_address_check.suggested`).
          *
-         *     A field's label in the country's words is the address format's `label_keys`.
+         *     A field's label in the country's words is the address format's `label_keys`, but for
+         *     `country`, which forms show apart from the address's own fields.
          */
         MessageParamsDto: {
             /** @example 90210 */

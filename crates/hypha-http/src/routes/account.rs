@@ -48,9 +48,8 @@ pub struct LoginCodeRequest {
     email: String,
     /// The language the shopper reads the storefront in (a BCP 47 tag), out of the store's
     /// default and published languages: one it doesn't offer is tried without its region,
-    /// then counts as the store's default; never an error. The code's email is written in
-    /// it when the customer has no language of their own, and a customer created now
-    /// keeps it.
+    /// then counts as none asked; never an error. The code's email is written in it when
+    /// the customer has no language of their own, and a customer created now keeps it.
     #[serde(default)]
     language: Option<String>,
 }
@@ -188,7 +187,7 @@ pub async fn request_code<S: Storage>(
     let language = match req.language.as_deref() {
         Some(asked) => {
             let store = super::stores::store_as_system(&state, &ports).await?;
-            crate::language::chosen(Some(asked), &store, None)
+            offered(asked, &store)
         }
         None => None,
     };
@@ -200,6 +199,17 @@ pub async fn request_code<S: Storage>(
     )
     .await?;
     Ok((StatusCode::ACCEPTED, Json(LoginCodeResponse { sent: true })))
+}
+
+/// The store's language `asked` names (its default or a published one, or the same
+/// without its region); `None` for one it doesn't offer or a tag that isn't one, which
+/// counts as asking for none: a customer then keeps no language and follows the store's
+/// default as it changes.
+fn offered(asked: &str, store: &hypha_stores::Store) -> Option<hypha_core::Language> {
+    let asked = hypha_core::Language::new(asked).ok()?;
+    let offered = store.offered_languages();
+    hypha_core::Language::pick(Some(&asked), &offered)
+        .filter(|l| *l == asked || asked.without_region().as_ref() == Some(l))
 }
 
 /// Signs in with the emailed code and answers the session token, shown once. 401

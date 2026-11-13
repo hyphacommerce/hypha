@@ -1933,7 +1933,7 @@
             "type": "string"
           },
           "language": {
-            "description": "The language the shopper reads the storefront in (a BCP 47 tag), out of the store's\ndefault and published languages: one it doesn't offer is tried without its region,\nthen counts as the store's default; never an error. The code's email is written in\nit when the customer has no language of their own, and a customer created now\nkeeps it.",
+            "description": "The language the shopper reads the storefront in (a BCP 47 tag), out of the store's\ndefault and published languages: one it doesn't offer is tried without its region,\nthen counts as none asked; never an error. The code's email is written in it when\nthe customer has no language of their own, and a customer created now keeps it.",
             "type": [
               "string",
               "null"
@@ -1966,7 +1966,7 @@
         "type": "string"
       },
       "MessageParamsDto": {
-        "description": "What a client needs to word a built-in cart message or an address problem from its\n`code` in the shopper's language, rather than show the English `message`. Absent where\nthere's nothing to say: a checkout rule's or a validation app's message (worded by\nwhoever wrote it), a built-in one that needs no data, a message stored before params.\nFields are added, never renamed. By code:\n\n- `required`, `unknown_region`: `field`.\n- `too_long`: `field`, `max`.\n- `invalid_format`: `field`, and `example` where the country gives one.\n- `region_mismatch`: `field` (`postal_code`), `region` (the code the address names) and\n  `region_name`.\n- `house_number_missing`: `field` (`line1`).\n- `apartment_missing`: `field` (`line2`).\n- `address_corrections_suggested`, `address_ambiguous`, `address_undeliverable`,\n  `validation_unavailable`: none (a suggested address is the cart's\n  `shipping_address_check.suggested`).\n\nA field's label in the country's words is the address format's `label_keys`.",
+        "description": "What a client needs to word a built-in cart message or an address problem from its\n`code` in the shopper's language, rather than show the English `message`. Absent where\nthere's nothing to say: a checkout rule's or a validation app's message (worded by\nwhoever wrote it), a built-in one that needs no data, a message stored before params.\nFields are added, never renamed. By code:\n\n- `required`, `unknown_region`: `field`.\n- `too_long`: `field`, `max`.\n- `invalid_format`: `field`, and `example` where the country gives one.\n- `region_mismatch`: `field` (`postal_code`), `region` (the code the address names) and\n  `region_name`.\n- `house_number_missing`: `field` (`line1`).\n- `apartment_missing`: `field` (`line2`).\n- `address_corrections_suggested`, `address_ambiguous`, `address_undeliverable`,\n  `validation_unavailable`: none (a suggested address is the cart's\n  `shipping_address_check.suggested`).\n\nA field's label in the country's words is the address format's `label_keys`, but for\n`country`, which forms show apart from the address's own fields.",
         "properties": {
           "example": {
             "example": "90210",

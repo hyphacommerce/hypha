@@ -7451,7 +7451,8 @@ export interface components {
          *       `validation_unavailable`: none (a suggested address is the cart's
          *       `shipping_address_check.suggested`).
          *
-         *     A field's label in the country's words is the address format's `label_keys`.
+         *     A field's label in the country's words is the address format's `label_keys`, but for
+         *     `country`, which forms show apart from the address's own fields.
          */
         MessageParamsDto: {
             /** @example 90210 */

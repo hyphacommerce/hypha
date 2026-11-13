@@ -230,7 +230,6 @@ async fn asking_for_a_code_answers_the_same_for_any_address_and_is_rate_limited(
     );
 }
 
-// Six digits are few: guesses must stay slow from any one address, and at any one email.
 #[tokio::test]
 async fn a_code_asked_for_in_a_language_is_written_in_it_and_the_new_customer_keeps_it() {
     let app = app().await;
@@ -256,14 +255,19 @@ async fn a_code_asked_for_in_a_language_is_written_in_it_and_the_new_customer_ke
     assert!(subject().starts_with("Vaš kod za prijavu"), "{}", subject());
     assert_eq!(customer_language("nina").await, "sr-Latn");
 
-    // Unpublished, or not a tag: the store's default, never an error.
+    // Unpublished, or not a tag: as if none was asked, never an error; the customer
+    // keeps no language, so they follow the store's default as it changes.
     ask_in("ivo@example.com", "fr").await;
     assert!(!subject().starts_with("Vaš"), "{}", subject());
-    assert_eq!(customer_language("ivo").await, "en");
+    assert_eq!(customer_language("ivo").await, Value::Null);
     ask_in("ana@example.com", "not a tag!").await;
-    assert_eq!(customer_language("ana").await, "en");
+    assert_eq!(customer_language("ana").await, Value::Null);
+    // A regional tag finds its language.
+    ask_in("mia@example.com", "sr-Latn-RS").await;
+    assert_eq!(customer_language("mia").await, "sr-Latn");
 }
 
+// Six digits are few: guesses must stay slow from any one address, and at any one email.
 #[tokio::test]
 async fn guessing_login_codes_from_one_address_is_limited() {
     let app = app().await;

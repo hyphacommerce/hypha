@@ -60,7 +60,8 @@ impl From<AddressField> for AddressFieldDto {
 ///   `validation_unavailable`: none (a suggested address is the cart's
 ///   `shipping_address_check.suggested`).
 ///
-/// A field's label in the country's words is the address format's `label_keys`.
+/// A field's label in the country's words is the address format's `label_keys`, but for
+/// `country`, which forms show apart from the address's own fields.
 #[derive(Serialize, utoipa::ToSchema)]
 pub(crate) struct MessageParamsDto {
     #[serde(skip_serializing_if = "Option::is_none")]
