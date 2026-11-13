@@ -12,13 +12,17 @@ type Image = { url: string; width?: number | null; height?: number | null; alt?:
 
 /**
  * A page's alternates by `hreflang`: its copy in every country and language
- * (`hreflangPlaces`), `path` being its path inside a place (`/p/mug`).
+ * (`hreflangPlaces`), `path` being its path inside a place (`/p/mug`). None on a page
+ * (`segment`) that set leaves out, since a page in a set names itself in it.
  */
-export async function alternatesOf(path: string): Promise<Record<string, string> | undefined> {
+export async function alternatesOf(
+  segment: string,
+  path: string,
+): Promise<Record<string, string> | undefined> {
   const countries = await loadCountries();
-  return localeAlternates(
-    hreflangPlaces(mode(), countries).map((p) => ({ tag: p.tag, href: link(p.segment, path) })),
-  );
+  const places = hreflangPlaces(mode(), countries);
+  if (!places.some((p) => p.segment === segment.toLowerCase())) return undefined;
+  return localeAlternates(places.map((p) => ({ tag: p.tag, href: link(p.segment, path) })));
 }
 
 /**
@@ -38,7 +42,7 @@ export async function pageMetadata(input: {
   const place = await pageLocale(input.segment);
   const [store, languages] = await Promise.all([
     loadStore(place.country, place.language),
-    siteUrl() ? alternatesOf(input.path) : undefined,
+    siteUrl() ? alternatesOf(place.segment, input.path) : undefined,
   ]);
   const description = input.description ?? store.description ?? undefined;
   const title = input.title ? `${input.title} · ${store.name}` : store.name;

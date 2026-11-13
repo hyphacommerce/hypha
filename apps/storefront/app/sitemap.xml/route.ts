@@ -61,11 +61,14 @@ export async function GET(request: Request) {
     for (const h of products) sellers.set(h, (sellers.get(h) ?? new Set()).add(country));
 
   const entry = (place: Place, path: string, alsoIn: Place[]) => {
-    const alternates = localeAlternates(
-      alsoIn
-        .filter((p) => named.has(p.segment))
-        .map((p) => ({ tag: p.tag, href: link(p.segment, path) })),
-    );
+    // A place left out of the set (its tag kept by another) names none, itself included.
+    const alternates = named.has(place.segment)
+      ? localeAlternates(
+          alsoIn
+            .filter((p) => named.has(p.segment))
+            .map((p) => ({ tag: p.tag, href: link(p.segment, path) })),
+        )
+      : undefined;
     return [
       "<url>",
       `<loc>${escape(origin + link(place.segment, path))}</loc>`,

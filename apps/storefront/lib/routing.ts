@@ -151,27 +151,57 @@ export function alternatePlaces(
   mode: Routing,
   countries: readonly Offer[],
 ): { tag: string; segment: string }[] {
+  return tagged(mode, countries).map(({ tag, segment }) => ({ tag, segment }));
+}
+
+/** `alternatePlaces` with each place's locale beside its tag. */
+function tagged(mode: Routing, countries: readonly Offer[]): (Locale & { tag: string })[] {
   if (mode === "single") {
     const [first] = countries;
-    return first ? locales([first]).map((l) => ({ tag: l.language, segment: l.segment })) : [];
+    return first ? locales([first]).map((l) => ({ ...l, tag: l.language })) : [];
   }
-  return locales(countries).map((l) => ({
-    tag: localeOf(l.language, l.country),
-    segment: l.segment,
-  }));
+  return locales(countries).map((l) => ({ ...l, tag: localeOf(l.language, l.country) }));
+}
+
+/** The region a language tag names (`AT` in `de-AT`, none in `sr-Latn`). */
+function regionOf(tag: string): string | undefined {
+  try {
+    return new Intl.Locale(tag).region;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
- * The places to name as `hreflang` alternates: `alternatePlaces`, except in a single
- * tree whose countries' default languages differ, where none. There the unprefixed URL
- * is each shopper's country's default language, so no one tag is true of it.
+ * The places to name as `hreflang` alternates: `alternatePlaces`, each tag once, except
+ * in a single tree whose countries' default languages differ, where none. There the
+ * unprefixed URL is each shopper's country's default language, so no one tag is true of
+ * it.
+ *
+ * Two places can come to one tag: `de` and `de-AT` offered in Austria are both `de-AT`
+ * (and so is `de-AT` offered in Germany). A tag names one URL, so one of them keeps it:
+ * the page in the tag's own country, then the one whose language names its region (the
+ * merchant offered `de-AT` for it on purpose), then the first listed. The others are in
+ * no `hreflang` set, not even their own (they name none): they stay in the sitemap, with
+ * their canonical pointing at themselves like any page's.
  */
 export function hreflangPlaces(
   mode: Routing,
   countries: readonly Offer[],
 ): { tag: string; segment: string }[] {
   if (mode === "single" && new Set(countries.map(defaultLanguage)).size > 1) return [];
-  return alternatePlaces(mode, countries);
+  const places = tagged(mode, countries);
+  const claim = (place: Locale & { tag: string }) =>
+    (regionOf(place.tag) === place.country ? 2 : 0) + (regionOf(place.language) ? 1 : 0);
+  const kept = new Map<string, Locale & { tag: string }>();
+  for (const place of places) {
+    const key = place.tag.toLowerCase();
+    const held = kept.get(key);
+    if (held === undefined || claim(place) > claim(held)) kept.set(key, place);
+  }
+  return places
+    .filter((place) => kept.get(place.tag.toLowerCase()) === place)
+    .map(({ tag, segment }) => ({ tag, segment }));
 }
 
 /**
