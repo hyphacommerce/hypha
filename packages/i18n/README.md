@@ -75,7 +75,7 @@ t("cart.items_count", { count: 3 }); // "3 items"
 t("cart.titel"); // doesn't compile
 ```
 
-- A key the language lacks is read from `fallback`; a key no catalog has is shown as the
+- A key the language lacks, or has as an empty string, is read from `fallback`; a key no catalog has is shown as the
   key. `onMissing({key, language, shown})` is told once per key.
 - Where a runtime has no data for the locale, plurals and numbers follow English
   (not the runtime's default), so a server and a browser show the same.
@@ -206,13 +206,13 @@ can't be formatted shows its key and is logged, never thrown.
 | `formatLocaleSegment({language?, country})` | its inverse, lower-cased |
 | `canonicalLanguage(tag)` | the tag as BCP 47 spells it (`sr-latn` → `sr-Latn`), or `undefined` |
 
-`matchLanguage` makes two passes over `wanted`. The first tries each tag exactly, then
-with its last parts taken off (`de-CH` → `de`, `sr-Latn-RS` → `sr-Latn` → `sr`). Only
-when that finds nothing for any wanted tag does the second widen: the first wanted tag
-whose language an available tag shares gets the first such tag (`sr` or `sr-RS` →
-`sr-Latn`, `de` → `de-AT`). So a match of the first kind for a later wanted tag beats a
-widened one for an earlier tag. Widening never crosses scripts: a wanted `sr-Cyrl` or
-`zh-Hant` only gets a tag with that script or with none, never `sr-Latn` or `zh-Hans`.
+`matchLanguage` tries each wanted tag fully before the next: exactly, then with its last
+parts taken off (`de-CH` → `de`, `sr-Latn-RS` → `sr-Latn` → `sr`), then wider, the
+first available tag of the same language (`sr` or `sr-RS` → `sr-Latn`, `de` →
+`de-AT`). What a reader asks for first wins, even widened: a browser sending
+`sr-RS,sr,en-US,en` gets `sr-Latn` from `en` and `sr-Latn`, not `en`. Widening never
+crosses scripts: a wanted `sr-Cyrl` or `zh-Hant` only gets a tag with that script or
+with none, never `sr-Latn` or `zh-Hans`.
 
 A tag sent to the API as a `language` must be one of the API's own (the store's or the
 market's languages), picked with `matchLanguage(wanted, thoseLanguages)`: it answers in
@@ -251,7 +251,8 @@ pnpm exec hypha-i18n-check messages [--source en] [--complete de]…
 Fails (exit 1) when a message isn't ICU MessageFormat, when a language has a key English
 lacks, when a message's placeholders or tags aren't English's for its key, or when a
 language named with `--complete` lacks a key. What every other language still lacks is
-printed and passes. It also reads `messages/<language>.json` files with full keys, but
+printed and passes. An empty string isn't a translation: the key counts as lacking, and
+an empty English message fails. It also reads `messages/<language>.json` files with full keys, but
 a directory holds one layout or the other: both together are refused (exit 2). The
 same check as a function: `checkCatalogs` from `@hyphacommerce/i18n/check`.
 

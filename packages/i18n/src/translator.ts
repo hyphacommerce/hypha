@@ -128,9 +128,13 @@ export function createTranslator<Keys extends string = string>(
   return Object.assign(t, { rich: parts, has, language, locale });
 }
 
-/** A catalog's own entry: never `toString` or another inherited property. */
+/**
+ * A catalog's own entry: never `toString` or another inherited property, and never an
+ * empty message, which is a translation not written yet rather than one that says nothing.
+ */
 function own(catalog: Readonly<Record<string, string | undefined>>, key: string) {
-  return Object.hasOwn(catalog, key) ? catalog[key] : undefined;
+  const message = Object.hasOwn(catalog, key) ? catalog[key] : undefined;
+  return message === undefined || message.trim() === "" ? undefined : message;
 }
 
 /** The values with each tag function handed a key: its position among the message's tags. */
