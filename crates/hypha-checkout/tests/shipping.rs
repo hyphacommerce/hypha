@@ -182,6 +182,7 @@ impl World {
             country: "HR".to_string(),
             idempotency: None,
             customer: None,
+            language: None,
         };
         let cart = block_on(create_cart(
             &self.ports.storefront(),
@@ -259,6 +260,9 @@ impl World {
             expected_total: expected,
             idempotency: None,
             return_url: None,
+            languages: hypha_checkout::ContentLanguages::only(
+                hypha_core::Language::new("en").unwrap(),
+            ),
         };
         block_on(checkout(
             &Ctx::system(),
@@ -523,6 +527,9 @@ impl World {
             expected_total: None,
             idempotency: None,
             return_url: None,
+            languages: hypha_checkout::ContentLanguages::only(
+                hypha_core::Language::new("en").unwrap(),
+            ),
         };
         let placed = block_on(checkout(
             &Ctx::system(),

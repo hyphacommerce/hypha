@@ -209,6 +209,7 @@ where
             } else {
                 Some(payment.customer_email.clone())
             },
+            language: payment.language.clone(),
         };
         // The payment's ID: a retried start (the shopper asking again) must not
         // charge twice.

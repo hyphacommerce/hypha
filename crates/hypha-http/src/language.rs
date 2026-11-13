@@ -7,6 +7,8 @@ use axum::{
     http::{HeaderValue, header},
     response::{IntoResponse, Response},
 };
+use hypha_cart::PricedCart;
+use hypha_checkout::ContentLanguages;
 use hypha_core::{CountryCode, Language, RepoError};
 use hypha_markets::{HasMarkets, Market, MarketRepo};
 use hypha_stores::Store;
@@ -67,6 +69,38 @@ impl ServedLanguage {
         Self::resolve(asked, store.default_language(), servable, &offered)
     }
 
+    /// The language `cart` is read in: the one it was given, held to what its market
+    /// offers now (`ContentLanguages::of`, the rule checkout places its order by), else
+    /// the market's default. A checked-out cart reads in its order's language, whatever
+    /// the market offers since.
+    pub fn of_cart(cart: &PricedCart, store: &Store) -> Self {
+        let languages = content_languages(store);
+        let language = match (cart.order, &cart.language) {
+            (Some(_), Some(placed)) => placed.clone(),
+            _ => languages.of(cart),
+        };
+        Self::fixed(language, store)
+    }
+
+    /// `language` as it is, for what was written in it already (an order); `None`, an
+    /// order from before languages, reads as the store's default.
+    pub fn of_order(language: Option<&Language>, store: &Store) -> Self {
+        Self::fixed(
+            language
+                .cloned()
+                .unwrap_or_else(|| store.default_language().clone()),
+            store,
+        )
+    }
+
+    fn fixed(language: Language, store: &Store) -> Self {
+        Self {
+            source: language == *store.default_language(),
+            language,
+            servable: store.offered_languages(),
+        }
+    }
+
     /// `of` on plain values: `source` is the store's default language, `servable` what
     /// the store offers and `offered` what this read may answer in, its default first.
     fn resolve(
@@ -76,8 +110,7 @@ impl ServedLanguage {
         offered: &[Language],
     ) -> Self {
         let asked = asked.and_then(|tag| Language::new(tag).ok());
-        let language =
-            Language::pick(asked.as_ref(), offered).unwrap_or_else(|| source.clone());
+        let language = Language::pick(asked.as_ref(), offered).unwrap_or_else(|| source.clone());
         Self {
             source: language == *source,
             language,
@@ -139,6 +172,27 @@ pub(crate) async fn served_in<S: Storage>(
     served(state, ports, params.language.as_deref(), market.as_ref()).await
 }
 
+/// What checkout resolves a cart's language against: the store's default and the
+/// languages it publishes.
+pub(crate) fn content_languages(store: &Store) -> ContentLanguages {
+    ContentLanguages {
+        source: store.default_language().clone(),
+        servable: store.offered_languages(),
+    }
+}
+
+/// The language a shopper's choice is kept as: what `asked` resolves to in `market`
+/// (`ServedLanguage::of`: a tag not offered tries its language, then the market's
+/// default), or `None` when nothing was asked (the market's default, followed as it
+/// changes). Never refuses: a stale or malformed tag is kept as what it reads in.
+pub(crate) fn chosen(
+    asked: Option<&str>,
+    store: &Store,
+    market: Option<&Market>,
+) -> Option<Language> {
+    asked.map(|tag| ServedLanguage::of(Some(tag), store, market).language)
+}
+
 /// The language `asked` gets from the store as it is now; see `ServedLanguage::of`.
 pub(crate) async fn served<S: Storage>(
     state: &AppState<S>,
@@ -161,13 +215,18 @@ pub struct Localized<T> {
 impl<T: Serialize> IntoResponse for Localized<T> {
     fn into_response(self) -> Response {
         let mut response = Json(self.body).into_response();
-        // A tag is letters, digits and hyphens: always a header value.
-        if let Ok(language) = HeaderValue::from_str(self.language.as_str()) {
-            response
-                .headers_mut()
-                .insert(header::CONTENT_LANGUAGE, language);
-        }
+        name_language(&mut response, &self.language);
         response
+    }
+}
+
+/// Names `language` in `response`'s `Content-Language`.
+pub(crate) fn name_language(response: &mut Response, language: &Language) {
+    // A tag is letters, digits and hyphens: always a header value.
+    if let Ok(language) = HeaderValue::from_str(language.as_str()) {
+        response
+            .headers_mut()
+            .insert(header::CONTENT_LANGUAGE, language);
     }
 }
 

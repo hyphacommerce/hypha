@@ -13,8 +13,8 @@ use uuid::Uuid;
 
 use crate::{
     columns::{
-        col, currency_from_db, micros, opt_micros, opt_ts, stamp_columns, stamps_from_row, ts,
-        version_from_db, version_to_db, write_stamps,
+        col, currency_from_db, json_from_db, json_to_db, micros, opt_micros, opt_ts, stamp_columns,
+        stamps_from_row, ts, version_from_db, version_to_db, write_stamps,
     },
     error::{corrupt, repo_error},
     outbox::insert_events,
@@ -212,7 +212,8 @@ impl<C: PgConnection> PaymentMethodRepo for PgStore<C> {
 fn payment_columns() -> String {
     format!(
         "id, version, cart_id, order_id, method_id, method_name, provider, currency, amount, refunded,
-         status, reference, refund_references, attempt, instructions, {}, {}, {}",
+         status, reference, refund_references, attempt, instructions,
+         localized::text AS localized, {}, {}, {}",
         micros("paid_at"),
         micros("voided_at"),
         stamp_columns("")
@@ -250,6 +251,7 @@ fn payment_from_row(row: &Row) -> Result<Payment, RepoError> {
         instructions: col(row, "instructions")?,
         paid_at: opt_ts(col(row, "paid_at")?),
         voided_at: opt_ts(col(row, "voided_at")?),
+        localized: json_from_db(col(row, "localized")?, "payment's names")?,
     })
     .map_err(|e| corrupt(format!("payment {id}: {e}")))
 }
@@ -362,8 +364,9 @@ pub(crate) async fn insert_payment(
         &format!(
             "INSERT INTO payments (id, version, order_id, method_id, method_name, provider,
                  currency, amount, refunded, status, reference, instructions, paid_at,
-                 voided_at, refund_references, attempt, cart_id)
-             VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, {}, {}, $14, $15, $16)",
+                 voided_at, refund_references, attempt, cart_id, localized)
+             VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, {}, {}, $14, $15, $16,
+                 $17::text::jsonb)",
             ts(12),
             ts(13)
         ),
@@ -384,6 +387,10 @@ pub(crate) async fn insert_payment(
             (&s.refund_references, Type::TEXT_ARRAY),
             (&s.attempt, Type::TEXT),
             (&s.cart.map(|c| c.as_uuid()), Type::UUID),
+            (
+                &json_to_db(s.localized.as_ref(), "payment's names")?,
+                Type::TEXT,
+            ),
         ],
     )
     .await
@@ -404,7 +411,7 @@ pub(crate) async fn update_payment(
                      method_name = $5, provider = $6, currency = $7, amount = $8,
                      refunded = $9, status = $10, reference = $11, instructions = $12,
                      paid_at = {}, voided_at = {}, refund_references = $15,
-                     attempt = $16, cart_id = $17
+                     attempt = $16, cart_id = $17, localized = $18::text::jsonb
                  WHERE id = $1 AND version = $2 RETURNING version",
                 ts(13),
                 ts(14)
@@ -427,6 +434,10 @@ pub(crate) async fn update_payment(
                 (&s.refund_references, Type::TEXT_ARRAY),
                 (&s.attempt, Type::TEXT),
                 (&s.cart.map(|c| c.as_uuid()), Type::UUID),
+                (
+                    &json_to_db(s.localized.as_ref(), "payment's names")?,
+                    Type::TEXT,
+                ),
             ],
         )
         .await

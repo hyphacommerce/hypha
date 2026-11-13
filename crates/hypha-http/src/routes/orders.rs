@@ -3,12 +3,14 @@ use hypha_core::Stamped;
 use super::stamp_times;
 use axum::{Json, extract::State, http::StatusCode, response::Response};
 use hypha_checkout::{Checkout, checkout};
+
+use crate::language::Localized;
 use std::collections::HashMap;
 
 use hypha_core::{
     AssetId, CartId, ChannelId, CountryCode, Currency, CustomerId, DiscountId, Email, Keyset,
-    LocationId, MarketId, Money, OrderId, OrderLineId, PaymentId, PriceListId, ProductId, Scope,
-    ShippingGroupId, ShippingOptionId, SortKey, TaxClassId, TaxRate, Timestamp, UnitCost,
+    Language, LocationId, MarketId, Money, OrderId, OrderLineId, PaymentId, PriceListId, ProductId,
+    Scope, ShippingGroupId, ShippingOptionId, SortKey, TaxClassId, TaxRate, Timestamp, UnitCost,
     VariantId,
 };
 use hypha_media::{AssetRepo, HasAssets};
@@ -252,6 +254,30 @@ pub struct OrderResponse {
     discounts: Vec<OrderDiscountResponse>,
     /// What they took off: already out of `subtotal` and `shipping_total`.
     discount_total: Money,
+    /// The language the buyer checked out in (a BCP 47 tag): what each `localized` copy
+    /// is in, and the order's emails. `null` for orders placed before orders had one,
+    /// which read as the store's default.
+    language: Option<Language>,
+}
+
+/// A line's names as the buyer read them, in the order's language.
+#[derive(Serialize, Clone, utoipa::ToSchema)]
+pub struct LocalizedLineResponse {
+    product_title: String,
+    /// `null` for a product without options.
+    variant_title: Option<String>,
+}
+
+/// A name as the buyer read it, in the order's language.
+#[derive(Serialize, Clone, utoipa::ToSchema)]
+pub struct LocalizedNameResponse {
+    name: String,
+}
+
+/// A title as the buyer read it, in the order's language.
+#[derive(Serialize, Clone, utoipa::ToSchema)]
+pub struct LocalizedTitleResponse {
+    title: String,
 }
 
 /// A discount as it applied to an order.
@@ -270,6 +296,10 @@ pub struct OrderDiscountResponse {
     target: serde_json::Value,
     /// What it took off in all.
     amount: Money,
+    /// `title` as the buyer read it, in the order's `language`, where it reads
+    /// differently; `null` otherwise, and on a storefront's answer, whose `title` is the
+    /// buyer's already.
+    localized: Option<LocalizedTitleResponse>,
 }
 
 impl From<&OrderDiscount> for OrderDiscountResponse {
@@ -287,6 +317,9 @@ impl From<&OrderDiscount> for OrderDiscountResponse {
             value: d.value.clone(),
             target: d.target.clone(),
             amount: d.amount,
+            localized: d.localized.as_ref().map(|l| LocalizedTitleResponse {
+                title: l.title.clone(),
+            }),
         }
     }
 }
@@ -313,6 +346,9 @@ pub struct OrderShippingLineResponse {
     discounts: Vec<DiscountShareResponse>,
     /// `amount` less the discounts: what was charged for it, and what its tax is on.
     total: Money,
+    /// `name` as the buyer read it, in the order's `language`, where it reads
+    /// differently; `null` otherwise.
+    localized: Option<LocalizedNameResponse>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -357,6 +393,9 @@ pub struct OrderLineResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(required = false)]
     redacted: Option<Vec<String>>,
+    /// `product_title` and `variant_title` as the buyer read them, in the order's
+    /// `language`, where they read differently; `null` otherwise.
+    localized: Option<LocalizedLineResponse>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -441,10 +480,14 @@ impl OrderResponse {
                         .map(DiscountShareResponse::from)
                         .collect(),
                     total: s.total,
+                    localized: s.localized.as_ref().map(|l| LocalizedNameResponse {
+                        name: l.name.clone(),
+                    }),
                 })
                 .collect(),
             discounts: order.discounts().iter().map(Into::into).collect(),
             discount_total: order.discount_total(),
+            language: order.language().cloned(),
         })
     }
 }
@@ -478,6 +521,10 @@ impl From<&OrderLine> for OrderLineResponse {
                 .collect(),
             unit_cost: l.unit_cost,
             redacted: None,
+            localized: l.localized.as_ref().map(|l| LocalizedLineResponse {
+                product_title: l.product_title.clone(),
+                variant_title: l.variant_title.clone(),
+            }),
         }
     }
 }
@@ -524,6 +571,9 @@ pub struct StorefrontOrderResponse {
     discounts: Vec<OrderDiscountResponse>,
     /// What they took off: already out of `subtotal` and `shipping_total`.
     discount_total: Money,
+    /// The language the buyer checked out in, which its names are in (`Content-Language`
+    /// too); `null` for orders placed before orders had one, in the store's default.
+    language: Option<Language>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -614,22 +664,29 @@ impl From<OrderResponse> for StorefrontOrderResponse {
             lines: o
                 .lines
                 .into_iter()
-                .map(|l| StorefrontOrderLineResponse {
-                    id: l.id,
-                    product: l.product,
-                    variant: l.variant,
-                    quantity: l.quantity,
-                    product_title: l.product_title,
-                    variant_title: l.variant_title,
-                    sku: l.sku,
-                    unit_price: l.unit_price,
-                    compare_at_price: l.compare_at_price,
-                    total: l.total,
-                    tax: l.tax.map(Into::into),
-                    fulfilled_quantity: l.fulfilled_quantity,
-                    image: l.image,
-                    subtotal: l.subtotal,
-                    discounts: l.discounts,
+                .map(|l| {
+                    // The buyer's names, in place.
+                    let (product_title, variant_title) = match l.localized {
+                        Some(names) => (names.product_title, names.variant_title),
+                        None => (l.product_title, l.variant_title),
+                    };
+                    StorefrontOrderLineResponse {
+                        id: l.id,
+                        product: l.product,
+                        variant: l.variant,
+                        quantity: l.quantity,
+                        product_title,
+                        variant_title,
+                        sku: l.sku,
+                        unit_price: l.unit_price,
+                        compare_at_price: l.compare_at_price,
+                        total: l.total,
+                        tax: l.tax.map(Into::into),
+                        fulfilled_quantity: l.fulfilled_quantity,
+                        image: l.image,
+                        subtotal: l.subtotal,
+                        discounts: l.discounts,
+                    }
                 })
                 .collect(),
             shipping_address: o.shipping_address,
@@ -641,7 +698,7 @@ impl From<OrderResponse> for StorefrontOrderResponse {
                     lines: s.lines,
                     option: s.option,
                     code: s.code,
-                    name: s.name,
+                    name: s.localized.map_or(s.name, |l| l.name),
                     service: s.service,
                     amount: s.amount,
                     estimate: s.estimate,
@@ -652,8 +709,18 @@ impl From<OrderResponse> for StorefrontOrderResponse {
                 .collect(),
             created_at: o.created_at,
             updated_at: o.updated_at,
-            discounts: o.discounts,
+            discounts: o
+                .discounts
+                .into_iter()
+                .map(|mut d| {
+                    if let Some(localized) = d.localized.take() {
+                        d.title = localized.title;
+                    }
+                    d
+                })
+                .collect(),
             discount_total: o.discount_total,
+            language: o.language,
         }
     }
 }
@@ -779,7 +846,7 @@ const REPLAY_WINDOW_MICROS: i64 = 60 * 60 * 1_000_000;
     path = "/storefront/carts/{id}/checkout",
     params(("id" = CartId, Path), ("Idempotency-Key" = Option<String>, Header, description = "Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`.")),
     request_body = CheckoutRequest,
-    responses((status = 201, description = "Created", body = CheckoutResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`."))), (status = 409, description = "The cart can't be checked out as it is: `cart_empty`, `cart_email_missing`, `cart_unavailable`, `shipping_address_required`, `shipping_option_required`, `shipping_option_unavailable`, `total_changed`, `discounts_changed`, `payment_method_required`, `payment_method_unavailable`, `payment_required`, `payment_pending`, `payment_failed`, `cart_payment_committed`, `cart_completed`; or, after those, `checkout_blocked`: the cart has error messages, every one in `details.messages` (each as a cart's `messages` item; warnings left out). Also a concurrent change (`concurrent_modification`, safe to retry).", body = ApiErrorBody), (status = 429, description = "Over the rate limit for this cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
+    responses((status = 201, description = "Created", body = CheckoutResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`."), ("Content-Language" = String, description = "The language the response is in."))), (status = 409, description = "The cart can't be checked out as it is: `cart_empty`, `cart_email_missing`, `cart_unavailable`, `shipping_address_required`, `shipping_option_required`, `shipping_option_unavailable`, `total_changed`, `discounts_changed`, `payment_method_required`, `payment_method_unavailable`, `payment_required`, `payment_pending`, `payment_failed`, `cart_payment_committed`, `cart_completed`; or, after those, `checkout_blocked`: the cart has error messages, every one in `details.messages` (each as a cart's `messages` item; warnings left out). Also a concurrent change (`concurrent_modification`, safe to retry).", body = ApiErrorBody), (status = 429, description = "Over the rate limit for this cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     extensions(("x-hypha-scopes" = json!(["checkout"]))),
 )]
 pub async fn checkout_handler<S: Storage>(
@@ -792,11 +859,13 @@ pub async fn checkout_handler<S: Storage>(
     // Renewing an expired quote calls rate apps, like asking for options.
     rate_limit::enforce(&state.limiter, Rule::ShippingQuotesCart, &cart.to_string()).await?;
     let req = req.parse()?;
+    let store = super::stores::store_as_system(&state, &ports).await?;
     let input = Checkout {
         cart,
         expected_total: req.body.expected_total,
         idempotency: req.idempotency,
         return_url: req.body.return_url,
+        languages: crate::language::content_languages(&store),
     };
     let rates = state.cart_rates(&ports, cart);
     let providers = state.payments(&ports);
@@ -824,7 +893,8 @@ pub async fn checkout_handler<S: Storage>(
         .into());
     }
     let (next_action, payment_error) = next_step(order.id(), &placed.value.next_action);
-    Ok(idempotent_response(
+    let served = crate::language::ServedLanguage::of_order(order.language(), &store);
+    let mut response = idempotent_response(
         StatusCode::CREATED,
         CheckoutResponse {
             placed: PlacedOrderResponse {
@@ -841,7 +911,9 @@ pub async fn checkout_handler<S: Storage>(
             payment_error,
         },
         placed.replayed,
-    ))
+    );
+    crate::language::name_language(&mut response, served.language());
+    Ok(response)
 }
 
 #[derive(Deserialize, utoipa::IntoParams)]
@@ -859,7 +931,7 @@ pub struct OrderTokenQuery {
     get,
     path = "/storefront/orders/{id}",
     params(("id" = OrderId, Path), OrderTokenQuery),
-    responses((status = 200, description = "OK", body = PlacedOrderResponse)),
+    responses((status = 200, description = "OK", body = PlacedOrderResponse, headers(("Content-Language" = String, description = "The language the response is in.")))),
     extensions(("x-hypha-scopes" = json!(["checkout"]))),
 )]
 pub async fn fetch_placed<S: Storage>(
@@ -867,7 +939,7 @@ pub async fn fetch_placed<S: Storage>(
     caller: Caller<Storefront>,
     PathId(id): PathId<OrderId>,
     query: Query<OrderTokenQuery>,
-) -> Result<Json<PlacedOrderResponse>, ApiError> {
+) -> Result<Localized<PlacedOrderResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let token = query.parse()?.token;
     if !state.env.is_order_token(id, &token) {
@@ -875,7 +947,9 @@ pub async fn fetch_placed<S: Storage>(
     }
     let order = get_placed_order(&ctx, ports.orders(), id).await?;
     let payment = hypha_payments::newest_payment(&ports, id).await?;
-    Ok(Json(PlacedOrderResponse {
+    let store = super::stores::store_as_system(&state, &ports).await?;
+    let served = crate::language::ServedLanguage::of_order(order.language(), &store);
+    Ok(served.respond(PlacedOrderResponse {
         order: StorefrontOrderResponse::with_images(&order, &ports, state.media.as_deref()).await?,
         access_token: token,
         payment: payment.as_ref().map(PlacedPaymentResponse::new),
@@ -939,10 +1013,12 @@ pub async fn start_cart_payment<S: Storage>(
     // Its checks may renew a quote, which calls rate apps, like checkout.
     rate_limit::enforce(&state.limiter, Rule::ShippingQuotesCart, &cart.to_string()).await?;
     let req = body.parse()?;
+    let store = super::stores::store_as_system(&state, &ports).await?;
     let input = hypha_checkout::StartCartPayment {
         cart,
         expected_total: req.expected_total,
         return_url: req.return_url,
+        languages: crate::language::content_languages(&store),
     };
     let rates = state.cart_rates(&ports, cart);
     let providers = state.payments(&ports);

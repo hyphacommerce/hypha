@@ -546,6 +546,18 @@ impl<S: Storage> AppState<S> {
         if !payment.status().committed() {
             return Ok(None);
         }
+        // The store's languages, which the order's is resolved against: read through
+        // the directory (this runs on any ports, a spore's webhook's too). A failure is a
+        // storage one, worth trying again like the rest.
+        let languages = match self.storage.directory().await {
+            Ok(directory) => {
+                hypha_stores::get_store(&hypha_core::Ctx::system(), &directory, self.store)
+                    .await
+                    .map(|store| crate::language::content_languages(&store))
+                    .map_err(|e| hypha_core::RepoError::Backend(e.to_string()))?
+            }
+            Err(e) => return Err(hypha_core::RepoError::Backend(format!("{e:?}")).into()),
+        };
         let rates = self.cart_rates(ports, cart);
         let providers = self.payments(ports);
         let placed = hypha_checkout::complete_paid_checkout(
@@ -556,6 +568,7 @@ impl<S: Storage> AppState<S> {
             &rates,
             &providers,
             &self.cart_checks(ports),
+            languages,
             payment.id(),
         )
         .await?;

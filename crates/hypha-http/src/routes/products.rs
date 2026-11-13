@@ -155,7 +155,11 @@ impl ProductMediaResponse {
     }
 
     /// The item with the asset's alt text as `overlay` translates it.
-    async fn translated(asset: &Asset, media: &Media, overlay: &Overlay) -> Result<Self, ApiError> {
+    pub(super) async fn translated(
+        asset: &Asset,
+        media: &Media,
+        overlay: &Overlay,
+    ) -> Result<Self, ApiError> {
         let of_asset = asset_resource(asset);
         Ok(Self {
             asset_id: asset.id(),

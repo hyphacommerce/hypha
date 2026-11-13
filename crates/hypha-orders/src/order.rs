@@ -1,11 +1,13 @@
 use std::{collections::HashSet, fmt, str::FromStr};
 
 use hypha_core::{
-    Address, CartId, ChannelId, CountryCode, Currency, CustomerId, DiscountId, Email, MarketId,
-    Money, OrderId, OrderLineId, PendingEvent, Price, PriceListId, ProductId, Quantity, Recorded,
-    Recorder, ShippingGroupId, ShippingOptionId, Stamped, Stamps, Subject, TaxClassId, TaxRate,
-    TaxRegionId, Timestamp, UnitCost, VariantId, Version, Versioned, required_text,
+    Address, CartId, ChannelId, CountryCode, Currency, CustomerId, DiscountId, Email, Language,
+    MarketId, Money, OrderId, OrderLineId, PendingEvent, Price, PriceListId, ProductId, Quantity,
+    Recorded, Recorder, ShippingGroupId, ShippingOptionId, Stamped, Stamps, Subject, TaxClassId,
+    TaxRate, TaxRegionId, Timestamp, UnitCost, VariantId, Version, Versioned, required_text,
 };
+
+use serde::{Deserialize, Serialize};
 
 use crate::{
     OrderError,
@@ -217,6 +219,38 @@ pub struct OrderDiscount {
     pub target: serde_json::Value,
     /// What it took off in all: the sum of its shares on lines and shipping.
     pub amount: Money,
+    /// Its title in the order's language, where that reads differently.
+    pub localized: Option<LocalizedDiscount>,
+}
+
+impl OrderDiscount {
+    /// The title as the buyer read it: the order's language where it was translated.
+    pub fn buyer_title(&self) -> &str {
+        self.localized.as_ref().map_or(&self.title, |l| &l.title)
+    }
+}
+
+/// A line's names in the order's language: what the buyer read, kept beside the names
+/// in the store's own language that staff read. Stored as JSON: fields are added,
+/// never renamed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalizedLine {
+    pub product_title: String,
+    /// `None` for a simple product, like the line's own.
+    #[serde(default)]
+    pub variant_title: Option<String>,
+}
+
+/// A shipping line's option name in the order's language. Stored as JSON.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalizedShipping {
+    pub name: String,
+}
+
+/// A discount's title in the order's language. Stored as JSON.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalizedDiscount {
+    pub title: String,
 }
 
 /// Part of an order discount on one line or shipping line.
@@ -266,9 +300,28 @@ pub struct OrderLine {
     /// average, in the store's currency), for the order's margin. `None` without a cost,
     /// and for lines placed before costs were kept.
     pub unit_cost: Option<UnitCost>,
+    /// Its names in the order's language, where they read differently: `None` for an
+    /// order in the store's own language, a line nothing was translated of, and lines
+    /// placed before orders had a language.
+    pub localized: Option<LocalizedLine>,
 }
 
 impl OrderLine {
+    /// The product's title as the buyer read it.
+    pub fn buyer_product_title(&self) -> &str {
+        self.localized
+            .as_ref()
+            .map_or(&self.product_title, |l| &l.product_title)
+    }
+
+    /// The variant's title as the buyer read it.
+    pub fn buyer_variant_title(&self) -> Option<&str> {
+        match &self.localized {
+            Some(localized) => localized.variant_title.as_deref(),
+            None => self.variant_title.as_deref(),
+        }
+    }
+
     /// What its discounts took off.
     pub fn discount_total(&self) -> Result<Money, OrderError> {
         let mut sum = Money::zero(self.subtotal.currency());
@@ -313,6 +366,15 @@ pub struct OrderShippingLine {
     pub estimate_days: Option<(u16, u16)>,
     /// `None` when the country had no tax rates.
     pub tax: Option<OrderTax>,
+    /// The option's name in the order's language, where it reads differently.
+    pub localized: Option<LocalizedShipping>,
+}
+
+impl OrderShippingLine {
+    /// The option's name as the buyer read it.
+    pub fn buyer_name(&self) -> &str {
+        self.localized.as_ref().map_or(&self.name, |l| &l.name)
+    }
 }
 
 /// What checkout knows when it places an order.
@@ -351,6 +413,8 @@ pub struct NewOrder {
     pub tax_total: Money,
     /// What the buyer pays.
     pub total: Money,
+    /// The language the buyer checked out in, as the host resolved the cart's.
+    pub language: Option<Language>,
 }
 
 /// An order: a snapshot of a priced cart, plus its payment and fulfillment status, and its
@@ -394,6 +458,10 @@ pub struct Order {
     financial_status: FinancialStatus,
     fulfillment_status: FulfillmentStatus,
     cancelled: Option<Cancellation>,
+    /// The language the buyer checked out in: what the `localized` copies are in and
+    /// emails about the order are written in. `None` for orders placed before orders
+    /// had one: they read as the store's default language.
+    language: Option<Language>,
     events: Recorder,
 }
 
@@ -454,6 +522,7 @@ impl Order {
             // Lines that say otherwise fail `restore`'s status check.
             fulfillment_status: FulfillmentStatus::Unfulfilled,
             cancelled: None,
+            language: new.language,
         })?;
         // Each code once, in the order applied: a discount with two rewards comes twice,
         // perhaps with another discount between.
@@ -472,6 +541,7 @@ impl Order {
             total: order.total,
             discount_codes: codes,
             discount_total: order.discount_total,
+            language: order.language.clone(),
         };
         order.events.record(order.subject(), &placed);
         Ok(order)
@@ -781,6 +851,12 @@ impl Order {
         self.fulfillment_status
     }
 
+    /// The language the buyer checked out in; `None` for orders from before orders
+    /// had one (the store's default language).
+    pub fn language(&self) -> Option<&Language> {
+        self.language.as_ref()
+    }
+
     pub fn cancelled(&self) -> Option<Cancellation> {
         self.cancelled
     }
@@ -818,6 +894,7 @@ pub struct OrderSnapshot {
     pub financial_status: FinancialStatus,
     pub fulfillment_status: FulfillmentStatus,
     pub cancelled: Option<Cancellation>,
+    pub language: Option<Language>,
 }
 
 impl Order {
@@ -849,6 +926,7 @@ impl Order {
             financial_status: self.financial_status,
             fulfillment_status: self.fulfillment_status,
             cancelled: self.cancelled,
+            language: self.language.clone(),
         }
     }
 
@@ -882,6 +960,11 @@ impl Order {
             line.product_title = required_text("product_title", &line.product_title)?;
             line.variant_title = copied_text(line.variant_title.take());
             line.sku = copied_text(line.sku.take());
+            line.localized = line
+                .localized
+                .take()
+                .filter(|_| s.language.is_some())
+                .and_then(|l| localized_line(l, &line.product_title, &line.variant_title));
 
             if line.fulfilled_quantity > line.quantity.value() {
                 return Err(OrderError::FulfilledPastQuantity(line.id));
@@ -917,6 +1000,12 @@ impl Order {
                 return Err(OrderError::UnknownShippedLine(*unknown));
             }
             line.name = required_text("shipping name", &line.name)?;
+            line.localized = line
+                .localized
+                .take()
+                .filter(|_| s.language.is_some())
+                .and_then(|l| localized_text(Some(l.name), &line.name))
+                .map(|name| LocalizedShipping { name });
             in_currency(line.amount.money())?;
             in_currency(line.total)?;
             let charged = line.amount.money().checked_sub(shared(
@@ -941,6 +1030,12 @@ impl Order {
                 return Err(OrderError::DiscountsMismatch);
             }
             discount.title = required_text("discount title", &discount.title)?;
+            discount.localized = discount
+                .localized
+                .take()
+                .filter(|_| s.language.is_some())
+                .and_then(|l| localized_text(Some(l.title), &discount.title))
+                .map(|title| LocalizedDiscount { title });
             discount_total = discount_total.checked_add(discount.amount)?;
         }
         in_currency(s.discount_total)?;
@@ -993,6 +1088,7 @@ impl Order {
             financial_status: s.financial_status,
             fulfillment_status: s.fulfillment_status,
             cancelled: s.cancelled,
+            language: s.language,
             events: Recorder::default(),
         })
     }
@@ -1029,6 +1125,33 @@ fn line_in(lines: &mut [OrderLine], id: OrderLineId) -> Result<&mut OrderLine, O
 /// Text copied from a product that the product doesn't cap (option labels joined into a
 /// variant title, a SKU): trimmed and blank as `None`, but no length limit. An order must
 /// accept whatever the cart could sell, or checkout would fail on every retry.
+/// A localized copy of `source`, trimmed: `None` when it's blank or reads the same, so
+/// a copy is only ever kept where the buyer read something else.
+fn localized_text(value: Option<String>, source: &str) -> Option<String> {
+    copied_text(value).filter(|v| v != source)
+}
+
+/// A line's localized names, kept when either reads differently from the line's own.
+/// A variant title is only ever a copy of one the line has.
+fn localized_line(
+    localized: LocalizedLine,
+    product_title: &str,
+    variant_title: &Option<String>,
+) -> Option<LocalizedLine> {
+    let product = copied_text(Some(localized.product_title));
+    let variant = variant_title
+        .as_ref()
+        .map(|own| copied_text(localized.variant_title).unwrap_or_else(|| own.clone()));
+    let product = product.unwrap_or_else(|| product_title.to_string());
+    if product == product_title && variant == *variant_title {
+        return None;
+    }
+    Some(LocalizedLine {
+        product_title: product,
+        variant_title: variant,
+    })
+}
+
 fn copied_text(value: Option<String>) -> Option<String> {
     value
         .map(|v| v.trim().to_string())
@@ -1076,6 +1199,7 @@ mod tests {
             compare_at_price: None,
             price_list: None,
             unit_cost: None,
+            localized: None,
         }
     }
 
@@ -1102,6 +1226,7 @@ mod tests {
                     region: TaxRegionId::from_uuid(Uuid::from_u128(9)),
                 },
             }),
+            localized: None,
         }
     }
 
@@ -1197,6 +1322,7 @@ mod tests {
             shipping_total: eur(0),
             tax_total: eur(500),
             total: eur(2900),
+            language: None,
         }
     }
 
@@ -1589,6 +1715,7 @@ mod tests {
             value: serde_json::json!({"type": "percent", "basis_points": 1000}),
             target: serde_json::json!({"type": "subtotal"}),
             amount: eur(amount),
+            localized: None,
         }
     }
 

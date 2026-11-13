@@ -48,6 +48,17 @@ use hypha_testkit::{FixedClock, InMemoryPorts, NoRateProviders, SequentialIds};
 use pollster::block_on;
 use uuid::Uuid;
 
+/// A store written in English that also publishes German.
+fn languages() -> hypha_checkout::ContentLanguages {
+    hypha_checkout::ContentLanguages {
+        source: hypha_core::Language::new("en").unwrap(),
+        servable: vec![
+            hypha_core::Language::new("en").unwrap(),
+            hypha_core::Language::new("de").unwrap(),
+        ],
+    }
+}
+
 // IDs from 1000 up, so they never collide with SequentialIds (which counts from 1).
 fn market_id() -> MarketId {
     MarketId::from_uuid(Uuid::from_u128(1000))
@@ -160,6 +171,7 @@ impl World {
             country: "HR".to_string(),
             idempotency: None,
             customer: None,
+            language: None,
         };
         let cart = block_on(create_cart(
             &ctx,
@@ -221,6 +233,7 @@ impl World {
             expected_total,
             idempotency,
             return_url: None,
+            languages: languages(),
         };
         block_on(checkout(
             ctx,
@@ -542,6 +555,7 @@ fn an_empty_cart_is_refused() {
         country: "HR".to_string(),
         idempotency: None,
         customer: None,
+        language: None,
     };
     let cart = block_on(create_cart(
         &world.ports.storefront(),
@@ -980,6 +994,7 @@ fn nothing_to_pay_needs_no_method_and_makes_no_payment() {
         country: "HR".to_string(),
         idempotency: None,
         customer: None,
+        language: None,
     };
     let cart = block_on(create_cart(
         &ctx,
@@ -1341,6 +1356,7 @@ fn start_paying(
             cart,
             expected_total: None,
             return_url: None,
+            languages: languages(),
         },
     ))
 }
@@ -1355,6 +1371,7 @@ fn check_out_by(
         expected_total: None,
         idempotency: None,
         return_url: None,
+        languages: languages(),
     };
     block_on(checkout(
         &Ctx::system(),
@@ -1561,6 +1578,7 @@ fn a_report_completes_the_checkout_and_the_shopper_then_gets_that_order() {
             &NoRateProviders,
             &(ManualProvider, &app),
             &Formats,
+            languages(),
             payment.id(),
         ))
     };
@@ -1592,6 +1610,7 @@ fn completing_a_paid_checkout_needs_payments_write() {
             &NoRateProviders,
             &(ManualProvider, &app),
             &Formats,
+            languages(),
             payment.id(),
         ))
         .map(|_| ()),
@@ -1707,6 +1726,7 @@ fn a_committed_payment_of_a_cart_checked_out_with_another_goes_back() {
         provider: ProviderKey::new("app_card").unwrap(),
         amount: eur(3000),
         instructions: None,
+        localized: None,
     })
     .unwrap();
     stray.authorize(None).unwrap();
@@ -1720,6 +1740,7 @@ fn a_committed_payment_of_a_cart_checked_out_with_another_goes_back() {
         &NoRateProviders,
         &(ManualProvider, &app),
         &Formats,
+        languages(),
         stray.id(),
     ));
     assert_eq!(done.map(|p| p.is_some()), Ok(false));
@@ -1957,6 +1978,7 @@ fn starting_a_cart_payment_needs_checkout() {
             cart,
             expected_total: None,
             return_url: None,
+            languages: languages(),
         },
     ));
     assert_eq!(started.map(|_| ()), missing(Scope::Checkout));
@@ -2218,6 +2240,7 @@ fn a_report_completing_a_cart_that_lost_its_discounts_last_use_gives_the_money_b
             &NoRateProviders,
             &(ManualProvider, &app),
             &Formats,
+            languages(),
             payment.id(),
         ))
         .map(|_| ()),
@@ -2357,6 +2380,7 @@ fn warnings_dont_stop_checkout() {
         expected_total: None,
         idempotency: None,
         return_url: None,
+        languages: languages(),
     };
     let placed = block_on(checkout(
         &Ctx::system(),
@@ -2621,6 +2645,7 @@ fn checkout_checked(world: &World, cart: CartId, app: &OneApp) -> Result<Placed,
         expected_total: None,
         idempotency: None,
         return_url: None,
+        languages: languages(),
     };
     block_on(checkout(
         &Ctx::system(),
@@ -2792,6 +2817,7 @@ fn an_apps_error_stops_its_payment_from_starting() {
             cart,
             expected_total: None,
             return_url: None,
+            languages: languages(),
         },
     ));
     assert_eq!(
@@ -2806,4 +2832,220 @@ fn an_apps_error_stops_its_payment_from_starting() {
             .unwrap()
             .is_empty()
     );
+}
+
+// ---- languages ----
+
+fn de() -> hypha_core::Language {
+    hypha_core::Language::new("de").unwrap()
+}
+
+/// Stores `fields` (key, source text, German) as `resource`'s German translation.
+fn in_german(
+    world: &World,
+    resource: hypha_translations::ResourceRef,
+    fields: &[(&str, &str, &str)],
+) {
+    use hypha_translations::{FieldInput, Source, SourceField, Translation, TranslationRepo};
+    let source = Source::new(
+        fields
+            .iter()
+            .map(|(key, text, _)| SourceField::new(*key, Some(*text)))
+            .collect(),
+    );
+    let input = fields
+        .iter()
+        .map(|(key, _, german)| {
+            (
+                key.to_string(),
+                FieldInput {
+                    value: german.to_string(),
+                    source_digest: None,
+                },
+            )
+        })
+        .collect();
+    let mut translation = Translation::new(resource, de());
+    translation.replace(&source, input).unwrap();
+    block_on(world.translations.insert(&mut translation)).unwrap();
+}
+
+/// The market offers English and German, and the mug, the bank transfer and a 10% off
+/// discount have German text; the cup has none.
+fn german_world() -> (World, hypha_core::DiscountId) {
+    use hypha_translations::{ResourceKind, ResourceRef, fields};
+    let world = World::new();
+    let mut market = block_on(world.markets.get(market_id())).unwrap().unwrap();
+    market
+        .set_languages(vec![hypha_core::Language::new("en").unwrap(), de()])
+        .unwrap();
+    block_on(world.markets.update(&mut market)).unwrap();
+    let discount = ten_percent_off(
+        &world,
+        hypha_discounts::Limits {
+            total: None,
+            once_per_customer: false,
+        },
+    );
+    in_german(
+        &world,
+        ResourceRef::new(ResourceKind::Product, pid("mug").as_uuid()),
+        &[(fields::product::TITLE, "MUG", "TASSE")],
+    );
+    in_german(
+        &world,
+        ResourceRef::new(ResourceKind::Discount, discount.as_uuid()),
+        &[(fields::discount::TITLE, "Welcome", "Willkommen")],
+    );
+    let bank_transfer = PaymentMethodId::from_uuid(Uuid::from_u128(InMemoryPorts::BANK_TRANSFER));
+    in_german(
+        &world,
+        ResourceRef::new(ResourceKind::PaymentMethod, bank_transfer.as_uuid()),
+        &[
+            (fields::payment_method::NAME, "Bank transfer", "Überweisung"),
+            (
+                fields::payment_method::INSTRUCTIONS,
+                "IBAN HR12 3456 7890; quote your order number",
+                "IBAN HR12 3456 7890; Bestellnummer angeben",
+            ),
+        ],
+    );
+    (world, discount)
+}
+
+fn read_in(world: &World, cart: CartId, language: Option<hypha_core::Language>) {
+    block_on(hypha_cart::set_cart_language(
+        &world.ports.storefront(),
+        &world.ports,
+        cart,
+        language,
+    ))
+    .unwrap();
+}
+
+#[test]
+fn an_order_in_another_language_keeps_the_buyers_names_beside_the_stores() {
+    let (world, _) = german_world();
+    let cart = world.cart();
+    read_in(&world, cart, Some(de()));
+    let placed = world
+        .place_as(&Ctx::system(), cart, None, None)
+        .unwrap()
+        .value;
+    let order = &placed.order;
+    assert_eq!(order.language(), Some(&de()));
+
+    let mug = &order.lines()[0];
+    assert_eq!(mug.product_title, "MUG");
+    assert_eq!(mug.buyer_product_title(), "TASSE");
+    // Nothing of the cup is translated: no copy, the buyer read the store's.
+    let cup = &order.lines()[1];
+    assert_eq!(cup.localized, None);
+    assert_eq!(cup.buyer_product_title(), "CUP");
+
+    let discount = &order.discounts()[0];
+    assert_eq!(
+        (discount.title.as_str(), discount.buyer_title()),
+        ("Welcome", "Willkommen")
+    );
+
+    let payment = placed.payment.unwrap();
+    assert_eq!(payment.method_name(), Some("Bank transfer"));
+    assert_eq!(payment.buyer_method_name(), Some("Überweisung"));
+    assert_eq!(
+        payment.buyer_instructions(),
+        Some("IBAN HR12 3456 7890; Bestellnummer angeben")
+    );
+    // The manual method shows the buyer its instructions in their language.
+    assert_eq!(
+        placed.next_action,
+        Some(Ok(NextAction::Instructions(
+            "IBAN HR12 3456 7890; Bestellnummer angeben".to_string()
+        )))
+    );
+
+    let stored = block_on(world.orders.get(order.id())).unwrap().unwrap();
+    assert_eq!(&stored, order);
+    let buyer = block_on(world.customers.get(order.customer()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(buyer.language(), Some(&de()));
+}
+
+#[test]
+fn an_order_in_the_stores_language_keeps_no_copies() {
+    let (world, _) = german_world();
+    let cart = world.cart();
+    let placed = world
+        .place_as(&Ctx::system(), cart, None, None)
+        .unwrap()
+        .value;
+    let order = &placed.order;
+    // The market's default, English, is the store's.
+    assert_eq!(
+        order.language(),
+        Some(&hypha_core::Language::new("en").unwrap())
+    );
+    assert!(order.lines().iter().all(|l| l.localized.is_none()));
+    assert!(order.discounts().iter().all(|d| d.localized.is_none()));
+    assert_eq!(placed.payment.unwrap().localized(), None);
+}
+
+#[test]
+fn a_language_the_market_stopped_offering_places_the_order_in_its_default() {
+    let (world, _) = german_world();
+    let cart = world.cart();
+    read_in(&world, cart, Some(de()));
+    let mut market = block_on(world.markets.get(market_id())).unwrap().unwrap();
+    market
+        .set_languages(vec![hypha_core::Language::new("en").unwrap()])
+        .unwrap();
+    block_on(world.markets.update(&mut market)).unwrap();
+    let order = world.checkout(cart).unwrap();
+    assert_eq!(
+        order.language(),
+        Some(&hypha_core::Language::new("en").unwrap())
+    );
+    assert!(order.lines().iter().all(|l| l.localized.is_none()));
+}
+
+#[test]
+fn a_known_buyer_takes_the_language_of_their_latest_checkout() {
+    let (world, _) = german_world();
+    let first = world.checkout(world.cart()).unwrap();
+    let buyer = || {
+        block_on(world.customers.get(first.customer()))
+            .unwrap()
+            .unwrap()
+    };
+    assert_eq!(
+        buyer().language(),
+        Some(&hypha_core::Language::new("en").unwrap())
+    );
+    let cart = world.cart();
+    read_in(&world, cart, Some(de()));
+    world.checkout(cart).unwrap();
+    assert_eq!(buyer().language(), Some(&de()));
+}
+
+#[test]
+fn a_cart_payment_started_in_another_language_copies_its_method_in_it() {
+    use hypha_translations::{ResourceKind, ResourceRef, fields};
+    let (world, _) = german_world();
+    let cart = world.cart();
+    read_in(&world, cart, Some(de()));
+    let method = pay_by_card(&world, cart);
+    in_german(
+        &world,
+        ResourceRef::new(ResourceKind::PaymentMethod, method.as_uuid()),
+        &[(fields::payment_method::NAME, "Card", "Karte")],
+    );
+    let app = CardApp::default();
+    let started = start_paying(&world, cart, &app).unwrap();
+    assert_eq!(started.payment.method_name(), Some("Card"));
+    assert_eq!(started.payment.buyer_method_name(), Some("Karte"));
+    let stored = block_on(world.payments.get(started.payment.id()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.buyer_method_name(), Some("Karte"));
 }

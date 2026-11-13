@@ -1,21 +1,28 @@
-use axum::{Json, extract::State, http::StatusCode, response::Response};
+use axum::{
+    Json,
+    extract::State,
+    http::{HeaderValue, StatusCode},
+    response::{IntoResponse, Response},
+};
 use hypha_cart::{
     AddLine, CreateCart, GroupOffers, LineStatus, PricedCart, PricedShippingGroup, PricingPorts,
     SetLineQuantity, add_discount_code, add_line, create_cart, remove_cart_line,
-    remove_discount_code, select_shipping, set_cart_customer, set_cart_email, set_line_quantity,
-    set_shipping_address, shipping_offers,
+    remove_discount_code, select_shipping, set_cart_customer, set_cart_email, set_cart_language,
+    set_line_quantity, set_shipping_address, shipping_offers,
 };
 use hypha_checkout::CartChecks;
 use hypha_checkout_rules::HasCheckoutRules;
 use hypha_core::{
     AssetId, CartId, CheckoutRuleId, CountryCode, Currency, CustomerId, DiscountId, Email,
-    ErrorCode, MarketId, Message, MessageSource, Money, OrderId, PaymentMethodId, ProductId,
-    Severity, ShippingGroupId, ShippingOptionId, TaxClassId, TaxRate, VariantId,
+    ErrorCode, Language, MarketId, Message, MessageSource, Money, OrderId, PaymentMethodId,
+    ProductId, Severity, ShippingGroupId, ShippingOptionId, TaxClassId, TaxRate, VariantId,
 };
 use hypha_customers::{HasCustomers, get_customer};
+use hypha_markets::{HasMarkets, MarketRepo};
 use hypha_media::{AssetRepo, HasAssets};
 use hypha_shipping::OfferOutcome;
 use hypha_tax::TaxLine;
+use hypha_translations::{HasTranslations, Overlay, ResourceKind, ResourceRef, fields as keys};
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -29,7 +36,8 @@ use super::{
 use crate::{
     client_ip::ClientIp,
     error::{ApiError, ApiErrorBody},
-    extract::{Caller, JsonBody, KeyedJson, PathId, Storefront, idempotent_response},
+    extract::{Caller, JsonBody, KeyedJson, PathId, REPLAYED_HEADER, Storefront},
+    language::{self, Localized, ServedLanguage},
     media::Media,
     rate_limit::{self, Rule},
     state::{SharedState, Storage},
@@ -40,6 +48,23 @@ use crate::{
 pub struct CreateCartRequest {
     /// Where the cart ships to; picks the market and the tax rates.
     country: String,
+    /// The language the shopper reads the cart in (a BCP 47 tag), out of those the
+    /// market offers (`/storefront/countries`): one not offered is tried without its
+    /// region (`de` for `de-AT`), else the market's default is kept. Absent, the cart
+    /// follows the market's default. The order is placed in it.
+    #[serde(default)]
+    language: Option<String>,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetLanguageRequest {
+    /// A BCP 47 tag, held to the cart's market like `language` on create: what it
+    /// resolves to is kept. `null` goes back to following the market's default.
+    /// Required, `null` included.
+    #[serde(deserialize_with = "crate::patch::required")]
+    #[schema(required = true)]
+    language: Option<String>,
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -126,6 +151,10 @@ pub struct CartResponse {
     /// errors stop checkout and starting its payment (`409 checkout_blocked`), warnings
     /// never do. Empty once the cart is checked out.
     messages: Vec<CartMessageResponse>,
+    /// The language the shopper chose for the cart (`PUT …/language`), as kept: `null`
+    /// follows the market's default. A storefront's answer is in the language the cart
+    /// reads in now, which `Content-Language` names; the admin's is in the store's.
+    language: Option<Language>,
 }
 
 /// Something about the cart for the shopper to see or fix.
@@ -345,6 +374,7 @@ impl From<&PricedCart> for CartResponse {
                 .collect(),
             // Filled by `cart_response`, which reads the store's checkout rules.
             messages: Vec::new(),
+            language: cart.language.clone(),
             shipping_address_check: None,
             tax_total: cart.tax_total,
             total: cart.total,
@@ -571,7 +601,7 @@ pub struct AddDiscountCodeRequest {
     path = "/storefront/carts/{id}/discount-codes",
     params(("id" = CartId, Path)),
     request_body = AddDiscountCodeRequest,
-    responses((status = 200, description = "OK", body = CartResponse), (status = 429, description = "Over the rate limit for codes per client address or per cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
+    responses((status = 200, description = "OK", body = CartResponse, headers(("Content-Language" = String, description = "The language the response is in."))), (status = 429, description = "Over the rate limit for codes per client address or per cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     extensions(("x-hypha-scopes" = json!(["carts:write"]))),
 )]
 pub async fn add_code<S: Storage>(
@@ -580,21 +610,13 @@ pub async fn add_code<S: Storage>(
     caller: Caller<Storefront>,
     PathId(id): PathId<CartId>,
     body: JsonBody<AddDiscountCodeRequest>,
-) -> Result<Json<CartResponse>, ApiError> {
+) -> Result<Localized<CartResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     rate_limit::enforce(&state.limiter, Rule::DiscountCodeIp, &ip).await?;
     rate_limit::enforce(&state.limiter, Rule::DiscountCodeCart, &id.to_string()).await?;
     let req = body.parse()?;
     let priced = add_discount_code(&ctx, &ports, id, &req.code).await?;
-    Ok(Json(
-        cart_response(
-            &priced,
-            &ports,
-            &state.cart_checks(&ports),
-            state.media.as_deref(),
-        )
-        .await?,
-    ))
+    storefront_cart(&state, &ports, &priced, &state.cart_checks(&ports)).await
 }
 
 /// Lets go of a discount code (as entered, or normalised).
@@ -602,34 +624,30 @@ pub async fn add_code<S: Storage>(
     delete,
     path = "/storefront/carts/{id}/discount-codes/{code}",
     params(("id" = CartId, Path), ("code" = String, Path, example = "WELCOME10", description = "The code as entered, or normalised.")),
-    responses((status = 200, description = "OK", body = CartResponse)),
+    responses((status = 200, description = "OK", body = CartResponse, headers(("Content-Language" = String, description = "The language the response is in.")))),
     extensions(("x-hypha-scopes" = json!(["carts:write"]))),
 )]
 pub async fn remove_code<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
     PathId((id, code)): PathId<(CartId, String)>,
-) -> Result<Json<CartResponse>, ApiError> {
+) -> Result<Localized<CartResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let priced = remove_discount_code(&ctx, &ports, id, &code).await?;
-    Ok(Json(
-        cart_response(
-            &priced,
-            &ports,
-            &state.cart_checks(&ports),
-            state.media.as_deref(),
-        )
-        .await?,
-    ))
+    storefront_cart(&state, &ports, &priced, &state.cart_checks(&ports)).await
 }
 
 /// The response for `cart` with its messages and its lines' images: the assets loaded in
-/// one query and their URLs made. Without file storage the lines show none.
-pub async fn cart_response<P: HasAssets + PricingPorts + HasCheckoutRules>(
+/// one query and their URLs made. Without file storage the lines show none. In `served`'s
+/// language (a storefront's), its names (lines' titles, image alt texts, the chosen
+/// shipping option, discounts' titles, checkout rules' messages) come from one overlay;
+/// without it (the admin's), as stored.
+pub async fn cart_response<P: HasAssets + PricingPorts + HasCheckoutRules + HasTranslations>(
     cart: &PricedCart,
     ports: &P,
     checks: &impl CartChecks,
     media: Option<&Media>,
+    served: Option<&ServedLanguage>,
 ) -> Result<CartResponse, ApiError> {
     let mut response = CartResponse::from(cart);
     response.shipping_address_check = cart
@@ -638,23 +656,154 @@ pub async fn cart_response<P: HasAssets + PricingPorts + HasCheckoutRules>(
         .filter(|_| cart.shipping_address.is_some())
         .map(ShippingAddressCheckResponse::new)
         .transpose()?;
-    response.messages = hypha_checkout::cart_messages(ports, checks, cart)
-        .await?
-        .iter()
-        .map(CartMessageResponse::from)
-        .collect();
+    let messages = hypha_checkout::cart_messages(ports, checks, cart).await?;
     let image = |l: &hypha_cart::PricedLine| l.details.as_ref().and_then(|d| d.image);
     let ids: Vec<AssetId> = cart.lines.iter().filter_map(image).collect();
-    let Some(media) = media.filter(|_| !ids.is_empty()) else {
+    let media = media.filter(|_| !ids.is_empty());
+    // A checked-out cart reads its order's names, already in its language.
+    let overlay = match served.filter(|s| !s.is_source() && cart.order.is_none()) {
+        Some(served) => {
+            let resources = cart_resources(cart, &messages, media.map(|_| ids.as_slice()));
+            served.overlay(ports, &resources).await?
+        }
+        None => Overlay::none(),
+    };
+    translate_cart(&mut response, cart, &overlay);
+    response.messages = messages
+        .iter()
+        .map(|m| {
+            let mut shown = CartMessageResponse::from(m);
+            if let MessageSource::Rule { rule } = m.source() {
+                let of_rule = ResourceRef::new(ResourceKind::CheckoutRule, rule.as_uuid());
+                if let Some(text) = overlay.text(of_rule, keys::checkout_rule::MESSAGE) {
+                    shown.message = text.to_string();
+                }
+            }
+            shown
+        })
+        .collect();
+    let Some(media) = media else {
         return Ok(response);
     };
     let assets = ports.assets().get_many(&ids).await?;
     for (line, priced) in response.lines.iter_mut().zip(&cart.lines) {
         if let Some(asset) = image(priced).and_then(|id| assets.iter().find(|a| a.id() == id)) {
-            line.image = Some(ProductMediaResponse::new(asset, media).await?);
+            line.image = Some(ProductMediaResponse::translated(asset, media, &overlay).await?);
         }
     }
     Ok(response)
+}
+
+/// Every translatable resource a cart's response names: its products, the chosen
+/// options, its discounts, the rules among its messages and (`images`) its lines' images.
+fn cart_resources(
+    cart: &PricedCart,
+    messages: &[Message],
+    images: Option<&[AssetId]>,
+) -> Vec<ResourceRef> {
+    let mut resources: Vec<ResourceRef> = Vec::new();
+    let mut add = |r: ResourceRef| {
+        if !resources.contains(&r) {
+            resources.push(r);
+        }
+    };
+    for line in &cart.lines {
+        add(ResourceRef::new(
+            ResourceKind::Product,
+            line.product.as_uuid(),
+        ));
+    }
+    for group in &cart.shipping_groups {
+        if let Some(selected) = &group.selected {
+            add(ResourceRef::new(
+                ResourceKind::ShippingOption,
+                selected.option.as_uuid(),
+            ));
+        }
+    }
+    for applied in &cart.discounts {
+        add(ResourceRef::new(
+            ResourceKind::Discount,
+            applied.discount.as_uuid(),
+        ));
+    }
+    for message in messages {
+        if let MessageSource::Rule { rule } = message.source() {
+            add(ResourceRef::new(ResourceKind::CheckoutRule, rule.as_uuid()));
+        }
+    }
+    for asset in images.unwrap_or_default() {
+        add(ResourceRef::new(ResourceKind::Asset, asset.as_uuid()));
+    }
+    resources
+}
+
+/// `response`'s names as `overlay` translates them: lines' titles (a variant's joined
+/// from its values' labels), the chosen options' names and discounts' titles.
+fn translate_cart(response: &mut CartResponse, cart: &PricedCart, overlay: &Overlay) {
+    for (line, priced) in response.lines.iter_mut().zip(&cart.lines) {
+        let product = ResourceRef::new(ResourceKind::Product, priced.product.as_uuid());
+        let Some(details) = priced
+            .details
+            .as_ref()
+            .filter(|_| overlay.translates(product))
+        else {
+            continue;
+        };
+        line.product_title = Some(
+            overlay
+                .text_or(product, keys::product::TITLE, &details.product_title)
+                .to_string(),
+        );
+        line.variant_title = details.variant_title_with(|value| {
+            overlay.text(product, &keys::product::option_value_label(value))
+        });
+    }
+    for (group, priced) in response
+        .shipping_groups
+        .iter_mut()
+        .zip(&cart.shipping_groups)
+    {
+        if let (Some(shown), Some(selected)) = (group.selected.as_mut(), priced.selected.as_ref()) {
+            let option = ResourceRef::new(ResourceKind::ShippingOption, selected.option.as_uuid());
+            if let Some(name) = overlay.text(option, keys::shipping_option::NAME) {
+                shown.name = name.to_string();
+            }
+        }
+    }
+    for (shown, applied) in response.discounts.iter_mut().zip(&cart.discounts) {
+        let discount = ResourceRef::new(ResourceKind::Discount, applied.discount.as_uuid());
+        if let Some(title) = overlay.text(discount, keys::discount::TITLE) {
+            shown.title = title.to_string();
+        }
+    }
+}
+
+/// The storefront's answer about `cart`: in the language it reads in now (the cart's
+/// choice held to what its market offers, the store read as the system), named by
+/// `Content-Language`.
+pub(crate) async fn storefront_cart<S: Storage>(
+    state: &crate::state::AppState<S>,
+    ports: &S::Ports<'_>,
+    cart: &PricedCart,
+    checks: &impl CartChecks,
+) -> Result<Localized<CartResponse>, ApiError> {
+    let store = super::stores::store_as_system(state, ports).await?;
+    let served = ServedLanguage::of_cart(cart, &store);
+    let response =
+        cart_response(cart, ports, checks, state.media.as_deref(), Some(&served)).await?;
+    Ok(served.respond(response))
+}
+
+/// `body` as a keyed write's answer: `Idempotent-Replayed` when it replays one.
+fn keyed<T: serde::Serialize>(status: StatusCode, body: Localized<T>, replayed: bool) -> Response {
+    let mut response = (status, body).into_response();
+    if replayed {
+        response
+            .headers_mut()
+            .insert(REPLAYED_HEADER, HeaderValue::from_static("true"));
+    }
+    response
 }
 
 /// Takes an `Idempotency-Key` header: a retry returns the cart the first request made.
@@ -663,7 +812,7 @@ pub async fn cart_response<P: HasAssets + PricingPorts + HasCheckoutRules>(
     path = "/storefront/carts",
     params(("Idempotency-Key" = Option<String>, Header, description = "Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`.")),
     request_body = CreateCartRequest,
-    responses((status = 201, description = "Created", body = CartResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`."))), (status = 429, description = "Over the rate limit for new carts per client address (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
+    responses((status = 201, description = "Created", body = CartResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`."), ("Content-Language" = String, description = "The language the response is in."))), (status = 429, description = "Over the rate limit for new carts per client address (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     extensions(("x-hypha-scopes" = json!(["carts:write"]))),
 )]
 pub async fn create<S: Storage>(
@@ -683,21 +832,29 @@ pub async fn create<S: Storage>(
         }
         Err(_) => None,
     };
+    // Held to what the country's market offers; a country no market sells to is the
+    // command's to refuse.
+    let language = match req.body.language.as_deref() {
+        Some(asked) => {
+            let market = match CountryCode::new(&req.body.country) {
+                Ok(country) => ports.markets().get_by_country(country).await?,
+                Err(_) => None,
+            };
+            let store = super::stores::store_as_system(&state, &ports).await?;
+            language::chosen(Some(asked), &store, market.as_ref())
+        }
+        None => None,
+    };
     let input = CreateCart {
         country: req.body.country,
         idempotency: req.idempotency,
         customer,
+        language,
     };
     let created = create_cart(&ctx, &ports, &state.ids, &state.clock, input).await?;
-    Ok(idempotent_response(
+    Ok(keyed(
         StatusCode::CREATED,
-        cart_response(
-            &created.value,
-            &ports,
-            &state.cart_checks(&ports),
-            state.media.as_deref(),
-        )
-        .await?,
+        storefront_cart(&state, &ports, &created.value, &state.cart_checks(&ports)).await?,
         created.replayed,
     ))
 }
@@ -707,25 +864,17 @@ pub async fn create<S: Storage>(
     get,
     path = "/storefront/carts/{id}",
     params(("id" = CartId, Path)),
-    responses((status = 200, description = "OK", body = CartResponse)),
+    responses((status = 200, description = "OK", body = CartResponse, headers(("Content-Language" = String, description = "The language the response is in.")))),
     extensions(("x-hypha-scopes" = json!(["carts:read"]))),
 )]
 pub async fn fetch<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
     PathId(id): PathId<CartId>,
-) -> Result<Json<CartResponse>, ApiError> {
+) -> Result<Localized<CartResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let priced = hypha_checkout::view_cart(&ctx, &ports, id).await?;
-    Ok(Json(
-        cart_response(
-            &priced,
-            &ports,
-            &state.cart_checks(&ports),
-            state.media.as_deref(),
-        )
-        .await?,
-    ))
+    storefront_cart(&state, &ports, &priced, &state.cart_checks(&ports)).await
 }
 
 /// Takes an `Idempotency-Key` header: a retry returns the cart without adding again.
@@ -734,7 +883,7 @@ pub async fn fetch<S: Storage>(
     path = "/storefront/carts/{id}/lines",
     params(("id" = CartId, Path), ("Idempotency-Key" = Option<String>, Header, description = "Makes the request safe to retry: a retry with the same key and body replays the first answer (marked `Idempotent-Replayed: true`) instead of repeating the effect. Same key with another body: `422 idempotency_key_reused`.")),
     request_body = AddLineRequest,
-    responses((status = 200, description = "OK", body = CartResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`.")))),
+    responses((status = 200, description = "OK", body = CartResponse, headers(("Idempotent-Replayed" = String, description = "`true` when this answer replays an earlier request with the same `Idempotency-Key`."), ("Content-Language" = String, description = "The language the response is in.")))),
     extensions(("x-hypha-scopes" = json!(["carts:write"]))),
 )]
 pub async fn add<S: Storage>(
@@ -752,15 +901,9 @@ pub async fn add<S: Storage>(
         idempotency: req.idempotency,
     };
     let added = add_line(&ctx, &ports, &state.clock, input).await?;
-    Ok(idempotent_response(
+    Ok(keyed(
         StatusCode::OK,
-        cart_response(
-            &added.value,
-            &ports,
-            &state.cart_checks(&ports),
-            state.media.as_deref(),
-        )
-        .await?,
+        storefront_cart(&state, &ports, &added.value, &state.cart_checks(&ports)).await?,
         added.replayed,
     ))
 }
@@ -771,7 +914,7 @@ pub async fn add<S: Storage>(
     path = "/storefront/carts/{id}/email",
     params(("id" = CartId, Path)),
     request_body = SetEmailRequest,
-    responses((status = 200, description = "OK", body = CartResponse)),
+    responses((status = 200, description = "OK", body = CartResponse, headers(("Content-Language" = String, description = "The language the response is in.")))),
     extensions(("x-hypha-scopes" = json!(["carts:write"]))),
 )]
 pub async fn set_email<S: Storage>(
@@ -779,19 +922,43 @@ pub async fn set_email<S: Storage>(
     caller: Caller<Storefront>,
     PathId(id): PathId<CartId>,
     body: JsonBody<SetEmailRequest>,
-) -> Result<Json<CartResponse>, ApiError> {
+) -> Result<Localized<CartResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let priced = set_cart_email(&ctx, &ports, id, req.email).await?;
-    Ok(Json(
-        cart_response(
-            &priced,
-            &ports,
-            &state.cart_checks(&ports),
-            state.media.as_deref(),
-        )
-        .await?,
-    ))
+    storefront_cart(&state, &ports, &priced, &state.cart_checks(&ports)).await
+}
+
+/// Sets the language the shopper reads the cart in, held to what its market offers (a tag
+/// not offered tries its language, then the market's default, which is what's kept);
+/// `null` follows the market's default. Answers the cart in it.
+#[utoipa::path(
+    put,
+    path = "/storefront/carts/{id}/language",
+    params(("id" = CartId, Path)),
+    request_body = SetLanguageRequest,
+    responses((status = 200, description = "OK", body = CartResponse, headers(("Content-Language" = String, description = "The language the response is in.")))),
+    extensions(("x-hypha-scopes" = json!(["carts:write"]))),
+)]
+pub async fn set_language<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller<Storefront>,
+    PathId(id): PathId<CartId>,
+    body: JsonBody<SetLanguageRequest>,
+) -> Result<Localized<CartResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let req = body.parse()?;
+    let language = match req.language.as_deref() {
+        Some(asked) => {
+            let cart = hypha_cart::find_cart(&ctx, &ports, id).await?;
+            let market = ports.markets().get(cart.market()).await?;
+            let store = super::stores::store_as_system(&state, &ports).await?;
+            language::chosen(Some(asked), &store, market.as_ref())
+        }
+        None => None,
+    };
+    let priced = set_cart_language(&ctx, &ports, id, language).await?;
+    storefront_cart(&state, &ports, &priced, &state.cart_checks(&ports)).await
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -808,7 +975,7 @@ pub struct SetMarketingRequest {
     path = "/storefront/carts/{id}/marketing",
     params(("id" = CartId, Path)),
     request_body = SetMarketingRequest,
-    responses((status = 200, description = "OK", body = CartResponse)),
+    responses((status = 200, description = "OK", body = CartResponse, headers(("Content-Language" = String, description = "The language the response is in.")))),
     extensions(("x-hypha-scopes" = json!(["carts:write"]))),
 )]
 pub async fn set_marketing<S: Storage>(
@@ -816,19 +983,11 @@ pub async fn set_marketing<S: Storage>(
     caller: Caller<Storefront>,
     PathId(id): PathId<CartId>,
     body: JsonBody<SetMarketingRequest>,
-) -> Result<Json<CartResponse>, ApiError> {
+) -> Result<Localized<CartResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let priced = hypha_cart::set_cart_marketing(&ctx, &ports, id, req.opt_in).await?;
-    Ok(Json(
-        cart_response(
-            &priced,
-            &ports,
-            &state.cart_checks(&ports),
-            state.media.as_deref(),
-        )
-        .await?,
-    ))
+    storefront_cart(&state, &ports, &priced, &state.cart_checks(&ports)).await
 }
 
 /// Links a cart to a customer, or unlinks it with `null`.
@@ -849,11 +1008,13 @@ pub async fn set_customer<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let priced = set_cart_customer(&ctx, &ports, id, req.customer).await?;
+    // The admin's: as stored, in the store's language.
     let cart = cart_response(
         &priced,
         &ports,
         &state.cart_checks(&ports),
         state.media.as_deref(),
+        None,
     )
     .await?;
     // The admin surface: personal data per the caller.
@@ -877,7 +1038,7 @@ pub struct SetQuantityRequest {
     path = "/storefront/carts/{id}/lines/{variant}",
     params(("id" = CartId, Path), ("variant" = VariantId, Path)),
     request_body = SetQuantityRequest,
-    responses((status = 200, description = "OK", body = CartResponse)),
+    responses((status = 200, description = "OK", body = CartResponse, headers(("Content-Language" = String, description = "The language the response is in.")))),
     extensions(("x-hypha-scopes" = json!(["carts:write"]))),
 )]
 pub async fn set_quantity<S: Storage>(
@@ -885,7 +1046,7 @@ pub async fn set_quantity<S: Storage>(
     caller: Caller<Storefront>,
     PathId((id, variant)): PathId<(CartId, VariantId)>,
     body: JsonBody<SetQuantityRequest>,
-) -> Result<Json<CartResponse>, ApiError> {
+) -> Result<Localized<CartResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let input = SetLineQuantity {
@@ -896,15 +1057,7 @@ pub async fn set_quantity<S: Storage>(
     let priced = set_line_quantity(&ctx, &ports, input)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("line_not_found"))?;
-    Ok(Json(
-        cart_response(
-            &priced,
-            &ports,
-            &state.cart_checks(&ports),
-            state.media.as_deref(),
-        )
-        .await?,
-    ))
+    storefront_cart(&state, &ports, &priced, &state.cart_checks(&ports)).await
 }
 
 /// Removes a line.
@@ -912,27 +1065,19 @@ pub async fn set_quantity<S: Storage>(
     delete,
     path = "/storefront/carts/{id}/lines/{variant}",
     params(("id" = CartId, Path), ("variant" = VariantId, Path)),
-    responses((status = 200, description = "OK", body = CartResponse)),
+    responses((status = 200, description = "OK", body = CartResponse, headers(("Content-Language" = String, description = "The language the response is in.")))),
     extensions(("x-hypha-scopes" = json!(["carts:write"]))),
 )]
 pub async fn remove_line<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
     PathId((id, variant)): PathId<(CartId, VariantId)>,
-) -> Result<Json<CartResponse>, ApiError> {
+) -> Result<Localized<CartResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let priced = remove_cart_line(&ctx, &ports, id, variant)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("line_not_found"))?;
-    Ok(Json(
-        cart_response(
-            &priced,
-            &ports,
-            &state.cart_checks(&ports),
-            state.media.as_deref(),
-        )
-        .await?,
-    ))
+    storefront_cart(&state, &ports, &priced, &state.cart_checks(&ports)).await
 }
 
 // ---------- shipping ----------
@@ -950,7 +1095,7 @@ pub struct SetShippingAddressRequest {
     path = "/storefront/carts/{id}/shipping-address",
     params(("id" = CartId, Path)),
     request_body = SetShippingAddressRequest,
-    responses((status = 200, description = "OK", body = CartResponse)),
+    responses((status = 200, description = "OK", body = CartResponse, headers(("Content-Language" = String, description = "The language the response is in.")))),
     extensions(("x-hypha-scopes" = json!(["carts:write"]))),
 )]
 pub async fn set_address<S: Storage>(
@@ -958,7 +1103,7 @@ pub async fn set_address<S: Storage>(
     caller: Caller<Storefront>,
     PathId(id): PathId<CartId>,
     body: JsonBody<SetShippingAddressRequest>,
-) -> Result<Json<CartResponse>, ApiError> {
+) -> Result<Localized<CartResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let mut priced = set_shipping_address(
@@ -980,9 +1125,7 @@ pub async fn set_address<S: Storage>(
         hypha_core::ValidationStep::Address,
     )
     .await?;
-    Ok(Json(
-        cart_response(&priced, &ports, &checks, state.media.as_deref()).await?,
-    ))
+    storefront_cart(&state, &ports, &priced, &checks).await
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -1065,22 +1208,66 @@ impl From<&GroupOffers> for GroupOffersResponse {
     get,
     path = "/storefront/carts/{id}/shipping-options",
     params(("id" = CartId, Path)),
-    responses((status = 200, description = "OK", body = ShippingOptionsResponse), (status = 429, description = "Over the rate limit for this cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
+    responses((status = 200, description = "OK", body = ShippingOptionsResponse, headers(("Content-Language" = String, description = "The language the response is in."))), (status = 429, description = "Over the rate limit for this cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     extensions(("x-hypha-scopes" = json!(["carts:read"]))),
 )]
 pub async fn shipping_options<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
     PathId(id): PathId<CartId>,
-) -> Result<Json<ShippingOptionsResponse>, ApiError> {
+) -> Result<Localized<ShippingOptionsResponse>, ApiError> {
     // After the key: a stranger can't use up a cart's quota.
     let (ports, ctx) = caller.authenticate(&state).await?;
     rate_limit::enforce(&state.limiter, Rule::ShippingQuotesCart, &id.to_string()).await?;
     let rates = state.cart_rates(&ports, id);
     let groups = shipping_offers(&ctx, &ports, &rates, id).await?;
-    Ok(Json(ShippingOptionsResponse {
+    let served = served_for(&state, &ports, &ctx, id).await?;
+    let mut response = ShippingOptionsResponse {
         groups: groups.iter().map(Into::into).collect(),
-    }))
+    };
+    if !served.is_source() {
+        let mut options: Vec<ResourceRef> = Vec::new();
+        for group in &response.groups {
+            let named = group.offers.iter().map(|o| o.option);
+            for option in named.chain(group.unavailable.iter().map(|u| u.option)) {
+                let r = ResourceRef::new(ResourceKind::ShippingOption, option.as_uuid());
+                if !options.contains(&r) {
+                    options.push(r);
+                }
+            }
+        }
+        let overlay = served.overlay(&ports, &options).await?;
+        let name = |option: ShippingOptionId, name: &mut String| {
+            let r = ResourceRef::new(ResourceKind::ShippingOption, option.as_uuid());
+            if let Some(text) = overlay.text(r, keys::shipping_option::NAME) {
+                *name = text.to_string();
+            }
+        };
+        for group in &mut response.groups {
+            for offer in &mut group.offers {
+                name(offer.option, &mut offer.name);
+            }
+            for left_out in &mut group.unavailable {
+                name(left_out.option, &mut left_out.name);
+            }
+        }
+    }
+    Ok(served.respond(response))
+}
+
+/// The language the cart `id` reads in now, for a read about it that isn't the cart
+/// itself (its shipping options, its payment methods): the cart and its market read.
+async fn served_for<S: Storage>(
+    state: &crate::state::AppState<S>,
+    ports: &S::Ports<'_>,
+    ctx: &hypha_core::Ctx,
+    id: CartId,
+) -> Result<ServedLanguage, ApiError> {
+    let cart = hypha_cart::find_cart(ctx, ports, id).await?;
+    let market = ports.markets().get(cart.market()).await?;
+    let store = super::stores::store_as_system(state, ports).await?;
+    let asked = cart.language().map(Language::as_str);
+    Ok(ServedLanguage::of(asked, &store, market.as_ref()))
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -1097,7 +1284,7 @@ pub struct SelectShippingRequest {
     path = "/storefront/carts/{id}/shipping/{group_id}",
     params(("id" = CartId, Path), ("group_id" = ShippingGroupId, Path)),
     request_body = SelectShippingRequest,
-    responses((status = 200, description = "OK", body = CartResponse), (status = 429, description = "Over the rate limit for this cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
+    responses((status = 200, description = "OK", body = CartResponse, headers(("Content-Language" = String, description = "The language the response is in."))), (status = 429, description = "Over the rate limit for this cart (`rate_limited`); see `Retry-After`", body = ApiErrorBody)),
     extensions(("x-hypha-scopes" = json!(["carts:write"]))),
 )]
 pub async fn select<S: Storage>(
@@ -1105,7 +1292,7 @@ pub async fn select<S: Storage>(
     caller: Caller<Storefront>,
     PathId((id, group)): PathId<(CartId, ShippingGroupId)>,
     body: JsonBody<SelectShippingRequest>,
-) -> Result<Json<CartResponse>, ApiError> {
+) -> Result<Localized<CartResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     rate_limit::enforce(&state.limiter, Rule::ShippingQuotesCart, &id.to_string()).await?;
     let req = body.parse()?;
@@ -1122,9 +1309,7 @@ pub async fn select<S: Storage>(
         hypha_core::ValidationStep::Shipping,
     )
     .await?;
-    Ok(Json(
-        cart_response(&priced, &ports, &checks, state.media.as_deref()).await?,
-    ))
+    storefront_cart(&state, &ports, &priced, &checks).await
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -1138,19 +1323,28 @@ pub struct CartPaymentMethodsResponse {
     get,
     path = "/storefront/carts/{id}/payment-methods",
     params(("id" = CartId, Path)),
-    responses((status = 200, description = "OK", body = CartPaymentMethodsResponse)),
+    responses((status = 200, description = "OK", body = CartPaymentMethodsResponse, headers(("Content-Language" = String, description = "The language the response is in.")))),
     extensions(("x-hypha-scopes" = json!(["carts:read"]))),
 )]
 pub async fn payment_methods<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
     PathId(id): PathId<CartId>,
-) -> Result<Json<CartPaymentMethodsResponse>, ApiError> {
+) -> Result<Localized<CartPaymentMethodsResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let providers = state.payments(&ports);
     let methods = hypha_checkout::cart_payment_methods(&ctx, &ports, &providers, id).await?;
-    Ok(Json(CartPaymentMethodsResponse {
-        items: methods.iter().map(CartPaymentMethodResponse::new).collect(),
+    let served = served_for(&state, &ports, &ctx, id).await?;
+    let resources: Vec<ResourceRef> = methods
+        .iter()
+        .map(|m| ResourceRef::new(ResourceKind::PaymentMethod, m.id().as_uuid()))
+        .collect();
+    let overlay = served.overlay(&ports, &resources).await?;
+    Ok(served.respond(CartPaymentMethodsResponse {
+        items: methods
+            .iter()
+            .map(|m| CartPaymentMethodResponse::translated(m, &overlay))
+            .collect(),
     }))
 }
 
@@ -1172,7 +1366,7 @@ pub struct SetPaymentMethodRequest {
     path = "/storefront/carts/{id}/payment-method",
     params(("id" = CartId, Path)),
     request_body = SetPaymentMethodRequest,
-    responses((status = 200, description = "OK", body = CartResponse)),
+    responses((status = 200, description = "OK", body = CartResponse, headers(("Content-Language" = String, description = "The language the response is in.")))),
     extensions(("x-hypha-scopes" = json!(["carts:write"]))),
 )]
 pub async fn set_payment_method<S: Storage>(
@@ -1180,7 +1374,7 @@ pub async fn set_payment_method<S: Storage>(
     caller: Caller<Storefront>,
     PathId(id): PathId<CartId>,
     body: JsonBody<SetPaymentMethodRequest>,
-) -> Result<Json<CartResponse>, ApiError> {
+) -> Result<Localized<CartResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let providers = state.payments(&ports);
@@ -1189,13 +1383,5 @@ pub async fn set_payment_method<S: Storage>(
             .await
             // The method arrives in the body: invalid input, not the cart's state.
             .map_err(|e| ApiError::from(e).unprocessable_if("payment_method_unavailable"))?;
-    Ok(Json(
-        cart_response(
-            &priced,
-            &ports,
-            &state.cart_checks(&ports),
-            state.media.as_deref(),
-        )
-        .await?,
-    ))
+    storefront_cart(&state, &ports, &priced, &state.cart_checks(&ports)).await
 }

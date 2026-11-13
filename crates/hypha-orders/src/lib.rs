@@ -27,8 +27,8 @@ pub use events::{
 pub use filter::{OrderFilter, OrderFilterInput, OrderSort};
 pub use order::{
     CancelReason, Cancellation, DiscountClass, DiscountShare, FinancialStatus, FulfillmentStatus,
-    NewOrder, Order, OrderDiscount, OrderLine, OrderNumber, OrderShippingLine, OrderSnapshot,
-    OrderTax, OrderTaxSource,
+    LocalizedDiscount, LocalizedLine, LocalizedShipping, NewOrder, Order, OrderDiscount, OrderLine,
+    OrderNumber, OrderShippingLine, OrderSnapshot, OrderTax, OrderTaxSource,
 };
 pub use repo::{HasOrders, OrderRepo, StageOrders};
 pub use sales::{

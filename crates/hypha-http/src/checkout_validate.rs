@@ -357,6 +357,7 @@ pub fn validated_cart(cart: &PricedCart, redaction: Redaction) -> ValidatedCart 
         subtotal: cart.subtotal,
         total: cart.total,
         redacted: removes_email.then(|| vec!["email".to_string()]),
+        language: cart.spoken_language().cloned(),
     }
 }
 

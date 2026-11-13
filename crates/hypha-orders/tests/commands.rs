@@ -68,6 +68,7 @@ fn mugs(id: OrderId, unit: i64) -> Order {
             compare_at_price: None,
             price_list: None,
             unit_cost: None,
+            localized: None,
         }],
         shipping_address: None,
         address_check: None,
@@ -78,6 +79,7 @@ fn mugs(id: OrderId, unit: i64) -> Order {
         shipping_total: eur(0),
         tax_total: eur(0),
         total: eur(2 * unit),
+        language: None,
     })
     .unwrap()
 }

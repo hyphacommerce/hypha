@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
 use hypha_core::{
-    Address, AddressId, CustomerId, Email, PendingEvent, Recorded, Stamped, Stamps, Timestamp,
-    Version, Versioned, optional_text,
+    Address, AddressId, CustomerId, Email, Language, PendingEvent, Recorded, Stamped, Stamps,
+    Timestamp, Version, Versioned, optional_text,
 };
 
 use crate::{
@@ -43,6 +43,10 @@ pub struct Customer {
     erasure_due_at: Option<Timestamp>,
     /// When the customer's personal data was erased: read-only from then on.
     erased_at: Option<Timestamp>,
+    /// The language they read: from their latest checkout, or as they or staff set it.
+    /// What emails that aren't about one order are written in; `None` for the store's
+    /// default.
+    language: Option<Language>,
     /// What changed since it was loaded, for its events.
     changes: Changes,
 }
@@ -92,6 +96,7 @@ impl Customer {
             sms_marketing: MarketingConsent::default(),
             erasure_due_at: None,
             erased_at: None,
+            language: None,
             changes: Changes::created(),
         }
     }
@@ -356,6 +361,23 @@ impl Customer {
         self.phone.as_deref()
     }
 
+    /// The language they read; `None` for the store's default.
+    pub fn language(&self) -> Option<&Language> {
+        self.language.as_ref()
+    }
+
+    /// Sets the language they read (the caller holds it to the store's languages);
+    /// `None` goes back to the store's default. Returns whether it changed.
+    pub fn set_language(&mut self, language: Option<Language>) -> Result<bool, CustomerError> {
+        self.ensure_not_erased()?;
+        if language == self.language {
+            return Ok(false);
+        }
+        self.language = language;
+        self.changes.field("language");
+        Ok(true)
+    }
+
     pub fn addresses(&self) -> &[SavedAddress] {
         &self.addresses
     }
@@ -390,6 +412,8 @@ pub struct CustomerSnapshot {
     pub sms_marketing: MarketingConsent,
     pub erasure_due_at: Option<Timestamp>,
     pub erased_at: Option<Timestamp>,
+    /// `None` for the store's default, and for customers from before they had one.
+    pub language: Option<Language>,
 }
 
 impl Customer {
@@ -409,6 +433,7 @@ impl Customer {
             sms_marketing: self.sms_marketing,
             erasure_due_at: self.erasure_due_at,
             erased_at: self.erased_at,
+            language: self.language.clone(),
         }
     }
 
@@ -440,6 +465,7 @@ impl Customer {
         customer.sms_marketing = s.sms_marketing;
         customer.erasure_due_at = s.erasure_due_at;
         customer.erased_at = s.erased_at;
+        customer.language = s.language;
         customer.version = s.version;
         customer.stamps = s.stamps;
         // Rebuilt through `new` and the setters; nothing happened, though.
@@ -489,6 +515,29 @@ mod tests {
         assert_eq!(c.first_name(), Some("Ana"));
         c.set_first_name(Some("  ".to_string())).unwrap();
         assert_eq!(c.first_name(), None);
+    }
+
+    #[test]
+    fn a_language_is_set_once_and_says_whether_it_changed() {
+        let mut c = customer();
+        let german = Language::new("de").unwrap();
+        assert_eq!(c.set_language(Some(german.clone())), Ok(true));
+        assert_eq!(c.set_language(Some(german.clone())), Ok(false));
+        assert_eq!(c.language(), Some(&german));
+        let restored = Customer::restore(c.snapshot()).unwrap();
+        assert_eq!(restored.language(), Some(&german));
+        assert_eq!(c.set_language(None), Ok(true));
+        assert_eq!(c.language(), None);
+    }
+
+    #[test]
+    fn an_erased_customers_language_does_not_change() {
+        let mut c = customer();
+        c.erase(Timestamp::from_unix_micros(1));
+        assert_eq!(
+            c.set_language(Some(Language::new("de").unwrap())),
+            Err(CustomerError::Erased)
+        );
     }
 
     #[test]

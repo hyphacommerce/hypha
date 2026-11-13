@@ -1,7 +1,7 @@
 use hypha_core::{
     Actor, AddressError, AddressFormats, AddressId, AddressParts, AuthError, Clock, Ctx,
-    CustomerGroupId, CustomerId, Email, EmailError, ErrorCode, Handle, IdGenerator, Keyset, Page,
-    PageRequest, RepoError, Scope, report_duplicate,
+    CustomerGroupId, CustomerId, Email, EmailError, ErrorCode, Handle, IdGenerator, Keyset,
+    Language, Page, PageRequest, RepoError, Scope, report_duplicate,
 };
 use thiserror::Error;
 
@@ -143,6 +143,9 @@ pub struct UpdateCustomer {
     pub first_name: Option<Option<String>>,
     pub last_name: Option<Option<String>>,
     pub phone: Option<Option<String>>,
+    /// The language they read, as the host held it to the store's languages; `Some(None)`
+    /// goes back to the store's default.
+    pub language: Option<Option<Language>>,
 }
 
 pub async fn update_customer<R: CustomerRepo>(
@@ -162,6 +165,9 @@ pub async fn update_customer<R: CustomerRepo>(
     }
     if let Some(phone) = input.phone {
         customer.set_phone(phone)?;
+    }
+    if let Some(language) = input.language {
+        customer.set_language(language)?;
     }
     let Some(email) = input.email else {
         customers.update(&mut customer).await?;

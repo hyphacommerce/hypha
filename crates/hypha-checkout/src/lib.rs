@@ -8,6 +8,7 @@
 
 mod cart_payment;
 pub mod commands;
+mod language;
 mod messages;
 mod payment;
 mod start;
@@ -18,6 +19,7 @@ pub use cart_payment::{CartPaymentStarted, StartCartPayment, start_cart_payment}
 pub use commands::{
     CHECKOUT, Checkout, CheckoutPorts, CommandError, Placed, checkout, complete_paid_checkout,
 };
+pub use language::ContentLanguages;
 pub use messages::{CartChecks, Checks, cart_messages, without_echoed_warnings};
 pub use payment::{cart_payment_methods, set_payment_method};
 pub use validation::{CheckoutValidators, NoValidators, Validator, validate_cart};
