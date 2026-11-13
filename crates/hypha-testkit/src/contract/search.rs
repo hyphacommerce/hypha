@@ -5,7 +5,7 @@
 //! sorts, pages, facets) must answer exactly as the reference does, ranking included.
 
 use hypha_core::{
-    ChannelId, MarketId, ProductId, RepoError, Timestamp, VariantId, Version, Versioned,
+    ChannelId, Language, MarketId, ProductId, RepoError, Timestamp, VariantId, Version, Versioned,
 };
 use hypha_search_index::{
     FacetKey, FacetSetting, Filter, Group, PriceBounds, SearchDocument, SearchIndex, SearchQuery,
@@ -22,6 +22,10 @@ fn market(n: u128) -> MarketId {
 
 fn product(n: u128) -> ProductId {
     ProductId::from_uuid(Uuid::from_u128(n))
+}
+
+fn language(tag: &str) -> Language {
+    Language::new(tag).unwrap()
 }
 
 /// Loads the fixture into `index`: one `replace` per market, for all its products.
@@ -45,6 +49,7 @@ async fn load<I: SearchIndex>(index: &I, documents: &[SearchDocument]) {
 fn query(market_n: u128) -> SearchQuery {
     SearchQuery {
         market: market(market_n),
+        language: language("en"),
         channel: None,
         category: None,
         terms: vec![],
@@ -80,6 +85,11 @@ fn filter(key: FacetKey, values: &[&str]) -> Filter {
 pub async fn search_index<I: SearchIndex>(make: impl AsyncFn() -> I) {
     scenario("search index: replace adds, replaces and removes a product's documents");
     replace(&make().await).await;
+    scenario(
+        "search index: replace takes a product's documents in every language together, and \
+         a market has documents in a language until none is left",
+    );
+    replace_languages(&make().await).await;
     scenario("search index: every query answers as the reference does");
     battery(&make().await).await;
     scenario("search index: option names, most used first");
@@ -137,6 +147,79 @@ async fn replace<I: SearchIndex>(index: &I) {
     other.market = market(2);
     assert_eq!(index.search(&other).await.unwrap().total, 1);
     assert_eq!(index.count().await, Ok(expected.len() as u64));
+}
+
+async fn replace_languages<I: SearchIndex>(index: &I) {
+    let fixture = search_fixture();
+    load(index, &fixture).await;
+    assert_eq!(
+        index.has_documents(market(1), &language("de")).await,
+        Ok(true)
+    );
+    assert_eq!(
+        index.has_documents(market(2), &language("de")).await,
+        Ok(false)
+    );
+    assert_eq!(
+        index.has_documents(market(2), &language("en")).await,
+        Ok(true)
+    );
+    let mut german = query(1);
+    german.language = language("de");
+    german.group = Group::Variant;
+    german.limit = 100;
+    assert_eq!(
+        index.search(&german).await.unwrap(),
+        reference::search(&fixture, &german)
+    );
+    assert_eq!(index.search(&german).await.unwrap().total, 6);
+
+    // The market stops offering German: the shirt is rebuilt in English alone, and its
+    // German documents go; the other products' stay.
+    let english: Vec<SearchDocument> = fixture
+        .iter()
+        .filter(|d| d.product == product(1) && d.language == language("en"))
+        .cloned()
+        .collect();
+    index
+        .replace(market(1), &[product(1)], &english)
+        .await
+        .unwrap();
+    let left: Vec<SearchDocument> = fixture
+        .iter()
+        .filter(|d| !(d.product == product(1) && d.language == language("de")))
+        .cloned()
+        .collect();
+    for language_ in ["en", "de"] {
+        let mut q = german.clone();
+        q.language = language(language_);
+        assert_eq!(
+            index.search(&q).await.unwrap(),
+            reference::search(&left, &q),
+            "{language_}"
+        );
+    }
+    assert_eq!(index.search(&german).await.unwrap().total, 3);
+    assert_eq!(index.count().await, Ok(left.len() as u64));
+
+    // Every product's German documents gone: the market has none in German.
+    let others: Vec<ProductId> = [2, 3].map(product).to_vec();
+    let english: Vec<SearchDocument> = fixture
+        .iter()
+        .filter(|d| {
+            d.market == market(1) && others.contains(&d.product) && d.language == language("en")
+        })
+        .cloned()
+        .collect();
+    index.replace(market(1), &others, &english).await.unwrap();
+    assert_eq!(
+        index.has_documents(market(1), &language("de")).await,
+        Ok(false)
+    );
+    assert_eq!(
+        index.has_documents(market(1), &language("en")).await,
+        Ok(true)
+    );
 }
 
 async fn battery<I: SearchIndex>(index: &I) {
@@ -237,6 +320,43 @@ async fn battery<I: SearchIndex>(index: &I) {
         q.channel = channel(1);
         q.market = market(2);
     });
+    // Another language: its own text and labels, the same keys; one with no documents.
+    let german = |q: &mut SearchQuery| q.language = language("de");
+    base(&german);
+    base(&|q| {
+        german(q);
+        q.terms = terms_("leinen");
+    });
+    base(&|q| {
+        german(q);
+        q.terms = terms_("rot");
+    });
+    base(&|q| {
+        german(q);
+        q.terms = terms_("baumwollhemd hell");
+    });
+    base(&|q| {
+        german(q);
+        q.terms = terms_("cotton");
+    });
+    base(&|q| {
+        german(q);
+        q.filters = vec![filter(FacetKey::Option("color".into()), &["Red"])];
+    });
+    base(&|q| {
+        german(q);
+        q.filters = vec![filter(FacetKey::Option("color".into()), &["Rot"])];
+    });
+    base(&|q| {
+        german(q);
+        q.channel = channel(2);
+        q.filters = vec![filter(FacetKey::OnSale, &["true"])];
+    });
+    base(&|q| q.language = language("fr"));
+    base(&|q| {
+        q.language = language("de");
+        q.market = market(2);
+    });
 
     for base in bases {
         for group in [Group::Listing, Group::Product, Group::Variant] {
@@ -324,6 +444,8 @@ async fn queued_once<Q: SearchQueue>(queue: &Q) {
     let targets = [
         Target::Product(product(2)),
         Target::Variant(variant(7)),
+        Target::Market(market(3)),
+        Target::Category(hypha_core::CategoryId::from_uuid(Uuid::from_u128(5))),
         Target::All,
     ];
     queue.mark(&targets).await.unwrap();
@@ -331,11 +453,11 @@ async fn queued_once<Q: SearchQueue>(queue: &Q) {
         .mark(&[Target::Product(product(2)), Target::Product(product(1))])
         .await
         .unwrap();
-    assert_eq!(queue.queued().await, Ok(4));
-    let leased = queue.lease(at(0), at(60), 3).await.unwrap();
+    assert_eq!(queue.queued().await, Ok(6));
+    let leased = queue.lease(at(0), at(60), 5).await.unwrap();
     assert_eq!(
         leased.iter().map(|m| m.target).collect::<Vec<_>>(),
-        [targets[0], targets[1], targets[2]],
+        targets,
         "oldest marked first; marking again doesn't move it back"
     );
     assert_eq!(queue.finish(&leased).await, Ok(vec![]));

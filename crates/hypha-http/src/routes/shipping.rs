@@ -355,7 +355,7 @@ pub async fn delete_zone_handler<S: Storage>(
         None => Vec::new(),
     };
     delete_zone(&ctx, ports.shipping_zones(), id).await?;
-    forget(&ports, ResourceKind::ShippingOption, options).await?;
+    forget(&ports, ResourceKind::ShippingOption, options).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -491,7 +491,7 @@ pub async fn remove_option_handler<S: Storage>(
     let zone = remove_option(&ctx, ports.shipping_zones(), id, option)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("shipping_option_not_found"))?;
-    forget(&ports, ResourceKind::ShippingOption, [option.as_uuid()]).await?;
+    forget(&ports, ResourceKind::ShippingOption, [option.as_uuid()]).await;
     Ok(Json(ShippingZoneResponse::new(&zone)?))
 }
 

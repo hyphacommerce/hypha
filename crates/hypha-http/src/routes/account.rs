@@ -90,6 +90,10 @@ pub struct AccountResponse {
     custom_fields: CustomFieldValues,
     /// When the account was created, RFC 3339 in UTC.
     created_at: String,
+    /// The language they read (a BCP 47 tag): their latest checkout's, or as they set it
+    /// (`PATCH /storefront/account`). What emails that aren't about one order use; `null`
+    /// for the store's default.
+    language: Option<hypha_core::Language>,
 }
 
 impl AccountResponse {
@@ -106,6 +110,7 @@ impl AccountResponse {
             addresses: c.addresses().iter().map(AddressResponse::from).collect(),
             email_marketing: ConsentResponse::new(c.marketing_consent(Channel::Email))?,
             sms_marketing: ConsentResponse::new(c.marketing_consent(Channel::Sms))?,
+            language: c.language().cloned(),
             erasure_due_at: c.erasure_due_at().map(rfc3339).transpose()?,
             custom_fields,
             created_at,
@@ -312,9 +317,14 @@ pub struct UpdateAccountRequest {
     last_name: Option<Option<String>>,
     #[serde(default, deserialize_with = "patch::nullable")]
     phone: Option<Option<String>>,
+    /// The language they read (a BCP 47 tag), out of those the store publishes: one it
+    /// doesn't is tried without its region, else the store's default is kept. `null`
+    /// goes back to the store's default.
+    #[serde(default, deserialize_with = "patch::nullable")]
+    language: Option<Option<String>>,
 }
 
-/// Changes the customer's names and phone (the admin's rules: `409 customer_erased`
+/// Changes the customer's names, phone and language (the admin's rules: `409 customer_erased`
 /// once erased).
 #[utoipa::path(
     patch,
@@ -331,11 +341,16 @@ pub async fn update<S: Storage>(
     let (ports, me) = caller.authenticate(&state).await?;
     let owned = own(&me.ctx)?;
     let req = body.parse()?;
+    let language = match req.language {
+        Some(asked) => Some(super::customers::customer_language(&state, &ports, asked).await?),
+        None => None,
+    };
     let input = UpdateCustomer {
         email: None,
         first_name: req.first_name,
         last_name: req.last_name,
         phone: req.phone,
+        language,
     };
     let customer = update_customer(&owned.ctx, ports.customers(), owned.customer, input).await?;
     Ok(Json(respond(&owned, &ports, &customer).await?))
@@ -541,14 +556,14 @@ pub async fn list_orders_handler<S: Storage>(
     get,
     path = "/storefront/account/orders/{id}",
     params(("id" = OrderId, Path)),
-    responses((status = 200, description = "OK", body = PlacedOrderResponse)),
+    responses((status = 200, description = "OK", body = PlacedOrderResponse, headers(("Content-Language" = String, description = "The language the response is in.")))),
     extensions(("x-hypha-scopes" = json!([])), ("x-hypha-customer-session" = json!(true))),
 )]
 pub async fn fetch_order<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: CustomerCaller,
     PathId(id): PathId<OrderId>,
-) -> Result<Json<PlacedOrderResponse>, ApiError> {
+) -> Result<crate::language::Localized<PlacedOrderResponse>, ApiError> {
     let (ports, me) = caller.authenticate(&state).await?;
     let owned = own(&me.ctx)?;
     let order = get_order(&owned.ctx, ports.orders(), id).await?;
@@ -556,7 +571,9 @@ pub async fn fetch_order<S: Storage>(
         return Err(hypha_orders::CommandError::OrderNotFound(id).into());
     }
     let payment = hypha_payments::newest_payment(&ports, id).await?;
-    Ok(Json(PlacedOrderResponse {
+    let store = super::stores::store_as_system(&state, &ports).await?;
+    let served = crate::language::ServedLanguage::of_order(order.language(), &store);
+    Ok(served.respond(PlacedOrderResponse {
         order: StorefrontOrderResponse::with_images(&order, &ports, state.media.as_deref()).await?,
         access_token: state.env.order_token(id),
         payment: payment.as_ref().map(PlacedPaymentResponse::new),
@@ -642,6 +659,7 @@ pub async fn request_erasure_handler<S: Storage>(
             .notify(CustomerEmail::ErasureRequested {
                 to: customer.email().clone(),
                 due_at,
+                language: customer.language().cloned(),
             })
             .await
     {

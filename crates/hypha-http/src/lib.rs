@@ -23,6 +23,7 @@ pub mod host;
 pub mod internal;
 pub mod jobs;
 pub mod key_cache;
+pub mod language;
 pub mod mail;
 pub mod manifests;
 pub mod mcp;

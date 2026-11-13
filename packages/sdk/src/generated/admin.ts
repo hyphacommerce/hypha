@@ -2446,7 +2446,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Every template, customized or default. */
+        /**
+         * Every template in the store's default language, customized or default, and the other
+         *     languages each is customized in.
+         */
         get: operations["admin.notifications.list_templates"];
         put?: never;
         post?: never;
@@ -2464,25 +2467,29 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * One template: its sources in effect, whether it's customized and on, and its
-         *     variables.
+         * One template in one language: its sources in effect, whether it's customized and on,
+         *     and its variables.
          */
         get: operations["admin.notifications.fetch_template"];
         /**
-         * Saves a template. The sources must parse and render against the template's sample
-         *     in the layout in effect (`template_invalid` with `details: {part, line, message}`);
-         *     saving the layout renders every message in it. Turning off one that can't be is
-         *     `template_required`.
+         * Saves a template for a language (none: the store's default). The sources must parse
+         *     and render against the template's sample in that language, in the layout in effect
+         *     for it (`template_invalid` with `details: {part, line, message}`); saving the layout
+         *     renders every message in it. Turning off one that can't be is `template_required`.
          */
         put: operations["admin.notifications.save_template"];
         post?: never;
-        /** Goes back to the default's sources, keeping whether it's on. */
+        /**
+         * Drops the merchant's sources for a language (none: the store's default), keeping
+         *     whether it's on: emails in it send what they fall back to again.
+         */
         delete: operations["admin.notifications.revert_template"];
         options?: never;
         head?: never;
         /**
-         * Turns a template on or off, keeping its sources: a default stays a default (and
-         *     gets later improvements). Turning off one that can't be is `template_required`.
+         * Turns a template on or off in every language, keeping its sources: a default stays a
+         *     default (and gets later improvements). Turning off one that can't be is
+         *     `template_required`. Answers the default language's template.
          */
         patch: operations["admin.notifications.set_template_enabled"];
         trace?: never;
@@ -5195,6 +5202,7 @@ export interface components {
             /** @description False when any line is unavailable; checkout should refuse such a cart. */
             fully_available: boolean;
             id: components["schemas"]["CartId"];
+            language?: components["schemas"]["Language"] | null;
             lines: components["schemas"]["LineResponse"][];
             /** @description Picked from the country when the cart was created; it sets the currency. */
             market: components["schemas"]["MarketId"];
@@ -6260,6 +6268,7 @@ export interface components {
             /** @description The customer groups it's in, sorted; `PUT /admin/customers/{id}/groups` sets them. */
             groups: components["schemas"]["CustomerGroupId"][];
             id: components["schemas"]["CustomerId"];
+            language?: components["schemas"]["Language"] | null;
             last_name?: string | null;
             /** @description What the customer's orders add up to. */
             orders: components["schemas"]["OrderStatsResponse"];
@@ -7300,6 +7309,20 @@ export interface components {
             /** @description In the call's order, each owner once. */
             items: components["schemas"]["OwnerItemsResponse"][];
         };
+        /** @description A line's names as the buyer read them, in the order's language. */
+        LocalizedLineResponse: {
+            product_title: string;
+            /** @description `null` for a product without options. */
+            variant_title?: string | null;
+        };
+        /** @description A name as the buyer read it, in the order's language. */
+        LocalizedNameResponse: {
+            name: string;
+        };
+        /** @description A title as the buyer read it, in the order's language. */
+        LocalizedTitleResponse: {
+            title: string;
+        };
         /**
          * @description A LocationId: `loc_` and 32 hex digits.
          * @example loc_0190f1a2b3c47d8e9f00112233445566
@@ -7573,8 +7596,26 @@ export interface components {
         NotificationTemplateKey: string;
         NotificationTemplateList: {
             /** @description Every template: the layout, the buyer's, then the staff's. */
-            items: components["schemas"]["NotificationTemplateSummary"][];
+            items: components["schemas"]["NotificationTemplateListItem"][];
         };
+        /**
+         * @description A template in the list: in the store's default language, with the other languages the
+         *     merchant saved it in.
+         */
+        NotificationTemplateListItem: components["schemas"]["NotificationTemplateSummary"] & {
+            /**
+             * @description The store's other languages with a template of the merchant's own for this key
+             *     (`?language=` reads one).
+             */
+            languages: string[];
+        };
+        /**
+         * @description Where a template's sources come from.
+         *
+         *     Known values: `merchant`, `default`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        NotificationTemplateOrigin: string;
         /** @description A template with the sources in effect and the variables it can use. */
         NotificationTemplateResponse: components["schemas"]["NotificationTemplateSummary"] & {
             /**
@@ -7582,14 +7623,26 @@ export interface components {
              *     `{% block preheader %}` and `{% block content %}`.
              */
             html: string;
-            /** @description Jinja; empty for the layout. The merchant's when `customized`, else the default. */
+            /** @description The language this is the template of; `null`: the store's default language. */
+            language?: string | null;
+            /**
+             * @description The language `subject`, `html` and `text` are written in: this one's when
+             *     `customized`, else the one its emails fall back to.
+             */
+            sources_language: string;
+            /** @description Where `subject`, `html` and `text` come from. */
+            sources_origin: components["schemas"]["NotificationTemplateOrigin"];
+            /**
+             * @description Jinja; empty for the layout. The merchant's when `customized`, else what emails
+             *     in this language send.
+             */
             subject: string;
             /** @description Jinja plain text; `null`: the text is made from the HTML. */
             text?: string | null;
             /**
-             * @description The template's context, filled with a made-up order and the store's branding:
-             *     every variable it can print (money as `{amount, currency, formatted}`, times as
-             *     `{iso, formatted}`), for the editor's variable list.
+             * @description The template's context, filled with a made-up order in this language and the
+             *     store's branding: every variable it can print (money as `{amount, currency,
+             *     formatted}`, times as `{iso, formatted}`), for the editor's variable list.
              */
             variables: Record<string, never>;
         };
@@ -7601,8 +7654,8 @@ export interface components {
             /** @description Whether the sources are the merchant's (else the build's default). */
             customized: boolean;
             /**
-             * @description Whether its messages are sent. A template that's off records each message as
-             *     `skipped`.
+             * @description Whether its messages are sent, in every language. A template that's off records
+             *     each message as `skipped`.
              */
             enabled: boolean;
             key: components["schemas"]["NotificationTemplateKey"];
@@ -7667,6 +7720,7 @@ export interface components {
             /** @description The code it came by, normalised; `null` for an automatic discount. */
             code?: string | null;
             discount: components["schemas"]["DiscountId"];
+            localized?: components["schemas"]["LocalizedTitleResponse"] | null;
             /** @description The sentence the shopper saw at checkout, kept as it was. */
             summary: string;
             target: components["schemas"]["DiscountTargetDto"];
@@ -7694,6 +7748,7 @@ export interface components {
             fulfilled_quantity: number;
             id: components["schemas"]["OrderLineId"];
             image?: components["schemas"]["ProductMediaResponse"] | null;
+            localized?: components["schemas"]["LocalizedLineResponse"] | null;
             price_list?: components["schemas"]["PriceListId"] | null;
             product: components["schemas"]["ProductId"];
             product_title: string;
@@ -7746,6 +7801,7 @@ export interface components {
             financial_status: components["schemas"]["FinancialStatusDto"];
             fulfillment_status: components["schemas"]["FulfillmentStatusDto"];
             id: components["schemas"]["OrderId"];
+            language?: components["schemas"]["Language"] | null;
             lines: components["schemas"]["OrderLineResponse"][];
             market: components["schemas"]["MarketId"];
             /**
@@ -7787,6 +7843,7 @@ export interface components {
             group: components["schemas"]["ShippingGroupId"];
             /** @description The order lines this ships. */
             lines: components["schemas"]["OrderLineId"][];
+            localized?: components["schemas"]["LocalizedNameResponse"] | null;
             name: string;
             option: components["schemas"]["ShippingOptionId"];
             /** @description `app_…` or `spore_…`; `null` for a built-in rate. */
@@ -8240,6 +8297,12 @@ export interface components {
         /** @description Unsaved sources to render. */
         PreviewNotificationRequest: {
             html: string;
+            /**
+             * @description The language the sources are written for (a BCP 47 tag, one of the store's):
+             *     rendered in that language's layout, its money and dates written its way. Absent:
+             *     the store's default.
+             */
+            language?: string | null;
             order?: components["schemas"]["OrderId"] | null;
             /** @description Empty for the layout. */
             subject?: string;
@@ -9228,7 +9291,10 @@ export interface components {
         };
         /** @description A template's sources (all of them: this replaces the stored ones). */
         SaveNotificationTemplateRequest: {
-            /** @description Absent keeps whether it's on. */
+            /**
+             * @description Absent keeps whether it's on. Set for every language at once: with a `language`
+             *     it's `422 enabled_not_per_language`.
+             */
             enabled?: boolean;
             html: string;
             /** @description Jinja, one line; required for a message, absent (or empty) for the layout. */
@@ -10448,6 +10514,12 @@ export interface components {
         UpdateCustomerRequest: {
             email?: string;
             first_name?: string | null;
+            /**
+             * @description The language they read (a BCP 47 tag), out of those the store publishes: one it
+             *     doesn't is tried without its region, else the store's default is kept. `null`
+             *     goes back to the store's default.
+             */
+            language?: string | null;
             last_name?: string | null;
             phone?: string | null;
         };
@@ -27156,7 +27228,17 @@ export interface operations {
     };
     "admin.notifications.fetch_template": {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description One of the store's languages (a BCP 47 tag, `sr-Latn`, `de-AT`); absent, or the
+                 *     store's default language, is the default language's template. Another language's
+                 *     template is the merchant's for it, else what an email in it sends: their template
+                 *     for it without its region, the build's default in it (or without its region), then
+                 *     the default language's. A language the store doesn't have is `422
+                 *     language_not_listed`.
+                 */
+                language?: string;
+            };
             header?: never;
             path: {
                 /** @example order_confirmation */
@@ -27175,7 +27257,7 @@ export interface operations {
                     "application/json": components["schemas"]["NotificationTemplateResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). */
+            /** @description A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -27224,7 +27306,17 @@ export interface operations {
     };
     "admin.notifications.save_template": {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description One of the store's languages (a BCP 47 tag, `sr-Latn`, `de-AT`); absent, or the
+                 *     store's default language, is the default language's template. Another language's
+                 *     template is the merchant's for it, else what an email in it sends: their template
+                 *     for it without its region, the build's default in it (or without its region), then
+                 *     the default language's. A language the store doesn't have is `422
+                 *     language_not_listed`.
+                 */
+                language?: string;
+            };
             header?: {
                 /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
                 "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
@@ -27252,7 +27344,7 @@ export interface operations {
                     "application/json": components["schemas"]["NotificationTemplateResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            /** @description A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -27337,7 +27429,17 @@ export interface operations {
     };
     "admin.notifications.revert_template": {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description One of the store's languages (a BCP 47 tag, `sr-Latn`, `de-AT`); absent, or the
+                 *     store's default language, is the default language's template. Another language's
+                 *     template is the merchant's for it, else what an email in it sends: their template
+                 *     for it without its region, the build's default in it (or without its region), then
+                 *     the default language's. A language the store doesn't have is `422
+                 *     language_not_listed`.
+                 */
+                language?: string;
+            };
             header?: {
                 /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
                 "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
@@ -27361,7 +27463,7 @@ export interface operations {
                     "application/json": components["schemas"]["NotificationTemplateResponse"];
                 };
             };
-            /** @description A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            /** @description A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
             400: {
                 headers: {
                     [name: string]: unknown;

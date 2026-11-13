@@ -27,7 +27,9 @@ pub use events::{
     PaymentRefunded, PaymentVoided,
 };
 pub use method::{NewPaymentMethod, PaymentMethod, PaymentMethodSnapshot};
-pub use payment::{NewPayment, Payment, PaymentSnapshot, PaymentStatus, financial_status};
+pub use payment::{
+    LocalizedPayment, NewPayment, Payment, PaymentSnapshot, PaymentStatus, financial_status,
+};
 pub use provider::{
     ActionAnswer, ActionRequest, ManualProvider, NextAction, PaymentAction, PaymentProvider,
     PaymentProviders, PaymentRequest, ProviderKey, ProviderState, ProviderStatus, Started,

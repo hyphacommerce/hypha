@@ -127,6 +127,50 @@ async fn an_apps_messages_are_on_the_cart_and_its_answer_is_kept() {
 }
 
 #[tokio::test]
+async fn an_app_is_told_the_language_the_cart_is_in() {
+    let app = app().await;
+    let (pk, cart_path, _) = cart_for_three_mugs(&app).await;
+    let (_, saw) = validating(&app, json!({"messages": []})).await;
+    ship_to(&app, &pk, &cart_path, zagreb("Ilica 1", "10000")).await;
+    // A store with one language and a market listing none: nothing to say.
+    assert_eq!(saw.lock().unwrap()[0].3["cart"].get("language"), None);
+
+    let body = json!({"languages": [{"language": "de", "published": true}]}).to_string();
+    send(&app, "PATCH", "/admin/store", Some(&body)).await;
+    let (_, markets) = send(&app, "GET", "/admin/markets", None).await;
+    let market = markets["items"][0]["id"].as_str().unwrap();
+    let body = json!({"languages": ["en", "de"]}).to_string();
+    send(
+        &app,
+        "PATCH",
+        &format!("/admin/markets/{market}"),
+        Some(&body),
+    )
+    .await;
+    let path = format!("{cart_path}/language");
+    send_as(&app, &pk, "PUT", &path, Some(r#"{"language":"de"}"#)).await;
+    ship_to(&app, &pk, &cart_path, zagreb("Ilica 2", "10000")).await;
+    assert_eq!(
+        saw.lock().unwrap().last().unwrap().3["cart"]["language"],
+        "de"
+    );
+
+    // The store stopped publishing German while the market still lists it (a race the
+    // store's check can't see): the app is told what the cart, and its order, are read
+    // in now.
+    sql(
+        &app,
+        r#"UPDATE stores SET languages = '[{"language": "de", "published": false}]'"#,
+    )
+    .await;
+    ship_to(&app, &pk, &cart_path, zagreb("Ilica 3", "10000")).await;
+    assert_eq!(
+        saw.lock().unwrap().last().unwrap().3["cart"]["language"],
+        "en"
+    );
+}
+
+#[tokio::test]
 async fn an_apps_error_blocks_checkout_until_the_cart_changes() {
     let app = app().await;
     let (pk, cart_path, _) = cart_for_three_mugs(&app).await;

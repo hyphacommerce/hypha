@@ -1,0 +1,8 @@
+{
+  "subject": "Order {number} cancelled",
+  "preheader": "Your order {number} has been cancelled.",
+  "heading": "Your order has been cancelled",
+  "cancelled": "Your order {number} has been cancelled.",
+  "reason": "Reason: {reason}.",
+  "questions": "If you have any questions about it, just reply to this email."
+}

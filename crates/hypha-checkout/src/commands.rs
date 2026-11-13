@@ -1,7 +1,7 @@
 use hypha_cart::{
-    Cart, CartError, CartPorts, CartReading, CartRepo, CartStatus, LineStatus, PricedCart,
-    PricedLine, PromotionReading, ReadingOf, SelectedShipping, ShippingProblem, StageCarts,
-    StoredQuote, group_offers,
+    Cart, CartError, CartPorts, CartReading, CartRepo, CartStatus, ContentLanguages, LineStatus,
+    PricedCart, PricedLine, PromotionReading, ReadingOf, SelectedShipping, ShippingProblem,
+    StageCarts, StoredQuote, group_offers,
     promotions::{Application, Class, CodeOutcome, Share},
     read_cart,
 };
@@ -31,8 +31,10 @@ use hypha_payments::{
 };
 use hypha_shipping::{OfferOutcome, RateProvider};
 use hypha_tax::{TaxLine, TaxSource};
+use hypha_translations::HasTranslations;
 use thiserror::Error;
 
+use crate::language::Localizer;
 pub(crate) use crate::messages::refuse_errors;
 use crate::messages::{CartChecks, cart_messages};
 use crate::start::{Payer, refresh, release, restart, start};
@@ -179,6 +181,7 @@ impl ErrorCode for CommandError {
 pub trait CheckoutPorts:
     CartPorts
     + HasCheckoutRules
+    + HasTranslations
     + HasOrders
     + HasPaymentMethods
     + HasPayments
@@ -197,6 +200,7 @@ pub trait CheckoutPorts:
 impl<T> CheckoutPorts for T where
     T: CartPorts
         + HasCheckoutRules
+        + HasTranslations
         + HasOrders
         + HasPaymentMethods
         + HasPayments
@@ -234,6 +238,9 @@ pub struct Checkout {
     /// Where the storefront wants the buyer back after a payment provider's page (a
     /// redirect), passed to the provider.
     pub return_url: Option<String>,
+    /// The store's languages: what the order's language is resolved against, its
+    /// `localized` copies made in.
+    pub languages: ContentLanguages,
 }
 
 /// Turns a cart into an order.
@@ -306,6 +313,7 @@ pub async fn complete_paid_checkout<
     rates: &P,
     payments: &Q,
     checks: &K,
+    languages: ContentLanguages,
     payment: PaymentId,
 ) -> Result<Option<Placed>, CommandError> {
     ctx.require(Scope::PaymentsWrite)?;
@@ -323,6 +331,7 @@ pub async fn complete_paid_checkout<
         expected_total: None,
         idempotency: None,
         return_url: None,
+        languages,
     };
     let placed = run_checkout(ctx, ports, ids, clock, rates, payments, checks, input).await?;
     // The cart was checked out with another payment (another method, another tab): this
@@ -544,6 +553,7 @@ fn payer_of(order: &Order) -> Payer {
         market: order.market(),
         country: order.country(),
         email: order.email().clone(),
+        language: order.language().cloned(),
     }
 }
 
@@ -576,6 +586,7 @@ pub(crate) async fn ready<
     rates: &P,
     payments: &Q,
     checks: &K,
+    languages: &ContentLanguages,
     id: CartId,
     expected_total: Option<Money>,
     renewed: &mut Option<Renewal>,
@@ -611,6 +622,7 @@ pub(crate) async fn ready<
     let mut reading = renew_expired_quote(
         ports,
         rates,
+        languages,
         clock,
         &mut cart,
         reading,
@@ -632,6 +644,7 @@ pub(crate) async fn ready<
     // kept at once, so a refused checkout or a retry doesn't ask again for the same cart.
     if let Some(fresh) = refreshed_checks(
         checks.validators(),
+        languages,
         clock,
         &reading.priced,
         ValidationStep::Checkout,
@@ -643,7 +656,7 @@ pub(crate) async fn ready<
         ports.carts().update(&mut cart).await?;
         reading.priced.app_checks = fresh;
     }
-    let messages = cart_messages(ports, checks, &reading.priced).await?;
+    let messages = cart_messages(ports, checks, languages, &reading.priced).await?;
     Ok(Ready {
         cart,
         reading,
@@ -735,6 +748,7 @@ async fn attempt<
         rates,
         payments,
         checks,
+        &input.languages,
         input.cart,
         input.expected_total,
         renewed,
@@ -773,18 +787,29 @@ async fn attempt<
         .map(|_| OrderAddressCheck::placed(priced.address_check.clone(), &messages));
     refuse_errors(cart.id(), messages)?;
 
+    // The order's names in the buyer's language, beside the store's own.
+    let localizer = Localizer::load(ports, &input.languages, &priced, method.as_ref()).await?;
     let lines = priced
         .lines
         .iter()
         .map(|line| {
             // What a unit costs now, from the item already read for its stock.
             let cost = stock.items.get(&line.variant).and_then(|i| i.unit_cost());
-            order_line(line, OrderLineId::from_uuid(ids.new_uuid()), cost)
+            let mut kept = order_line(line, OrderLineId::from_uuid(ids.new_uuid()), cost)?;
+            kept.localized = localizer.line(line);
+            Ok(kept)
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, CommandError>>()?;
 
-    let shipping_lines = shipping_lines(&priced, &lines)?;
-    let order_discounts: Vec<OrderDiscount> = priced.discounts.iter().map(order_discount).collect();
+    let shipping_lines = shipping_lines(&priced, &lines, &localizer)?;
+    let order_discounts: Vec<OrderDiscount> = priced
+        .discounts
+        .iter()
+        .map(|a| OrderDiscount {
+            localized: localizer.discount(a),
+            ..order_discount(a)
+        })
+        .collect();
 
     // Reserve before taking a number, so a shortage doesn't use one up.
     let StockContext {
@@ -832,8 +857,13 @@ async fn attempt<
         },
     };
     // The marketing box: ticked, the buyer subscribes from checkout, unless a newer consent
-    // is stored; unticked never unsubscribes anyone. An erased customer can't consent: the
-    // order still goes through.
+    // is stored; unticked never unsubscribes anyone. An erased customer can't consent, nor
+    // change language: the order still goes through.
+    let language = localizer.language().clone();
+    let mut buyer_changed = false;
+    if let Some(guest) = &mut new_customer {
+        guest.set_language(Some(language.clone()))?;
+    }
     if priced.marketing_opt_in {
         let change = ConsentChange {
             state: ConsentState::Subscribed,
@@ -844,19 +874,27 @@ async fn attempt<
         if let Some(guest) = &mut new_customer {
             guest.set_marketing_consent(Channel::Email, change, ConsentSource::Checkout, now)?;
         }
-        if let Some(buyer) = &mut known_customer {
-            let subscribed = !buyer.is_erased()
-                && buyer.set_marketing_consent(
-                    Channel::Email,
-                    change,
-                    ConsentSource::Checkout,
-                    now,
-                )?;
-            if !subscribed {
-                known_customer = None;
-            }
+        if let Some(buyer) = &mut known_customer
+            && !buyer.is_erased()
+        {
+            buyer_changed |= buyer.set_marketing_consent(
+                Channel::Email,
+                change,
+                ConsentSource::Checkout,
+                now,
+            )?;
         }
-    } else {
+    }
+    // The language they last checked out in: what emails not about one order use. Only
+    // for the customer the cart is linked to (signed in, or linked by staff): a guest who
+    // types a customer's email doesn't change what that customer reads.
+    if priced.customer.is_some()
+        && let Some(buyer) = &mut known_customer
+        && !buyer.is_erased()
+    {
+        buyer_changed |= buyer.set_language(Some(language.clone()))?;
+    }
+    if !buyer_changed {
         known_customer = None;
     }
 
@@ -882,6 +920,7 @@ async fn attempt<
         shipping_total: priced.shipping_total,
         tax_total: priced.tax_total,
         total: priced.total,
+        language: Some(language),
     })?;
     cart.complete(order.id())
         .map_err(hypha_cart::CommandError::from)?;
@@ -893,13 +932,10 @@ async fn attempt<
                 .as_ref()
                 .map(|m| {
                     let id = hypha_core::PaymentId::from_uuid(ids.new_uuid());
-                    Payment::new(NewPayment::by(
-                        m,
-                        id,
-                        cart.id(),
-                        Some(order.id()),
-                        order.total(),
-                    ))
+                    Payment::new(NewPayment {
+                        localized: localizer.payment(m),
+                        ..NewPayment::by(m, id, cart.id(), Some(order.id()), order.total())
+                    })
                 })
                 .transpose()?;
         }
@@ -1026,9 +1062,11 @@ pub(crate) struct Renewal {
 /// quote replaces the old on the cart, and a changed price fails with `total_changed` when
 /// the buyer confirmed a total, after storing the new quote, so the client shows the new
 /// total and retries with it.
+#[allow(clippy::too_many_arguments)]
 async fn renew_expired_quote<S: CheckoutPorts, C: Clock, P: RateProvider>(
     ports: &S,
     rates: &P,
+    languages: &ContentLanguages,
     clock: &C,
     cart: &mut Cart,
     reading: CartReading<ReadingOf<S>>,
@@ -1049,7 +1087,7 @@ async fn renew_expired_quote<S: CheckoutPorts, C: Clock, P: RateProvider>(
     let version = cart.version();
     let selection = match carried.take().filter(|r| r.version == version) {
         Some(earlier) => earlier.selection,
-        None => match ask_again(cart, &reading, rates, &choice, now).await? {
+        None => match ask_again(cart, &reading, rates, languages, &choice, now).await? {
             Some(selection) => selection,
             // The option is built-in now: its price follows the cart without a quote.
             None => return Ok(reading),
@@ -1082,12 +1120,13 @@ async fn ask_again<P: RateProvider, R: PromotionReading>(
     cart: &Cart,
     reading: &CartReading<R>,
     rates: &P,
+    languages: &ContentLanguages,
     choice: &SelectedShipping,
     now: hypha_core::Timestamp,
 ) -> Result<Option<SelectedShipping>, CommandError> {
     let unavailable =
         || CommandError::ShippingUnavailable(ShippingProblem::OptionUnavailable(choice.option));
-    let offers = match group_offers(cart, reading, rates).await {
+    let offers = match group_offers(cart, reading, rates, languages).await {
         Ok(offers) => offers,
         // No zone serves the country any more: to the buyer, the option is gone.
         Err(hypha_cart::CommandError::NoShippingToCountry(_)) => return Err(unavailable()),
@@ -1125,6 +1164,7 @@ async fn ask_again<P: RateProvider, R: PromotionReading>(
 fn shipping_lines(
     priced: &PricedCart,
     lines: &[OrderLine],
+    localizer: &Localizer,
 ) -> Result<Vec<OrderShippingLine>, CommandError> {
     priced
         .shipping_groups
@@ -1156,6 +1196,7 @@ fn shipping_lines(
                 total: selected.total,
                 estimate_days: selected.estimate.map(|e| (e.min_days(), e.max_days())),
                 tax: selected.tax.map(order_tax),
+                localized: localizer.shipping(selected.option, &selected.name),
             })
         })
         .collect()
@@ -1177,6 +1218,7 @@ fn order_discount(a: &Application) -> OrderDiscount {
         value: a.value.clone(),
         target: a.target.clone(),
         amount: a.amount,
+        localized: None,
     }
 }
 
@@ -1272,6 +1314,7 @@ fn order_line(
         compare_at_price: *compare_at,
         price_list: *price_list,
         unit_cost,
+        localized: None,
     })
 }
 

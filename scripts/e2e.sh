@@ -99,6 +99,19 @@ replayed() {
     fi
 }
 
+# in_language NAME TAG CURL_ARGS...: asserts the response's `Content-Language` is TAG.
+in_language() {
+    local name=$1 tag=$2
+    shift 2
+    pick_creds "$@"
+    if curl -s -o /dev/null -D - ${CREDS[@]+"${CREDS[@]}"} "$@" | tr -d '\r' | grep -q "^[Cc]ontent-[Ll]anguage: $tag\$"; then
+        echo "ok   $name"
+    else
+        echo "FAIL $name: no Content-Language: $tag"
+        FAILED=$((FAILED + 1))
+    fi
+}
+
 # fresh NAME CURL_ARGS...: asserts the response does NOT carry `Idempotent-Replayed`.
 fresh() {
     local name=$1
@@ -301,11 +314,13 @@ MUG_VAR=$(variant)
 step "the mug's translatable fields" 200 - "$BASE/admin/translations/product/$MUG"
 contains "what it can be translated from and into" '"default_language":"en","languages":["de","fr"]'
 contains "the title's source text" '"key":"title","format":"text","max_length":255,"source":"Mug"'
+step "nothing to translate in an empty description" 422 invalid_translation \
+    -X PUT "$BASE/admin/translations/product/$MUG/de" -H "$JSON" -d '{"fields":{"description":{"value":"<p>Eine Tasse.</p>"}}}'
+contains "says why" '"code":"source_empty","key":"description"'
 step "translate the mug into German" 200 - -X PUT "$BASE/admin/translations/product/$MUG/de" -H "$JSON" \
-    -d '{"fields":{"title":{"value":" Tasse "},"description":{"value":"<p>Eine Tasse.</p><script>x</script>"}}}'
+    -d '{"fields":{"title":{"value":" Tasse "}}}'
 contains "the title, trimmed" '"de":{"value":"Tasse","source_digest":"'
-contains "the description, sanitised" '"de":{"value":"<p>Eine Tasse.</p>","source_digest":"'
-contains "both up to date" '"language":"de","translated":2,"outdated":0'
+contains "up to date" '"language":"de","translated":1,"outdated":0'
 step "into an unpublished language too" 200 - -X PUT "$BASE/admin/translations/product/$MUG/fr" -H "$JSON" \
     -d '{"fields":{"title":{"value":"Tasse"}}}'
 step "never into the default language" 422 translation_into_default_language -X PUT "$BASE/admin/translations/product/$MUG/en" \
@@ -317,7 +332,7 @@ step "a field a product doesn't have" 422 invalid_translation -X PUT "$BASE/admi
 contains "says which" '"code":"unknown_field"'
 step "a kind that has no translations" 404 unknown_resource_kind "$BASE/admin/translations/variant/$MUG"
 step "what's translated into German" 200 - "$BASE/admin/translations?kind=product&language=de"
-contains "the mug's title and description" "{\"resource\":{\"kind\":\"product\",\"id\":\"$MUG\"},\"language\":\"de\",\"fields\":[\"description\",\"title\"]"
+contains "the mug's title" "{\"resource\":{\"kind\":\"product\",\"id\":\"$MUG\"},\"language\":\"de\",\"fields\":[\"title\"]"
 step "the default language is fixed while anything is translated" 409 default_language_in_use -X PATCH "$BASE/admin/store" \
     -H "$JSON" -d '{"default_language":"es"}'
 step "remove the German translation" 204 - -X DELETE "$BASE/admin/translations/product/$MUG/de"
@@ -711,6 +726,39 @@ step "a page without a country has no prices" 200 - "$BASE/storefront/products/b
 contains "none" '"price":null,"available":null'
 step "an unknown handle" 404 product_not_found "$BASE/storefront/products/by-handle/no-such-thing?country=HR"
 step "an unknown parameter" 400 invalid_query "$BASE/storefront/products/by-handle/mug?currency=EUR"
+step "the mug in German" 200 - -X PUT "$BASE/admin/translations/product/$MUG/de" -H "$JSON" \
+    -d '{"fields":{"title":{"value":"Tasse"}}}'
+step "its page in German" 200 - "$BASE/storefront/products/by-handle/mug?country=HR&language=de"
+contains "the translated title" '"title":"Tasse"'
+in_language "named in Content-Language" de "$BASE/storefront/products/by-handle/mug?country=HR&language=DE"
+step "a language the store hasn't published" 200 - "$BASE/storefront/products/by-handle/mug?country=HR&language=fr"
+lacks "is the market's default, not an error" '"title":"Tasse"'
+in_language "English, the market's first" en "$BASE/storefront/products/by-handle/mug?country=HR&language=fr"
+in_language "as without a language" en "$BASE/storefront/products/$MUG?country=HR"
+in_language "the categories take it too" de "$BASE/storefront/categories?language=de"
+in_language "and the country, for its market's default" en "$BASE/storefront/categories?country=HR"
+wait_for "search in German finds the mug by its German title" \
+    "$BASE/storefront/search?country=HR&language=de&q=tasse" '"title":"Tasse"'
+in_language "search names its language" de "$BASE/storefront/search?country=HR&language=de&q=tasse"
+step "search in a language the store hasn't published" 200 - "$BASE/storefront/search?country=HR&language=fr&q=mug"
+contains "answers in the market's default" '"title":"Mug"'
+in_language "named in Content-Language" en "$BASE/storefront/search?country=HR&language=fr&q=mug"
+step "a cart in German" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR","language":"de"}'
+contains "keeps the language" '"language":"de"'
+LANG_CART=$(id)
+in_language "answered in it" de "$BASE/storefront/carts/$LANG_CART"
+step "a mug in it" 200 - -X POST "$BASE/storefront/carts/$LANG_CART/lines" -H "$JSON" \
+    -d "{\"variant\":\"$MUG_VAR\",\"quantity\":1}"
+contains "named in German" '"product_title":"Tasse"'
+step "a language its market doesn't offer" 200 - -X PUT "$BASE/storefront/carts/$LANG_CART/language" -H "$JSON" \
+    -d '{"language":"fr"}'
+contains "keeps the market's default" '"language":"en"'
+contains "and reads in it" '"product_title":"Mug"'
+step "the language is required" 422 invalid_body -X PUT "$BASE/storefront/carts/$LANG_CART/language" -H "$JSON" -d '{}'
+step "back to following the market" 200 - -X PUT "$BASE/storefront/carts/$LANG_CART/language" -H "$JSON" \
+    -d '{"language":null}'
+contains "no language of its own" '"language":null'
+step "back to the source alone" 204 - -X DELETE "$BASE/admin/translations/product/$MUG/de"
 step "where the store sells" 200 - "$BASE/storefront/countries"
 contains "Croatia, in euros" "{\"country\":\"HR\",\"name\":\"Croatia\",\"market\":\"$MARKET\",\"currency\":\"EUR\",\"minor_units\":2"
 contains "in the market's languages" '"languages":["en","de"]'
@@ -967,6 +1015,7 @@ ORDER=$(id)
 contains "its payment is pending, with the instructions" '"payment":{"status":"pending","method_name":"Bank transfer","instructions":"IBAN HR12 3456 7890. Quote the order number.","amount":{"amount":1800,"currency":"EUR"}}'
 contains "and the next action shows them" '"next_action":{"type":"instructions","instructions":"IBAN HR12 3456 7890. Quote the order number."}'
 contains "the order is #1001" '"number":1001'
+contains "placed in the market's default language" '"language":"en"'
 contains "it is pending and unfulfilled" '"financial_status":"pending","fulfillment_status":"unfulfilled"'
 contains "it copies the line" '"product_title":"Mug","variant_title":null,"sku":null,"unit_price":{"amount":900,"currency":"EUR"}'
 contains "and its compare-at" '"unit_price":{"amount":900,"currency":"EUR"},"compare_at_price":null,"total"'
@@ -2264,6 +2313,11 @@ contains "the layout first" '"items":[{"key":"layout"'
 step "one template" 200 - "$BASE/admin/notification-templates/order_shipped"
 contains "with its variables" '"variables":{'
 step "an unknown template" 404 template_unknown "$BASE/admin/notification-templates/nope"
+step "a template in the store's default language" 200 - \
+    "$BASE/admin/notification-templates/order_shipped?language=en"
+contains "is the default language's" '"language":null'
+step "a template in a language the store doesn't have" 422 language_not_listed \
+    "$BASE/admin/notification-templates/order_shipped?language=ja"
 TEMPLATES="$BASE/admin/notification-templates/order_shipped"
 BROKEN='{"subject":"Shipped","html":"{% extends \"layout\" %}{% block content %}{{ order.nope }}{% endblock %}"}'
 GOOD='{"subject":"Shipped: {{ order.number }}","html":"{% extends \"layout\" %}{% block content %}<p>{{ order.number }}</p>{% endblock %}"}'

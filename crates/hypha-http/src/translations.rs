@@ -13,7 +13,8 @@ use hypha_custom_fields::{CustomFieldDefinition, DefinitionRepo, HasCustomFieldD
 use hypha_discounts::{Discount, DiscountRepo, HasDiscounts};
 use hypha_media::{Asset, AssetRepo, HasAssets};
 use hypha_notifications::{
-    HasNotificationSettings, NotificationSettings, NotificationSettingsRepo,
+    HasNotificationSettings, HasNotificationTemplates, NotificationSettings,
+    NotificationSettingsRepo, NotificationTemplateRepo,
 };
 use hypha_payments::{HasPaymentMethods, PaymentMethod, PaymentMethodRepo};
 use hypha_products::{HasProducts, Product, ProductRepo};
@@ -226,27 +227,43 @@ pub(crate) async fn source<S: Storage>(
 
 /// Removes the translations of resources that are gone, for the kinds no event names
 /// when they go (shipping options, payment methods): the route that deleted them calls
-/// this with the same ports.
+/// this with the same ports, after the delete committed.
+///
+/// Best effort: the delete stands, so its answer doesn't change when this fails; the
+/// failure is logged and the translations stay behind, unread (nothing lists a gone
+/// resource's). A deleted event for these kinds, followed by a handler like other
+/// kinds', would retry it; it's owed.
 pub(crate) async fn forget<P: HasTranslations>(
     ports: &P,
     kind: ResourceKind,
     ids: impl IntoIterator<Item = uuid::Uuid>,
-) -> Result<(), RepoError> {
+) {
     let resources: Vec<ResourceRef> = ids
         .into_iter()
         .map(|id| ResourceRef::new(kind, id))
         .collect();
-    ports.translations().delete_resources(&resources).await
+    if let Err(error) = ports.translations().delete_resources(&resources).await {
+        let ids: Vec<String> = resources.iter().map(ResourceRef::id_string).collect();
+        tracing::warn!(
+            %error,
+            %kind,
+            ?ids,
+            "a deleted resource's translations weren't removed"
+        );
+    }
 }
 
-/// Removes the translations into languages the store no longer lists. A language is
+/// Removes the translations into languages the store no longer lists, and the email
+/// templates the merchant saved for them. A language is
 /// taken off the list by a write of the store, which may be on another connection than
 /// the translations, so it's followed by event: `store.updated` naming `languages`.
 /// Idempotent: it keeps what the list holds when it runs.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LanguageCleanup;
 
-impl<P: StoreRepo + HasTranslations> EventHandler<P> for LanguageCleanup {
+impl<P: StoreRepo + HasTranslations + HasNotificationTemplates> EventHandler<P>
+    for LanguageCleanup
+{
     fn name(&self) -> &'static str {
         "language_cleanup"
     }
@@ -279,7 +296,21 @@ impl<P: StoreRepo + HasTranslations> EventHandler<P> for LanguageCleanup {
             .translations()
             .retain_languages(&listed)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        let templates = ports.notification_templates();
+        let stored = templates.list().await.map_err(|e| e.to_string())?;
+        for template in stored
+            .iter()
+            .filter(|t| t.locale().is_some_and(|l| !listed.contains(l)))
+        {
+            match templates.delete(template).await {
+                // Changed or removed since it was read: another run's, or a save that
+                // a later run of this handler sees.
+                Ok(()) | Err(RepoError::StaleVersion) => {}
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+        Ok(())
     }
 }
 
