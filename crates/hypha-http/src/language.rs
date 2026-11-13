@@ -71,9 +71,13 @@ impl ServedLanguage {
 
     /// The language `cart` is read in: the one it was given, held to what its market
     /// offers now (`ContentLanguages::of`, the rule checkout places its order by), else
-    /// the market's default. A checked-out cart reads in its order's language, whatever
-    /// the market offers since (the only one its priced form offers).
+    /// the market's default. A checked-out cart (its order's view, whose
+    /// `market_languages` hold the order's language alone) is its order's copies, written
+    /// in the order's language: that one, whatever the store publishes since.
     pub fn of_cart(cart: &PricedCart, store: &Store) -> Self {
+        if cart.order.is_some() {
+            return Self::of_order(cart.market_languages.first(), store);
+        }
         Self::fixed(content_languages(store).of(cart), store)
     }
 
