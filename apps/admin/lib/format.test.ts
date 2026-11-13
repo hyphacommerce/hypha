@@ -11,12 +11,12 @@ import {
   unitCostInput,
   unitCostTotal,
 } from "./format.ts";
-import { localeOf } from "./pick-language.ts";
+import { formatLocale } from "./pick-language.ts";
 
 const currencies = { EUR: 2, JPY: 0, KWD: 3, USD: 2 };
 
 test("English keeps the formats the admin always had", () => {
-  const format = createFormat(localeOf("en"), { currencies, timeZone: "Europe/Zagreb" });
+  const format = createFormat(formatLocale("en"), { currencies, timeZone: "Europe/Zagreb" });
   assert.equal(format.money({ amount: 1800, currency: "EUR" }), "€18.00");
   assert.equal(format.money({ amount: 1800, currency: "USD" }), "US$18.00");
   assert.equal(format.money({ amount: 1800, currency: "JPY" }), "JP¥1,800");
@@ -37,7 +37,7 @@ test("the functions without a language are English", () => {
 });
 
 test("the pseudo-language formats as English", () => {
-  const format = createFormat(localeOf("en-XA"), { currencies });
+  const format = createFormat(formatLocale("en-XA"), { currencies });
   assert.equal(format.money({ amount: 1800, currency: "EUR" }), "€18.00");
   assert.equal(format.date("2026-11-11T12:00:00Z"), "11 Nov 2026");
 });
@@ -61,26 +61,26 @@ test("another language formats its own way", () => {
 });
 
 test("names Intl doesn't have fall back to the code", () => {
-  const format = createFormat(localeOf("en"));
+  const format = createFormat(formatLocale("en"));
   assert.equal(format.countryName("not a code"), "not a code");
   assert.equal(format.currencyName("not a code"), undefined);
 });
 
 test("plural categories follow the language", () => {
-  assert.equal(createFormat(localeOf("en")).plural(1), "one");
+  assert.equal(createFormat(formatLocale("en")).plural(1), "one");
   assert.equal(createFormat("sr-Latn").plural(3), "few");
 });
 
 test("money in a currency the store's table lacks throws rather than guess", () => {
   assert.throws(
-    () => createFormat(localeOf("en")).money({ amount: 1, currency: "EUR" }),
+    () => createFormat(formatLocale("en")).money({ amount: 1, currency: "EUR" }),
     /unknown currency/,
   );
 });
 
 test("a time that isn't one is a dash", () => {
-  assert.equal(createFormat(localeOf("en")).dateTime("nonsense"), "—");
-  assert.equal(createFormat(localeOf("en")).date("nonsense"), "—");
+  assert.equal(createFormat(formatLocale("en")).dateTime("nonsense"), "—");
+  assert.equal(createFormat(formatLocale("en")).date("nonsense"), "—");
 });
 
 test("a unit cost reads in the major unit with its extra decimals", () => {

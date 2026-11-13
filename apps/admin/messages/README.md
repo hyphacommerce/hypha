@@ -210,9 +210,13 @@ const format = useFormat();       // client
 - In JSX, `<DateTime value short? />` and `<CalendarDate value short? />`
   (`components/date-time.tsx`) do the dates.
 - `getFormat()` and `useFormat()` already hold the currency table and the store's time
-  zone, so `formatMoney(x, currencies)` becomes `format.money(x)`. The old functions in
-  `lib/format.ts` still take a `language` as their last argument and default to English;
-  call sites should end up on `format.*`.
+  zone, so `formatMoney(x, currencies)` becomes `format.money(x)`.
+- **Don't call the old functions without a locale**: `formatMoney(x, currencies)`,
+  `formatUnitCost`, `formatDateTime`, `formatBytes` (`lib/format.ts`) and `countryName`,
+  `countryLabel`, `countryOptions`, `currencyOptions` (`lib/regions.ts`) called without
+  their last argument write English and are `@deprecated`: in an extracted folder that's
+  a lint error (`typescript/no-deprecated`). Move each call to `format.*`, or pass the
+  locale where a plain function is what's needed.
 - Before the login there's no store: `createFormat(t.locale)` formats numbers and dates
   (UTC), not money.
 - `lib/regions.ts`' `countryName`, `countryOptions` and `currencyOptions` take the locale
@@ -243,14 +247,22 @@ const format = useFormat();       // client
 `getLanguage()` (`lib/language.ts`) decides it for every request: the staff member's
 choice (the `hypha_admin_language` cookie, written by the profile page), else the first
 language of the browser's `Accept-Language` the catalogs have (`sr` reads `sr-Latn`),
-else English. The root layout sets
+else English.
+
+Once the API has `users.language`, the order is: the signed-in user's language from the
+request's staff read (`GET /admin/me`, the read the layout already makes), then the
+cookie (the pages before the login, which have no session), then `Accept-Language`, then
+English. The profile's select then saves to the API and to the cookie. The pseudo-
+language stays in the cookie alone: `en-XA` is never sent to the API. The root layout sets
 `<html lang dir>` from it and hands it to the providers; the login, invite and reset pages
 use the same function. It has nothing to do with the store's content languages.
 
-A second language is a folder: `messages/<tag>/<namespace>.json` for every namespace, then
-`pnpm --filter admin i18n:index`. A language the admin ships must be complete: the
-browser gets one catalog, its language's, as a chunk it keeps (never English beside it,
-never through the page's payload), so `i18n:check` fails for a missing key. Astryx's own
+A second language is a folder: `messages/<tag>/<namespace>.json`, then
+`pnpm --filter admin i18n:index`. The browser gets one catalog, its language's, as a
+chunk it keeps (never English beside it, never through the page's payload). For a key
+the language doesn't have yet, the index writes the English string into that language's
+generated module, so nobody is shown a raw key; that a shipped language is complete is
+CI's rule (`i18n:check` fails for a missing key), not something the admin needs to run. Astryx's own
 strings follow by themselves: the index adds Astryx's shipped catalog for the language
 (`messages/astryx.generated.ts`, `lib/astryx-locales.ts`; `sr-Latn` reads Astryx's
 Cyrillic one through `serbianLatin`).
@@ -271,10 +283,14 @@ never sent to the API.
   placeholders than English's, every shipped language is complete.
 - `i18n/no-literal-text` (in `pnpm lint`; the rule is `scripts/oxlint-i18n.mjs`, shared
   with the storefront) on the files listed in `adminTranslated`: no literal text between
-  tags or in the props people read (`label`, `title`, `description`, `placeholder`, `alt`,
-  `aria-label`). It doesn't know Astryx's other text props (`subtitle`, `tooltip`,
-  `actionLabel`, `submitLabel`…) and sees JSX only, so those, and strings in objects and
-  actions, are yours to find.
+  tags or in the props people read (`READ_PROPS` there: `label`, `title`, `description`,
+  `placeholder`, `subtitle`, `tooltip`, `actionLabel`, `submitLabel`, `confirmLabel`,
+  `cancelLabel`, `addLabel`, `searchLabel`, `alreadyInLabel`, `emptyBootstrapText`,
+  `disabledMessage`, `helperText`, `caption`, `heading`, `note`, `noun`, `alt`,
+  `aria-label`, `aria-description`). A component of yours with another text prop: name
+  it one of these, or tell whoever owns the rule. It sees JSX only, so strings in
+  objects and actions are yours to find.
+- `typescript/no-deprecated` on the same files: no format function that names no locale.
 - TypeScript: `t("orders.titel")` doesn't compile.
 
 ## `common`: the shared vocabulary
@@ -297,3 +313,17 @@ command palette), `errors` (API error codes), `auth` (login, invite, reset, two-
 `table` (the resource table, pager, filters), `components` (pickers, dialogs, the save
 bar, address fields, status badges, skeleton labels, app extensions), `global_error`.
 Reuse a `components.*` or `table.*` string only from the component it belongs to.
+
+## The closing step
+
+When the last area is extracted:
+
+1. `adminTranslated` in the root `vite.config.ts` becomes `apps/admin/app/**`,
+   `apps/admin/components/**` and `apps/admin/resources/**`.
+2. Delete the `@deprecated` overloads in `lib/format.ts` (`formatMoney`, `formatUnitCost`,
+   `formatDateTime`, `formatBytes`) and `lib/regions.ts` (`countryName`, `countryLabel`,
+   `countryOptions`, `currencyOptions`), and the `ENGLISH` default with them, so the
+   locale is a required argument. `pnpm lint` lists any caller left
+   (`pnpm exec vp lint apps/admin -D typescript/no-deprecated` shows them today).
+3. Fold into `common` the words areas duplicated, and drop keys nothing reads.
+4. Read every page once in the pseudo-language.

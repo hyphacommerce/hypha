@@ -7,7 +7,7 @@ import { Link } from "@astryxdesign/core/Link";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
-import { type FormEvent, startTransition, useActionState, useState } from "react";
+import { type SubmitEvent, startTransition, useActionState, useState } from "react";
 
 import { NewPasswordFields, fieldText, newPasswordProblem } from "@/components/new-password";
 import { useFormat } from "@/lib/use-format";
@@ -35,7 +35,7 @@ export function InviteForm({
   const [problem, setProblem] = useState<string>();
   const [state, accept, isPending] = useActionState(acceptInvite, {});
 
-  const submit = (e: FormEvent<HTMLFormElement>) => {
+  const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     const fields = new FormData(e.currentTarget);
     const submittedName = fieldText(fields, "name").trim();

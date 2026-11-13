@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { localeOf, pickLanguage } from "./pick-language.ts";
+import { formatLocale, pickLanguage } from "./pick-language.ts";
 
 const available = ["en", "sr-Latn", "de"];
 
@@ -47,7 +47,7 @@ test("a Serbian browser gets Serbian in Latin script, though it lists English to
 });
 
 test("English and the pseudo-language format the British way, others their own", () => {
-  assert.equal(localeOf("en"), "en-GB");
-  assert.equal(localeOf("en-XA"), "en-GB");
-  assert.equal(localeOf("sr-Latn"), "sr-Latn");
+  assert.equal(formatLocale("en"), "en-GB");
+  assert.equal(formatLocale("en-XA"), "en-GB");
+  assert.equal(formatLocale("sr-Latn"), "sr-Latn");
 });
