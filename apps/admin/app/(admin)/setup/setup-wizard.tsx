@@ -122,6 +122,14 @@ const EMAIL_EXAMPLE = "hello@example.com";
 const KEY_SETTING = "STOREFRONT_KEY";
 const KEY_FILE = "apps/storefront/.dev.vars";
 
+/**
+ * Names the forms start with. They're saved as the store's content (shoppers pick the
+ * option at checkout), which is in the store's language whatever the staff member's is,
+ * so they aren't translated: staff type their own.
+ */
+const OPTION_NAME = "Standard";
+const KEY_NAME = "Storefront";
+
 export function SetupWizard({
   data,
   initialStep,
@@ -556,7 +564,7 @@ function ShippingStep({
   const [chosen, setChosen] = useState<string[]>(() =>
     first ? first.countries.filter((c) => !zoned.has(c)) : [],
   );
-  const [optionName, setOptionName] = useState(() => t("setup.shipping_option_default"));
+  const [optionName, setOptionName] = useState(OPTION_NAME);
   const [price, setPrice] = useState("");
   const [currency, setCurrency] = useState(first?.currency);
   const { error, isPending, run } = useSave(onSaved);
@@ -856,7 +864,7 @@ function SellStep({
   const [picked, setProduct] = useState<string>();
   const unpublished = data.products.find((p) => !channel || !p.channels.includes(channel));
   const product = picked ?? unpublished?.id ?? data.products[0]?.id;
-  const [keyName, setKeyName] = useState(() => t("setup.sell_key_name_default"));
+  const [keyName, setKeyName] = useState(KEY_NAME);
   const [token, setToken] = useState<string>();
   const published = useSave(onSaved);
   const key = useSave(onSaved);

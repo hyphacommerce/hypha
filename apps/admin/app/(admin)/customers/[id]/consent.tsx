@@ -37,6 +37,9 @@ const STATES: Record<
 
 const LEVELS = ["single", "confirmed", "unknown"] as const;
 
+/** Where a consent can come from besides an app, as the API names them. */
+const SOURCES = ["admin", "checkout", "storefront", "import", "system"] as const;
+
 /** "single opt-in"; nothing for a level the admin doesn't know. */
 function levelLabel(t: TFor<"customers">, level: string): string | null {
   const known = LEVELS.find((l) => l === level);
@@ -47,9 +50,9 @@ function levelLabel(t: TFor<"customers">, level: string): string | null {
 function sourceLabel(t: TFor<"customers">, source: string | null | undefined): string | null {
   if (!source) return null;
   if (source.startsWith("app:")) return t("customers.consent_from_app", { app: source.slice(4) });
-  return source === "admin"
-    ? t("customers.consent_from_admin")
-    : t("customers.consent_from", { source });
+  const known = SOURCES.find((s) => s === source);
+  // A source the admin doesn't know is shown as the API names it.
+  return known ? t(`customers.consent_from_${known}`) : t("customers.consent_from", { source });
 }
 
 export function ConsentCard({

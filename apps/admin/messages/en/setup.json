@@ -86,7 +86,6 @@
   "shipping_countries_description": "A country is in one zone at most.",
   "shipping_option_name": "Option name",
   "shipping_option_description": "What shoppers pick at checkout.",
-  "shipping_option_default": "Standard",
   "shipping_rate": "Flat rate",
   "shipping_add": "Add shipping",
   "shipping_rate_invalid": "Enter the rate as a number, like 5 or 4.90.",
@@ -135,7 +134,6 @@
   "sell_key_copy_description": "The key is shown only once.",
   "sell_key_title": "Publishable key",
   "sell_key_name": "Key name",
-  "sell_key_name_default": "Storefront",
   "sell_key_create": "Create storefront key",
   "sell_key_where": "It goes in the storefront's {setting} setting ({file} when you run it locally)."
 }

@@ -32,11 +32,19 @@ import {
 } from "@/components/status";
 import { cancelReasonLabel, unitCostTotal } from "@/lib/format";
 import { type Format, getFormat } from "@/lib/get-format";
-import { channelNames, loaded, requireStaff, sessionClient, staffNames } from "@/lib/hypha";
+import {
+  channelNames,
+  loadCountries,
+  loaded,
+  requireStaff,
+  sessionClient,
+  staffNames,
+} from "@/lib/hypha";
 import { type T, getT } from "@/lib/i18n";
 import { type Extensions, loadExtensions } from "@/lib/app-extensions";
 import { definitionsOf } from "@/lib/custom-fields-server";
 import { canMarkPaid, providerLabel } from "@/lib/payments";
+import { countryName } from "@/lib/regions";
 
 import { AddressCheckCard, EditAddressButton } from "./address-check";
 import { EmailsCard } from "./emails";
@@ -325,7 +333,8 @@ async function Order({ id }: { id: string }) {
   // The address check names an app and a staff member by ID: their names, when it does
   // (IDs stay where the role can't read apps or users).
   const check = order.address_check;
-  const [addressFormat, people, apps] = await Promise.all([
+  const [countries, addressFormat, people, apps] = await Promise.all([
+    loadCountries(),
     order.shipping_address
       ? client
           .GET("/admin/address-formats/{country}", {
@@ -597,7 +606,7 @@ async function Order({ id }: { id: string }) {
               <MetadataListItem label={t("orders.fulfilment")}>
                 <FulfillmentBadge status={order.fulfillment_status} t={t} />
               </MetadataListItem>
-              <MetadataListItem label={t("orders.detail_items")}>
+              <MetadataListItem label={t("orders.detail_summary_items")}>
                 {format.number(order.lines.reduce((n, l) => n + l.quantity, 0))}
               </MetadataListItem>
             </MetadataList>
@@ -609,7 +618,7 @@ async function Order({ id }: { id: string }) {
                 <Link href={`/customers/${order.customer}`}>{order.email}</Link>
               </MetadataListItem>
               <MetadataListItem label={t("common.country")}>
-                {format.countryName(order.country)}
+                {countryName(order.country, countries, format.locale)}
               </MetadataListItem>
               <MetadataListItem label={t("common.currency")}>{order.currency}</MetadataListItem>
               <MetadataListItem label={t("common.channel")}>
@@ -635,7 +644,7 @@ async function Order({ id }: { id: string }) {
                       .filter(Boolean)
                       .join(" "),
                     order.shipping_address.province_name ?? order.shipping_address.province,
-                    format.countryName(order.shipping_address.country),
+                    countryName(order.shipping_address.country, countries, format.locale),
                   ]
                     .filter(Boolean)
                     .join(", ")}

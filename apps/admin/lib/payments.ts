@@ -45,19 +45,27 @@ export const PAYMENT_PRESETS: PaymentPreset[] = [
   },
 ];
 
+/** The name a method made from each preset starts with. */
+const PRESET_NAMES: Record<PaymentPreset["value"], string> = {
+  cash_on_delivery: "Cash on delivery",
+  bank_transfer: "Bank transfer",
+  custom: "",
+};
+
 /** The presets, in the order offered. */
 const PRESET_VALUES = ["cash_on_delivery", "bank_transfer", "custom"] as const;
 
 /**
- * The presets as `t`'s language words them. A named preset's name is its label; staff
- * can change it before saving.
+ * The presets as `t`'s language words them. The name a method starts with is content
+ * (shoppers see it at checkout), which is in the store's language whatever the staff
+ * member's is, so it isn't translated: staff change it before saving.
  */
 export function paymentPresets(t: TFor<"orders">): PaymentPreset[] {
   return PRESET_VALUES.map((value) => ({
     value,
     label: t(`orders.payment_preset_${value}_label`),
     description: t(`orders.payment_preset_${value}_description`),
-    name: value === "custom" ? "" : t(`orders.payment_preset_${value}_label`),
+    name: PRESET_NAMES[value],
     instructionsPlaceholder: t(`orders.payment_preset_${value}_instructions`),
   }));
 }

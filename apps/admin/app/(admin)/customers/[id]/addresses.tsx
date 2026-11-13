@@ -28,7 +28,7 @@ import {
   type FieldProblems,
   missingIn,
 } from "@/lib/address";
-import { type Country, countryOptions } from "@/lib/regions";
+import { type Country, countryName, countryOptions } from "@/lib/regions";
 import { useFormat } from "@/lib/use-format";
 import { useT } from "@/lib/use-t";
 
@@ -117,7 +117,10 @@ export function AddressesCard({
                       )}
                     </HStack>
                   )}
-                  <AddressLines address={address} country={format.countryName(address.country)} />
+                  <AddressLines
+                    address={address}
+                    country={countryName(address.country, countries, format.locale)}
+                  />
                 </VStack>
                 {canWrite && (
                   <HStack gap={1}>
@@ -267,7 +270,11 @@ function AddressDialog({
   return (
     <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={560} purpose="form">
       <DialogHeader
-        title={address ? t("customers.addresses_edit") : t("customers.addresses_add")}
+        title={
+          address
+            ? t("customers.addresses_dialog_edit_title")
+            : t("customers.addresses_dialog_add_title")
+        }
         subtitle={t("customers.addresses_dialog_subtitle")}
         onOpenChange={(open) => !open && onClose()}
       />

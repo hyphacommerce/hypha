@@ -40,12 +40,6 @@ const SHOWN_LABELS = 3;
 
 type Customer = AdminSchemas["CustomerSummaryResponse"];
 
-/**
- * What the bulk banner counts. It builds an English sentence around it ("Labelled 3
- * customers") until `resources/bulk.tsx` reads the catalogs, so this stays English with it.
- */
-const BULK_NOUN = "customer";
-
 /** Every order the list offers, as the API names them. */
 const SORT_VALUES = [
   "newest",
@@ -161,7 +155,7 @@ export function CustomersTable({
     },
     {
       key: "address_count",
-      header: t("customers.addresses_title"),
+      header: t("customers.list_column_addresses"),
       width: pixel(100),
       align: "end",
     },
@@ -178,7 +172,7 @@ export function CustomersTable({
       {outcome && (
         <BulkOutcomeBanner
           outcome={outcome}
-          noun={BULK_NOUN}
+          noun={t("customers.list_bulk_noun")}
           onClose={() => setOutcome(undefined)}
         />
       )}

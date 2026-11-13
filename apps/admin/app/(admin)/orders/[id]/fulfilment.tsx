@@ -323,7 +323,7 @@ function Shipment({
           ) : (
             <HStack gap={1}>
               <Button
-                label={t("orders.tracking_dialog_title")}
+                label={t("orders.tracking_edit")}
                 size="sm"
                 variant="ghost"
                 onClick={() => setEditing(true)}

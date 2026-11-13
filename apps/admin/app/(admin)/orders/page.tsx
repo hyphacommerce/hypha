@@ -13,10 +13,11 @@ import {
 } from "@/components/resource-table/params";
 import { listPage, nextDay, pageQuery, startOfDay } from "@/components/resource-table/server";
 import { getFormat } from "@/lib/get-format";
-import { channelNames, loadTimeZone, sessionClient } from "@/lib/hypha";
+import { channelNames, loadCountries, loadTimeZone, sessionClient } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
 import { fieldQuery, isFilterOffered } from "@/lib/custom-fields";
 import { definitionsOf } from "@/lib/custom-fields-server";
+import { countryName } from "@/lib/regions";
 import { OrdersTable } from "@/resources/orders";
 
 const PAYMENT: AdminSchemas["FinancialStatusDto"][] = [
@@ -65,7 +66,7 @@ async function OrderRows({ params }: { params: SearchParams }) {
   const timeZone = placed ? await loadTimeZone() : "UTC";
   // Filterable custom fields.
   const fieldFilters = (await definitionsOf("order")).filter(isFilterOffered);
-  const [result, markets, channelName, format] = await Promise.all([
+  const [result, markets, channelName, format, countries] = await Promise.all([
     client.GET("/admin/orders", {
       params: {
         query: {
@@ -90,11 +91,12 @@ async function OrderRows({ params }: { params: SearchParams }) {
     client.GET("/admin/markets"),
     channelNames(client),
     getFormat(),
+    loadCountries(),
   ]);
 
   const sold = markets.data?.items ?? [];
   const soldTo = [...new Set(sold.flatMap((m) => m.countries))]
-    .map((code) => ({ value: code, label: format.countryName(code) }))
+    .map((code) => ({ value: code, label: countryName(code, countries, format.locale) }))
     .toSorted((a, b) => format.compare(a.label, b.label));
 
   return (

@@ -289,7 +289,9 @@ function EditAddressDialog({
   return (
     <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={560} purpose="form">
       <DialogHeader
-        title={suggested ? t("orders.address_check_use_suggested") : t("orders.edit_address_title")}
+        title={
+          suggested ? t("orders.edit_address_suggested_title") : t("orders.edit_address_title")
+        }
         subtitle={t("orders.edit_address_subtitle")}
         onOpenChange={(open) => !open && onClose()}
       />
