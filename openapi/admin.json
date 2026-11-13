@@ -363,11 +363,21 @@
             "description": "Whether the first line is expected to hold a house number.",
             "type": "boolean"
           },
+          "label_keys": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LabelKeyOrNull"
+            },
+            "description": "Each label's key, by field, for the same fields as `labels` (`province: \"state\"`,\n`postal_code: \"zip_code\"`): what a form in another language translates the label\nby. `null` for a label outside the set, which is then shown as `labels` has it.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
           "labels": {
             "additionalProperties": {
               "type": "string"
             },
-            "description": "Each field's label, by field (\"State\", \"ZIP code\"). English for now.",
+            "description": "Each field's label, by field (\"State\", \"ZIP code\"), in English.",
             "propertyNames": {
               "type": "string"
             },
@@ -413,6 +423,7 @@
           "rows",
           "required",
           "labels",
+          "label_keys",
           "postal_code",
           "regions",
           "house_number_required",
@@ -2223,8 +2234,18 @@
             "type": "string"
           },
           "message": {
-            "description": "Plain text for the shopper.",
+            "description": "Plain text for the shopper, in English when the message is built in: a client\nshowing another language words it from `code` and `params`.",
             "type": "string"
+          },
+          "params": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MessageParamsDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "path": {
             "description": "An RFC 9535 JSONPath into this response, from a closed set: `$` (the cart),\n`$.email`, `$.shipping_address`, `$.shipping_address.<field>`,\n`$.shipping_groups[<i>]` (the group and its chosen option) or `$.lines[<i>]`. Show\nthe message by that field; one a client doesn't place goes at the top.",
@@ -7904,6 +7925,53 @@
         ],
         "type": "string"
       },
+      "LabelKeyDto": {
+        "description": "What a field's label says, by meaning: a closed set for a client to translate labels\nby, the English `labels` being one rendering of it. Values are added, never renamed.\n\nKnown values: `first_name`, `last_name`, `company`, `address1`, `address2`, `street_and_house_number`, `full_address`, `additional_address`, `city`, `city_town`, `city_ward_town_village`, `ward`, `district`, `suburb`, `area`, `region`, `province`, `state`, `state_territory`, `county`, `prefecture`, `emirate`, `governorate`, `department`, `postal_code`, `postcode`, `zip_code`, `pin_code`, `phone`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "first_name",
+          "last_name",
+          "company",
+          "address1",
+          "address2",
+          "street_and_house_number",
+          "full_address",
+          "additional_address",
+          "city",
+          "city_town",
+          "city_ward_town_village",
+          "ward",
+          "district",
+          "suburb",
+          "area",
+          "region",
+          "province",
+          "state",
+          "state_territory",
+          "county",
+          "prefecture",
+          "emirate",
+          "governorate",
+          "department",
+          "postal_code",
+          "postcode",
+          "zip_code",
+          "pin_code",
+          "phone"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "LabelKeyOrNull": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/LabelKeyDto",
+            "description": "A label's key, or `null` for a label outside the set."
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
       "Language": {
         "description": "A BCP 47 language tag: a language, then optionally a script, region and variants (`en`, `en-GB`, `sr-Latn`). Responses show it in canonical case.",
         "examples": [
@@ -8495,6 +8563,51 @@
           "id",
           "name"
         ],
+        "type": "object"
+      },
+      "MessageParamsDto": {
+        "description": "What a client needs to word a built-in cart message or an address problem from its\n`code` in the shopper's language, rather than show the English `message`. Absent where\nthere's nothing to say: a checkout rule's or a validation app's message (worded by\nwhoever wrote it), a built-in one that needs no data, a message stored before params.\nFields are added, never renamed. By code:\n\n- `required`, `unknown_region`: `field`.\n- `too_long`: `field`, `max`.\n- `invalid_format`: `field`, and `example` where the country gives one.\n- `region_mismatch`: `field` (`postal_code`), `region` (the code the address names) and\n  `region_name`.\n- `house_number_missing`: `field` (`line1`).\n- `apartment_missing`: `field` (`line2`).\n- `address_corrections_suggested`, `address_ambiguous`, `address_undeliverable`,\n  `validation_unavailable`: none (a suggested address is the cart's\n  `shipping_address_check.suggested`).\n\nA field's label in the country's words is the address format's `label_keys`, but for\n`country`, which forms show apart from the address's own fields.",
+        "properties": {
+          "example": {
+            "example": "90210",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "field": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AddressFieldDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "max": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "region": {
+            "example": "NY",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "region_name": {
+            "example": "New York",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
         "type": "object"
       },
       "MessageSourceDto": {
@@ -10598,7 +10711,7 @@
       },
       "PostalAddressRequest": {
         "additionalProperties": false,
-        "description": "Sent: last name, first line and city required, text trimmed, at most 255 characters\nper field. A cart's or a location's address is also checked against its country's\nformat (`GET …/address-formats/{country}`): its required fields, the postal code's\nshape, the region (a name, alternate name or code, stored as the code where the\ncountry lists regions). Every problem comes back at once as `422 invalid_address`\nwith `details.problems: [{field, code, message}]`.",
+        "description": "Sent: last name, first line and city required, text trimmed, at most 255 characters\nper field. A cart's or a location's address is also checked against its country's\nformat (`GET …/address-formats/{country}`): its required fields, the postal code's\nshape, the region (a name, alternate name or code, stored as the code where the\ncountry lists regions). Every problem comes back at once as `422 invalid_address`\nwith `details.problems: [{field, code, message, params}]` (`params` as a cart\nmessage's).",
         "properties": {
           "city": {
             "type": "string"
@@ -13090,6 +13203,16 @@
           },
           "message": {
             "type": "string"
+          },
+          "params": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MessageParamsDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -16185,6 +16308,16 @@
           },
           "message": {
             "type": "string"
+          },
+          "params": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MessageParamsDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [

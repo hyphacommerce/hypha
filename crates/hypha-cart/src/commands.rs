@@ -983,7 +983,11 @@ pub async fn shipping_offers<S: HasCarts + PricingPorts, P: RateProvider>(
 
 /// Picks `option` for `group`, if the cart is offered it now. A provider's price is stored
 /// with the choice, as quoted. Providers are asked as `shipping_offers` asks them.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a command's ports, clock and plain inputs, as its siblings take them; a struct \
+              would only bundle them for this one"
+)]
 pub async fn select_shipping<S: HasCarts + PricingPorts, P: RateProvider>(
     ctx: &Ctx,
     ports: &S,

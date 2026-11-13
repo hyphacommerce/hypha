@@ -156,6 +156,7 @@ pub fn event_scope(subject_kind: &str) -> Option<Scope> {
         "inventory_item" | "location" => Scope::InventoryRead,
         "customer" | "customer_group" => Scope::CustomersRead,
         "order" | "payment" => Scope::OrdersRead,
+        "payment_method" => Scope::PaymentsRead,
         "fulfillment" => Scope::FulfillmentsRead,
         "shipping_zone" => Scope::ShippingRead,
         "asset" => Scope::MediaRead,

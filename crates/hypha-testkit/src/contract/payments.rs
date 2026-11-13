@@ -45,9 +45,13 @@ pub async fn payment_repo<R: PaymentRepo>(make: impl AsyncFn() -> R) {
 
 /// Runs the scenarios that span methods and payments: a method an open payment uses
 /// can't be deleted, checked in the same step as the delete.
-pub async fn payment_method_delete<S: HasPaymentMethods + HasPayments>(make: impl AsyncFn() -> S) {
+pub async fn payment_method_delete<S: HasPaymentMethods + HasPayments + HasOutbox>(
+    make: impl AsyncFn() -> S,
+) {
     scenario("payment method: delete is refused while an open payment uses it");
     open_payments_keep_their_method(&make().await).await;
+    scenario("payment method: a delete writes its event; a refused or stale one writes none");
+    a_delete_writes_its_event(&make().await).await;
 }
 
 /// Runs the batch scenarios for payments: a payment and its order commit together, with
@@ -198,10 +202,16 @@ async fn method_deletes<R: PaymentMethodRepo>(repo: &R) {
     let stale = m.clone();
     m.set_enabled(false);
     repo.update(&mut m).await.unwrap();
-    assert_eq!(repo.delete(&stale).await, Err(RepoError::StaleVersion));
-    assert_eq!(repo.delete(&m).await, Ok(()));
+    assert_eq!(
+        repo.delete(&mut stale.clone()).await,
+        Err(RepoError::StaleVersion)
+    );
+    assert_eq!(repo.delete(&mut m.clone()).await, Ok(()));
     assert_eq!(repo.get(m.id()).await, Ok(None));
-    assert_eq!(repo.delete(&m).await, Err(RepoError::StaleVersion));
+    assert_eq!(
+        repo.delete(&mut m.clone()).await,
+        Err(RepoError::StaleVersion)
+    );
 }
 
 /// Payment `n` of order `order`, by method `method`: every field set.
@@ -393,10 +403,10 @@ async fn open_payments_keep_their_method<S: HasPaymentMethods + HasPayments>(por
     let mut p = payment(1, 1, 1);
     ports.payments().insert(&mut p).await.unwrap();
     let in_use = Err(RepoError::Reference(keys::OPEN_PAYMENT_METHOD));
-    assert_eq!(ports.payment_methods().delete(&m).await, in_use);
+    assert_eq!(ports.payment_methods().delete(&mut m.clone()).await, in_use);
     p.authorize(None).unwrap();
     ports.payments().update(&mut p).await.unwrap();
-    assert_eq!(ports.payment_methods().delete(&m).await, in_use);
+    assert_eq!(ports.payment_methods().delete(&mut m.clone()).await, in_use);
     // Refused, it's still there, unchanged.
     assert_eq!(
         ports.payment_methods().get(m.id()).await,
@@ -407,7 +417,7 @@ async fn open_payments_keep_their_method<S: HasPaymentMethods + HasPayments>(por
     newer.set_enabled(false);
     ports.payment_methods().update(&mut newer).await.unwrap();
     assert_eq!(
-        ports.payment_methods().delete(&m).await,
+        ports.payment_methods().delete(&mut m.clone()).await,
         Err(RepoError::StaleVersion)
     );
     // A processing payment holds its method too.
@@ -417,9 +427,15 @@ async fn open_payments_keep_their_method<S: HasPaymentMethods + HasPayments>(por
     ports.payments().insert(&mut slow).await.unwrap();
     slow.process(None).unwrap();
     ports.payments().update(&mut slow).await.unwrap();
-    assert_eq!(ports.payment_methods().delete(&third).await, in_use);
+    assert_eq!(
+        ports.payment_methods().delete(&mut third.clone()).await,
+        in_use
+    );
     // Another method's open payment doesn't hold this one.
-    assert_eq!(ports.payment_methods().delete(&other).await, Ok(()));
+    assert_eq!(
+        ports.payment_methods().delete(&mut other.clone()).await,
+        Ok(())
+    );
     // Once nothing open uses it (paid, voided), it goes.
     p.pay(at(0), None).unwrap();
     ports.payments().update(&mut p).await.unwrap();
@@ -427,8 +443,51 @@ async fn open_payments_keep_their_method<S: HasPaymentMethods + HasPayments>(por
     ports.payments().insert(&mut voided).await.unwrap();
     voided.void(at(0)).unwrap();
     ports.payments().update(&mut voided).await.unwrap();
-    assert_eq!(ports.payment_methods().delete(&newer).await, Ok(()));
+    assert_eq!(
+        ports.payment_methods().delete(&mut newer.clone()).await,
+        Ok(())
+    );
     assert_eq!(ports.payment_methods().get(m.id()).await, Ok(None));
+}
+
+/// A delete writes `payment_method.deleted`, naming the method, with the delete; one
+/// refused (an open payment holds it) or stale writes nothing.
+async fn a_delete_writes_its_event<S: HasPaymentMethods + HasPayments + HasOutbox>(ports: &S) {
+    let mut m = method(1, 0);
+    ports.payment_methods().insert(&mut m).await.unwrap();
+    let mut held = method(2, 1);
+    ports.payment_methods().insert(&mut held).await.unwrap();
+    let mut p = payment(1, 1, 2);
+    ports.payments().insert(&mut p).await.unwrap();
+    let before = events(ports).await.len();
+
+    let mut refused = held.clone();
+    refused.delete();
+    assert_eq!(
+        ports.payment_methods().delete(&mut refused).await,
+        Err(RepoError::Reference(keys::OPEN_PAYMENT_METHOD))
+    );
+    let mut stale = m.clone();
+    m.set_enabled(false);
+    ports.payment_methods().update(&mut m).await.unwrap();
+    stale.delete();
+    assert_eq!(
+        ports.payment_methods().delete(&mut stale).await,
+        Err(RepoError::StaleVersion)
+    );
+    assert_eq!(events(ports).await.len(), before, "nothing written");
+
+    m.delete();
+    ports.payment_methods().delete(&mut m).await.unwrap();
+    let written = events(ports).await;
+    let deleted: Vec<&StoredEvent> = written
+        .iter()
+        .filter(|e| e.event_type == "payment_method.deleted")
+        .collect();
+    assert_eq!(deleted.len(), 1, "{written:?}");
+    assert_eq!(deleted[0].subject_kind, "payment_method");
+    assert_eq!(deleted[0].subject_id, m.id().as_uuid());
+    assert_eq!(deleted[0].data["payment_method"], m.id().to_string());
 }
 
 async fn events<S: HasOutbox>(ports: &S) -> Vec<StoredEvent> {

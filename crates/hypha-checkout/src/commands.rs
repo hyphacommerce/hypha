@@ -1062,7 +1062,11 @@ pub(crate) struct Renewal {
 /// quote replaces the old on the cart, and a changed price fails with `total_changed` when
 /// the buyer confirmed a total, after storing the new quote, so the client shows the new
 /// total and retries with it.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "checkout's ports, providers and languages beside the cart it is renewing and \
+              what its retry loop carries between attempts"
+)]
 async fn renew_expired_quote<S: CheckoutPorts, C: Clock, P: RateProvider>(
     ports: &S,
     rates: &P,

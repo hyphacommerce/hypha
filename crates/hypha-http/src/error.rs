@@ -610,9 +610,17 @@ fn address_problems(e: &hypha_core::AddressError) -> Value {
     let problems: Vec<Value> = e
         .problems()
         .iter()
-        .map(
-            |p| json!({ "field": p.field.as_str(), "code": p.code.as_str(), "message": p.message }),
-        )
+        .map(|p| {
+            let mut problem = json!({
+                "field": p.field.as_str(),
+                "code": p.code.as_str(),
+                "message": p.message,
+            });
+            if let Some(params) = crate::routes::address::MessageParamsDto::of(&p.params) {
+                problem["params"] = json!(params);
+            }
+            problem
+        })
         .collect();
     json!({ "problems": problems })
 }
