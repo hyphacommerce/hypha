@@ -157,14 +157,23 @@ pub(crate) async fn served_in<S: Storage>(
     ports: &S::Ports<'_>,
     params: &LanguageParams,
 ) -> Result<ServedLanguage, ApiError> {
-    let market = match params.country.as_deref() {
+    let market = market_in(ports, params).await?;
+    served(state, ports, params.language.as_deref(), market.as_ref()).await
+}
+
+/// The market selling to `params`' country, for a read that has the store already and
+/// passes both to `ServedLanguage::of`; `served_in` reads the store itself.
+pub(crate) async fn market_in<P: HasMarkets>(
+    ports: &P,
+    params: &LanguageParams,
+) -> Result<Option<Market>, ApiError> {
+    Ok(match params.country.as_deref() {
         Some(country) => {
             let country = CountryCode::new(country)?;
             ports.markets().get_by_country(country).await?
         }
         None => None,
-    };
-    served(state, ports, params.language.as_deref(), market.as_ref()).await
+    })
 }
 
 /// What checkout resolves a cart's language against: the store's default and the
