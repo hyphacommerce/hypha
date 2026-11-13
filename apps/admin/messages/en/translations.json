@@ -42,6 +42,7 @@
   "problem_unknown_child": "What this translates no longer exists. Reload the page.",
   "problem_too_long": "The translation is too long.",
   "problem_too_short": "The translation is too short for this field.",
+  "problem_too_short_min": "The translation is too short: at least {min, plural, one {# character} other {# characters}}.",
   "problem_not_single_line": "This field takes one line, without line breaks.",
   "problem_source_changed": "The original changed while you were translating. Check the translation against the text now shown: edit it, or keep it as it is.",
   "problem_source_empty": "The original has no text, so there's nothing to translate.",
@@ -78,5 +79,8 @@
   "keep_translation": "Keep translation",
   "too_long": "At most {max, number} characters.",
   "too_long_html": "The translation is too long.",
-  "counter": "{count, number} / {max, number}"
+  "too_short": "At least {min, plural, one {# character} other {# characters}}.",
+  "too_short_html": "The translation is too short.",
+  "counter": "{count, number} / {max, number}",
+  "counter_min": "{count, number} / {max, number}, at least {min, number}"
 }

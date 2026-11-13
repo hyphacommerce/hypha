@@ -42,6 +42,7 @@
   "problem_unknown_child": "Ono što ovo prevodi više ne postoji. Učitajte stranicu ponovo.",
   "problem_too_long": "Prevod je predugačak.",
   "problem_too_short": "Prevod je prekratak za ovo polje.",
+  "problem_too_short_min": "Prevod je prekratak: najmanje {min, plural, one {# znak} few {# znaka} other {# znakova}}.",
   "problem_not_single_line": "Ovo polje prima jedan red, bez preloma reda.",
   "problem_source_changed": "Original se promenio dok ste prevodili. Uporedite prevod sa tekstom koji je sada prikazan: izmenite ga ili ga zadržite takvog kakav je.",
   "problem_source_empty": "Original nema teksta, pa nema šta da se prevodi.",
@@ -78,5 +79,8 @@
   "keep_translation": "Zadrži prevod",
   "too_long": "Najviše {max, number} znakova.",
   "too_long_html": "Prevod je predugačak.",
-  "counter": "{count, number} / {max, number}"
+  "too_short": "Najmanje {min, plural, one {# znak} few {# znaka} other {# znakova}}.",
+  "too_short_html": "Prevod je prekratak.",
+  "counter": "{count, number} / {max, number}",
+  "counter_min": "{count, number} / {max, number}, najmanje {min, number}"
 }

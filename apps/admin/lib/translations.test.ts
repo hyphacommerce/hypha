@@ -13,6 +13,7 @@ import {
   isDirty,
   isKind,
   isSingleLine,
+  isTooShort,
   isTranslatable,
   lengthOf,
   oneLine,
@@ -418,6 +419,29 @@ test("text is counted in characters, HTML in bytes", () => {
   // One code point outside the BMP is one character, as the API counts.
   assert.equal(lengthOf("a😀", "text"), 2);
   assert.equal(lengthOf("<p>ö</p>", "html"), 9);
+});
+
+test("a translation under its field's minimum is too short, at the boundary not", () => {
+  const min3 = { min_length: 3 };
+  assert.equal(isTooShort("ab", min3), true);
+  assert.equal(isTooShort("abc", min3), false);
+  // Counted in characters (code points), as the API counts.
+  assert.equal(isTooShort("a😀", min3), true);
+  assert.equal(isTooShort("öö😀", min3), false);
+});
+
+test("the minimum counts the trimmed text, as the API saves it", () => {
+  assert.equal(isTooShort("  ab  ", { min_length: 3 }), true);
+});
+
+test("a blank translation is no translation, never too short", () => {
+  assert.equal(isTooShort("", { min_length: 3 }), false);
+  assert.equal(isTooShort("   ", { min_length: 3 }), false);
+});
+
+test("a field without a minimum takes any length", () => {
+  assert.equal(isTooShort("a", { min_length: null }), false);
+  assert.equal(isTooShort("a", {}), false);
 });
 
 test("a save's problems are read by field, the first of each", () => {
