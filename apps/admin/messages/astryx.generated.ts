@@ -9,5 +9,6 @@ type AstryxCatalog = Readonly<Record<string, string>>;
 export const ASTRYX_LOADERS: Readonly<
   Record<string, () => Promise<{ default: AstryxCatalog }>>
 > = {
+  "sr-Latn": () => import("@astryxdesign/core/locales/sr-SP.generated.js"),
   "en-XA": () => import("@astryxdesign/core/locales/pseudo.generated.js"),
 };

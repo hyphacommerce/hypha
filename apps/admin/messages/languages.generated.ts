@@ -3,11 +3,12 @@
 import type { Messages } from "@hyphacommerce/i18n";
 
 /** The languages the admin has catalogs for, English (the source) first. */
-export const LANGUAGES = ["en"] as const;
+export const LANGUAGES = ["en","sr-Latn"] as const;
 
 export type AppLanguage = (typeof LANGUAGES)[number];
 
 /** Each language's catalog as a chunk of its own, loaded when a request or a browser asks. */
 export const LOADERS: Record<AppLanguage, () => Promise<Messages>> = {
   "en": async () => (await import("./en.generated")).default,
+  "sr-Latn": async () => (await import("./sr-Latn.generated")).default,
 };
