@@ -267,6 +267,10 @@ translated.
   sentences (`describe()` in both apps); those sentences move into the catalogs.
 - The storefront's `describe()` falls back to `error.error` for an unknown code. In
   another language it falls back to a generic sentence instead.
+- The admin keeps the cause for staff: for a code its catalog doesn't have, it shows a
+  translated sentence followed by the API's own. A few codes whose sentence carries
+  data (a name, a count) are shown as the API wrote them until their `details` hold
+  that data.
 
 ### 7.2 Cart messages and address forms
 
