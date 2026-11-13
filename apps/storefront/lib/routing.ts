@@ -56,7 +56,13 @@ export function segmentCountry(segment: string): string {
 /**
  * The country's language a wanted one comes to, in the country's spelling: itself, the
  * same without its region (`de-AT` → `de`), or the same language wider (`en` →
- * `en-GB`), as the API resolves it; `undefined` when the country offers none of them.
+ * `en-GB`); `undefined` when the country offers none of them.
+ *
+ * Broader than the API on purpose: the API never widens (the exact tag, then the tag
+ * without its region, then the market's default), but a URL (`/en-rs`, a cookie, an
+ * `Accept-Language` of `en`) is better sent to the country's English than to its
+ * default. Nothing is served wrongly by it: what this answers is always one of the
+ * country's own tags, so the API is only ever asked in a language it offers.
  */
 export function offered(wanted: string | undefined, offer: Offer): string | undefined {
   if (wanted === undefined) return undefined;
@@ -85,6 +91,24 @@ export function localeSegment(offer: Offer, language?: string): string {
     return country;
   }
   return formatLocaleSegment({ language, country });
+}
+
+/**
+ * Where a page about something written in `language` (an order) belongs in the page's
+ * country: that language's segment there (or the one it comes to, `offered`).
+ * `undefined` when the page is in it already (`page` is the page's segment), or when
+ * the country offers nothing it comes to (an order from before languages, or in one the
+ * country dropped since): the page stays where it is.
+ */
+export function segmentFor(
+  language: string | null | undefined,
+  offer: Offer,
+  page: string,
+): string | undefined {
+  const there = offered(language ?? undefined, offer);
+  if (there === undefined) return undefined;
+  const segment = localeSegment(offer, there);
+  return segment === page.toLowerCase() ? undefined : segment;
 }
 
 /** The one segment a page in a segment's country and language lives at: `de-de` and

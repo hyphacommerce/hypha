@@ -27,6 +27,7 @@ import {
   withoutLocale,
 } from "@/lib/routing";
 import { paymentElementModule } from "@/lib/app-elements";
+import { readCart } from "@/lib/cart";
 import { checkOutCart } from "@/lib/checkout";
 import { actionT } from "@/lib/i18n";
 import { accountApi, forgetSession, sessionHeaders } from "@/lib/account";
@@ -53,22 +54,21 @@ function optional(value: string | undefined): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
-/** A new cart in `country`, remembered in the shopper's cookies; a signed-in shopper's
- * is theirs from the start. */
-// shortcut: a cart is made without a language until the API takes one; then it's
-// `body: { country, language }` here, the page's (`pageLocale`), so its emails and
-// messages follow the page.
-async function newCart(country: string): Promise<string> {
+/** A new cart in the page's place, in the page's language (so its messages and the
+ * order placed from it follow the page), remembered in the shopper's cookies; a signed-in
+ * shopper's is theirs from the start. */
+async function newCart(place: Locale): Promise<string> {
   const session = await sessionHeaders();
-  let answer = await (await shopperApi(session)).POST("/storefront/carts", { body: { country } });
+  const body = { country: place.country, language: place.language };
+  let answer = await (await shopperApi(session)).POST("/storefront/carts", { body });
   if (answer.error?.code === "invalid_token" && "authorization" in session) {
     // The session ended meanwhile (signed out everywhere, expired): the cookie goes,
     // and the shopper carries on as a guest.
     await forgetSession();
-    answer = await (await shopperApi()).POST("/storefront/carts", { body: { country } });
+    answer = await (await shopperApi()).POST("/storefront/carts", { body });
   }
   if (answer.error) throw new Error(`couldn't create a cart: ${answer.error.code}`);
-  await rememberCart(country, answer.data.id);
+  await rememberCart(place.country, answer.data.id);
   return answer.data.id;
 }
 
@@ -85,17 +85,17 @@ async function currentCart(place: Locale): Promise<string> {
   return id;
 }
 
-/** The shopper's open cart in `country`, priced; `null` without one (or once it's an
+/** The shopper's open cart in the page's country (`locale` is its locale segment),
+ * priced and in the page's language (`readCart`); `null` without one (or once it's an
  * order). For the header and the drawer, which can't read it while the page renders. */
-export async function loadCart(country: string): Promise<Cart | null> {
-  const id = await cartId(country);
+export async function loadCart(locale: string): Promise<Cart | null> {
+  const place = await pageLocale(locale);
+  const id = await cartId(place.country);
   if (!id) return null;
-  const { data, response } = await api().GET("/storefront/carts/{id}", {
-    params: { path: { id } },
-  });
-  if (data && !data.order) return data;
+  const { cart, status } = await readCart(id, place);
+  if (cart && !cart.order) return cart;
   // Gone or an order now: forget it (and its flag), so pages stop asking.
-  if (data || response.status === 404) await forgetCart(country);
+  if (cart || status === 404) await forgetCart(place.country);
   return null;
 }
 
@@ -157,12 +157,12 @@ export async function addToCart(input: {
   const existing = await cartId(place.country);
   let result = existing ? await add(existing) : undefined;
   if (!result || (result.error && cartClosed(result.error))) {
-    result = await add(await newCart(place.country));
+    result = await add(await newCart(place));
   }
   const { data, error } = result;
   if (error)
     return {
-      cart: await loadCart(place.country),
+      cart: await loadCart(input.locale),
       error: describe(await actionT(input.locale), error),
     };
   return { cart: data };
@@ -188,10 +188,10 @@ export async function setQuantity(input: {
       : await client.DELETE("/storefront/carts/{id}/lines/{variant}", { params: { path } });
   if (error)
     return {
-      cart: await loadCart(place.country),
+      cart: await loadCart(input.locale),
       error: describe(await actionT(input.locale), error),
     };
-  return { cart: data ?? (await loadCart(place.country)) };
+  return { cart: data ?? (await loadCart(input.locale)) };
 }
 
 /** Adds a discount code to the cart, and answers with the cart. A code that's known but
@@ -207,7 +207,7 @@ export async function applyDiscountCode(input: {
   const code = input.code.trim();
   if (code === "") {
     const t = await actionT(input.locale);
-    return { cart: await loadCart(place.country), error: t("discounts.enter_code") };
+    return { cart: await loadCart(input.locale), error: t("discounts.enter_code") };
   }
   // The shopper's address goes on: the API limits code entry per client.
   const client = await shopperApi();
@@ -217,10 +217,10 @@ export async function applyDiscountCode(input: {
   });
   if (error)
     return {
-      cart: await loadCart(place.country),
+      cart: await loadCart(input.locale),
       error: describe(await actionT(input.locale), error),
     };
-  return { cart: data ?? (await loadCart(place.country)) };
+  return { cart: data ?? (await loadCart(input.locale)) };
 }
 
 /** Takes a code off the cart, and answers with the cart. */
@@ -237,10 +237,10 @@ export async function removeDiscountCode(input: {
   });
   if (error)
     return {
-      cart: await loadCart(place.country),
+      cart: await loadCart(input.locale),
       error: describe(await actionT(input.locale), error),
     };
-  return { cart: data ?? (await loadCart(place.country)) };
+  return { cart: data ?? (await loadCart(input.locale)) };
 }
 
 export type Details = AddressValues & { email: string };
@@ -464,8 +464,21 @@ export async function setLanguage(input: { locale: string; target: string; path:
     path: "/",
     maxAge: YEAR,
   });
-  // shortcut: the cart keeps the language it was made in until the API takes one
-  // (`PUT /storefront/carts/{id}/language`); switching should update it here.
+  // The cart follows: its lines, messages and the order placed from it in the language
+  // picked. A cart that's gone or checked out has nothing to follow, and the page is
+  // what the shopper asked for, so neither a refusal nor an API that didn't answer
+  // stops the switch (the next read for the page moves the cart, `readCart`).
+  const cart = await cartId(there.country);
+  if (cart) {
+    try {
+      await api().PUT("/storefront/carts/{id}/language", {
+        params: { path: { id: cart } },
+        body: { language: there.language },
+      });
+    } catch (error) {
+      console.error("setLanguage: the cart's language wasn't set", error);
+    }
+  }
   redirect(link(there.segment, withoutLocale(mode(), path, countries)));
 }
 

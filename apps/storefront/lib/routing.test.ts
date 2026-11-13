@@ -11,6 +11,7 @@ import {
   prefixes,
   routeFor,
   segmentCountry,
+  segmentFor,
   segmentLanguage,
   withoutLocale,
 } from "./routing.ts";
@@ -211,4 +212,24 @@ test("a single tree names no hreflang when its countries' defaults differ", () =
 test("robots' prefixes: every place with folders, every other language in a single tree", () => {
   assert.deepEqual(prefixes("folders", COUNTRIES), ["/de", "/en-de", "/at", "/rs", "/en-gb-rs"]);
   assert.deepEqual(prefixes("single", COUNTRIES), ["", "/en", "/en-gb"]);
+});
+
+test("a page about something in another language belongs at that language's segment", () => {
+  assert.equal(segmentFor("en", DE, "de"), "en-de");
+  assert.equal(segmentFor("de", DE, "en-de"), "de");
+  // Found the way a segment is: without its region, or wider.
+  assert.equal(segmentFor("de-AT", DE, "en-de"), "de");
+  assert.equal(segmentFor("en", RS, "rs"), "en-gb-rs");
+});
+
+test("a page already in that language stays", () => {
+  assert.equal(segmentFor("de", DE, "de"), undefined);
+  assert.equal(segmentFor("en", DE, "EN-DE"), undefined);
+  assert.equal(segmentFor("sr-Latn", RS, "rs"), undefined);
+});
+
+test("a language the country doesn't offer, or none, keeps the page where it is", () => {
+  assert.equal(segmentFor("fr", DE, "en-de"), undefined);
+  assert.equal(segmentFor(null, DE, "en-de"), undefined);
+  assert.equal(segmentFor(undefined, DE, "de"), undefined);
 });

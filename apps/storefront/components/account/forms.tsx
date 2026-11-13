@@ -8,6 +8,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { Grid } from "@astryxdesign/core/Grid";
+import { Selector } from "@astryxdesign/core/Selector";
 import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
@@ -41,8 +42,14 @@ const useAccountT = () => useT<"account" | "address">();
 
 export function ProfileForm({
   initial,
+  languages,
 }: {
-  initial: { first_name: string; last_name: string; phone: string };
+  /** `language`: one of `languages`, or empty when theirs isn't one of them (none, or
+   * another country's). */
+  initial: { first_name: string; last_name: string; phone: string; language: string };
+  /** The languages the country is offered in, each named in itself; the select is
+   * left out with fewer than two. */
+  languages: { value: string; label: string }[];
 }) {
   const locale = useLocale();
   const t = useAccountT();
@@ -79,6 +86,17 @@ export function ProfileForm({
         value={values.phone}
         onChange={set("phone")}
       />
+      {languages.length > 1 && (
+        <Selector
+          size="lg"
+          label={t("account.language")}
+          description={t("account.language_note")}
+          placeholder={t("account.choose_language")}
+          options={languages}
+          value={values.language || undefined}
+          onChange={set("language")}
+        />
+      )}
       {error && <Banner status="error" title={error} />}
       {saved && <Banner status="success" title={t("account.saved")} />}
       <div>
@@ -89,7 +107,9 @@ export function ProfileForm({
           isLoading={pending}
           clickAction={() =>
             start(async () => {
-              const result = await updateProfile(locale, values);
+              // The language only when changed: an untouched select keeps theirs.
+              const language = values.language === initial.language ? undefined : values.language;
+              const result = await updateProfile(locale, { ...values, language });
               setError(result?.error);
               setSaved(!result);
             })

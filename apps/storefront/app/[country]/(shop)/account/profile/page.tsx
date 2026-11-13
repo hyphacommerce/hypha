@@ -7,7 +7,9 @@ import { AccountShell } from "@/components/account/account-shell";
 import { ProfileForm } from "@/components/account/forms";
 import { loadAccount } from "@/lib/account";
 import { countryOf } from "@/lib/api";
+import { languageName } from "@/lib/format";
 import { pageT } from "@/lib/i18n";
+import { offered } from "@/lib/routing";
 import { link } from "@/lib/site";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +25,7 @@ export async function generateMetadata({
 
 export default async function ProfilePage({ params }: { params: Promise<{ country: string }> }) {
   const folder = (await params).country;
-  const [, t] = await Promise.all([countryOf(folder), pageT(folder)]);
+  const [country, t] = await Promise.all([countryOf(folder), pageT(folder)]);
   const to = (path: string) => link(folder, path);
   const account = await loadAccount();
   if (!account) redirect(to("/account"));
@@ -42,7 +44,11 @@ export default async function ProfilePage({ params }: { params: Promise<{ countr
             first_name: account.first_name ?? "",
             last_name: account.last_name ?? "",
             phone: account.phone ?? "",
+            // As this country spells it (`de-AT` kept is `de` here); empty when it
+            // offers nothing theirs comes to.
+            language: offered(account.language ?? undefined, country) ?? "",
           }}
+          languages={country.languages.map((l) => ({ value: l, label: languageName(l) }))}
         />
       </VStack>
     </AccountShell>
