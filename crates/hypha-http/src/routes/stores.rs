@@ -1,5 +1,5 @@
 use axum::{Json, extract::State};
-use hypha_core::{Ctx, Currency, Email, Language, StoreId, Timezone};
+use hypha_core::{Ctx, Currency, Email, Language, Scope, StoreId, Timezone};
 use hypha_inventory::{HasStockMovements, StockMovementRepo};
 use hypha_markets::{HasMarkets, MarketRepo};
 use hypha_purchasing::{HasPurchaseOrders, PurchaseOrderRepo};
@@ -158,7 +158,8 @@ pub struct UpdateStoreRequest {
     default_language: Option<String>,
     /// The other languages, replacing the list: at most 20, each once, never the default
     /// one. A language markets offer can't be removed or unpublished (`409
-    /// language_in_use`, `details.markets: [{id, languages}]`).
+    /// language_in_use`, `details.markets: [{id, languages}]` for callers with
+    /// `markets:read`).
     #[serde(default, deserialize_with = "patch::non_null")]
     #[schema(value_type = Vec<StoreLanguageRequest>, required = false)]
     languages: Option<Vec<StoreLanguageRequest>>,
@@ -252,14 +253,24 @@ pub async fn update<S: Storage>(
         setup_finished: req.setup_finished,
     };
     // Through the request's ports when they hold the directory (`read_store`).
-    let store = match state.storage.directory_in(&ports) {
-        Some(directory) => update_store(&ctx, directory, &state.clock, state.store, input).await?,
+    let updated = match state.storage.directory_in(&ports) {
+        Some(directory) => update_store(&ctx, directory, &state.clock, state.store, input).await,
         None => {
             drop(ports);
             let directory = state.storage.directory().await?;
-            update_store(&ctx, &directory, &state.clock, state.store, input).await?
+            update_store(&ctx, &directory, &state.clock, state.store, input).await
         }
     };
+    let store = updated.map_err(|e| {
+        // Which markets are in the way is theirs to read: `stores:write` alone gets the
+        // code.
+        let names_markets = matches!(e, hypha_stores::CommandError::LanguageInUse(_));
+        let error = ApiError::from(e);
+        if names_markets && !ctx.has_scope(Scope::MarketsRead) {
+            return error.with_details(None);
+        }
+        error
+    })?;
     Ok(Json(StoreResponse::new(&store)?))
 }
 
@@ -273,10 +284,6 @@ pub struct StorefrontStoreResponse {
     contact_email: Option<Email>,
     /// The language the store's content is written in.
     default_language: Language,
-    /// The other languages shoppers can be served, in the merchant's order: the
-    /// published ones only. Which of them a country offers is on
-    /// `GET /storefront/countries`.
-    languages: Vec<Language>,
 }
 
 /// The store's public details.
@@ -297,12 +304,6 @@ pub async fn fetch_storefront<S: Storage>(
         description: store.description().map(str::to_string),
         contact_email: store.contact_email().cloned(),
         default_language: store.default_language().clone(),
-        languages: store
-            .languages()
-            .iter()
-            .filter(|l| l.published)
-            .map(|l| l.language.clone())
-            .collect(),
     }))
 }
 

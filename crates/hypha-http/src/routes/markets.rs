@@ -1382,7 +1382,7 @@ pub async fn storefront_countries<S: Storage>(
     let mut items: Vec<StorefrontCountryResponse> = markets
         .iter()
         .flat_map(|m| {
-            let languages = market_languages(m, &offered);
+            let languages = m.offered_languages(&offered);
             m.countries()
                 .iter()
                 .map(move |c| StorefrontCountryResponse {
@@ -1398,23 +1398,6 @@ pub async fn storefront_countries<S: Storage>(
         .collect();
     items.sort_by_key(|i| i.country.as_str());
     Ok(Json(StorefrontCountryListResponse { items }))
-}
-
-/// What a market offers shoppers, out of what the store offers (`offered`, its default
-/// first): the market's list in order, or the store's default when it has none. A
-/// language the store stopped offering since (the store's check and a market's write
-/// don't share a transaction) is left out rather than promised.
-fn market_languages(market: &Market, offered: &[Language]) -> Vec<Language> {
-    let languages: Vec<Language> = market
-        .languages()
-        .iter()
-        .filter(|l| offered.contains(l))
-        .cloned()
-        .collect();
-    if languages.is_empty() {
-        return offered.first().cloned().into_iter().collect();
-    }
-    languages
 }
 
 // ---------- a product's prices ----------

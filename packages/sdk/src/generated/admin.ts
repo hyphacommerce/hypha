@@ -10477,7 +10477,8 @@ export interface components {
             /**
              * @description The other languages, replacing the list: at most 20, each once, never the default
              *     one. A language markets offer can't be removed or unpublished (`409
-             *     language_in_use`, `details.markets: [{id, languages}]`).
+             *     language_in_use`, `details.markets: [{id, languages}]` for callers with
+             *     `markets:read`).
              */
             languages?: components["schemas"]["StoreLanguageRequest"][];
             legal_address?: components["schemas"]["PostalAddressRequest"] | null;

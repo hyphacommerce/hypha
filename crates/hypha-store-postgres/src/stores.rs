@@ -1,6 +1,6 @@
 use hypha_core::{
-    Currency, Email, Language, RepoError, StoreId, Timezone, Version, Versioned, stamp_insert,
-    stamp_update,
+    Currency, Email, Language, Recorded, RepoError, StoreId, Timezone, Version, Versioned,
+    stamp_insert, stamp_update,
 };
 use hypha_stores::{Store, StoreLanguage, StoreRepo, StoreSnapshot};
 use tokio_postgres::{
@@ -15,6 +15,7 @@ use crate::{
         version_from_db, version_to_db, write_stamps,
     },
     error::{corrupt, repo_error},
+    outbox::insert_events,
     store::Queries,
     store::{PgConnection, PgStore, in_transaction},
 };
@@ -174,15 +175,27 @@ impl<C: PgConnection> StoreRepo for PgStore<C> {
     async fn insert(&self, store: &mut Store) -> Result<(), RepoError> {
         stamp_insert(store, self.now());
         let s = store.snapshot();
-        in_transaction!(self, |tx| insert_store(tx, &s).await)?;
-        store.set_version(Version::NEW.next());
+        let events = store.take_events();
+        let stamp = self.event_stamp();
+        let version = Version::NEW.next();
+        in_transaction!(self, |tx| {
+            insert_store(tx, &s).await?;
+            insert_events(tx, &events, Some(version), stamp).await
+        })?;
+        store.set_version(version);
         Ok(())
     }
 
     async fn update(&self, store: &mut Store) -> Result<(), RepoError> {
         stamp_update(store, self.now());
         let s = store.snapshot();
-        let version = in_transaction!(self, |tx| update_store(tx, &s).await)?;
+        let events = store.take_events();
+        let stamp = self.event_stamp();
+        let version = in_transaction!(self, |tx| {
+            let version = update_store(tx, &s).await?;
+            insert_events(tx, &events, Some(version), stamp).await?;
+            Ok(version)
+        })?;
         store.set_version(version);
         Ok(())
     }

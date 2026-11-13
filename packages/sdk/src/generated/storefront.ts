@@ -2363,12 +2363,6 @@ export interface components {
             default_language: components["schemas"]["Language"];
             /** @description Plain text, at most 500 characters. */
             description?: string | null;
-            /**
-             * @description The other languages shoppers can be served, in the merchant's order: the
-             *     published ones only. Which of them a country offers is on
-             *     `GET /storefront/countries`.
-             */
-            languages: components["schemas"]["Language"][];
             name: string;
         };
         /**

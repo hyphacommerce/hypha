@@ -1,6 +1,6 @@
 use hypha_core::{
-    Address, AddressParts, Currency, Email, Language, RepoError, StoreId, Timestamp, Timezone,
-    Version, Versioned,
+    Address, AddressParts, Currency, Email, HasOutbox, Language, OutboxRepo, RepoError, StoreId,
+    Timestamp, Timezone, Version, Versioned,
 };
 use hypha_stores::{SetupStep, Store, StoreLanguage, StoreRepo, repo::keys};
 use uuid::Uuid;
@@ -19,6 +19,60 @@ pub async fn store_repo<R: StoreRepo>(make: impl AsyncFn() -> R) {
     details_round_trip(&make().await).await;
     scenario("store: its other languages keep their order and whether they're published");
     languages_round_trip(&make().await).await;
+}
+
+/// Runs the scenarios of a store's events, each on fresh ports from `make`.
+pub async fn store_events<S: StoreRepo + HasOutbox>(make: impl AsyncFn() -> S) {
+    scenario("store: a write that changed fields records one store.updated, in its commit");
+    events_follow_writes(&make().await).await;
+}
+
+async fn events_follow_writes<S: StoreRepo + HasOutbox>(ports: &S) {
+    let mut s = store(1, "Acme");
+    ports.insert(&mut s).await.unwrap();
+    // Nothing changed: the write stands, with no event.
+    ports.update(&mut s).await.unwrap();
+
+    let mut stale = s.clone();
+    s.rename("Acme EU").unwrap();
+    s.set_languages(
+        Language::new("hr").unwrap(),
+        vec![StoreLanguage {
+            language: Language::new("de").unwrap(),
+            published: true,
+        }],
+    )
+    .unwrap();
+    ports.update(&mut s).await.unwrap();
+
+    // A write that fails leaves no event behind.
+    stale.rename("Acme US").unwrap();
+    assert_eq!(ports.update(&mut stale).await, Err(RepoError::StaleVersion));
+
+    let events = ports.outbox().events_after(0, 100).await.unwrap();
+    assert_eq!(events.len(), 1, "{events:?}");
+    let event = &events[0];
+    assert_eq!(
+        (
+            event.event_type.as_str(),
+            event.subject_kind.as_str(),
+            event.subject_id,
+            event.subject_version,
+        ),
+        (
+            "store.updated",
+            "store",
+            s.id().as_uuid(),
+            Some(s.version())
+        )
+    );
+    assert_eq!(
+        event.data,
+        serde_json::json!({
+            "store": s.id(),
+            "fields": ["default_language", "languages", "name"]
+        })
+    );
 }
 
 async fn languages_round_trip<R: StoreRepo>(repo: &R) {

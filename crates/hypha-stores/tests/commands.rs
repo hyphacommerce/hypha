@@ -695,6 +695,83 @@ fn a_language_a_market_offers_stays_offered() {
 }
 
 #[test]
+fn a_market_already_out_of_step_doesnt_stop_other_changes() {
+    let repo = InMemoryStoreRepo::default();
+    let store = store_in_three_languages(&repo);
+    // `hr` was never offered and `fr` isn't published: neither is this change's doing.
+    let input = UpdateStore {
+        default_language: Some("en".to_string()),
+        languages: Some(vec![
+            listed("de", true),
+            listed("fr", false),
+            listed("it", true),
+        ]),
+        market_languages: vec![offering(1, &["hr", "fr", "de"])],
+        ..UpdateStore::default()
+    };
+    let changed = block_on(update_store(
+        &Ctx::system(),
+        &repo,
+        &clock(),
+        store.id(),
+        input,
+    ))
+    .unwrap();
+    assert_eq!(changed.languages().len(), 3);
+}
+
+#[test]
+fn update_store_records_what_changed() {
+    use hypha_core::{HasOutbox, OutboxRepo};
+    use hypha_testkit::InMemoryPorts;
+
+    let ports = InMemoryPorts::default();
+    let ids = SequentialIds::default();
+    let store = block_on(create_store(&Ctx::system(), &ports, &ids, "Acme")).unwrap();
+    let update = |input: UpdateStore| {
+        block_on(update_store(
+            &Ctx::system(),
+            &ports,
+            &clock(),
+            store.id(),
+            input,
+        ))
+    };
+    update(UpdateStore {
+        name: Some("Acme".to_string()),
+        default_language: Some("en".to_string()),
+        ..UpdateStore::default()
+    })
+    .unwrap();
+    update(UpdateStore {
+        description: Some(Some("Mugs.".to_string())),
+        languages: Some(vec![listed("de", true)]),
+        ..UpdateStore::default()
+    })
+    .unwrap();
+    // Refused: nothing recorded.
+    update(UpdateStore {
+        name: Some("Acme EU".to_string()),
+        languages: Some(vec![listed("en", true)]),
+        ..UpdateStore::default()
+    })
+    .unwrap_err();
+
+    let events = block_on(ports.outbox().events_after(0, 100)).unwrap();
+    let fields: Vec<_> = events
+        .iter()
+        .map(|e| (e.event_type.as_str(), e.data["fields"].clone()))
+        .collect();
+    assert_eq!(
+        fields,
+        [(
+            "store.updated",
+            serde_json::json!(["description", "languages"])
+        )]
+    );
+}
+
+#[test]
 fn what_markets_offer_alone_changes_nothing() {
     let repo = InMemoryStoreRepo::default();
     let store = store_in_three_languages(&repo);

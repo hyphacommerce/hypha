@@ -22,8 +22,6 @@ pub enum MarketError {
     PriceListNotInCatalog(PriceListId),
     #[error("language {0} is listed twice")]
     DuplicateLanguage(Language),
-    #[error("a market offers at most {max} languages")]
-    TooManyLanguages { max: usize },
 }
 
 /// What's wrong with one entry of a list of fixed prices.
@@ -85,7 +83,6 @@ impl ErrorCode for MarketError {
             MarketError::TooManyPriceLists { .. } => "too_many_price_lists",
             MarketError::PriceListNotInCatalog(_) => "price_list_not_in_catalog",
             MarketError::DuplicateLanguage(_) => "duplicate_language",
-            MarketError::TooManyLanguages { .. } => "too_many_languages",
         }
     }
 }

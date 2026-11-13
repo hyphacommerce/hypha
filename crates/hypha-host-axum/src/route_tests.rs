@@ -403,7 +403,7 @@ async fn the_store_details_are_set_cleared_and_partly_public() {
     .await;
     assert_eq!(
         public,
-        json!({"name": store["name"], "description": "Candles.", "contact_email": "hi@lumen.example", "default_language": "hr", "languages": []})
+        json!({"name": store["name"], "description": "Candles.", "contact_email": "hi@lumen.example", "default_language": "hr"})
     );
 
     for (body, want) in [
@@ -2709,7 +2709,7 @@ async fn a_publishable_key_works_on_the_storefront_only() {
         (status, &store),
         (
             StatusCode::OK,
-            &json!({ "name": "Test", "description": null, "contact_email": null, "default_language": "en", "languages": [] })
+            &json!({ "name": "Test", "description": null, "contact_email": null, "default_language": "en" })
         )
     );
     // In the Authorization header too.
@@ -5792,7 +5792,7 @@ async fn a_store_lists_languages_and_markets_offer_the_published_ones() {
     let app = app().await;
     let (market, _) = market_selling_a_mug(&app).await;
     let market_url = format!("/admin/markets/{market}");
-    let key = publishable(&app).await;
+    let shop = publishable(&app).await;
     let (_, store) = send(&app, "GET", "/admin/store", None).await;
     assert_eq!(store["languages"], json!([]));
     let (_, fetched) = send(&app, "GET", &market_url, None).await;
@@ -5811,11 +5811,16 @@ async fn a_store_lists_languages_and_markets_offer_the_published_ones() {
     assert_eq!(store["languages"], three);
     let (_, store) = send(&app, "GET", "/admin/store", None).await;
     assert_eq!(store["languages"], three);
-    let (_, public) = send_as(&app, &key, "GET", "/storefront/store", None).await;
-    assert_eq!(
-        (&public["default_language"], &public["languages"]),
-        (&json!("en"), &json!(["de", "sr-Latn"])),
-        "a storefront sees the published ones"
+    let event = outbox_events(&app)
+        .await
+        .into_iter()
+        .rfind(|e| e.event_type == "store.updated")
+        .unwrap();
+    assert_eq!(event.data["fields"], json!(["languages"]));
+    let (_, public) = send_as(&app, &shop, "GET", "/storefront/store", None).await;
+    assert!(
+        public.get("languages").is_none(),
+        "a storefront reads languages per country"
     );
 
     for (body, status, want) in [
@@ -5865,7 +5870,7 @@ async fn a_store_lists_languages_and_markets_offer_the_published_ones() {
 
     // A market offers the store's default or published languages, in its own order.
     let countries = async || {
-        let (_, countries) = send_as(&app, &key, "GET", "/storefront/countries", None).await;
+        let (_, countries) = send_as(&app, &shop, "GET", "/storefront/countries", None).await;
         countries["items"][0]["languages"].clone()
     };
     assert_eq!(countries().await, json!(["en"]), "the store's default");
@@ -5937,6 +5942,24 @@ async fn a_store_lists_languages_and_markets_offer_the_published_ones() {
         (&store["default_language"], &store["languages"]),
         (&json!("en"), &three),
         "nothing changed"
+    );
+    // Which markets are in the way is for callers who may read markets.
+    let stores_only = key(
+        &app,
+        json!({"kind": "secret", "name": "Store settings", "scopes": ["stores:write"]}),
+    )
+    .await;
+    let (status, error) = send_as(
+        &app,
+        &stores_only,
+        "PATCH",
+        "/admin/store",
+        Some(r#"{"languages":[]}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&error), &error["details"]),
+        (StatusCode::CONFLICT, "language_in_use", &Value::Null)
     );
 
     // Languages no market names change freely; the default and another swap in one

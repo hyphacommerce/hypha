@@ -78,9 +78,6 @@ impl Stamped for Market {
 }
 
 impl Market {
-    /// As many as a store can offer: its default language and 20 others.
-    pub const MAX_LANGUAGES: usize = 21;
-
     pub fn new(
         id: MarketId,
         name: String,
@@ -138,11 +135,6 @@ impl Market {
     /// the store's default language alone. Each may be listed once. Whether the store
     /// offers them is the command's to check: a market can't see the store.
     pub fn set_languages(&mut self, languages: Vec<Language>) -> Result<(), MarketError> {
-        if languages.len() > Self::MAX_LANGUAGES {
-            return Err(MarketError::TooManyLanguages {
-                max: Self::MAX_LANGUAGES,
-            });
-        }
         for (i, language) in languages.iter().enumerate() {
             if languages[..i].contains(language) {
                 return Err(MarketError::DuplicateLanguage(language.clone()));
@@ -205,6 +197,23 @@ impl Market {
 
     pub fn languages(&self) -> &[Language] {
         &self.languages
+    }
+
+    /// What shoppers are offered here, out of what the store offers (`store_languages`,
+    /// its default first): the market's languages in order, or the store's default when
+    /// it lists none. A language the store stopped offering since (the store's check and
+    /// a market's write don't share a transaction) is left out rather than promised.
+    pub fn offered_languages(&self, store_languages: &[Language]) -> Vec<Language> {
+        let offered: Vec<Language> = self
+            .languages
+            .iter()
+            .filter(|l| store_languages.contains(l))
+            .cloned()
+            .collect();
+        if offered.is_empty() {
+            return store_languages.first().cloned().into_iter().collect();
+        }
+        offered
     }
 }
 
@@ -382,15 +391,18 @@ mod tests {
     }
 
     #[test]
-    fn twenty_one_languages_is_the_limit() {
+    fn shoppers_are_offered_the_markets_languages_the_store_still_offers() {
+        let store = [lang("en"), lang("de"), lang("fr")];
         let mut m = market(1, &["RS"]).unwrap();
-        let tags: Vec<Language> = (b'a'..=b'v')
-            .map(|c| lang(&format!("a{}", c as char)))
-            .collect();
-        assert_eq!(m.set_languages(tags[..21].to_vec()), Ok(()));
+        assert_eq!(m.offered_languages(&store), vec![lang("en")], "none listed");
+        m.set_languages(vec![lang("fr"), lang("hr"), lang("en")])
+            .unwrap();
+        assert_eq!(m.offered_languages(&store), vec![lang("fr"), lang("en")]);
+        m.set_languages(vec![lang("hr")]).unwrap();
         assert_eq!(
-            m.set_languages(tags),
-            Err(MarketError::TooManyLanguages { max: 21 })
+            m.offered_languages(&store),
+            vec![lang("en")],
+            "none left: the store's default"
         );
     }
 

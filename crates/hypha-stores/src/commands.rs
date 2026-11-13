@@ -127,22 +127,29 @@ pub struct MarketLanguages {
 impl UpdateStore {
     /// Whether the caller asked for no change; what the host adds doesn't count.
     fn is_empty(&self) -> bool {
-        let asked = Self {
-            currency_locked: false,
-            market_languages: Vec::new(),
-            ..self.clone()
-        };
-        asked == Self::default()
+        *self
+            == Self {
+                currency_locked: self.currency_locked,
+                market_languages: self.market_languages.clone(),
+                ..Self::default()
+            }
     }
 }
 
-/// The markets that offer a language `store` doesn't, each with those languages.
-fn languages_in_use(store: &Store, markets: Vec<MarketLanguages>) -> Vec<MarketLanguages> {
+/// The markets naming a language the store offered `before` and no longer does, each
+/// with those languages. A language it didn't offer before isn't this change's doing,
+/// so a market out of step already doesn't stop the store's other changes.
+fn languages_in_use(
+    before: &[Language],
+    store: &Store,
+    markets: Vec<MarketLanguages>,
+) -> Vec<MarketLanguages> {
     let offered = store.offered_languages();
     markets
         .into_iter()
         .filter_map(|mut m| {
-            m.languages.retain(|l| !offered.contains(l));
+            m.languages
+                .retain(|l| before.contains(l) && !offered.contains(l));
             (!m.languages.is_empty()).then_some(m)
         })
         .collect()
@@ -181,6 +188,7 @@ pub async fn update_store<R: StoreRepo>(
     if let Some(timezone) = input.timezone {
         store.set_timezone(timezone.as_deref().map(Timezone::new).transpose()?);
     }
+    let offered_before = store.offered_languages();
     let default_language = input
         .default_language
         .as_deref()
@@ -204,7 +212,7 @@ pub async fn update_store<R: StoreRepo>(
         (Some(default), None) => store.set_default_language(default)?,
         (None, None) => {}
     }
-    let in_use = languages_in_use(&store, input.market_languages);
+    let in_use = languages_in_use(&offered_before, &store, input.market_languages);
     if !in_use.is_empty() {
         return Err(CommandError::LanguageInUse(in_use));
     }

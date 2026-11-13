@@ -17508,7 +17508,7 @@
             ]
           },
           "languages": {
-            "description": "The other languages, replacing the list: at most 20, each once, never the default\none. A language markets offer can't be removed or unpublished (`409\nlanguage_in_use`, `details.markets: [{id, languages}]`).",
+            "description": "The other languages, replacing the list: at most 20, each once, never the default\none. A language markets offer can't be removed or unpublished (`409\nlanguage_in_use`, `details.markets: [{id, languages}]` for callers with\n`markets:read`).",
             "items": {
               "$ref": "#/components/schemas/StoreLanguageRequest"
             },

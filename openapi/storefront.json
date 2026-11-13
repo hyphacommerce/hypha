@@ -4231,21 +4231,13 @@
               "null"
             ]
           },
-          "languages": {
-            "description": "The other languages shoppers can be served, in the merchant's order: the\npublished ones only. Which of them a country offers is on\n`GET /storefront/countries`.",
-            "items": {
-              "$ref": "#/components/schemas/Language"
-            },
-            "type": "array"
-          },
           "name": {
             "type": "string"
           }
         },
         "required": [
           "name",
-          "default_language",
-          "languages"
+          "default_language"
         ],
         "type": "object"
       },
