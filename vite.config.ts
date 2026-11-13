@@ -178,7 +178,7 @@ export default defineConfig({
       },
       {
         // `node:test`'s `test()` returns a promise the runner awaits.
-        files: ["**/*.test.ts"],
+        files: ["**/*.test.ts", "**/*.test.mjs"],
         rules: { "typescript/no-floating-promises": "off" },
       },
     ],

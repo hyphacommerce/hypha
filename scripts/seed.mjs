@@ -12,7 +12,8 @@
 // tax regions, price lists and fixed prices, two warehouses, shipping zones with rates,
 // a category tree, products with stock (some sold out), publishing, search filters, a
 // publishable key, the storefront's webhook, payment methods (cash on delivery in
-// Serbia, bank transfer everywhere), and a few orders in different states, some paid.
+// Serbia, bank transfer everywhere), a few orders in different states, some paid, and
+// German as a second content language.
 //
 // Run it against a fresh store (it stops when products already exist):
 //
@@ -48,10 +49,19 @@
 // `pnpm seed --checkout` on a store this script seeded before checkout rules adds them (no
 // PO boxes with the express options, a house number in the Netherlands and Germany, both
 // errors) and widens the "Demo (read-only)" role. Rules are skipped by name.
+//
+// `pnpm seed --translations` on a store this script seeded before languages adds German:
+// published on the store, offered by the markets selling to German-speaking countries
+// (first where every country speaks it, else after English, so "Europe" stays English
+// by default with German at `/de-de` and `/de-at`), and the seeded content translated from
+// `seed-data/de.mjs` (`seed-translations.mjs`). Resources with a German translation
+// already are skipped, so a second run adds nothing.
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
+
+import { seedGerman } from "./seed-translations.mjs";
 
 const BASE = (process.env.HYPHA_URL ?? "http://127.0.0.1:3917").replace(/\/$/, "");
 const EMAIL = process.env.HYPHA_SEED_EMAIL ?? process.env.HYPHA_OWNER_EMAIL ?? "owner@example.com";
@@ -2095,6 +2105,25 @@ async function addPurchasing() {
   for (const line of added) console.log(`  ${line}`);
 }
 
+// ---------- German (the run, and `--translations`) ----------
+
+/**
+ * `--translations`, on a store this script seeded before languages: adds German (the
+ * language, the markets, the translations) and widens the demo's read-only role. Running
+ * it again adds nothing.
+ */
+async function addTranslations() {
+  const { added, where } = await seedGerman(admin, {
+    storefrontUrl: STOREFRONT_URL,
+    log: console.log,
+  });
+  const scopes = await widenDemoRole();
+  if (scopes.length > 0) added.push(`${DEMO_ROLE}: ${scopes.join(", ")}`);
+  console.log(added.length > 0 ? "\nAdded:" : "\nNothing to add: the store has it all.");
+  for (const line of added) console.log(`  ${line}`);
+  if (where) console.log(`\n${where}`);
+}
+
 async function main() {
   console.log(`Seeding ${BASE} as ${EMAIL}`);
   const login = await call("POST", "/admin/auth/login", { email: EMAIL, password: PASSWORD });
@@ -2102,14 +2131,15 @@ async function main() {
     throw new Error(`login needs ${login.status}: use a store owner without 2FA`);
   token = login.session.token;
 
-  const flags = ["--images", "--pricing", "--purchasing", "--checkout"].filter((f) =>
-    process.argv.includes(f),
+  const flags = ["--images", "--pricing", "--purchasing", "--checkout", "--translations"].filter(
+    (f) => process.argv.includes(f),
   );
   if (flags.length > 0) {
     if (flags.includes("--images")) await replaceImages();
     if (flags.includes("--pricing")) await addPricing();
     if (flags.includes("--purchasing")) await addPurchasing();
     if (flags.includes("--checkout")) await addCheckoutRules();
+    if (flags.includes("--translations")) await addTranslations();
     return;
   }
 
@@ -2729,12 +2759,24 @@ async function main() {
     purchasing = [];
   }
 
+  // Last, so every name, description and field it translates is there.
+  console.log("\nGerman");
+  /** @type {{ added: string[], where: string | null }} */
+  let german = { added: [], where: null };
+  try {
+    german = await seedGerman(admin, { storefrontUrl: STOREFRONT_URL, log: console.log });
+  } catch (e) {
+    console.error(`  German failed: ${e.message}. Run \`pnpm seed --translations\` to finish it.`);
+  }
+
   const variantCount = sellable.reduce((n, p) => n + p.variants.length, 0);
   console.log("\nDone: Mycelium Works is set up.");
   console.log(
     `  ${sellable.length} products for sale (${variantCount} variants), 1 draft · ${FIELDS.length} custom fields · ${MARKETS.length} markets · ${orders.length} orders · ${discounts.length} discounts`,
   );
   for (const line of purchasing) console.log(`  ${line}`);
+  for (const line of german.added) console.log(`  ${line}`);
+  if (german.where) console.log(`\n${german.where}`);
 }
 
 main().catch((e) => {
