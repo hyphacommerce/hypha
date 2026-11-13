@@ -8354,8 +8354,9 @@ export interface components {
             html: string;
             /**
              * @description The language the sources are written for (a BCP 47 tag, one of the store's):
-             *     rendered in that language's layout, its money and dates written its way. Absent:
-             *     the store's default.
+             *     rendered as that language's emails send, in its layout, with money and dates
+             *     written the way of the template's `sources_language` (a language still sending
+             *     another's sources keeps their formats). Absent: the store's default.
              */
             language?: string | null;
             order?: components["schemas"]["OrderId"] | null;
