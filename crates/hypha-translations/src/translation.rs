@@ -72,110 +72,157 @@ impl Translation {
         input: BTreeMap<String, FieldInput>,
     ) -> Result<bool, TranslationError> {
         let mut problems = Vec::new();
-        let mut problem = |key: &str, code: &'static str, message: String| {
-            problems.push(Problem {
-                key: key.to_string(),
-                code,
-                message,
-            });
-        };
         let mut fields = BTreeMap::new();
         for (key, field) in input {
-            let Some((spec, child)) = self.resource.kind.field(&key) else {
-                problem(
-                    &key,
-                    "unknown_field",
-                    format!("a {} has no such field", self.resource.kind),
-                );
-                continue;
-            };
-            let now = source.field(&key);
-            // A field whose rule is the resource's own has none to check by once it's
-            // gone: it's unknown, whatever it holds (blank still removes it).
-            if now.is_none()
-                && matches!(spec.rule, FieldRule::Value(_))
-                && !field.value.trim().is_empty()
-            {
-                problem(
-                    &key,
-                    "unknown_child",
-                    "the resource has no such field now".to_string(),
-                );
-                continue;
-            }
-            let rule = now.map_or(spec.rule, |f| f.rule_or(spec.rule));
-            let value = match rule {
-                FieldRule::Value(rule) => match value_of(rule, &field.value) {
-                    Ok(value) => value,
-                    Err((code, message)) => {
-                        problem(&key, code, message);
-                        continue;
-                    }
-                },
-                FieldRule::Text { max_chars } => {
-                    let value = field.value.trim();
-                    if value.chars().count() > max_chars {
-                        problem(&key, "too_long", format!("at most {max_chars} characters"));
-                        continue;
-                    }
-                    value.to_string()
+            match self.check(source, &key, field) {
+                Ok(Some(field)) => {
+                    fields.insert(key, field);
                 }
-                FieldRule::Html { max_bytes } => match Description::new(&field.value) {
-                    Ok(html) => html.map(|h| h.as_html().to_string()).unwrap_or_default(),
-                    Err(DescriptionError::TooLong { .. }) => {
-                        problem(
-                            &key,
-                            "too_long",
-                            format!("at most {max_bytes} bytes of HTML"),
-                        );
-                        continue;
-                    }
-                },
-            };
-            if value.is_empty() {
-                continue;
+                Ok(None) => {}
+                Err(problem) => problems.push(problem),
             }
-            let Some(now) = now else {
-                let code = match child {
-                    Some(_) => "unknown_child",
-                    None => "unknown_field",
-                };
-                problem(&key, code, "the resource has no such field now".to_string());
-                continue;
-            };
-            // A translation replaces text the resource has: without a source nothing
-            // would ever show it.
-            if now.text.is_empty() {
-                problem(
-                    &key,
-                    "source_empty",
-                    "the resource has no text in this field to translate".to_string(),
-                );
-                continue;
-            }
-            let source_digest = match (field.source_digest, self.fields.get(&key)) {
-                (Some(seen), _) if seen != now.digest => {
-                    problem(
-                        &key,
-                        "source_changed",
-                        "the source text changed since it was read".to_string(),
-                    );
-                    continue;
-                }
-                (None, Some(stored)) if stored.value == value => stored.source_digest.clone(),
-                _ => now.digest.clone(),
-            };
-            fields.insert(
-                key,
-                TranslatedField {
-                    value,
-                    source_digest,
-                },
-            );
         }
         if !problems.is_empty() {
             return Err(TranslationError::Invalid(problems));
         }
+        Ok(self.set_fields(fields))
+    }
+
+    /// Changes only the fields `input` names, by the same rules as `replace`: a field
+    /// given a value is set (blank removes it), `None` removes it, and every field left
+    /// out stays as it is. Returns whether anything changed; when it did,
+    /// `translation.updated` names the fields.
+    pub fn patch(
+        &mut self,
+        source: &Source,
+        input: BTreeMap<String, Option<FieldInput>>,
+    ) -> Result<bool, TranslationError> {
+        let mut problems = Vec::new();
+        let mut fields = self.fields.clone();
+        for (key, field) in input {
+            let checked = match field {
+                Some(field) => self.check(source, &key, field),
+                // Removing a field a gone child had is fine; one the kind never has isn't.
+                None if self.resource.kind.field(&key).is_none() => Err(self.unknown_field(&key)),
+                None => Ok(None),
+            };
+            match checked {
+                Ok(Some(field)) => {
+                    fields.insert(key, field);
+                }
+                Ok(None) => {
+                    fields.remove(&key);
+                }
+                Err(problem) => problems.push(problem),
+            }
+        }
+        if !problems.is_empty() {
+            return Err(TranslationError::Invalid(problems));
+        }
+        Ok(self.set_fields(fields))
+    }
+
+    fn unknown_field(&self, key: &str) -> Problem {
+        Problem {
+            key: key.to_string(),
+            code: "unknown_field",
+            message: format!("a {} has no such field", self.resource.kind),
+        }
+    }
+
+    /// One field of a write, checked against the resource as it is now: what to store,
+    /// `None` when it's blank (the field is removed), or why not.
+    fn check(
+        &self,
+        source: &Source,
+        key: &str,
+        field: FieldInput,
+    ) -> Result<Option<TranslatedField>, Problem> {
+        let problem = |code: &'static str, message: String| Problem {
+            key: key.to_string(),
+            code,
+            message,
+        };
+        let Some((spec, child)) = self.resource.kind.field(key) else {
+            return Err(self.unknown_field(key));
+        };
+        let now = source.field(key);
+        // A field whose rule is the resource's own has none to check by once it's
+        // gone: it's unknown, whatever it holds (blank still removes it).
+        if now.is_none()
+            && matches!(spec.rule, FieldRule::Value(_))
+            && !field.value.trim().is_empty()
+        {
+            return Err(problem(
+                "unknown_child",
+                "the resource has no such field now".to_string(),
+            ));
+        }
+        let rule = now.map_or(spec.rule, |f| f.rule_or(spec.rule));
+        let value = match rule {
+            FieldRule::Value(rule) => {
+                value_of(rule, &field.value).map_err(|(code, message)| problem(code, message))?
+            }
+            FieldRule::Text { max_chars } => {
+                let value = field.value.trim();
+                if value.chars().count() > max_chars {
+                    return Err(problem(
+                        "too_long",
+                        format!("at most {max_chars} characters"),
+                    ));
+                }
+                value.to_string()
+            }
+            FieldRule::Html { max_bytes } => match Description::new(&field.value) {
+                Ok(html) => html.map(|h| h.as_html().to_string()).unwrap_or_default(),
+                Err(DescriptionError::TooLong { .. }) => {
+                    return Err(problem(
+                        "too_long",
+                        format!("at most {max_bytes} bytes of HTML"),
+                    ));
+                }
+            },
+        };
+        if value.is_empty() {
+            return Ok(None);
+        }
+        let Some(now) = now else {
+            let code = match child {
+                Some(_) => "unknown_child",
+                None => "unknown_field",
+            };
+            return Err(problem(
+                code,
+                "the resource has no such field now".to_string(),
+            ));
+        };
+        // A translation replaces text the resource has: without a source nothing
+        // would ever show it.
+        if now.text.is_empty() {
+            return Err(problem(
+                "source_empty",
+                "the resource has no text in this field to translate".to_string(),
+            ));
+        }
+        let source_digest = match (field.source_digest, self.fields.get(key)) {
+            (Some(seen), _) if seen != now.digest => {
+                return Err(problem(
+                    "source_changed",
+                    "the source text changed since it was read".to_string(),
+                ));
+            }
+            (None, Some(stored)) if stored.value == value => stored.source_digest.clone(),
+            _ => now.digest.clone(),
+        };
+        Ok(Some(TranslatedField {
+            value,
+            source_digest,
+        }))
+    }
+
+    /// Makes `fields` the translation's, recording `translation.updated` naming the keys
+    /// added, changed or removed. Returns whether any was.
+    fn set_fields(&mut self, fields: BTreeMap<String, TranslatedField>) -> bool {
         let mut changed: Vec<String> = fields
             .iter()
             .filter(|(key, field)| self.fields.get(*key) != Some(field))
@@ -188,12 +235,12 @@ impl Translation {
             )
             .collect();
         if changed.is_empty() {
-            return Ok(false);
+            return false;
         }
         changed.sort_unstable();
         self.fields = fields;
         self.record_updated(changed);
-        Ok(true)
+        true
     }
 
     /// Records `translation.updated` naming `changed`. One event per write: a second
@@ -806,6 +853,115 @@ mod tests {
         assert_eq!(t.text(VALUE), Some("Wolle"));
         assert_eq!(t.replace(&without, input(&[("title", "Tasse")])), Ok(true));
         assert_eq!(t.text(VALUE), None);
+    }
+
+    fn patch(fields: &[(&str, Option<&str>)]) -> BTreeMap<String, Option<FieldInput>> {
+        fields
+            .iter()
+            .map(|(key, value)| {
+                (
+                    key.to_string(),
+                    value.map(|value| FieldInput {
+                        value: value.to_string(),
+                        source_digest: None,
+                    }),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_patch_keeps_the_fields_it_leaves_out() {
+        let mut t = german();
+        t.replace(
+            &source(),
+            input(&[("title", "Tasse"), ("options.opt_1.name", "Farbe")]),
+        )
+        .unwrap();
+        t.take_events();
+        assert_eq!(
+            t.patch(&source(), patch(&[("title", Some("Becher"))])),
+            Ok(true)
+        );
+        assert_eq!(t.text("title"), Some("Becher"));
+        assert_eq!(t.text("options.opt_1.name"), Some("Farbe"));
+        let events = t.take_events();
+        assert_eq!(events[0].data["fields"], serde_json::json!(["title"]));
+    }
+
+    #[test]
+    fn a_patch_removes_a_field_set_to_none_or_blank() {
+        let mut t = german();
+        t.replace(
+            &source(),
+            input(&[
+                ("title", "Tasse"),
+                ("description", "<p>Eine Tasse.</p>"),
+                ("options.opt_1.name", "Farbe"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(
+            t.patch(
+                &source(),
+                patch(&[("title", None), ("description", Some(" "))])
+            ),
+            Ok(true)
+        );
+        assert_eq!(
+            t.fields().keys().collect::<Vec<_>>(),
+            vec!["options.opt_1.name"]
+        );
+    }
+
+    #[test]
+    fn a_patch_checks_what_it_sets_like_a_replace() {
+        let mut t = german();
+        t.replace(&source(), input(&[("title", "Tasse")])).unwrap();
+        let mut stale = patch(&[("options.opt_1.name", Some("Farbe"))]);
+        stale
+            .get_mut("options.opt_1.name")
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .source_digest = Some(source_digest("Color"));
+        stale.insert("name".to_string(), None);
+        assert_eq!(
+            problems(t.patch(&source(), stale)),
+            vec![
+                ("name".to_string(), "unknown_field"),
+                ("options.opt_1.name".to_string(), "source_changed"),
+            ]
+        );
+        assert_eq!(t.fields().keys().collect::<Vec<_>>(), vec!["title"]);
+    }
+
+    #[test]
+    fn a_patch_may_remove_a_gone_childs_field() {
+        let mut t = german();
+        t.replace(&source(), input(&[("options.opt_1.name", "Farbe")]))
+            .unwrap();
+        let without = Source::new(vec![SourceField::new("title", Some("Mug"))]);
+        assert_eq!(
+            t.patch(&without, patch(&[("options.opt_1.name", None)])),
+            Ok(true)
+        );
+        assert!(t.is_empty());
+    }
+
+    #[test]
+    fn a_patch_that_changes_nothing_records_nothing() {
+        let mut t = german();
+        t.replace(&source(), input(&[("title", "Tasse")])).unwrap();
+        t.take_events();
+        assert_eq!(
+            t.patch(
+                &source(),
+                patch(&[("title", Some("Tasse")), ("description", None)])
+            ),
+            Ok(false)
+        );
+        assert!(t.take_events().is_empty());
     }
 
     #[test]

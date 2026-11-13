@@ -8,8 +8,10 @@ use hypha_core::{
     HasOutbox, Language, OutboxRepo, PageLimit, PageRequest, RepoError, Stamped, Version, Versioned,
 };
 use hypha_translations::{
-    FieldInput, HasTranslations, Overlay, ResourceKind, ResourceRef, Source, SourceField,
-    Translation, TranslationFilter, TranslationKey, TranslationRepo, keys,
+    FieldCounts, FieldInput, HasTranslations, Inheritance, LanguageProgress, Overlay,
+    ProgressLanguage, ResourceKind, ResourceRef, Source, SourceDigest, SourceField, Translation,
+    TranslationFilter, TranslationKey, TranslationRepo, TranslationSourceRepo, TranslationState,
+    WorklistFilter, keys, source_digest, source_digests,
 };
 use uuid::Uuid;
 
@@ -103,6 +105,453 @@ where
     deletes_resources(&make().await).await;
     scenario("translations: languages off the list go, without events");
     retains_languages(&make().await).await;
+    scenario("translation sources: replaced whole per resource, none removes them");
+    replaces_sources(&make().await).await;
+    scenario("translation sources: the worklist counts fields in one language, by state");
+    worklist_states(&make().await).await;
+    scenario("translation sources: the worklist pages in the catalog's order of kinds");
+    worklist_pages(&make().await).await;
+    scenario("translation sources: progress counts each language's fields");
+    progress(&make().await).await;
+    scenario("translation sources: a regional language counts what it inherits from its base");
+    inherits(&make().await).await;
+    scenario(
+        "translation sources: the queue, longest waiting first, queued again survives, counted",
+    );
+    queue(&make().await).await;
+}
+
+fn digest(key: &str, text: &str) -> SourceDigest {
+    SourceDigest {
+        key: key.to_string(),
+        digest: source_digest(text),
+    }
+}
+
+/// The digests of `source()`'s fields with text, as a product's.
+fn product_sources() -> Vec<SourceDigest> {
+    source_digests(&Source::new(vec![
+        SourceField::new("title", Some("Mug")),
+        SourceField::new("description", Some("<p>A mug.</p>")),
+        SourceField::new("options.opt_1.name", Some("Colour")),
+    ]))
+}
+
+/// A stored translation of `resource` into `language` of `fields`, against `source()`.
+async fn translated<S: HasTranslations>(
+    ports: &S,
+    resource: ResourceRef,
+    language: &str,
+    values: &[(&str, &str)],
+) {
+    let mut t = Translation::new(resource, lang(language));
+    t.replace(&source(), fields(values)).unwrap();
+    ports.translations().insert(&mut t).await.unwrap();
+}
+
+async fn replaces_sources<S: HasTranslations + HasOutbox>(ports: &S) {
+    let repo = ports.translations();
+    let category = resource(ResourceKind::Category, 1);
+    repo.replace_sources(product(1), &product_sources())
+        .await
+        .unwrap();
+    repo.replace_sources(category, &[digest("name", "Mugs")])
+        .await
+        .unwrap();
+    let mut both = product_sources()
+        .into_iter()
+        .map(|d| (product(1), d))
+        .collect::<Vec<_>>();
+    both.insert(0, (category, digest("name", "Mugs")));
+    // By resource (the catalog's order of kinds: products first), then key.
+    both.sort();
+    assert_eq!(repo.sources(&[product(1), category]).await, Ok(both));
+
+    // Replaced whole: a key left out goes, a changed digest changes.
+    let fewer = vec![digest("title", "Cup")];
+    repo.replace_sources(product(1), &fewer).await.unwrap();
+    assert_eq!(
+        repo.sources(&[product(1)]).await,
+        Ok(vec![(product(1), digest("title", "Cup"))])
+    );
+    // None removes them; another resource's stay.
+    repo.replace_sources(product(1), &[]).await.unwrap();
+    assert_eq!(repo.sources(&[product(1)]).await, Ok(vec![]));
+    assert_eq!(repo.sources(&[category]).await.unwrap().len(), 1);
+    assert_eq!(repo.sources(&[]).await, Ok(vec![]));
+    // A read model: no events.
+    assert_eq!(ports.outbox().events_after(0, 100).await.unwrap().len(), 0);
+}
+
+async fn worklist_states<S: HasTranslations>(ports: &S) {
+    let repo = ports.translations();
+    // 1 complete, 2 outdated (its title changed since), 3 untranslated, 4 half done and
+    // its other field changed: missing outranks outdated.
+    for n in 1..=4 {
+        repo.replace_sources(product(n), &product_sources())
+            .await
+            .unwrap();
+    }
+    let all = [
+        ("title", "Tasse"),
+        ("description", "<p>Eine Tasse.</p>"),
+        ("options.opt_1.name", "Farbe"),
+    ];
+    translated(ports, product(1), "de", &all).await;
+    translated(ports, product(2), "de", &all).await;
+    translated(ports, product(4), "de", &all[..1]).await;
+    let changed = |n: u128| {
+        let mut d = product_sources();
+        for s in &mut d {
+            if s.key == "title" {
+                s.digest = source_digest("Cup");
+            }
+        }
+        (product(n), d)
+    };
+    for (r, d) in [changed(2), changed(4)] {
+        repo.replace_sources(r, &d).await.unwrap();
+    }
+    // A translation in another language and a resource without text count for nothing.
+    translated(ports, product(3), "fr", &all).await;
+    repo.replace_sources(resource(ResourceKind::Asset, 9), &[])
+        .await
+        .unwrap();
+
+    let list = async |state: Option<TranslationState>| {
+        let filter = WorklistFilter {
+            kinds: ResourceKind::ALL.to_vec(),
+            language: lang("de"),
+            inherits: Inheritance::Nothing,
+            state,
+        };
+        repo.worklist(&filter, PageRequest::default())
+            .await
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|item| (item.resource, item.counts, item.translation.is_some()))
+            .collect::<Vec<_>>()
+    };
+    let counts = |missing, outdated| FieldCounts {
+        total: 3,
+        missing,
+        outdated,
+        inherited: 0,
+    };
+    assert_eq!(
+        list(Some(TranslationState::Missing)).await,
+        [
+            (product(3), counts(3, 0), false),
+            (product(4), counts(2, 1), true)
+        ]
+    );
+    assert_eq!(
+        list(Some(TranslationState::Outdated)).await,
+        [(product(2), counts(0, 1), true)]
+    );
+    assert_eq!(
+        list(Some(TranslationState::Complete)).await,
+        [(product(1), counts(0, 0), true)]
+    );
+    assert_eq!(list(None).await.len(), 4);
+
+    // The item carries the translation, as stored.
+    let filter = WorklistFilter {
+        kinds: vec![ResourceKind::Product],
+        language: lang("de"),
+        inherits: Inheritance::Nothing,
+        state: Some(TranslationState::Outdated),
+    };
+    let page = repo
+        .worklist(&filter, PageRequest::default())
+        .await
+        .unwrap();
+    assert_eq!(
+        page.items[0].translation,
+        repo.get(product(2), &lang("de")).await.unwrap()
+    );
+    // Kinds not asked for aren't listed.
+    let categories = WorklistFilter {
+        kinds: vec![ResourceKind::Category],
+        ..filter
+    };
+    assert!(
+        repo.worklist(&categories, PageRequest::default())
+            .await
+            .unwrap()
+            .items
+            .is_empty()
+    );
+}
+
+async fn worklist_pages<S: HasTranslations>(ports: &S) {
+    let repo = ports.translations();
+    let category = resource(ResourceKind::Category, 1);
+    let asset = resource(ResourceKind::Asset, 1);
+    // The catalog lists products, then categories, …, then assets: not their names'
+    // order. IDs by their bytes within a kind.
+    for r in [asset, category, product(2), product(1)] {
+        repo.replace_sources(r, &[digest("title", "Mug")])
+            .await
+            .unwrap();
+    }
+    let filter = WorklistFilter {
+        kinds: ResourceKind::ALL.to_vec(),
+        language: lang("de"),
+        inherits: Inheritance::Nothing,
+        state: Some(TranslationState::Missing),
+    };
+    let in_order = [product(1), product(2), category, asset];
+    let one = PageLimit::new(1).unwrap();
+    let mut after = None;
+    let mut seen = Vec::new();
+    loop {
+        let page = repo
+            .worklist(&filter, PageRequest { after, limit: one })
+            .await
+            .unwrap();
+        seen.extend(page.items.iter().map(|i| i.resource));
+        if !page.has_more {
+            break;
+        }
+        after = page.items.last().map(|i| i.resource);
+    }
+    assert_eq!(seen, in_order);
+    let all = repo
+        .worklist(&filter, PageRequest::default())
+        .await
+        .unwrap();
+    assert!(!all.has_more);
+    assert_eq!(
+        all.items.iter().map(|i| i.resource).collect::<Vec<_>>(),
+        in_order
+    );
+}
+
+async fn progress<S: HasTranslations>(ports: &S) {
+    let repo = ports.translations();
+    let category = resource(ResourceKind::Category, 1);
+    repo.replace_sources(product(1), &product_sources())
+        .await
+        .unwrap();
+    repo.replace_sources(product(2), &product_sources())
+        .await
+        .unwrap();
+    repo.replace_sources(category, &[digest("name", "Mugs")])
+        .await
+        .unwrap();
+    let de = [("title", "Tasse"), ("options.opt_1.name", "Farbe")];
+    translated(ports, product(1), "de", &de).await;
+    translated(ports, product(2), "de", &de[..1]).await;
+    translated(ports, category, "de", &[("name", "Tassen")]).await;
+    translated(ports, product(1), "fr", &de[..1]).await;
+    // Product 2's title changed since; product 1 lost its option, whose translation now
+    // counts for nothing.
+    let mut changed = product_sources();
+    for s in &mut changed {
+        if s.key == "title" {
+            s.digest = source_digest("Cup");
+        }
+    }
+    repo.replace_sources(product(2), &changed).await.unwrap();
+    let without_option: Vec<SourceDigest> = product_sources()
+        .into_iter()
+        .filter(|d| d.key != "options.opt_1.name")
+        .collect();
+    repo.replace_sources(product(1), &without_option)
+        .await
+        .unwrap();
+
+    let of = |language: &str, total, translated, outdated| LanguageProgress {
+        language: lang(language),
+        total,
+        translated,
+        outdated,
+        inherited: 0,
+    };
+    assert_eq!(
+        repo.progress(&ResourceKind::ALL, &plain(&["fr", "de", "it"]))
+            .await,
+        // In the order asked, languages without translations too.
+        Ok(vec![
+            of("fr", 6, 1, 0),
+            of("de", 6, 3, 1),
+            of("it", 6, 0, 0)
+        ])
+    );
+    assert_eq!(
+        repo.progress(&[ResourceKind::Category], &plain(&["de"]))
+            .await,
+        Ok(vec![of("de", 1, 1, 0)])
+    );
+    assert_eq!(
+        repo.progress(&[], &plain(&["de"])).await,
+        Ok(vec![of("de", 0, 0, 0)])
+    );
+    assert_eq!(repo.progress(&ResourceKind::ALL, &[]).await, Ok(vec![]));
+    assert_eq!(of("de", 6, 3, 1).missing(), 3);
+}
+
+/// Languages counted with nothing to inherit.
+fn plain(tags: &[&str]) -> Vec<ProgressLanguage> {
+    tags.iter()
+        .map(|tag| ProgressLanguage {
+            language: lang(tag),
+            inherits: Inheritance::Nothing,
+        })
+        .collect()
+}
+
+async fn inherits<S: HasTranslations>(ports: &S) {
+    let repo = ports.translations();
+    let category = resource(ResourceKind::Category, 1);
+    for n in 1..=3 {
+        repo.replace_sources(product(n), &product_sources())
+            .await
+            .unwrap();
+    }
+    repo.replace_sources(category, &[digest("name", "Mugs")])
+        .await
+        .unwrap();
+    // German translates product 1 whole, product 2's title and the category; Austrian
+    // German has product 1's title of its own and product 3's option, which German lacks.
+    let all = [
+        ("title", "Tasse"),
+        ("description", "<p>Eine Tasse.</p>"),
+        ("options.opt_1.name", "Farbe"),
+    ];
+    translated(ports, product(1), "de", &all).await;
+    translated(ports, product(2), "de", &all[..1]).await;
+    translated(ports, category, "de", &[("name", "Tassen")]).await;
+    translated(ports, product(1), "de-AT", &[("title", "Häferl")]).await;
+    translated(
+        ports,
+        product(3),
+        "de-AT",
+        &[("options.opt_1.name", "Farbe")],
+    )
+    .await;
+
+    let from_german = Inheritance::Translation(lang("de"));
+    let counted = |tag: &str, inherits: Inheritance| ProgressLanguage {
+        language: lang(tag),
+        inherits,
+    };
+    let progress = repo
+        .progress(
+            &ResourceKind::ALL,
+            &[
+                counted("de-AT", from_german.clone()),
+                counted("en-GB", Inheritance::Source),
+                counted("de", Inheritance::Nothing),
+            ],
+        )
+        .await
+        .unwrap();
+    let inherited: Vec<(u64, u64)> = progress
+        .iter()
+        .map(|p| (p.missing(), p.inherited))
+        .collect();
+    // 10 fields. de-AT: 2 its own, of the 8 missing German has product 1's other two,
+    // product 2's title and the category's name. en-GB inherits all it lacks.
+    assert_eq!(inherited, [(8, 4), (10, 10), (5, 0)]);
+    assert_eq!(
+        repo.progress(
+            &[ResourceKind::Category],
+            &[counted("de-AT", from_german.clone())]
+        )
+        .await
+        .unwrap()[0]
+            .inherited,
+        1
+    );
+
+    let filter = WorklistFilter {
+        kinds: vec![ResourceKind::Product],
+        language: lang("de-AT"),
+        inherits: from_german,
+        state: None,
+    };
+    let items: Vec<(ResourceRef, u32, u32)> = repo
+        .worklist(&filter, PageRequest::default())
+        .await
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|i| (i.resource, i.counts.missing, i.counts.inherited))
+        .collect();
+    assert_eq!(
+        items,
+        [(product(1), 2, 2), (product(2), 3, 1), (product(3), 2, 0)]
+    );
+    let from_source = WorklistFilter {
+        inherits: Inheritance::Source,
+        language: lang("en-GB"),
+        ..filter
+    };
+    let first = &repo
+        .worklist(&from_source, PageRequest::default())
+        .await
+        .unwrap()
+        .items[0];
+    assert_eq!((first.counts.missing, first.counts.inherited), (3, 3));
+}
+
+async fn queue<S: HasTranslations>(ports: &S) {
+    let repo = ports.translations();
+    let category = resource(ResourceKind::Category, 1);
+    assert_eq!(repo.queued(10).await, Ok(vec![]));
+    repo.queue(&[product(2), category]).await.unwrap();
+    repo.queue(&[product(1)]).await.unwrap();
+    let resources = |queued: &[hypha_translations::QueuedSource]| {
+        queued.iter().map(|q| q.resource).collect::<Vec<_>>()
+    };
+    let first = repo.queued(2).await.unwrap();
+    assert_eq!(resources(&first).len(), 2);
+    let all = repo.queued(10).await.unwrap();
+    assert_eq!(all.len(), 3);
+    // Counted by kind.
+    assert_eq!(repo.pending(&ResourceKind::ALL).await, Ok(3));
+    assert_eq!(repo.pending(&[ResourceKind::Category]).await, Ok(1));
+    assert_eq!(repo.pending(&[]).await, Ok(0));
+    // Longest waiting first.
+    assert_eq!(resources(&all)[2], product(1));
+
+    // Queued again after it was read: it stays queued, at the back.
+    repo.queue(&[all[0].resource]).await.unwrap();
+    repo.unqueue(&all).await.unwrap();
+    let left = repo.queued(10).await.unwrap();
+    assert_eq!(resources(&left), [all[0].resource]);
+    repo.unqueue(&left).await.unwrap();
+    assert_eq!(repo.queued(10).await, Ok(vec![]));
+    assert_eq!(repo.pending(&ResourceKind::ALL).await, Ok(0));
+
+    // Touched while queued: it stays queued, at the back; one not queued stays off it.
+    repo.queue(&[product(1)]).await.unwrap();
+    let read = repo.queued(10).await.unwrap();
+    repo.touch_queued(&[product(1), product(2)]).await.unwrap();
+    repo.unqueue(&read).await.unwrap();
+    assert_eq!(resources(&repo.queued(10).await.unwrap()), [product(1)]);
+    let read = repo.queued(10).await.unwrap();
+    repo.unqueue(&read).await.unwrap();
+    repo.touch_queued(&[]).await.unwrap();
+    assert_eq!(repo.queued(10).await, Ok(vec![]));
+
+    // Every resource of a kind that has digests.
+    repo.replace_sources(product(1), &product_sources())
+        .await
+        .unwrap();
+    repo.replace_sources(product(2), &product_sources())
+        .await
+        .unwrap();
+    repo.replace_sources(category, &[digest("name", "Mugs")])
+        .await
+        .unwrap();
+    repo.queue_kind(ResourceKind::Product).await.unwrap();
+    let mut queued = resources(&repo.queued(10).await.unwrap());
+    queued.sort();
+    assert_eq!(queued, [product(1), product(2)]);
 }
 
 async fn round_trip<S: HasTranslations + HasOutbox>(ports: &S) {
