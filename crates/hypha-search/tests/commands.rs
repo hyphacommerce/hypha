@@ -11,12 +11,12 @@
     clippy::cast_sign_loss,
     reason = "a failing test panics, and fixtures cast small counters"
 )]
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 use hypha_core::{
     Actor, AuthError, BasisPoints, CatalogId, CountryCode, Ctx, Currency, EventHandler,
-    InventoryItemId, LocationId, MarketId, Money, OptionId, OptionValueId, Price, PriceListId,
-    ProductId, Scope, UserId, VariantId,
+    InventoryItemId, Language, LocationId, MarketId, Money, OptionId, OptionValueId, Price,
+    PriceListId, ProductId, Scope, UserId, VariantId,
 };
 use hypha_inventory::{InventoryItem, InventoryItemRepo, Location, LocationRepo};
 use hypha_markets::{
@@ -81,6 +81,12 @@ struct World {
     clock: FixedClock,
     /// How many outbox events `deliver` has handled.
     delivered: Cell<usize>,
+    /// What the store offers shoppers, its own language first.
+    servable: RefCell<Vec<Language>>,
+}
+
+fn lang(tag: &str) -> Language {
+    Language::new(tag).unwrap()
 }
 
 impl World {
@@ -93,6 +99,7 @@ impl World {
             index: InMemorySearchIndex::default(),
             clock: FixedClock::default(),
             delivered: Cell::new(0),
+            servable: RefCell::new(vec![lang("en")]),
         };
         let p = &w.ports;
         for (market, country, currency) in [
@@ -220,6 +227,7 @@ impl World {
             &self.index,
             &self.clock,
             &SyncSettings::default(),
+            &self.servable.borrow(),
         ))
         .unwrap()
         .progress
@@ -240,7 +248,19 @@ impl World {
     }
 
     fn search(&self, input: SearchInput) -> Result<hypha_search::Found, CommandError> {
-        block_on(search(&Ctx::system(), &self.ports, &self.index, input))
+        self.search_in(&Ctx::system(), input, "en")
+    }
+
+    /// A search as `ctx`, in `language`.
+    fn search_in(
+        &self,
+        ctx: &Ctx,
+        input: SearchInput,
+        language: &str,
+    ) -> Result<hypha_search::Found, CommandError> {
+        block_on(search(ctx, &self.ports, &self.index, input, |_| {
+            lang(language)
+        }))
     }
 }
 
@@ -358,6 +378,7 @@ fn a_product_the_engine_refuses_fails_alone() {
             &refusing,
             &w.clock,
             &SyncSettings::default(),
+            &[lang("en")],
         ))
         .unwrap();
         failed.extend(synced.failed.iter().map(|(id, _)| *id));
@@ -501,7 +522,14 @@ fn a_full_rebuild_says_there_is_more_to_do_at_once() {
     let w = World::new();
     w.settle();
     block_on(reindex(&Ctx::system(), &w.ports)).unwrap();
-    let synced = block_on(sync(&w.ports, &w.index, &w.clock, &SyncSettings::default())).unwrap();
+    let synced = block_on(sync(
+        &w.ports,
+        &w.index,
+        &w.clock,
+        &SyncSettings::default(),
+        &[lang("en")],
+    ))
+    .unwrap();
     assert_eq!((synced.progress.done, synced.progress.more), (1, true));
     assert_eq!(
         w.ports.search_queue.targets().len(),
@@ -691,7 +719,7 @@ fn searching_needs_products_read_and_settings_need_write() {
         vec![Scope::OrdersRead],
     );
     assert_eq!(
-        block_on(search(&ctx, &w.ports, &w.index, input("HR"))).map(|_| ()),
+        w.search_in(&ctx, input("HR"), "en").map(|_| ()),
         Err(CommandError::Auth(AuthError::MissingScope(
             Scope::ProductsRead
         )))
@@ -791,7 +819,7 @@ fn a_storefront_searches_only_what_its_channel_publishes() {
         q: Some("linen".to_string()),
         ..input("HR")
     };
-    let found = block_on(search(&storefront, &w.ports, &w.index, linen())).unwrap();
+    let found = w.search_in(&storefront, linen(), "en").unwrap();
     assert_eq!(found.results.total, 1);
 
     block_on(hypha_channels::unpublish_products(
@@ -802,7 +830,7 @@ fn a_storefront_searches_only_what_its_channel_publishes() {
     ))
     .unwrap();
     w.settle();
-    let found = block_on(search(&storefront, &w.ports, &w.index, linen())).unwrap();
+    let found = w.search_in(&storefront, linen(), "en").unwrap();
     assert_eq!(found.results.total, 0);
     // Staff search every channel.
     assert_eq!(w.search(linen()).unwrap().results.total, 1);
@@ -812,7 +840,7 @@ fn a_storefront_searches_only_what_its_channel_publishes() {
         let keys = found.results.facets.iter().map(|f| f.key.clone());
         keys.filter(|k| matches!(k, FacetKey::Option(_))).collect()
     };
-    let everything = block_on(search(&storefront, &w.ports, &w.index, input("HR"))).unwrap();
+    let everything = w.search_in(&storefront, input("HR"), "en").unwrap();
     assert_eq!(options(&everything), vec![]);
     assert!(!options(&w.search(input("HR")).unwrap()).is_empty());
 }
@@ -1182,15 +1210,14 @@ fn a_product_only_in_a_hidden_subcategory_isnt_listed_under_its_parent() {
 
     // Staff may search a hidden category; a storefront only a shown one.
     let in_category = |ctx: &Ctx, n| {
-        block_on(search(
+        w.search_in(
             ctx,
-            &w.ports,
-            &w.index,
             SearchInput {
                 category: Some(cid(n)),
                 ..input("HR")
             },
-        ))
+            "en",
+        )
         .map(|_| ())
     };
     let storefront = w.ports.storefront();
@@ -1612,4 +1639,263 @@ mod fields {
             "custom_field_definition.created"
         ));
     }
+}
+
+// ---------- languages ----------
+
+/// The store publishes German and Croatia offers it after English; the shirt is
+/// translated: its title, description, colour and red.
+fn german_croatia(w: &World) {
+    use hypha_translations::{
+        FieldInput, ResourceKind, ResourceRef, Source, SourceField, Translation, TranslationRepo,
+        fields::product as keys,
+    };
+    w.servable.replace(vec![lang("en"), lang("de")]);
+    let mut market = block_on(w.ports.markets.get(hr_market())).unwrap().unwrap();
+    market.set_languages(vec![lang("en"), lang("de")]).unwrap();
+    block_on(w.ports.markets.update(&mut market)).unwrap();
+
+    let color = OptionId::from_uuid(id(1400));
+    let red = OptionValueId::from_uuid(id(1401));
+    let fields = [
+        (keys::TITLE.to_string(), "Linen Shirt", "Leinenhemd"),
+        (
+            keys::DESCRIPTION.to_string(),
+            "<p>Breathable <em>linen</em></p>",
+            "<p>Atmungsaktives <em>Leinen</em></p>",
+        ),
+        (keys::option_name(color), "Color", "Farbe"),
+        (keys::option_value_label(red), "Red", "Rot"),
+    ];
+    let source = Source::new(
+        fields
+            .iter()
+            .map(|(key, source, _)| SourceField::new(key.clone(), Some(source)))
+            .collect(),
+    );
+    let resource = ResourceRef::new(ResourceKind::Product, shirt().as_uuid());
+    let mut translation = Translation::new(resource, lang("de"));
+    translation
+        .replace(
+            &source,
+            fields
+                .iter()
+                .map(|(key, _, text)| {
+                    let input = FieldInput {
+                        value: text.to_string(),
+                        source_digest: None,
+                    };
+                    (key.clone(), input)
+                })
+                .collect(),
+        )
+        .unwrap();
+    block_on(w.ports.translations.insert(&mut translation)).unwrap();
+}
+
+#[test]
+fn a_market_has_documents_in_each_language_it_offers() {
+    let w = World::new();
+    w.settle();
+    let english = w.documents(hr_market());
+    assert!(english.iter().all(|d| d.language == lang("en")));
+
+    german_croatia(&w);
+    w.settle();
+    let docs = w.documents(hr_market());
+    assert_eq!(
+        docs.len(),
+        2 * english.len(),
+        "each variant in both languages"
+    );
+    let in_german: Vec<&SearchDocument> =
+        docs.iter().filter(|d| d.language == lang("de")).collect();
+    let shirt_doc = in_german.iter().find(|d| d.variant == red_s()).unwrap();
+    assert_eq!(
+        (
+            shirt_doc.title.as_str(),
+            shirt_doc.variant_title.as_deref(),
+            shirt_doc.description.as_str(),
+        ),
+        ("Leinenhemd", Some("Rot / S"), "Atmungsaktives Leinen")
+    );
+    // Facet values and the listing stay as stored; what a shopper reads is German, with
+    // the stored text where nothing is translated.
+    assert_eq!(
+        shirt_doc.options,
+        [
+            ("Color".to_string(), "Red".to_string()),
+            ("Size".to_string(), "S".to_string())
+        ]
+    );
+    assert_eq!(
+        shirt_doc.option_labels,
+        [
+            ("Farbe".to_string(), "Rot".to_string()),
+            ("Size".to_string(), "S".to_string())
+        ]
+    );
+    let mug_doc = in_german.iter().find(|d| d.variant == mug_v()).unwrap();
+    assert_eq!(mug_doc.title, "mug", "untranslated: as stored");
+    // The English documents are what they were.
+    let still: Vec<SearchDocument> = docs
+        .into_iter()
+        .filter(|d| d.language == lang("en"))
+        .collect();
+    assert_eq!(still, english);
+    // A market offering one language still has one document per variant.
+    assert!(w.documents(us_market()).is_empty());
+}
+
+#[test]
+fn a_search_in_a_language_reads_its_words_and_labels_facets_in_them() {
+    let w = World::new();
+    german_croatia(&w);
+    w.settle();
+    let found = w
+        .search_in(
+            &Ctx::system(),
+            SearchInput {
+                q: Some("leinenhemd".to_string()),
+                filters: vec!["option.color:Red".to_string()],
+                ..input("HR")
+            },
+            "de",
+        )
+        .unwrap();
+    assert_eq!(found.language, lang("de"));
+    assert_eq!(found.results.total, 1);
+    assert_eq!(found.results.hits[0].document.title, "Leinenhemd");
+    let color = found
+        .results
+        .facets
+        .iter()
+        .find(|f| f.key == FacetKey::Option("color".to_string()))
+        .unwrap();
+    let labelled: Vec<(&str, &str)> = color
+        .values
+        .iter()
+        .map(|v| (v.value.as_str(), v.label.as_str()))
+        .collect();
+    assert_eq!(labelled, [("Blue", "Blue"), ("Red", "Rot")]);
+    // German words don't find English documents, nor English words German ones.
+    let leinen = || SearchInput {
+        q: Some("leinenhemd".to_string()),
+        ..input("HR")
+    };
+    assert_eq!(
+        w.search_in(&Ctx::system(), leinen(), "en")
+            .unwrap()
+            .results
+            .total,
+        0
+    );
+}
+
+#[test]
+fn a_market_that_stops_offering_a_language_loses_its_documents() {
+    let w = World::new();
+    german_croatia(&w);
+    w.settle();
+    let mut market = block_on(w.ports.markets.get(hr_market())).unwrap().unwrap();
+    market.set_languages(vec![]).unwrap();
+    block_on(w.ports.markets.update(&mut market)).unwrap();
+    w.settle();
+    assert!(
+        w.documents(hr_market())
+            .iter()
+            .all(|d| d.language == lang("en"))
+    );
+}
+
+#[test]
+fn a_market_mark_queues_the_products_its_catalog_sells() {
+    let w = World::new();
+    block_on(hypha_search_index::SearchQueue::mark(
+        &w.ports.search_queue,
+        &[Target::Market(us_market())],
+    ))
+    .unwrap();
+    let synced = block_on(sync(
+        &w.ports,
+        &w.index,
+        &w.clock,
+        &SyncSettings::default(),
+        &[lang("en")],
+    ))
+    .unwrap();
+    assert!(synced.progress.more);
+    assert_eq!(w.ports.search_queue.targets(), [Target::Product(shirt())]);
+}
+
+#[test]
+fn languages_and_translations_mark_what_their_documents_hold() {
+    use hypha_search::handler::targets;
+    let translated = |kind: &str, id: String| serde_json::json!({ "resource": { "kind": kind, "id": id }, "language": "de" });
+    for event_type in ["translation.updated", "translation.deleted"] {
+        assert!(EventHandler::<InMemoryPorts>::wants(
+            &SearchIndexer,
+            event_type
+        ));
+        assert_eq!(
+            targets(&event(
+                event_type,
+                translated("product", shirt().to_string())
+            )),
+            Ok(vec![Target::Product(shirt())])
+        );
+        // Read when a search answers, not held in documents.
+        for kind in [
+            "search_facet",
+            "asset",
+            "discount",
+            "category",
+            "custom_field_definition",
+        ] {
+            assert_eq!(
+                targets(&event(event_type, translated(kind, "x".to_string()))),
+                Ok(vec![]),
+                "{kind}"
+            );
+        }
+    }
+    assert!(
+        targets(&event(
+            "translation.updated",
+            translated("product", "prod_x".to_string())
+        ))
+        .is_err()
+    );
+
+    let store = |fields: serde_json::Value| {
+        targets(&event(
+            "store.updated",
+            serde_json::json!({ "store": "store_x", "fields": fields }),
+        ))
+    };
+    assert_eq!(store(serde_json::json!(["name"])), Ok(vec![]));
+    assert_eq!(
+        store(serde_json::json!(["languages"])),
+        Ok(vec![Target::All])
+    );
+    assert_eq!(
+        store(serde_json::json!(["default_language"])),
+        Ok(vec![Target::All])
+    );
+
+    let market = hr_market().to_string();
+    let changed = |fields: serde_json::Value| {
+        targets(&event(
+            "market.changed",
+            serde_json::json!({ "market": market, "fields": fields }),
+        ))
+    };
+    assert_eq!(
+        changed(serde_json::json!(["languages"])),
+        Ok(vec![Target::Market(hr_market())])
+    );
+    assert_eq!(
+        changed(serde_json::json!(["languages", "currency"])),
+        Ok(vec![Target::All])
+    );
 }

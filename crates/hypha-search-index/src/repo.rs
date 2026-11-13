@@ -14,9 +14,10 @@ use crate::{IndexError, SearchDocument, SearchQuery, SearchResults, SearchSettin
 #[allow(async_fn_in_trait)]
 pub trait SearchIndex {
     /// Makes `documents` the documents of `products` in `market`: each product's
-    /// documents there are replaced by its ones in `documents` (removed when it has
-    /// none). Every document is of one of `products`, in `market`. One call per market
-    /// for a whole batch, so an engine can write it at once.
+    /// documents there, in every language, are replaced by its ones in `documents`
+    /// (removed when it has none, so a language the market stopped offering goes with
+    /// the rebuild). Every document is of one of `products`, in `market`. One call per
+    /// market for a whole batch, so an engine can write it at once.
     async fn replace(
         &self,
         market: MarketId,
@@ -26,8 +27,8 @@ pub trait SearchIndex {
 
     async fn search(&self, query: &SearchQuery) -> Result<SearchResults, IndexError>;
 
-    /// The option names (lowercased) documents in `market` have, most documents first, then
-    /// by name: the default facets. With a `channel`, only its documents count, so a
+    /// The option names (lowercased) documents in `market` have, in any language (names
+    /// are as stored), most documents first, then by name: the default facets. With a `channel`, only its documents count, so a
     /// storefront's facets are its own products'. `reference::option_names` says exactly
     /// what.
     async fn option_names(
@@ -79,6 +80,9 @@ pub enum Target {
     /// The products in this category or below it, whose ancestor lists changed when it
     /// moved (resolved when the mark is worked).
     Category(CategoryId),
+    /// The products this market's catalog sells, whose documents there changed with the
+    /// languages it offers (resolved when the mark is worked).
+    Market(MarketId),
     /// Every product.
     All,
 }

@@ -4,7 +4,8 @@
 //!
 //! Work per step is bounded and batched: the batch's products load at once (variant
 //! marks resolve in one query), stock items load once for every market, prices once
-//! per market, and each market's documents are written in one `replace`. A product
+//! per market, the products' translations once per language, and each market's
+//! documents, in every language it offers, are written in one `replace`. A product
 //! that fails (it can't be loaded, or the engine refuses its documents) fails alone:
 //! the rest of the batch is finished, and its marks wait for their lease to run out.
 
@@ -14,23 +15,27 @@ use std::collections::{BTreeMap, BTreeSet};
 use hypha_categories::{CategoryRepo, CategoryTree, HasCategories};
 use hypha_channels::{ChannelRepo, HasChannels};
 use hypha_core::{
-    CategoryId, ChannelId, Clock, ErrorCode, Keyset, PageLimit, PageRequest, ProductId, Progress,
-    RepoError, SortKey, VariantId,
+    CategoryId, ChannelId, Clock, ErrorCode, Keyset, Language, MarketId, PageLimit, PageRequest,
+    ProductId, Progress, RepoError, SortKey, VariantId,
 };
 use hypha_custom_fields::{HasCustomFieldDefinitions, HasCustomFieldValues};
 use hypha_inventory::{
     HasInventoryItems, HasLocations, InventoryItemRepo, LocationRepo, StockContext,
 };
-use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists, Market, MarketRepo};
+use hypha_markets::{
+    CatalogContext, CatalogRepo, HasCatalogs, HasMarkets, HasPriceLists, Market, MarketRepo,
+};
 use hypha_pricing::load_pricing_for;
 use hypha_products::{HasProducts, Product, ProductFilter, ProductRepo, ProductSort};
 use hypha_search_index::{
     HasSearchQueue, HasSearchSettings, IndexError, Mark, SearchDocument, SearchIndex, SearchQueue,
     SearchSettings, SearchSettingsRepo, Target,
 };
+use hypha_translations::{HasTranslations, Overlay, ResourceKind, ResourceRef};
 use thiserror::Error;
 
 use crate::{
+    build::{InLanguage, Placement},
     build_documents,
     fields::{FacetFields, load_facet_fields},
 };
@@ -51,6 +56,7 @@ pub trait SyncPorts:
     + HasLocations
     + HasCustomFieldDefinitions
     + HasCustomFieldValues
+    + HasTranslations
 {
 }
 
@@ -68,6 +74,7 @@ impl<T> SyncPorts for T where
         + HasLocations
         + HasCustomFieldDefinitions
         + HasCustomFieldValues
+        + HasTranslations
         + ?Sized
 {
 }
@@ -116,14 +123,18 @@ pub struct Synced {
 }
 
 /// Leases up to `batch` marks and rebuilds what they name: every product for `All`
-/// (by queueing each), a variant's product, a product's documents in every market (none
-/// once it's gone, inactive or unlisted). `Err` only when the step as a whole couldn't
-/// run (the queue, the markets or the settings couldn't be read).
+/// and a market's products for `Market` (by queueing each), a variant's product, a
+/// product's documents in every market, in each language the market offers (none once
+/// it's gone, inactive or unlisted). `servable` is what the store offers shoppers, its
+/// default language first (`Store::offered_languages`): what markets offer out of it,
+/// and what translations are read in. `Err` only when the step as a whole couldn't run
+/// (the queue, the markets or the settings couldn't be read).
 pub async fn sync<S: SyncPorts, I: SearchIndex>(
     ports: &S,
     index: &I,
     clock: &impl Clock,
     settings: &SyncSettings,
+    servable: &[Language],
 ) -> Result<Synced, SyncError> {
     let now = clock.now();
     let marks = ports
@@ -153,6 +164,11 @@ pub async fn sync<S: SyncPorts, I: SearchIndex>(
                 // It just queued every product: carry on without waiting the interval.
                 progress.more = true;
             }
+            Target::Market(market) => {
+                queue_market_products(ports, market).await?;
+                finished.push(*mark);
+                progress.more = true;
+            }
             Target::Product(id) => {
                 products.insert(id);
             }
@@ -174,13 +190,13 @@ pub async fn sync<S: SyncPorts, I: SearchIndex>(
     products.extend(owners.iter().copied());
     let products: Vec<ProductId> = products.into_iter().collect();
 
-    let failed = rebuild(ports, index, &products).await?;
+    let failed = rebuild(ports, index, &products, servable).await?;
     // Variant marks finish with their product: one that failed may own any of them, so
     // they wait unless every product succeeded.
     let failed_ids: BTreeSet<ProductId> = failed.iter().map(|(id, _)| *id).collect();
     for mark in &marks {
         let done = match mark.target {
-            Target::All => false, // finished above
+            Target::All | Target::Market(_) => false, // finished above
             Target::Product(id) => !failed_ids.contains(&id),
             Target::Variant(_) | Target::Category(_) => failed_ids.is_empty(),
         };
@@ -197,11 +213,13 @@ pub async fn sync<S: SyncPorts, I: SearchIndex>(
     Ok(Synced { progress, failed })
 }
 
-/// Rebuilds `ids`' documents in every market; the products that failed, with why.
+/// Rebuilds `ids`' documents in every market and language; the products that failed,
+/// with why.
 async fn rebuild<S: SyncPorts, I: SearchIndex>(
     ports: &S,
     index: &I,
     ids: &[ProductId],
+    servable: &[Language],
 ) -> Result<Vec<(ProductId, SyncError)>, SyncError> {
     if ids.is_empty() {
         return Ok(vec![]);
@@ -216,10 +234,13 @@ async fn rebuild<S: SyncPorts, I: SearchIndex>(
     if writing.is_empty() {
         return Ok(failed);
     }
-    let mut sources = Sources::load(ports, loaded, &writing).await?;
+    let mut sources = Sources::load(ports, loaded, &writing, servable).await?;
     for market in ports.markets().list_all().await? {
         let market_id = market.id();
-        let documents = sources.documents(ports, market, &writing).await?;
+        let languages = market.offered_languages(servable);
+        let documents = sources
+            .documents(ports, market, &writing, &languages)
+            .await?;
         if let Err(batch_error) = index.replace(market_id, &writing, &documents).await {
             // Find which product the engine refuses: one at a time.
             let mut any_failed = false;
@@ -246,8 +267,8 @@ async fn rebuild<S: SyncPorts, I: SearchIndex>(
 }
 
 /// What documents are made of, for a set of products, loaded once for every market:
-/// the products, their stock items, publications, categories and facet fields, and the
-/// settings.
+/// the products, their stock items, publications, categories and facet fields, the
+/// settings, and their translations into each language as a market first asks for it.
 struct Sources {
     loaded: BTreeMap<ProductId, Product>,
     variants: Vec<VariantId>,
@@ -256,6 +277,9 @@ struct Sources {
     channels: BTreeMap<ProductId, Vec<ChannelId>>,
     categories: BTreeMap<ProductId, Vec<CategoryId>>,
     fields: BTreeMap<ProductId, FacetFields>,
+    /// What the store offers, its own language first: the one nothing is read for.
+    servable: Vec<Language>,
+    overlays: Vec<(Language, Overlay)>,
 }
 
 impl Sources {
@@ -263,6 +287,7 @@ impl Sources {
         ports: &S,
         loaded: BTreeMap<ProductId, Product>,
         ids: &[ProductId],
+        servable: &[Language],
     ) -> Result<Self, SyncError> {
         let variants: Vec<VariantId> = loaded
             .values()
@@ -317,51 +342,89 @@ impl Sources {
             channels,
             categories,
             fields,
+            servable: servable.to_vec(),
+            overlays: Vec::new(),
         })
     }
 
-    /// `ids`' documents in `market`, priced and stocked there.
+    /// Reads the products' translations into each of `languages` not read yet: one read
+    /// per language for the whole batch, none for the store's own.
+    async fn load_overlays<S: SyncPorts>(
+        &mut self,
+        ports: &S,
+        languages: &[Language],
+    ) -> Result<(), SyncError> {
+        let resources: Vec<ResourceRef> = self
+            .loaded
+            .keys()
+            .map(|id| ResourceRef::new(ResourceKind::Product, id.as_uuid()))
+            .collect();
+        for language in languages {
+            if self.overlays.iter().any(|(l, _)| l == language) {
+                continue;
+            }
+            let overlay = if self.servable.first() == Some(language) {
+                Overlay::none()
+            } else {
+                Overlay::load(ports, language, &self.servable, &resources).await?
+            };
+            self.overlays.push((language.clone(), overlay));
+        }
+        Ok(())
+    }
+
+    /// `ids`' documents in `market`, priced and stocked there, in each of `languages`.
     async fn documents<S: SyncPorts>(
         &mut self,
         ports: &S,
         market: Market,
         ids: &[ProductId],
+        languages: &[Language],
     ) -> Result<Vec<SearchDocument>, SyncError> {
         let market_id = market.id();
         // The market as the caller has it, not read again. Every shopper shares a
         // document, so it carries public prices: no customer groups.
         let pricing = load_pricing_for(ports, market, ids, &self.variants, &[]).await?;
         self.stock.locations = ports.locations().serving(market_id).await?;
+        self.load_overlays(ports, languages).await?;
         let none: &[ChannelId] = &[];
         let no_categories: &[CategoryId] = &[];
         let no_fields = FacetFields::default();
-        Ok(ids
-            .iter()
-            .filter_map(|id| self.loaded.get(id))
-            .flat_map(|p| {
-                build_documents(
-                    p,
+        let mut documents = Vec::new();
+        for (language, overlay) in self.overlays.iter().filter(|(l, _)| languages.contains(l)) {
+            for product in ids.iter().filter_map(|id| self.loaded.get(id)) {
+                let placement = Placement {
+                    channels: self.channels.get(&product.id()).map_or(none, Vec::as_slice),
+                    categories: self
+                        .categories
+                        .get(&product.id())
+                        .map_or(no_categories, Vec::as_slice),
+                    fields: self.fields.get(&product.id()).unwrap_or(&no_fields),
+                };
+                documents.extend(build_documents(
+                    product,
                     &pricing,
                     &self.stock,
                     &self.settings,
-                    self.channels.get(&p.id()).map_or(none, Vec::as_slice),
-                    self.categories
-                        .get(&p.id())
-                        .map_or(no_categories, Vec::as_slice),
-                    self.fields.get(&p.id()).unwrap_or(&no_fields),
-                )
-            })
-            .collect())
+                    placement,
+                    InLanguage { language, overlay },
+                ));
+            }
+        }
+        Ok(documents)
     }
 }
 
-/// `ids`' documents in `market` as the sync job would build them now: priced and stocked
-/// there, none for a product that's gone, inactive or not in the market's catalog. For hits
-/// an app found: Hypha shows its own prices and stock, never an app's.
+/// `ids`' documents in `market` and `language` as the sync job would build them now:
+/// priced and stocked there, none for a product that's gone, inactive or not in the
+/// market's catalog. `servable` as `sync` takes it. For hits an app found: Hypha shows its
+/// own prices, stock and text, never an app's.
 pub async fn documents_for<S: SyncPorts>(
     ports: &S,
     market: Market,
     ids: &[ProductId],
+    language: &Language,
+    servable: &[Language],
 ) -> Result<Vec<SearchDocument>, SyncError> {
     let loaded: BTreeMap<ProductId, Product> = ports
         .products()
@@ -370,8 +433,10 @@ pub async fn documents_for<S: SyncPorts>(
         .into_iter()
         .map(|p| (p.id(), p))
         .collect();
-    let mut sources = Sources::load(ports, loaded, ids).await?;
-    sources.documents(ports, market, ids).await
+    let mut sources = Sources::load(ports, loaded, ids, servable).await?;
+    sources
+        .documents(ports, market, ids, std::slice::from_ref(language))
+        .await
 }
 
 /// `ids`' products, in one query; if that fails (one can't be restored, say), one at a
@@ -396,6 +461,38 @@ async fn load_products<S: HasProducts>(
                 }
             }
             (loaded, failed)
+        }
+    }
+}
+
+/// Marks the products `market`'s catalog sells, a page at a time. A product it stopped
+/// selling was rebuilt by the catalog's own event.
+async fn queue_market_products<S: SyncPorts>(ports: &S, market: MarketId) -> Result<(), RepoError> {
+    let Some(catalog) = ports
+        .catalogs()
+        .get_by_context(CatalogContext::Market(market))
+        .await?
+    else {
+        return Ok(());
+    };
+    let mut after = None;
+    loop {
+        let page = ports
+            .catalogs()
+            .product_page(
+                catalog.id(),
+                PageRequest {
+                    after,
+                    limit: PageLimit::new(PageLimit::MAX)
+                        .unwrap_or_else(|_| unreachable!("MAX is a valid limit")),
+                },
+            )
+            .await?;
+        let targets: Vec<Target> = page.items.iter().map(|p| Target::Product(*p)).collect();
+        ports.search_queue().mark(&targets).await?;
+        match page.items.last() {
+            Some(last) if page.has_more => after = Some(*last),
+            _ => return Ok(()),
         }
     }
 }

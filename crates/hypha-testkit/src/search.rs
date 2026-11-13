@@ -211,9 +211,11 @@ impl SearchSettingsRepo for InMemorySearchSettingsRepo {
 /// without options, ties on price and creation time, a title beyond ASCII and unavailable
 /// variants. Channel 1 sells products 1–3, channel 2 products 1 and 4. Custom field facets:
 /// `custom.material` (one shirt variant's own value over its product's), a list
-/// `custom.care`, a boolean `custom.organic`.
+/// `custom.care`, a boolean `custom.organic`. Every document is in English; market 1 also
+/// offers German (`fixture_german`), where the shirts and the mug are translated and the
+/// two shirts label their red differently.
 pub fn search_fixture() -> Vec<SearchDocument> {
-    use hypha_core::{ChannelId, Currency, Money, VariantId};
+    use hypha_core::{ChannelId, Currency, Language, Money, VariantId};
     use hypha_search_index::PriceRange;
     use uuid::Uuid;
 
@@ -387,6 +389,7 @@ pub fn search_fixture() -> Vec<SearchDocument> {
                 .collect();
             documents.push(SearchDocument {
                 market: market(p.market),
+                language: Language::new("en").unwrap_or_else(|e| panic!("{e}")),
                 product: id,
                 variant: VariantId::from_uuid(Uuid::from_u128(variant.n)),
                 listing: listing(variant),
@@ -406,6 +409,7 @@ pub fn search_fixture() -> Vec<SearchDocument> {
                 product_type: p.product_type.map(str::to_string),
                 tags: p.tags.iter().map(|t| t.to_string()).collect(),
                 sku: variant.sku.map(str::to_string),
+                option_labels: options.clone(),
                 options,
                 fields: fixture_fields(variant.n),
                 price: eur(variant.price),
@@ -420,7 +424,59 @@ pub fn search_fixture() -> Vec<SearchDocument> {
             });
         }
     }
+    let german: Vec<SearchDocument> = documents.iter().filter_map(fixture_german).collect();
+    documents.extend(german);
     documents
+}
+
+/// `english`'s German document, for the products market 1 has translated: titles, the
+/// description, option names and value labels, the variant title joined from them. Facet
+/// values stay as stored.
+fn fixture_german(english: &SearchDocument) -> Option<SearchDocument> {
+    use hypha_core::Language;
+
+    if english.market != MarketId::from_uuid(uuid::Uuid::from_u128(1)) {
+        return None;
+    }
+    let product = english.product.as_uuid().as_u128();
+    let (title, description) = match product {
+        1 => ("Leinenhemd", "Atmungsaktives Leinen."),
+        2 => ("Baumwollhemd", "Weiche Baumwolle, kein Leinen."),
+        3 => ("Čaša Becher", "Hält Tee."),
+        _ => return None,
+    };
+    let label = |text: &str| -> String {
+        match (product, text) {
+            (_, "Color" | "color") => "Farbe",
+            (_, "Size" | "size") => "Größe",
+            (1, "Red") => "Rot",
+            // The cotton shirt calls its red something else: facets show the least.
+            (2, "Red") => "Hellrot",
+            (_, "Blue") => "Blau",
+            (_, "Green") => "Grün",
+            (_, other) => other,
+        }
+        .to_string()
+    };
+    let option_labels: Vec<(String, String)> = english
+        .options
+        .iter()
+        .map(|(name, value)| (label(name), label(value)))
+        .collect();
+    Some(SearchDocument {
+        language: Language::new("de").unwrap_or_else(|e| panic!("{e}")),
+        title: title.to_string(),
+        description: description.to_string(),
+        variant_title: (!option_labels.is_empty()).then(|| {
+            option_labels
+                .iter()
+                .map(|(_, v)| v.as_str())
+                .collect::<Vec<_>>()
+                .join(" / ")
+        }),
+        option_labels,
+        ..english.clone()
+    })
 }
 
 /// The custom field facet values of the fixture's variant `n`, sorted by key.
