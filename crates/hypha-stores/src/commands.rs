@@ -107,8 +107,9 @@ pub struct UpdateStore {
     /// Set by the host, not the caller: whether a cost was ever recorded, which fixes
     /// the currency.
     pub currency_locked: bool,
-    /// Set by the host, not the caller: whether the store has any translation, which
-    /// fixes the default language.
+    /// Set by the host, not the caller: whether the store has any translation into a
+    /// language it still has after this change (listed, or the new default), which fixes
+    /// the default language.
     pub has_translations: bool,
     /// The setup guide's step the merchant is on.
     pub setup_step: Option<Option<String>>,
