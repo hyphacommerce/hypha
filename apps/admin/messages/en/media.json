@@ -1,9 +1,5 @@
 {
   "title": "Media",
-  "sort_newest": "Newest",
-  "sort_oldest": "Oldest",
-  "sort_name_asc": "Name A–Z",
-  "sort_name_desc": "Name Z–A",
   "search_placeholder": "Search names, alt text, titles",
   "view_images": "Images",
   "view_videos": "Videos",
@@ -12,7 +8,6 @@
   "layout_grid": "Grid",
   "layout_table": "Table",
   "file": "File",
-  "kind": "Kind",
   "kind_image": "image",
   "kind_video": "video",
   "kind_file": "file",
@@ -26,7 +21,6 @@
   "upload_placeholder": "Drop images, videos or PDFs here, or choose files",
   "upload_not_stored": "The upload didn't reach storage. Check your connection and retry.",
   "upload_file_error": "{file}: {error}",
-  "saved": "Saved.",
   "alt_description": "Describes the image for screen readers and search engines. Up to 255 characters.",
   "title_description": "Your label for it in the library.",
   "delete_confirm": "Delete this file for good?",
@@ -39,7 +33,6 @@
   "used_by_more": "And more.",
   "dimensions": "Dimensions",
   "dimensions_value": "{width} × {height} px",
-  "visibility": "Visibility",
   "visibility_public": "Public",
   "visibility_private": "Private"
 }

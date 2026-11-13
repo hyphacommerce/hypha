@@ -14,7 +14,7 @@ import {
   ResourceTable,
   type View,
 } from "@/components/resource-table/resource-table";
-import { TransferStatusBadge } from "@/components/status";
+import { TransferStatusBadge, statusOptions } from "@/components/status";
 import { type TransferSummary, trNumber } from "@/lib/transfers";
 import { useFormat } from "@/lib/use-format";
 import { useT } from "@/lib/use-t";
@@ -41,7 +41,7 @@ export function TransfersTable({
       kind: "select",
       param: "status",
       label: t("common.status"),
-      options: STATUSES.map((value) => ({ value, label: t(`transfers.status_${value}`) })),
+      options: statusOptions("transfer", STATUSES, t),
     },
   ];
   const views: View[] = [

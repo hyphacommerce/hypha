@@ -26,7 +26,7 @@ export function AssetForm(props: { id: string; alt: string; title: string; hasAl
   return (
     <VStack gap={4}>
       {state.error && <Banner status="error" title={state.error} />}
-      {state.saved && !isChanged && <Banner status="success" title={t("media.saved")} />}
+      {state.saved && !isChanged && <Banner status="success" title={t("common.saved_notice")} />}
       {props.hasAlt && (
         <TextInput
           label={t("media.alt_text")}

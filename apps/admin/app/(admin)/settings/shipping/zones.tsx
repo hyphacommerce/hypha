@@ -344,7 +344,7 @@ function OptionRow({
           ) : (
             <>
               <IconButton
-                label={t("shipping.option_move_up", { name: option.name })}
+                label={t("common.move_up_named", { name: option.name })}
                 icon={<ArrowUpIcon />}
                 size="sm"
                 variant="ghost"
@@ -352,7 +352,7 @@ function OptionRow({
                 onClick={() => onMove(-1)}
               />
               <IconButton
-                label={t("shipping.option_move_down", { name: option.name })}
+                label={t("common.move_down_named", { name: option.name })}
                 icon={<ArrowDownIcon />}
                 size="sm"
                 variant="ghost"
@@ -360,14 +360,14 @@ function OptionRow({
                 onClick={() => onMove(1)}
               />
               <IconButton
-                label={t("shipping.option_edit", { name: option.name })}
+                label={t("common.edit_named", { name: option.name })}
                 icon={<PencilIcon />}
                 size="sm"
                 variant="ghost"
                 onClick={() => setIsEditing(true)}
               />
               <IconButton
-                label={t("shipping.option_delete", { name: option.name })}
+                label={t("common.delete_named_label", { name: option.name })}
                 icon={<TrashIcon />}
                 size="sm"
                 variant="ghost"

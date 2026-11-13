@@ -141,7 +141,7 @@ export function Staff({
               onClick={() => setInviting({ email: i.email, role: i.role })}
             />
             <Button
-              label={t("staff.invites_revoke")}
+              label={t("common.revoke")}
               size="sm"
               variant="ghost"
               onClick={() => setRevoking(i)}
@@ -163,7 +163,7 @@ export function Staff({
     },
     {
       key: "scopes",
-      header: t("staff.roles_scopes"),
+      header: t("common.scopes"),
       renderCell: (r) =>
         r.owner
           ? t("staff.roles_scopes_all")
@@ -409,7 +409,7 @@ function RoleDialog({
           onChange={setName}
         />
         <MultiSelector
-          label={t("staff.role_dialog_scopes")}
+          label={t("common.scopes")}
           description={t("staff.role_dialog_scopes_description")}
           options={options.map((s) => ({ value: s, label: s }))}
           value={chosen}

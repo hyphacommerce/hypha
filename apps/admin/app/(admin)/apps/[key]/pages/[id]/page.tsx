@@ -3,19 +3,14 @@ import { Section } from "@astryxdesign/core/Section";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 
-import { type Crumb, PageHeader } from "@/components/page-header";
+import { PageHeader } from "@/components/page-header";
 import { FormSkeleton } from "@/components/skeletons";
 import { appName, loadExtensions } from "@/lib/app-extensions";
 import { getT } from "@/lib/i18n";
-import type { T } from "@/lib/messages";
+import { appsCrumb } from "@/lib/navigation";
 
 import { AppPageTabs } from "../../app-pages";
 import { AppFrame } from "./app-frame";
-
-/** The way back to the list of apps. */
-function appsCrumb(t: T): Crumb {
-  return { label: t("common.apps"), href: "/apps" };
-}
 
 /**
  * One of an app's embedded pages (`apps.page`, `settings.app`), at `?path=` within it

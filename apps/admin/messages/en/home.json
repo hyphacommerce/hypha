@@ -29,6 +29,5 @@
   "tile_low_stock": "Running low",
   "tile_low_stock_hint": "Variants with fewer than {count, number} available",
   "recent_title": "Recent orders",
-  "recent_view_all": "View all",
   "recent_empty": "No orders yet. They show up here as shoppers place them."
 }

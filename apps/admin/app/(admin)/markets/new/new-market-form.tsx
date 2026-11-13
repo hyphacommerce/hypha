@@ -66,7 +66,7 @@ export function NewMarketForm({
           value={currency}
           onChange={setCurrency}
           hasSearch
-          placeholder={t("markets.new_currency_placeholder")}
+          placeholder={t("common.choose_currency")}
         />
         <Switch
           label={t("markets.prices_include_tax")}

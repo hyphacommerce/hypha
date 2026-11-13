@@ -80,10 +80,10 @@ export function PriceListsTable({
       .map(([value, label]) => ({ value, label }))
       .toSorted((a, b) => format.compare(a.label, b.label));
   const sortOptions: SortOption[] = [
-    { value: "newest", label: t("price_lists.sort_newest") },
-    { value: "oldest", label: t("price_lists.sort_oldest") },
-    { value: "name_asc", label: t("price_lists.sort_name_asc") },
-    { value: "name_desc", label: t("price_lists.sort_name_desc") },
+    { value: "newest", label: t("common.sort_newest") },
+    { value: "oldest", label: t("common.sort_oldest") },
+    { value: "name_asc", label: t("common.sort_name_asc") },
+    { value: "name_desc", label: t("common.sort_name_desc") },
   ];
   const views: View[] = [
     { label: t("common.all"), params: {} },
@@ -95,7 +95,7 @@ export function PriceListsTable({
     {
       kind: "select",
       param: "kind",
-      label: t("price_lists.filter_kind"),
+      label: t("common.kind"),
       options: KINDS.map((kind) => ({ value: kind, label: t(`price_lists.kind_${kind}`) })),
     },
     {
@@ -130,7 +130,7 @@ export function PriceListsTable({
     },
     {
       key: "kind",
-      header: t("price_lists.column_kind"),
+      header: t("common.kind"),
       width: pixel(140),
       renderCell: (list) => (
         <Badge label={kindLabel(t, list.kind)} variant={list.kind === "sale" ? "pink" : "blue"} />

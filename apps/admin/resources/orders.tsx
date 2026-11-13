@@ -24,6 +24,7 @@ import {
   FulfillmentBadge,
   NeedsReviewBadge,
   PaymentBadge,
+  statusOptions,
 } from "@/components/status";
 import type { Definition } from "@/lib/custom-fields";
 import { UNPAID } from "@/lib/payments";
@@ -79,8 +80,8 @@ export function OrdersTable({
   const [outcome, setOutcome] = useState<BulkOutcome>();
   const needsCurrency = t("orders.list_sort_needs_currency");
   const sortOptions: SortOption[] = [
-    { value: "newest", label: t("orders.list_sort_newest") },
-    { value: "oldest", label: t("orders.list_sort_oldest") },
+    { value: "newest", label: t("common.sort_newest") },
+    { value: "oldest", label: t("common.sort_oldest") },
     { value: "total_desc", label: t("orders.list_sort_total_desc"), unavailable: needsCurrency },
     { value: "total_asc", label: t("orders.list_sort_total_asc"), unavailable: needsCurrency },
   ];
@@ -111,19 +112,13 @@ export function OrdersTable({
       kind: "multi",
       param: "financial_status",
       label: t("orders.payment"),
-      options: FINANCIAL.map((value) => ({
-        value,
-        label: t(`orders.list_filter_financial_${value}`),
-      })),
+      options: statusOptions("financial", FINANCIAL, t),
     },
     {
       kind: "multi",
       param: "fulfillment_status",
       label: t("orders.fulfilment"),
-      options: FULFILLMENT.map((value) => ({
-        value,
-        label: t(`orders.list_filter_fulfillment_${value}`),
-      })),
+      options: statusOptions("fulfillment", FULFILLMENT, t),
     },
     {
       kind: "select",

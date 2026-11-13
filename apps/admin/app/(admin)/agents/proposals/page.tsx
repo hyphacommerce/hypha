@@ -8,6 +8,7 @@ import { listPage, pageQuery } from "@/components/resource-table/server";
 import { PROPOSAL_STATUSES } from "@/lib/agents";
 import { sessionClient } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
+import { agentsCrumb } from "@/lib/navigation";
 
 import { ProposalsTable } from "./proposals-table";
 
@@ -27,7 +28,7 @@ export default async function ProposalsPage({
       <VStack gap={5}>
         <PageHeader
           title={t("agents.proposals_title")}
-          back={{ label: t("agents.list_title"), href: "/agents" }}
+          back={agentsCrumb(t)}
           description={t("agents.proposals_description")}
         />
         <Suspense fallback={<ProposalsTable />}>

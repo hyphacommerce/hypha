@@ -83,7 +83,7 @@ export function LoginForm({ notice }: { notice?: string }) {
             </HStack>
           </VStack>
           <Button
-            label={t("auth.sign_in")}
+            label={t("common.sign_in")}
             type="submit"
             variant="primary"
             size="lg"

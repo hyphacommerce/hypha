@@ -84,7 +84,7 @@ export function NewPurchaseOrder({ supplier: preset }: { supplier?: string }) {
             options={(choices?.locations ?? []).map((l) => ({ value: l.id, label: l.name }))}
             value={destination || undefined}
             onChange={setDestination}
-            placeholder={choices ? t("purchasing.choose_location") : t("common.loading")}
+            placeholder={choices ? t("common.choose_location") : t("common.loading")}
           />
           <HStack gap={2} hAlign="end">
             <Button label={t("common.cancel")} variant="ghost" onClick={close} />

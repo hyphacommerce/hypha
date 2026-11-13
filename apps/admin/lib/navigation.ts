@@ -303,6 +303,16 @@ export function settingsCrumb(t: TFor<"nav">): { label: string; href: string } {
   return { label: t(SETTINGS_NAV.label), href: SETTINGS_NAV.href };
 }
 
+/** The way back to the list of apps, for a breadcrumb. */
+export function appsCrumb(t: TFor<"nav">): { label: string; href: string } {
+  return { label: t("nav.apps"), href: "/apps" };
+}
+
+/** The way back to the list of agents, for a breadcrumb. */
+export function agentsCrumb(t: TFor<"nav">): { label: string; href: string } {
+  return { label: t("nav.agents"), href: "/agents" };
+}
+
 /** Whether `href` covers `pathname`: itself, or a page under it. */
 export function covers(pathname: string, href: string): boolean {
   return href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);

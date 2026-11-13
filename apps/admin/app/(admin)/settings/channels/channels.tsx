@@ -64,7 +64,7 @@ export function ChannelsCard({ channels }: { channels: Channel[] }) {
           <TableHeader>
             <TableRow>
               <TableHeaderCell>{t("common.channel")}</TableHeaderCell>
-              <TableHeaderCell>{t("settings.channels_column_kind")}</TableHeaderCell>
+              <TableHeaderCell>{t("common.kind")}</TableHeaderCell>
               <TableHeaderCell>{t("common.created")}</TableHeaderCell>
               <TableHeaderCell>
                 <span />
@@ -171,7 +171,7 @@ function ChannelDialog({ channel, onClose }: { channel?: Channel; onClose: () =>
         />
         {!channel && (
           <Selector
-            label={t("settings.channel_kind_label")}
+            label={t("common.kind")}
             description={t("settings.channel_kind_description")}
             options={KINDS.map((value) => ({
               value,

@@ -66,7 +66,7 @@ export function UserMenu({ name, email }: { name: string; email: string }) {
         href={ACCOUNT_NAV.href}
       />
       <DropdownMenuItem
-        label={t("nav.sign_out")}
+        label={t("common.sign_out")}
         icon={ArrowRightStartOnRectangleIcon}
         onClick={() => startTransition(() => logout())}
       />

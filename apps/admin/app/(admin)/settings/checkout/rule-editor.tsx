@@ -188,7 +188,7 @@ export function RuleEditor({
             )}
             <MultiSelector
               label={t("common.markets")}
-              placeholder={t("checkout.editor_every_market")}
+              placeholder={t("common.every_market")}
               options={options.markets}
               value={form.markets}
               onChange={(markets) => set({ markets })}
@@ -197,7 +197,7 @@ export function RuleEditor({
             />
             <MultiSelector
               label={t("common.channels")}
-              placeholder={t("checkout.editor_every_channel")}
+              placeholder={t("common.every_channel")}
               options={options.channels}
               value={form.channels}
               onChange={(channels) => set({ channels })}

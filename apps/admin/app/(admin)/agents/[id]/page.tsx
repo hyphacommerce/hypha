@@ -4,7 +4,7 @@ import { VStack } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
 import { Suspense } from "react";
 
-import { type Crumb, PageHeader } from "@/components/page-header";
+import { PageHeader } from "@/components/page-header";
 import { type SearchParams, one } from "@/components/resource-table/params";
 import { listPage, pageQuery } from "@/components/resource-table/server";
 import { FormSkeleton } from "@/components/skeletons";
@@ -18,18 +18,12 @@ import {
   staffNames,
 } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
-import type { T } from "@/lib/messages";
-import { hasScope } from "@/lib/navigation";
+import { agentsCrumb, hasScope } from "@/lib/navigation";
 
 import { ActivityTable } from "./activity-table";
 import { AgentActions } from "./agent-actions";
 import { AgentEditor } from "./agent-editor";
 import { AgentTabs, type AgentTab } from "./agent-tabs";
-
-/** The way back to the list of agents. */
-function back(t: T): Crumb {
-  return { label: t("agents.list_title"), href: "/agents" };
-}
 
 /** The agents this request read, by ID: the header and the access form share one read. */
 const agentReads = perRequest(async () => new Map<string, Promise<Agent>>());
@@ -62,7 +56,7 @@ export default async function AgentPage({
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={1080}>
-        <Suspense fallback={<PageHeader back={back(t)} />}>
+        <Suspense fallback={<PageHeader back={agentsCrumb(t)} />}>
           <AgentHeader id={id} />
         </Suspense>
         <AgentTabs id={id} tab={tab}>
@@ -102,7 +96,7 @@ async function AgentHeader({ id }: { id: string }) {
     <>
       <PageHeader
         title={agent.name}
-        back={back(t)}
+        back={agentsCrumb(t)}
         badges={<Badge label={state.label} variant={state.variant} />}
         description={facts.join(" · ")}
         actions={

@@ -4,7 +4,7 @@
 
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
-import { hasKey } from "./keys";
+import { hasKey, labelOr } from "./keys";
 import type { TFor } from "./messages";
 
 type App = AdminSchemas["AppResponse"];
@@ -92,7 +92,7 @@ export function isPersonalDataScope(scope: string): boolean {
  */
 export function personalDataLabel(t: TFor<"apps">, scope: string): string {
   const key = `apps.personal_data_${scope.slice(scope.indexOf(":") + 1)}`;
-  return isPersonalDataScope(scope) && hasKey(t, key) ? t(key) : scope;
+  return isPersonalDataScope(scope) ? labelOr(t, key, scope) : scope;
 }
 
 /** Older names of areas, still met in operation IDs: each reads as the area it became. */
@@ -128,13 +128,13 @@ export function scopeLabel(t: TFor<"apps">, scope: string): string {
   const own = action ? `apps.scope_${canonical}_${action}` : `apps.scope_${canonical}`;
   if (action === "read") {
     const key = `apps.scope_read_${canonical}`;
-    return hasKey(t, key) ? t(key) : t("apps.scope_other_read", { area: areaWords(area) });
+    return labelOr(t, key, t("apps.scope_other_read", { area: areaWords(area) }));
   }
   if (action === "write") {
     const key = `apps.scope_write_${canonical}`;
-    return hasKey(t, key) ? t(key) : t("apps.scope_other_write", { area: areaWords(area) });
+    return labelOr(t, key, t("apps.scope_other_write", { area: areaWords(area) }));
   }
-  return hasKey(t, own) ? t(own) : scope;
+  return labelOr(t, own, scope);
 }
 
 type Actor = AdminSchemas["EventActor"] | null | undefined;
@@ -142,5 +142,5 @@ type Actor = AdminSchemas["EventActor"] | null | undefined;
 /** Who did something, for a line of history ("a staff member", "the app itself"), in `t`'s language. */
 export function actorLabel(t: TFor<"apps">, actor: Actor): string {
   const key = `apps.actor_${actor?.type ?? "unknown"}`;
-  return hasKey(t, key) ? t(key) : t("apps.actor_unknown");
+  return labelOr(t, key, t("apps.actor_unknown"));
 }

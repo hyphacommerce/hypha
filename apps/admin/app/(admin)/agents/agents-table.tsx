@@ -78,7 +78,7 @@ export function AgentsTable({
     },
     {
       key: "kind",
-      header: t("agents.kind"),
+      header: t("common.kind"),
       width: pixel(220),
       renderCell: (a) => (
         <VStack gap={0.5} hAlign="start">

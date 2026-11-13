@@ -16,15 +16,16 @@ import { Text } from "@astryxdesign/core/Text";
 import { type ReactNode, Suspense } from "react";
 
 import { DateTime } from "@/components/date-time";
-import { type Crumb, PageHeader } from "@/components/page-header";
+import { PageHeader } from "@/components/page-header";
 import { FormSkeleton } from "@/components/skeletons";
 import { appState, isBuiltIn, isPersonalDataScope, personalDataLabel } from "@/lib/apps";
 import { loadExtensions } from "@/lib/app-extensions";
 import { getFormat } from "@/lib/get-format";
-import { hasKey } from "@/lib/keys";
+import { labelOr } from "@/lib/keys";
 import { loaded, requireStaff, sessionClient } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
 import type { T } from "@/lib/messages";
+import { appsCrumb } from "@/lib/navigation";
 
 import { AppActions } from "./app-actions";
 import { AppPageTabs } from "./app-pages";
@@ -41,12 +42,7 @@ const HISTORY_VARIANT: Record<string, "success" | "warning" | "error"> = {
 /** An authorization's status in words; one the admin doesn't know shows as it is. */
 function historyStatus(t: T, status: string): string {
   const key = `apps.history_status_${status}`;
-  return hasKey(t, key) ? t(key) : status;
-}
-
-/** The way back to the list of apps. */
-function back(t: T): Crumb {
-  return { label: t("common.apps"), href: "/apps" };
+  return labelOr(t, key, status);
 }
 
 function Panel({
@@ -96,7 +92,7 @@ export default async function AppPage({ params }: { params: Promise<{ key: strin
         <Suspense
           fallback={
             <>
-              <PageHeader back={back(t)} />
+              <PageHeader back={appsCrumb(t)} />
               <FormSkeleton cards={2} />
             </>
           }
@@ -132,7 +128,7 @@ async function App({ appKey: key }: { appKey: string }) {
     <>
       <PageHeader
         title={app.name}
-        back={back(t)}
+        back={appsCrumb(t)}
         badges={<Badge label={state.label} variant={state.variant} />}
         description={`${app.key} · ${state.description}`}
         actions={
@@ -283,7 +279,7 @@ async function App({ appKey: key }: { appKey: string }) {
             <TableHeader>
               <TableRow>
                 <TableHeaderCell>{t("apps.detail_history_asked")}</TableHeaderCell>
-                <TableHeaderCell>{t("apps.detail_history_scopes")}</TableHeaderCell>
+                <TableHeaderCell>{t("common.scopes")}</TableHeaderCell>
                 <TableHeaderCell>{t("apps.detail_history_answer")}</TableHeaderCell>
               </TableRow>
             </TableHeader>

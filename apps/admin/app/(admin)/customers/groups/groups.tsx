@@ -99,14 +99,14 @@ export function GroupsCard({ groups, canWrite }: { groups: Group[]; canWrite: bo
                     {canWrite && (
                       <HStack gap={1} hAlign="end">
                         <IconButton
-                          label={t("customers.groups_edit_named", { name: group.name })}
+                          label={t("common.edit_named", { name: group.name })}
                           icon={<PencilSquareIcon />}
                           size="sm"
                           variant="ghost"
                           onClick={() => setEditing(group)}
                         />
                         <IconButton
-                          label={t("customers.groups_delete_named", { name: group.name })}
+                          label={t("common.delete_named_label", { name: group.name })}
                           icon={<TrashIcon />}
                           size="sm"
                           variant="ghost"

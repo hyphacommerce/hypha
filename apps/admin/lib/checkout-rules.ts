@@ -6,7 +6,7 @@
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 import { type Currencies, type Format, moneyInput, parseMoney } from "./format";
-import { hasKey } from "./keys.ts";
+import { labelOr } from "./keys.ts";
 import type { TFor } from "./messages";
 
 type CheckoutT = TFor<"checkout">;
@@ -97,19 +97,19 @@ export const CONDITION_TYPES: { value: ConditionType; group: ConditionGroup }[] 
 /** An address field's name; one this admin doesn't know as it is. */
 export function fieldLabel(t: CheckoutT, field: string): string {
   const key = `checkout.field_${field}`;
-  return hasKey(t, key) ? t(key) : field;
+  return labelOr(t, key, field);
 }
 
 /** What an address is flagged as, to follow "The address is"; an unknown flag as it is. */
 export function flagLabel(t: CheckoutT, flag: string): string {
   const key = `checkout.flag_${flag}`;
-  return hasKey(t, key) ? t(key) : flag;
+  return labelOr(t, key, flag);
 }
 
 /** A verdict as it reads inside a sentence ("Verification says …"); an unknown one as it is. */
 export function verdictPhrase(t: CheckoutT, verdict: string): string {
   const key = `checkout.verdict_inline_${verdict}`;
-  return hasKey(t, key) ? t(key) : verdict;
+  return labelOr(t, key, verdict);
 }
 
 /** The fields a condition can read, for the picker. */

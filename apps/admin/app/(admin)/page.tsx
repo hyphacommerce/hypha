@@ -10,7 +10,6 @@ import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Text } from "@astryxdesign/core/Text";
 import { CheckCircleIcon as CheckCircleOutline } from "@heroicons/react/24/outline";
 import { CheckCircleIcon } from "@heroicons/react/24/solid";
-import { withEnglish } from "@hyphacommerce/i18n";
 import type { AdminPaths, AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { Suspense } from "react";
 
@@ -42,12 +41,13 @@ const RECENT = 5;
  * orders to fulfil and payments to collect) and the latest orders. The greeting and the banners render at once; each card streams in.
  */
 export default async function HomePage() {
-  const [me, store, setup, timeZone, t] = await Promise.all([
+  const [me, store, setup, timeZone, t, format] = await Promise.all([
     requireStaff(),
     loadStore(),
     loadSetup(),
     loadTimeZone(),
     getT(),
+    getFormat(),
   ]);
   const showChecklist = setup !== null && !setup.isFinished;
   const canSeeOrders = hasScope(me.scopes, "orders:read");
@@ -62,7 +62,7 @@ export default async function HomePage() {
       <VStack gap={6} maxWidth={1280}>
         <PageHeader
           title={t(`home.greeting_${dayPart(now, timeZone)}`, { name: me.user.name })}
-          description={[longDate(now, timeZone, t.locale), store?.name].filter(Boolean).join(" · ")}
+          description={[format.weekday(now), store?.name].filter(Boolean).join(" · ")}
           actions={
             <>
               {canSeeOrders && (
@@ -131,19 +131,6 @@ function dayPart(now: Date, timeZone: string): "morning" | "afternoon" | "evenin
     new Intl.DateTimeFormat("en-US", { hour: "numeric", hourCycle: "h23", timeZone }).format(now),
   );
   return hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
-}
-
-/**
- * "Thursday 22 October", in the store's time zone, as `locale` writes it. `Format` has no
- * date with its weekday, so this one asks `Intl` itself, with the translator's locale.
- */
-function longDate(now: Date, timeZone: string, locale: string): string {
-  return new Intl.DateTimeFormat(withEnglish(locale), {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    timeZone,
-  }).format(now);
 }
 
 /** Today as YYYY-MM-DD in the store's time zone: computed, never shown, so its locale is fixed. */
@@ -435,7 +422,7 @@ async function RecentOrders() {
           <Text type="display-3" as="h2">
             {t("home.recent_title")}
           </Text>
-          <Link href="/orders">{t("home.recent_view_all")}</Link>
+          <Link href="/orders">{t("common.view_all")}</Link>
         </HStack>
         {orders.length === 0 ? (
           <Text color="secondary">{t("home.recent_empty")}</Text>

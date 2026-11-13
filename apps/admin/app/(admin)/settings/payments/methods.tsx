@@ -153,15 +153,10 @@ export function PaymentMethodsCard({
                   <TableCell>
                     <VStack gap={0.5}>
                       <Text type="supporting">
-                        {where(method.markets, markets, t("payments.methods_every_market"), list)}
+                        {where(method.markets, markets, t("common.every_market"), list)}
                       </Text>
                       <Text type="supporting" color="secondary">
-                        {where(
-                          method.channels,
-                          channels,
-                          t("payments.methods_every_channel"),
-                          list,
-                        )}
+                        {where(method.channels, channels, t("common.every_channel"), list)}
                       </Text>
                     </VStack>
                   </TableCell>
@@ -181,7 +176,7 @@ export function PaymentMethodsCard({
                     {canWrite && (
                       <HStack gap={1} hAlign="end">
                         <IconButton
-                          label={t("payments.method_move_up", { name: method.name })}
+                          label={t("common.move_up_named", { name: method.name })}
                           icon={<ArrowUpIcon />}
                           size="sm"
                           variant="ghost"
@@ -189,7 +184,7 @@ export function PaymentMethodsCard({
                           onClick={() => move(index, -1)}
                         />
                         <IconButton
-                          label={t("payments.method_move_down", { name: method.name })}
+                          label={t("common.move_down_named", { name: method.name })}
                           icon={<ArrowDownIcon />}
                           size="sm"
                           variant="ghost"
@@ -197,14 +192,14 @@ export function PaymentMethodsCard({
                           onClick={() => move(index, 1)}
                         />
                         <IconButton
-                          label={t("payments.method_edit", { name: method.name })}
+                          label={t("common.edit_named", { name: method.name })}
                           icon={<PencilSquareIcon />}
                           size="sm"
                           variant="ghost"
                           onClick={() => setEditing(method)}
                         />
                         <IconButton
-                          label={t("payments.method_delete", { name: method.name })}
+                          label={t("common.delete_named_label", { name: method.name })}
                           icon={<TrashIcon />}
                           size="sm"
                           variant="ghost"
@@ -326,7 +321,7 @@ function MethodDialog({
         <VStack gap={4} padding={4}>
           {!method && (
             <Selector
-              label={t("payments.method_kind_label")}
+              label={t("common.kind")}
               options={[
                 ...presets.map(({ value, label, description }) => ({
                   value,
@@ -367,7 +362,7 @@ function MethodDialog({
           <MultiSelector
             label={t("common.markets")}
             description={t("payments.method_markets_description")}
-            placeholder={t("payments.method_markets_placeholder")}
+            placeholder={t("common.every_market")}
             options={markets}
             value={form.markets}
             onChange={(chosen) => set({ markets: chosen })}
@@ -377,7 +372,7 @@ function MethodDialog({
           <MultiSelector
             label={t("common.channels")}
             description={t("payments.method_channels_description")}
-            placeholder={t("payments.method_channels_placeholder")}
+            placeholder={t("common.every_channel")}
             options={channels}
             value={form.channels}
             onChange={(chosen) => set({ channels: chosen })}

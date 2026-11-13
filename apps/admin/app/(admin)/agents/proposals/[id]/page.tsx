@@ -25,16 +25,13 @@ import {
 } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
 import type { T } from "@/lib/messages";
-import { hasScope } from "@/lib/navigation";
+import { agentsCrumb, hasScope } from "@/lib/navigation";
 
 import { Decision } from "./decision";
 
 /** The way back: the agents, then the proposals inbox. */
 function back(t: T): Crumb[] {
-  return [
-    { label: t("agents.list_title"), href: "/agents" },
-    { label: t("agents.proposals_title"), href: "/agents/proposals" },
-  ];
+  return [agentsCrumb(t), { label: t("agents.proposals_title"), href: "/agents/proposals" }];
 }
 
 /**

@@ -95,13 +95,13 @@ function EditCustomerDialog({ customer, onClose }: { customer: Customer; onClose
         />
         <div className="form-grid">
           <TextInput
-            label={t("customers.edit_first_name")}
+            label={t("common.first_name")}
             isOptional
             value={firstName}
             onChange={setFirstName}
           />
           <TextInput
-            label={t("customers.edit_last_name")}
+            label={t("common.last_name")}
             isOptional
             value={lastName}
             onChange={setLastName}

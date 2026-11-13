@@ -149,7 +149,7 @@ export async function changeOrderAddress(
     const problems = problemsOf(error);
     if (problems && Object.keys(problems).length > 0) {
       const t = await getT();
-      return { error: t("orders.edit_address_check_fields"), problems };
+      return { error: t("common.check_highlighted_fields"), problems };
     }
     return { error: await describe(error) };
   }

@@ -17,14 +17,15 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
 import { DateTime } from "@/components/date-time";
-import { type Crumb, PageHeader } from "@/components/page-header";
+import { PageHeader } from "@/components/page-header";
 import { Pager } from "@/components/pager";
 import { TableSkeleton } from "@/components/skeletons";
 
 import { loaded, sessionClient } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
-import { hasKey } from "@/lib/keys";
+import { labelOr } from "@/lib/keys";
 import type { T } from "@/lib/messages";
+import { appsCrumb } from "@/lib/navigation";
 
 import { RetryButton } from "./retry-button";
 
@@ -37,12 +38,7 @@ const STATUSES: Record<string, "success" | "warning" | "error"> = {
 /** A delivery's status in words; one the admin doesn't know shows as it is. */
 function statusLabel(t: T, status: string): string {
   const key = `apps.delivery_status_${status}`;
-  return hasKey(t, key) ? t(key) : status;
-}
-
-/** The way back to the list of apps. */
-function appsCrumb(t: T): Crumb {
-  return { label: t("common.apps"), href: "/apps" };
+  return labelOr(t, key, status);
 }
 
 /**

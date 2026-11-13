@@ -88,9 +88,7 @@ export function ItemSetFields({
             onChange={(chosen) => set({ categories: chosen }, "categories")}
             hasSearch
             triggerDisplay="count"
-            formatValue={(chosen) =>
-              t("discounts.items_categories_count", { count: chosen.length })
-            }
+            formatValue={(chosen) => t("common.categories_count", { count: chosen.length })}
             isDisabled={isReadOnly}
             status={fieldStatus(errors[`${path}.categories`])}
             width="100%"

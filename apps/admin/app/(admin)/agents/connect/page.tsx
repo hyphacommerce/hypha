@@ -11,21 +11,17 @@ import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { Suspense } from "react";
 
 import { DateTime } from "@/components/date-time";
-import { type Crumb, PageHeader } from "@/components/page-header";
+import { PageHeader } from "@/components/page-header";
 import { FormSkeleton } from "@/components/skeletons";
 import { describe, requireStaff, sessionClient } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
 import type { T } from "@/lib/messages";
+import { agentsCrumb } from "@/lib/navigation";
 
 import { draftOf } from "../grant";
 import { ConnectForm } from "./connect-form";
 
 type Connection = AdminSchemas["AgentConnectionResponse"];
-
-/** The way back to the list of agents. */
-function back(t: T): Crumb {
-  return { label: t("agents.list_title"), href: "/agents" };
-}
 
 /** Where a client starts connecting: a command, never translated. */
 const MCP_COMMAND = "/mcp";
@@ -54,7 +50,7 @@ export default async function ConnectPage({
           <Suspense
             fallback={
               <>
-                <PageHeader back={back(t)} />
+                <PageHeader back={agentsCrumb(t)} />
                 <FormSkeleton cards={2} />
               </>
             }
@@ -88,7 +84,7 @@ async function ConnectRequest({ id }: { id: string }) {
     <>
       <PageHeader
         title={t("agents.connect_title", { name: agentClient.name })}
-        back={back(t)}
+        back={agentsCrumb(t)}
         badges={<StatusBadge t={t} status={request.status} />}
         description={t.rich("agents.connect_description", {
           name: me.user.name,

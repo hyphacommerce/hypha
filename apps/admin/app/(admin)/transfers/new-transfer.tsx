@@ -65,14 +65,14 @@ export function NewTransfer() {
                 options={options}
                 value={origin || undefined}
                 onChange={setOrigin}
-                placeholder={locations ? t("transfers.choose_location") : t("common.loading")}
+                placeholder={locations ? t("common.choose_location") : t("common.loading")}
               />
               <Selector
                 label={t("transfers.to")}
                 options={options}
                 value={destination || undefined}
                 onChange={setDestination}
-                placeholder={locations ? t("transfers.choose_location") : t("common.loading")}
+                placeholder={locations ? t("common.choose_location") : t("common.loading")}
                 status={
                   origin && origin === destination
                     ? { type: "error", message: t("transfers.same_location") }

@@ -437,7 +437,7 @@ async function Order({ id }: { id: string }) {
                             <Text type="supporting" color="secondary">
                               {[
                                 line.variant_title,
-                                line.sku && t("orders.detail_line_sku", { sku: line.sku }),
+                                line.sku && t("common.sku_named", { sku: line.sku }),
                               ]
                                 .filter(Boolean)
                                 .join(" · ")}
@@ -734,7 +734,7 @@ function PaymentCard({
                     {providerLabel(payment.provider, t)}
                   </MetadataListItem>
                   {payment.reference && (
-                    <MetadataListItem label={t("orders.reference")}>
+                    <MetadataListItem label={t("common.reference")}>
                       {payment.reference}
                     </MetadataListItem>
                   )}

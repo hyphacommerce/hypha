@@ -15,7 +15,7 @@ import {
   type SortOption,
   type View,
 } from "@/components/resource-table/resource-table";
-import { PurchaseOrderStatusBadge, ReceiptStatusBadge } from "@/components/status";
+import { PurchaseOrderStatusBadge, ReceiptStatusBadge, statusOptions } from "@/components/status";
 import { type PurchaseOrderSummary, poNumber } from "@/lib/purchasing";
 import { useFormat } from "@/lib/use-format";
 import { useT } from "@/lib/use-t";
@@ -43,13 +43,13 @@ export function PurchaseOrdersTable({
       kind: "select",
       param: "status",
       label: t("common.status"),
-      options: STATUSES.map((value) => ({ value, label: t(`purchasing.status_${value}`) })),
+      options: statusOptions("purchase_order", STATUSES, t),
     },
     {
       kind: "select",
       param: "receipt_status",
       label: t("purchasing.received"),
-      options: RECEIPTS.map((value) => ({ value, label: t(`purchasing.receipt_${value}`) })),
+      options: statusOptions("receipt", RECEIPTS, t),
     },
   ];
   const views: View[] = [

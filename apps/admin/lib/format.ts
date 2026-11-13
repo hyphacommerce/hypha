@@ -288,6 +288,8 @@ export interface Format {
   dateTime(rfc3339: string, style?: "long" | "short"): string;
   /** A calendar date kept as noon UTC, read in UTC: `long` "11 Nov 2026", `short` "11 Nov". */
   date(rfc3339: string, style?: "long" | "short"): string;
+  /** The day a moment falls on in the store's time zone, with its weekday: "Thursday 22 October". */
+  weekday(at: Date): string;
   /** "A, B and C" (`conjunction`, the default), "A, B or C" (`disjunction`), "A, B, C" (`unit`). */
   list(items: readonly string[], type?: Intl.ListFormatType): string;
   /** The plural category of `count` ("one", "few", "other"…). Messages use ICU plurals instead. */
@@ -360,6 +362,8 @@ export function createFormat(locale: string, context: FormatContext = {}): Forma
     unitCost: (cost) => formatUnitCost(cost, currencies, locale),
     dateTime: (rfc3339, style = "long") => formatDateTime(rfc3339, timeZone, style, locale),
     date: (rfc3339, style = "long") => formatCalendarDate(rfc3339, style, locale),
+    weekday: (at) =>
+      dateFormat(locale, { weekday: "long", day: "numeric", month: "long", timeZone }).format(at),
     list: (items, type = "conjunction") =>
       formatter(
         "list",

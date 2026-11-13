@@ -69,7 +69,7 @@ export function TwoFactorCard({ isEnabled }: { isEnabled: boolean }) {
               onClick={() => setStep({ kind: "regenerate" })}
             />
             <Button
-              label={t("account.two_factor_turn_off")}
+              label={t("common.turn_off")}
               variant="destructive"
               onClick={() => setStep({ kind: "disable" })}
             />
@@ -151,7 +151,7 @@ function TwoFactorDialog({
               label={t("account.two_factor_app_code")}
               autoComplete="one-time-code"
               placeholder={CODE_EXAMPLE}
-              submitLabel={t("account.two_factor_turn_on")}
+              submitLabel={t("common.turn_on")}
               onSubmit={async (code) => {
                 const result = await confirmTotp(code);
                 if (result.codes) onStep({ kind: "codes", codes: result.codes, isNew: true });
@@ -182,7 +182,7 @@ function TwoFactorDialog({
             label={t("account.two_factor_code_or_recovery")}
             description={t("account.two_factor_disable_description")}
             autoComplete="one-time-code"
-            submitLabel={t("account.two_factor_turn_off")}
+            submitLabel={t("common.turn_off")}
             isDestructive
             onSubmit={async (code) => {
               const result = await disableTotp(code);

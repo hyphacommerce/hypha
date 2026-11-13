@@ -179,7 +179,7 @@ export function DefinitionsCard({
                         {isOwn && canWrite && (
                           <HStack gap={1} hAlign="end">
                             <IconButton
-                              label={t("custom_fields.move_up", { name: definition.name })}
+                              label={t("common.move_up_named", { name: definition.name })}
                               icon={<ArrowUpIcon />}
                               size="sm"
                               variant="ghost"
@@ -187,7 +187,7 @@ export function DefinitionsCard({
                               onClick={() => move(definition, definition.position - 1)}
                             />
                             <IconButton
-                              label={t("custom_fields.move_down", { name: definition.name })}
+                              label={t("common.move_down_named", { name: definition.name })}
                               icon={<ArrowDownIcon />}
                               size="sm"
                               variant="ghost"
@@ -195,14 +195,14 @@ export function DefinitionsCard({
                               onClick={() => move(definition, definition.position + 1)}
                             />
                             <IconButton
-                              label={t("custom_fields.edit_named", { name: definition.name })}
+                              label={t("common.edit_named", { name: definition.name })}
                               icon={<PencilSquareIcon />}
                               size="sm"
                               variant="ghost"
                               onClick={() => setEditing(definition)}
                             />
                             <IconButton
-                              label={t("custom_fields.delete_field_named", {
+                              label={t("common.delete_named_label", {
                                 name: definition.name,
                               })}
                               icon={<TrashIcon />}

@@ -105,7 +105,7 @@ async function ProductDetail({ id, back }: { id: string; back: Crumb }) {
         media={<MediaSection id={product.id} media={product.media} />}
         identifiers={
           <Card>
-            <MetadataList title={t("products.identifiers")}>
+            <MetadataList title={t("common.identifiers")}>
               <MetadataListItem label={t("products.product_id")}>
                 <Text type="supporting" color="secondary">
                   {product.id}

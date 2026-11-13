@@ -74,7 +74,7 @@ export function ConditionsSection({
         <MultiSelector
           label={t("common.markets")}
           description={t("discounts.conditions_markets_hint")}
-          placeholder={t("discounts.conditions_markets_placeholder")}
+          placeholder={t("common.every_market")}
           options={withUnknown(markets, c.markets)}
           value={c.markets}
           onChange={(chosen) => set({ markets: chosen }, "markets")}
@@ -85,7 +85,7 @@ export function ConditionsSection({
         />
         <MultiSelector
           label={t("discounts.conditions_channels")}
-          placeholder={t("discounts.conditions_channels_placeholder")}
+          placeholder={t("common.every_channel")}
           options={withUnknown(options.channels, c.channels)}
           value={c.channels}
           onChange={(chosen) => set({ channels: chosen }, "channels")}
@@ -95,7 +95,7 @@ export function ConditionsSection({
         />
         {groups.length > 0 && (
           <MultiSelector
-            label={t("discounts.conditions_groups")}
+            label={t("common.customer_groups")}
             description={t("discounts.conditions_groups_hint")}
             placeholder={t("discounts.conditions_groups_placeholder")}
             options={groups}

@@ -286,7 +286,7 @@ function AddressDialog({
           value={draft.country || undefined}
           onChange={chooseCountry}
           hasSearch
-          placeholder={t("customers.addresses_dialog_country_placeholder")}
+          placeholder={t("common.choose_country")}
           isRequired
         />
         {addressFormat && !isLoadingFormat ? (

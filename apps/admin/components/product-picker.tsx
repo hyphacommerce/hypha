@@ -18,19 +18,14 @@ import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { MagnifyingGlassIcon, PhotoIcon } from "@heroicons/react/24/outline";
 import { useEffect, useRef, useState, useTransition } from "react";
 
-import { ProductStatusBadge } from "@/components/status";
-import type { KeyIn } from "@/lib/messages";
+import { ProductStatusBadge, statusLabel } from "@/components/status";
 import { useT } from "@/lib/use-t";
 
 import { type PickerProduct, pickerProducts } from "./product-picker-actions";
 
 type Status = AdminSchemas["ProductStatus"];
 
-const STATUSES: { value: Status; label: KeyIn<"common"> }[] = [
-  { value: "active", label: "common.active" },
-  { value: "draft", label: "common.draft" },
-  { value: "archived", label: "common.archived" },
-];
+const STATUSES: Status[] = ["active", "draft", "archived"];
 
 export type { PickerProduct };
 
@@ -160,13 +155,13 @@ export function ProductPicker({
           hasAutoFocus
         />
         <HStack gap={2} vAlign="center" wrap="wrap">
-          {STATUSES.map((s) => (
+          {STATUSES.map((status) => (
             <ToggleButton
-              key={s.value}
-              label={t(s.label)}
+              key={status}
+              label={statusLabel("product", status, t)}
               size="sm"
-              isPressed={statuses.includes(s.value)}
-              onPressedChange={() => toggleStatus(s.value)}
+              isPressed={statuses.includes(status)}
+              onPressedChange={() => toggleStatus(status)}
             />
           ))}
         </HStack>
@@ -236,7 +231,7 @@ export function ProductPicker({
                         `/${product.handle}`,
                         ...(product.variantCount > 1
                           ? [
-                              t("components.product_picker_variants", {
+                              t("common.variants_count", {
                                 count: product.variantCount,
                               }),
                             ]
@@ -252,7 +247,7 @@ export function ProductPicker({
             {next && (
               <HStack hAlign="center" padding={3}>
                 <Button
-                  label={t("components.product_picker_load_more")}
+                  label={t("common.load_more")}
                   variant="ghost"
                   size="sm"
                   isLoading={isLoadingMore}

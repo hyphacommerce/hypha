@@ -367,7 +367,7 @@ export function SessionsCard({ sessions }: { sessions: Session[] }) {
                 </Text>
               </VStack>
               <Button
-                label={t("account.sessions_sign_out")}
+                label={t("common.sign_out")}
                 variant={session.current ? "secondary" : "ghost"}
                 size="sm"
                 isLoading={isPending && busy === session.id}

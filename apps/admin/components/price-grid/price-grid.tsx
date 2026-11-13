@@ -378,7 +378,7 @@ export function PriceGrid({
           ? (answer.error ?? t("price_lists.grid_rows_not_saved", { count: failedIds.length }))
           : undefined,
       );
-      setNotice(failedIds.length > 0 ? undefined : t("price_lists.grid_saved"));
+      setNotice(failedIds.length > 0 ? undefined : t("common.saved_notice"));
     });
   };
 
@@ -910,7 +910,7 @@ export function PriceGrid({
             </button>
             <span className="pg-name-title">{r.product.title}</span>
             <span className="pg-muted">{r.product.handle}</span>
-            <span className="pg-muted">{t("price_lists.grid_variants_count", { count })}</span>
+            <span className="pg-muted">{t("common.variants_count", { count })}</span>
           </span>
         );
       }

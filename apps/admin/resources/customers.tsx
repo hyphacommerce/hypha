@@ -10,6 +10,8 @@ import { Text } from "@astryxdesign/core/Text";
 import { Token } from "@astryxdesign/core/Token";
 import { UsersIcon } from "@heroicons/react/24/outline";
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
+
+import type { KeyIn } from "@/lib/messages";
 import { useState } from "react";
 
 import { customFieldFilters } from "@/components/custom-fields/filters";
@@ -41,14 +43,14 @@ const SHOWN_LABELS = 3;
 type Customer = AdminSchemas["CustomerSummaryResponse"];
 
 /** Every order the list offers, as the API names them. */
-const SORT_VALUES = [
-  "newest",
-  "oldest",
-  "name_asc",
-  "name_desc",
-  "email_asc",
-  "email_desc",
-] as const;
+const SORT_OPTIONS: { value: string; label: KeyIn<"common" | "customers"> }[] = [
+  { value: "newest", label: "common.sort_newest" },
+  { value: "oldest", label: "common.sort_oldest" },
+  { value: "name_asc", label: "common.sort_name_asc" },
+  { value: "name_desc", label: "common.sort_name_desc" },
+  { value: "email_asc", label: "customers.list_sort_email_asc" },
+  { value: "email_desc", label: "customers.list_sort_email_desc" },
+];
 const SORTS: Record<string, SortDef> = {
   name: { asc: "name_asc", desc: "name_desc" },
   email: { asc: "email_asc", desc: "email_desc" },
@@ -76,9 +78,9 @@ export function CustomersTable({
   const t = useT<"customers">();
   const format = useFormat();
   const [outcome, setOutcome] = useState<BulkOutcome>();
-  const sortOptions: SortOption[] = SORT_VALUES.map((value) => ({
+  const sortOptions: SortOption[] = SORT_OPTIONS.map(({ value, label }) => ({
     value,
-    label: t(`customers.list_sort_${value}`),
+    label: t(label),
   }));
   const search: FilterDef = {
     kind: "search",

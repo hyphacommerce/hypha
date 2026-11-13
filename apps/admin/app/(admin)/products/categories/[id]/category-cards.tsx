@@ -108,7 +108,7 @@ export function CategoryForm({
           setError(undefined);
         }}
       />
-      {isSaved && !isDirty && <Banner status="success" title={t("categories.saved")} />}
+      {isSaved && !isDirty && <Banner status="success" title={t("common.saved_notice")} />}
       <div className="detail-columns">
         <div>
           <Card>
@@ -154,7 +154,7 @@ export function CategoryForm({
                 exclude={subtree(tree, category.id)}
               />
               <Selector
-                label={t("categories.visibility")}
+                label={t("common.visibility")}
                 description={t("categories.visibility_description")}
                 options={visibilityOptions(t)}
                 value={form.visibility}
@@ -205,7 +205,7 @@ export function ImageCard({ id, image }: { id: string; image: Media | null }) {
               />
             )}
             <Button
-              label={image ? t("common.change") : t("categories.image_pick")}
+              label={image ? t("common.change") : t("common.pick_from_library")}
               variant="secondary"
               onClick={() => setIsPicking(true)}
             />
@@ -307,7 +307,7 @@ export function ProductsCard({
                   <TableCell>
                     <HStack hAlign="end">
                       <IconButton
-                        label={t("categories.product_remove", {
+                        label={t("common.remove_named", {
                           name: product.title ?? product.id,
                         })}
                         icon={<TrashIcon />}

@@ -25,18 +25,18 @@ import {
   type SortOption,
   type View,
 } from "@/components/resource-table/resource-table";
-import { hasKey } from "@/lib/keys";
+import { labelOr } from "@/lib/keys";
 import type { KeyIn } from "@/lib/messages";
 import { type Format, useFormat } from "@/lib/use-format";
 import { useT } from "@/lib/use-t";
 
 type Asset = AdminSchemas["AssetResponse"];
 
-const SORT_OPTIONS: { value: string; label: KeyIn<"media"> }[] = [
-  { value: "newest", label: "media.sort_newest" },
-  { value: "oldest", label: "media.sort_oldest" },
-  { value: "name_asc", label: "media.sort_name_asc" },
-  { value: "name_desc", label: "media.sort_name_desc" },
+const SORT_OPTIONS: { value: string; label: KeyIn<"common"> }[] = [
+  { value: "newest", label: "common.sort_newest" },
+  { value: "oldest", label: "common.sort_oldest" },
+  { value: "name_asc", label: "common.sort_name_asc" },
+  { value: "name_desc", label: "common.sort_name_desc" },
 ];
 
 const SORTS: Record<string, SortDef> = {
@@ -194,12 +194,12 @@ export function MediaLibrary({
     },
     {
       key: "kind",
-      header: t("media.kind"),
+      header: t("common.kind"),
       width: pixel(90),
       renderCell: (asset) => {
         // The API may add kinds: one without a name shows as it is.
         const key = `media.kind_${asset.kind}`;
-        return hasKey(t, key) ? t(key) : asset.kind;
+        return labelOr(t, key, asset.kind);
       },
     },
     { key: "facts", header: t("media.size"), renderCell: (asset) => facts(asset, format) },

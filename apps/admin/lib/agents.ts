@@ -7,7 +7,7 @@ import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 import { areaLabel, personalDataLabel } from "./apps";
 import type { Format } from "./format";
-import { hasKey } from "./keys";
+import { labelOr } from "./keys";
 import type { KeyIn, TFor } from "./messages";
 
 /** A translator with the agents' messages, the apps' (areas, scopes) and the vocabulary. */
@@ -136,7 +136,7 @@ export function agentState(
 /** "Connected" (acts for a staff member) or "Autonomous" (its own key); another kind as it is. */
 export function kindLabel(t: TFor<"agents">, kind: string): string {
   const key = `agents.kind_${kind}`;
-  return hasKey(t, key) ? t(key) : kind;
+  return labelOr(t, key, kind);
 }
 
 type Variant = "success" | "neutral" | "warning" | "info" | "error";
@@ -167,7 +167,7 @@ export function proposalStatus(
 ): { label: string; variant: Variant } {
   const key = `agents.proposal_status_${status}`;
   return {
-    label: hasKey(t, key) ? t(key) : status,
+    label: labelOr(t, key, status),
     variant: PROPOSAL_VARIANT[status] ?? "neutral",
   };
 }
@@ -175,7 +175,7 @@ export function proposalStatus(
 /** A call's mode in the activity log; an unknown one shows as it is. */
 export function modeLabel(t: TFor<"agents">, mode: string): string {
   const key = `agents.mode_${mode}`;
-  return hasKey(t, key) ? t(key) : mode;
+  return labelOr(t, key, mode);
 }
 
 /**

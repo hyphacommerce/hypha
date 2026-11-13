@@ -453,7 +453,7 @@ function MarketStep({ data, onSaved }: { data: WizardData; onSaved: () => void }
   // A market selling everywhere lists its count, not two hundred names.
   const where = (codes: string[]) =>
     codes.length > 6
-      ? t("setup.countries_count", { count: codes.length })
+      ? t("common.countries_count", { count: codes.length })
       : format.list(
           codes.map((c) => countryLabel(c, data.countries, format.locale)),
           "unit",
@@ -499,7 +499,7 @@ function MarketStep({ data, onSaved }: { data: WizardData; onSaved: () => void }
               value={currency}
               onChange={setCurrency}
               hasSearch
-              placeholder={t("setup.market_currency_placeholder")}
+              placeholder={t("common.choose_currency")}
             />
             <Switch
               label={t("setup.market_prices_include_tax")}
@@ -583,7 +583,7 @@ function ShippingStep({
             name: z.name,
             where:
               z.countries.length > 6
-                ? t("setup.countries_count", { count: z.countries.length })
+                ? t("common.countries_count", { count: z.countries.length })
                 : format.list(z.countries, "unit"),
             options: z.options.length,
           }),
@@ -669,7 +669,7 @@ function PaymentStep({ data, onSaved }: { data: WizardData; onSaved: () => void 
           <VStack gap={4}>
             {error && <Banner status="error" title={error} />}
             <Selector
-              label={t("setup.payment_kind")}
+              label={t("common.kind")}
               options={presets.map(({ value, label, description }) => ({
                 value,
                 label,

@@ -17,6 +17,7 @@ test("English keeps the formats the admin always had", () => {
   assert.equal(format.dateTime("2020-10-15T07:30:00Z", "short"), "15 Oct 2020");
   assert.equal(format.date("2026-11-11T12:00:00Z"), "11 Nov 2026");
   assert.equal(format.date("2026-11-11T12:00:00Z", "short"), "11 Nov");
+  assert.equal(format.weekday(new Date("2026-10-22T22:30:00Z")), "Friday 23 October");
   assert.equal(format.bytes(980), "980 B");
   assert.equal(format.bytes(1024 * 1024 * 1.4), "1.4 MB");
 });

@@ -196,3 +196,33 @@ export function TransferStatusBadge({
 }) {
   return <StatusBadge looks={TRANSFER} status={status} t={t} />;
 }
+
+/** The statuses that have a badge, by family. */
+const FAMILIES = {
+  product: PRODUCT,
+  financial: PAYMENT,
+  fulfillment: FULFILLMENT,
+  purchase_order: PURCHASE_ORDER,
+  receipt: RECEIPT,
+  transfer: TRANSFER,
+} satisfies Record<string, Record<string, Look>>;
+
+/**
+ * A status as its badge says it, for text beside one: a filter's option, a view's tab.
+ * One source for both, so a filter and the badges it filters can't disagree. An unknown
+ * status as it is.
+ */
+export function statusLabel(family: keyof typeof FAMILIES, status: string, t: Translate): string {
+  const looks: Record<string, Look> = FAMILIES[family];
+  const look = Object.hasOwn(looks, status) ? looks[status] : undefined;
+  return look ? t(look.label) : status;
+}
+
+/** A filter's options for `statuses`, in the order given, each named as its badge is. */
+export function statusOptions<S extends string>(
+  family: keyof typeof FAMILIES,
+  statuses: readonly S[],
+  t: Translate,
+): { value: S; label: string }[] {
+  return statuses.map((value) => ({ value, label: statusLabel(family, value, t) }));
+}

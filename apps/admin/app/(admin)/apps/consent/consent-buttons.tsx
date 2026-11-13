@@ -80,7 +80,7 @@ export function ConsentButtons({
         {error && <Banner status="error" title={error} />}
         <HStack gap={2}>
           <Button
-            label={t("apps.consent_approve")}
+            label={t("common.approve")}
             variant="primary"
             isDisabled={!canApprove}
             isLoading={pending}

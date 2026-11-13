@@ -12,23 +12,19 @@ import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { type ReactNode, Suspense } from "react";
 
 import { DateTime } from "@/components/date-time";
-import { type Crumb, PageHeader } from "@/components/page-header";
+import { PageHeader } from "@/components/page-header";
 import { FormSkeleton } from "@/components/skeletons";
 import { areaLabel, personalDataLabel, scopeLabel } from "@/lib/apps";
 import { type Format, getFormat } from "@/lib/get-format";
 import { isMissingScope, requireStaff, sessionClient } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
-import { hasKey } from "@/lib/keys";
+import { labelOr } from "@/lib/keys";
 import type { T } from "@/lib/messages";
+import { appsCrumb } from "@/lib/navigation";
 
 import { ConsentButtons } from "./consent-buttons";
 
 type Request = AdminSchemas["ConsentRequestResponse"];
-
-/** The way back to the list of apps. */
-function back(t: T): Crumb {
-  return { label: t("common.apps"), href: "/apps" };
-}
 
 /**
  * The consent page: where Hypha's `/oauth/authorize` sends staff (`?request=oareq_…`),
@@ -58,7 +54,7 @@ export default async function ConsentPage({
           <Suspense
             fallback={
               <>
-                <PageHeader back={back(t)} />
+                <PageHeader back={appsCrumb(t)} />
                 <FormSkeleton cards={2} />
               </>
             }
@@ -116,7 +112,7 @@ async function ConsentRequest({ id }: { id: string }) {
             ? t("apps.consent_title_more", { name: request.app.name })
             : t("apps.consent_title_install", { name: request.app.name })
         }
-        back={back(t)}
+        back={appsCrumb(t)}
         badges={<StatusBadge t={t} status={request.status} />}
         description={
           request.app.private
@@ -379,7 +375,7 @@ function ownerLabel(t: T, owner: string): string {
 /** The same within a sentence ("fields to products, variants"). */
 function ownerInSentence(t: T, owner: string): string {
   const key = `apps.consent_fields_owner_${owner}`;
-  return hasKey(t, key) ? t(key) : owner;
+  return labelOr(t, key, owner);
 }
 
 type Field = Request["custom_fields"]["added"][number];

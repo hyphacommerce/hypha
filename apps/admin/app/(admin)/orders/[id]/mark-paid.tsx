@@ -79,7 +79,7 @@ function MarkPaidDialog({
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
         <TextInput
-          label={t("orders.reference")}
+          label={t("common.reference")}
           description={t("orders.mark_paid_reference_description")}
           isOptional
           value={reference}

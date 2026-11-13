@@ -52,14 +52,14 @@ const ADDRESS_FIELDS: {
   label: KeyIn<"suppliers" | "common">;
   isRequired?: boolean;
 }[] = [
-  { key: "company", label: "suppliers.address_company" },
-  { key: "first_name", label: "suppliers.address_first_name" },
+  { key: "company", label: "common.company" },
+  { key: "first_name", label: "common.first_name" },
   { key: "last_name", label: "suppliers.address_last_name", isRequired: true },
   { key: "line1", label: "common.address", isRequired: true },
-  { key: "line2", label: "suppliers.address_line2" },
-  { key: "city", label: "suppliers.address_city", isRequired: true },
-  { key: "province", label: "suppliers.address_province" },
-  { key: "postal_code", label: "suppliers.address_postal_code" },
+  { key: "line2", label: "common.address_line2" },
+  { key: "city", label: "common.city", isRequired: true },
+  { key: "province", label: "common.region_or_province" },
+  { key: "postal_code", label: "common.postal_code" },
   { key: "phone", label: "common.phone" },
 ];
 
@@ -254,7 +254,7 @@ export function SupplierForm({
           onDiscard={discard}
         />
       )}
-      {saved && !isChanged && <Banner status="success" title={t("suppliers.saved")} />}
+      {saved && !isChanged && <Banner status="success" title={t("common.saved_notice")} />}
       <Card>
         <VStack gap={4}>
           <Text type="display-3" as="h2">
@@ -468,7 +468,7 @@ export function SupplierForm({
             onChange={field("country")}
             isDisabled={isReadOnly}
             hasSearch
-            placeholder={t("suppliers.choose_country")}
+            placeholder={t("common.choose_country")}
           />
         </VStack>
       </Card>

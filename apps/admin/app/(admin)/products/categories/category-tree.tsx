@@ -97,7 +97,7 @@ export function CategoryTree({ tree }: { tree: CategoryNode[] }) {
                   <TableCell>
                     <HStack gap={1} hAlign="end">
                       <IconButton
-                        label={t("categories.move_up", { name: row.name })}
+                        label={t("common.move_up_named", { name: row.name })}
                         icon={<ArrowUpIcon />}
                         size="sm"
                         variant="ghost"
@@ -105,7 +105,7 @@ export function CategoryTree({ tree }: { tree: CategoryNode[] }) {
                         onClick={() => move(row.id, row.position - 1)}
                       />
                       <IconButton
-                        label={t("categories.move_down", { name: row.name })}
+                        label={t("common.move_down_named", { name: row.name })}
                         icon={<ArrowDownIcon />}
                         size="sm"
                         variant="ghost"
@@ -171,7 +171,7 @@ function AddCategoryDialog({ tree, onClose }: { tree: CategoryNode[]; onClose: (
         />
         <ParentSelector tree={tree} value={parent} onChange={setParent} />
         <Selector
-          label={t("categories.visibility")}
+          label={t("common.visibility")}
           options={visibilityOptions(t)}
           value={visibility}
           onChange={setVisibility}

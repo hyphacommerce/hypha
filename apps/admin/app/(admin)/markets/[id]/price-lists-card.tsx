@@ -110,7 +110,7 @@ export function PriceListsCard({
                 <TableHeader>
                   <TableRow>
                     <TableHeaderCell>{t("markets.price_lists_column_list")}</TableHeaderCell>
-                    <TableHeaderCell>{t("markets.price_lists_column_kind")}</TableHeaderCell>
+                    <TableHeaderCell>{t("common.kind")}</TableHeaderCell>
                     <TableHeaderCell>{t("common.status")}</TableHeaderCell>
                     <TableHeaderCell>
                       {t("markets.price_lists_column_fixed_prices")}

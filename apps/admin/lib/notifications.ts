@@ -2,7 +2,7 @@
 // status reads, and the variables a template can print. Plain functions, for server and
 // client code alike: the ones that build text take the caller's translator.
 
-import { hasKey } from "./keys.ts";
+import { labelOr } from "./keys.ts";
 import type { TFor } from "./messages";
 
 type NotificationsT = TFor<"notifications">;
@@ -10,13 +10,13 @@ type NotificationsT = TFor<"notifications">;
 /** A template key as people read it; an unknown one as it is. */
 export function templateName(t: NotificationsT, key: string): string {
   const name = `notifications.template_${key}_name`;
-  return hasKey(t, name) ? t(name) : key;
+  return labelOr(t, name, key);
 }
 
 /** What a template is for, by its stable key; nothing for an unknown one. */
 export function templateDescription(t: NotificationsT, key: string): string | undefined {
   const description = `notifications.template_${key}_description`;
-  return hasKey(t, description) ? t(description) : undefined;
+  return labelOr(t, description, undefined);
 }
 
 const MESSAGE_STATUS_VARIANTS = {
@@ -46,7 +46,7 @@ export function messageStatus(
 /** Which source a template problem is in, as the editor names it; an unknown one as it is. */
 function partName(t: NotificationsT, part: string): string {
   const name = `notifications.part_${part}`;
-  return hasKey(t, name) ? t(name) : part;
+  return labelOr(t, name, part);
 }
 
 /** Where a template problem is: its part, its line (from 1, when known) and the words. */

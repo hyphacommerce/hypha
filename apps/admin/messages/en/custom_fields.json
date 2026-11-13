@@ -2,7 +2,6 @@
   "title": "Custom fields",
   "card_title": "Custom fields",
   "page_description": "Your own data on products, variants, categories, customers and orders: each field has a type, rules for its values, and a place on its record's page. Apps add fields of their own.",
-
   "type_text": "Single line text",
   "type_text_description": "Up to 255 characters.",
   "type_multiline_text": "Multi-line text",
@@ -31,7 +30,6 @@
   "type_reference_description": "A product, category, customer…",
   "type_json": "JSON",
   "type_json_description": "Any JSON, for integrations.",
-
   "list_type_text": "List: single line text",
   "list_type_multiline_text": "List: multi-line text",
   "list_type_rich_text": "List: rich text",
@@ -46,14 +44,12 @@
   "list_type_choice": "List: choice",
   "list_type_reference": "List: reference",
   "list_type_json": "List: JSON",
-
   "dimension_weight": "Weight",
   "dimension_length": "Length",
   "dimension_volume": "Volume",
   "reference_kind_asset": "Media file",
   "manager_spore": "Spore {name}",
   "manager_app": "App {name}",
-
   "value_integer": "Enter a whole number.",
   "value_too_large": "That number is too large.",
   "value_decimal": "Enter a number like 12.50 (a point for decimals).",
@@ -68,14 +64,11 @@
   "value_json": "That isn't valid JSON.",
   "problem_not_valid": "Isn't valid",
   "problem_stale": "Someone else changed this field meanwhile. Reload to see it.",
-
   "lookup_missing": "Nothing with that ID.",
   "lookup_variant": "A variant of a product",
-
   "card_needs_fixing": "Some custom fields need fixing first.",
   "card_hint": "{owner, select, product {Your own data on this product, and what apps keep here.} variant {Your own data on this variant, and what apps keep here.} category {Your own data on this category, and what apps keep here.} customer {Your own data on this customer, and what apps keep here.} other {Your own data on this order, and what apps keep here.}} <link>Manage fields</link>",
   "form_hidden_personal": "Personal: hidden from your role.",
-
   "input_list_units": "Each with its unit: {units}.",
   "input_list_money": "Each amount with its currency, like 12.50 EUR.",
   "input_list_add_like": "Add, like {example}",
@@ -88,7 +81,6 @@
   "badge_read_only": "Read-only",
   "badge_private": "Private to its app",
   "badge_staff_read_only": "Read-only for staff",
-
   "reference_no_category": "No category",
   "reference_pick": "Pick",
   "reference_look_up": "Look up",
@@ -97,16 +89,13 @@
   "reference_add_category": "Add a category",
   "reference_pick_products": "Pick products",
   "reference_pick_products_title": "Pick products",
-
   "variant_button": "Fields",
   "variant_tooltip": "Custom fields of {title}",
   "variant_dialog_title": "Custom fields of {title}",
   "variant_dialog_subtitle": "Saved at once, apart from the product's other changes.",
   "variant_save": "Save fields",
-
   "values_invalid_starting_with": "{error} Starting with: {names}.",
   "owner_order_number": "order #{number}",
-
   "list_order_hint": "Shown on each of their pages in this order.",
   "list_order_hint_read_only": "Shown on each of their pages in this order. Changing fields needs the custom_fields:write scope.",
   "list_empty": "No fields yet.",
@@ -122,15 +111,10 @@
   "dialog_storefront": "Storefront",
   "dialog_filterable": "Filterable",
   "dialog_unique": "Unique",
-  "move_up": "Move {name} up",
-  "move_down": "Move {name} down",
-  "edit_named": "Edit {name}",
-  "delete_field_named": "Delete {name}",
   "suggested_title": "Suggested",
   "suggested_description": "Fields Hypha knows what to do with: the admin shows them in place, and apps expect them by these names. Add the ones you want; change or delete them like any other.",
   "delete_dialog_description": "Every value of {field} goes with it, on every record, and it can't be undone. Filters and integrations using it stop working.",
   "delete_dialog_action": "Delete field",
-
   "error_name": "Give the field a name.",
   "error_key": "The key is 2 to 64 lowercase letters, digits and _, starting with a letter.",
   "error_min_length": "The minimum length is a whole number.",
@@ -146,7 +130,6 @@
   "error_max_measurement": "The maximum is a number with its unit, like 1.5 {unit}.",
   "error_choices_empty": "Add at least one choice.",
   "error_choices_incomplete": "Give every choice a key and a label.",
-
   "dialog_new_subtitle": "Its key and type can't change later.",
   "dialog_edit_subtitle": "{field} · {type}. Its key and type can't change.",
   "dialog_name_hint": "What staff see on the form.",
@@ -161,7 +144,6 @@
   "dialog_unique_hint": "No two records hold the same value (text ignoring case).",
   "dialog_personal": "Personal data",
   "dialog_personal_hint": "About a person (a birthday, a gift message): hidden from apps and keys without customer_data:profile.",
-
   "rules_title": "Rules",
   "bound_hint_integer": "A whole number.",
   "bound_hint_decimal": "Like 12.50.",
@@ -190,7 +172,6 @@
   "rule_max_items": "Most items",
   "rule_max_items_hint": "Up to 128.",
   "rule_unique_items": "No item twice",
-
   "choices_title": "Choices",
   "choices_hint": "Keys are lowercase letters, digits, _ and -; they're what's stored, so they can't change once saved. Labels are what staff and shoppers see.",
   "choices_label": "Label",

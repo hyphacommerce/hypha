@@ -54,7 +54,7 @@ export async function saveAddress(
     const problems = problemsOf(error);
     if (problems && Object.keys(problems).length > 0) {
       const t = await getT();
-      return { error: t("customers.address_check_fields"), problems };
+      return { error: t("common.check_highlighted_fields"), problems };
     }
     return { error: await describe(error) };
   }

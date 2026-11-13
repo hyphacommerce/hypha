@@ -66,7 +66,7 @@ export function ApiKeys({
     },
     {
       key: "kind",
-      header: t("api_keys.kind"),
+      header: t("common.kind"),
       width: pixel(130),
       renderCell: (k) => (
         <Badge
@@ -104,7 +104,7 @@ export function ApiKeys({
         ) : (
           canWrite && (
             <Button
-              label={t("api_keys.revoke")}
+              label={t("common.revoke")}
               size="sm"
               variant="ghost"
               onClick={() => setRevoking(k)}
@@ -222,7 +222,7 @@ function CreateKeyDialog({
         ) : (
           <>
             <SegmentedControl
-              label={t("api_keys.create_kind")}
+              label={t("common.kind")}
               value={kind}
               onChange={(value) => {
                 if (value === "secret" || value === "publishable") setKind(value);
@@ -247,7 +247,7 @@ function CreateKeyDialog({
             />
             {kind === "secret" ? (
               <MultiSelector
-                label={t("api_keys.scopes")}
+                label={t("common.scopes")}
                 description={t("api_keys.scopes_description")}
                 options={scopes.map((s) => ({ value: s, label: s }))}
                 value={chosen}

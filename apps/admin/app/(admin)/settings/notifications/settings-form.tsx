@@ -104,7 +104,7 @@ export function NotificationSettingsForm({
           setError(undefined);
         }}
       />
-      {isSaved && !isDirty && <Banner status="success" title={t("notifications.settings_saved")} />}
+      {isSaved && !isDirty && <Banner status="success" title={t("common.saved_notice")} />}
       <Card>
         <VStack gap={4}>
           <VStack gap={1}>
@@ -314,7 +314,7 @@ function LogoField({
               />
             )}
             <Button
-              label={hasLogo ? t("common.change") : t("notifications.logo_pick")}
+              label={hasLogo ? t("common.change") : t("common.pick_from_library")}
               variant="secondary"
               onClick={() => setIsPicking(true)}
             />

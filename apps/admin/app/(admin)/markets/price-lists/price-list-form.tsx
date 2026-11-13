@@ -142,7 +142,7 @@ function SettingsFields({
             width={240}
           />
           <RadioList
-            label={t("price_lists.form_kind")}
+            label={t("common.kind")}
             value={form.kind}
             onChange={(kind) => set({ kind: kind === "sale" ? "sale" : "override" })}
             isDisabled={isReadOnly}
@@ -251,7 +251,7 @@ function SettingsFields({
             </Text>
           ) : (
             <MultiSelector
-              label={t("price_lists.form_groups")}
+              label={t("common.customer_groups")}
               placeholder={t("price_lists.form_groups_placeholder")}
               options={groupOptions}
               value={form.groups}
@@ -338,9 +338,7 @@ function SettingsFields({
                     onChange={(chosen) => set({ categories: chosen })}
                     hasSearch
                     triggerDisplay="count"
-                    formatValue={(items) =>
-                      t("price_lists.form_categories_count", { count: items.length })
-                    }
+                    formatValue={(items) => t("common.categories_count", { count: items.length })}
                     isDisabled={isReadOnly}
                     status={status(errors.categories)}
                     width="100%"

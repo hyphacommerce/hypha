@@ -144,7 +144,7 @@ function Lines({ transfer, canEdit }: { transfer: Transfer; canEdit: boolean }) 
                     <VStack gap={0}>
                       <Text weight="medium">{transferLineLabel(l)}</Text>
                       <Text type="supporting" color="secondary">
-                        {l.sku ? t("transfers.line_sku", { sku: l.sku }) : t("transfers.no_sku")}
+                        {l.sku ? t("common.sku_named", { sku: l.sku }) : t("common.no_sku")}
                       </Text>
                     </VStack>
                   </TableCell>
@@ -172,14 +172,14 @@ function Lines({ transfer, canEdit }: { transfer: Transfer; canEdit: boolean }) 
                     <TableCell>
                       <HStack gap={1} hAlign="end">
                         <IconButton
-                          label={t("transfers.edit_named", { name: transferLineLabel(l) })}
+                          label={t("common.edit_named", { name: transferLineLabel(l) })}
                           icon={<PencilSquareIcon />}
                           size="sm"
                           variant="ghost"
                           onClick={() => startEditing(l.variant, transferLineLabel(l))}
                         />
                         <IconButton
-                          label={t("transfers.remove_named", { name: transferLineLabel(l) })}
+                          label={t("common.remove_named", { name: transferLineLabel(l) })}
                           icon={<TrashIcon />}
                           size="sm"
                           variant="ghost"
@@ -294,7 +294,7 @@ function VariantChoice({
           })}
           value={chosen}
           onChange={setChosen}
-          placeholder={t("transfers.choose_variant")}
+          placeholder={t("common.choose_variant")}
         />
         <HStack gap={2} hAlign="end">
           <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
@@ -386,7 +386,7 @@ function Details({
               <Text color="secondary">—</Text>
             )}
           </MetadataListItem>
-          <MetadataListItem label={t("transfers.reference")}>
+          <MetadataListItem label={t("common.reference")}>
             <Text color={transfer.reference ? undefined : "secondary"}>
               {transfer.reference ?? "—"}
             </Text>
@@ -466,7 +466,7 @@ function DetailsDialog({
             onChange={(value) => setExpected(value ?? undefined)}
           />
           <TextInput
-            label={t("transfers.reference")}
+            label={t("common.reference")}
             isOptional
             description={t("transfers.reference_description")}
             value={reference}

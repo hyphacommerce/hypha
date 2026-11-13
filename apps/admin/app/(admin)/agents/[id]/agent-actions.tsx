@@ -45,7 +45,7 @@ export function AgentActions({
           changeAction={async (enabled) => setError((await setAgentEnabled(id, enabled)).error)}
         />
         <Button
-          label={t("agents.revoke")}
+          label={t("common.revoke")}
           variant="destructive"
           onClick={() => setIsConfirming(true)}
         />

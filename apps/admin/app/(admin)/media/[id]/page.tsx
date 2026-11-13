@@ -149,7 +149,7 @@ async function Asset({ id, back }: { id: string; back: Crumb }) {
                 {t("media.dimensions_value", { width: asset.width, height: asset.height })}
               </MetadataListItem>
             ) : null}
-            <MetadataListItem label={t("media.visibility")}>
+            <MetadataListItem label={t("common.visibility")}>
               {asset.visibility === "public"
                 ? t("media.visibility_public")
                 : t("media.visibility_private")}

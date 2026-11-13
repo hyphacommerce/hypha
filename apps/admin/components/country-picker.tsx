@@ -81,7 +81,7 @@ export function CountryPicker({
         triggerDisplay="count"
         formatValue={(items) =>
           (items.length === 1 ? items[0]?.label : undefined) ??
-          t("components.country_picker_count", { count: items.length })
+          t("common.countries_count", { count: items.length })
         }
         placeholder={t("components.country_picker_placeholder")}
         status={status}

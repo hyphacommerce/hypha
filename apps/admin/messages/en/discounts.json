@@ -12,7 +12,6 @@
   "edit_read_only": "Your role can see discounts but not change them.",
   "edit_used_on": "{count, plural, one {Used on # order} other {Used on # orders}}",
   "edit_uses_of_limit": "{used, number} of {limit, number} uses",
-
   "list_search_placeholder": "Search titles and codes",
   "list_filter_method": "Method",
   "list_method_codes": "Codes",
@@ -30,22 +29,18 @@
   "list_empty_title": "No discounts yet",
   "list_empty_description": "A code for a newsletter, free shipping over an amount, buy one get one: start from a template.",
   "list_no_results": "No discounts match these filters",
-
   "method_automatic": "Automatic",
   "method_codes": "Discount codes",
   "codes_count": "{count, plural, one {# code} other {# codes}}",
   "uses_of_limit": "{used, number} of {limit, number}",
-
   "tab_codes": "Codes",
   "tab_usage": "Usage",
-
   "delete_title": "Delete",
   "delete_hint": "Its codes and usage records go with it. Orders keep what it took off them. To stop it for now, switch it off under Schedule instead.",
   "delete_action": "Delete discount",
   "delete_dialog_action": "Delete discount",
   "delete_dialog_used": "{count, plural, one {It was used on # order: they keep their discount, but its usage records are deleted with it.} other {It was used on # orders: they keep their discount, but its usage records are deleted with it.}}",
   "delete_dialog_unused": "The discount and its codes are deleted for good.",
-
   "codes_search_placeholder": "Search codes",
   "codes_batch": "Batch",
   "codes_filter_batch": "Batch",
@@ -99,14 +94,12 @@
   "codes_empty_description": "Add the codes buyers will type, or generate a batch of random ones.",
   "codes_empty_description_read_only": "Nobody has added codes to this discount.",
   "codes_no_results": "No codes match",
-
   "usage_column_took_off": "Took off",
   "usage_column_used": "Used",
   "usage_total": "Total discounted",
   "usage_total_none": "Nothing yet",
   "usage_empty_title": "Not used yet",
   "usage_empty_description": "Orders placed with this discount show here.",
-
   "picker_load_variants_failed": "Couldn't load variants.",
   "picker_load_customers_failed": "Couldn't load customers.",
   "picker_placeholder": "{source, select, variants {Search by product title, handle or SKU} other {Search by name or email}}",
@@ -117,7 +110,6 @@
   "picker_already_chosen": "Already chosen",
   "picker_pick_some": "{source, select, variants {Pick one or more variants} other {Pick one or more customers}}",
   "picker_add_count": "Add {count, number}",
-
   "template_amount_off_products": "Amount off products",
   "template_amount_off_products_description": "A percentage or an amount off some products, or a fixed price for them.",
   "template_amount_off_order": "Amount off order",
@@ -128,7 +120,6 @@
   "template_volume_description": "Tiers: more off the more of some items a cart holds, or the more it spends.",
   "template_free_shipping": "Free shipping",
   "template_free_shipping_description": "Shipping free, or reduced, for orders above a minimum.",
-
   "method_title": "Method",
   "method_label": "How buyers get it",
   "method_code": "Discount code",
@@ -139,7 +130,6 @@
   "method_title_placeholder_automatic": "Free shipping over €50",
   "method_generate": "Generate",
   "method_code_hint": "Leave it blank to add or generate codes once it's created.",
-
   "value_title": "Value",
   "value_label": "Value",
   "value_hint": "What it takes off. Product discounts come off lines first, order discounts off the subtotal after them, then shipping. Discounts of one kind that combine add up: 10% and 20% take 30% off.",
@@ -171,7 +161,6 @@
   "value_cheapest_units": "How many of the cheapest",
   "amounts_not_offered": "Not offered",
   "amounts_no_market": "No market to price it in yet.",
-
   "bxgy_hint": "Each time the cart has what's bought, it gets the cheapest units of what's got for less: free, a percentage off or an amount off each.",
   "bxgy_buys_at_least": "Customer buys at least",
   "bxgy_buy_quantity": "A number of items",
@@ -182,7 +171,6 @@
   "bxgy_items_got_hint": "The cheapest units of what's got that the cart holds.",
   "bxgy_uses_per_order": "Uses per order",
   "bxgy_uses_per_order_hint": "How many times one order gets it. Blank: as often as the cart qualifies.",
-
   "tiers_title": "Tiers",
   "tiers_hint": "The highest tier the cart reaches applies to every item it counts. Each tier needs more than the one before it.",
   "tiers_measure": "Counted by",
@@ -193,7 +181,6 @@
   "tier_from_items": "From (items)",
   "tier_from_spent": "From (spent)",
   "tier_add": "Add tier",
-
   "applies_to": "Applies to",
   "applies_to_label": "Applies to",
   "applies_buys": "Customer buys",
@@ -209,21 +196,16 @@
   "items_variants": "Chosen variants",
   "items_variants_hint": "Only these variants of their products.",
   "items_choose_categories": "Choose categories",
-  "items_categories_count": "{count, plural, one {# category} other {# categories}}",
   "items_choose_products": "Choose products",
   "items_choose_variants": "Choose variants",
   "items_not_on_sale": "Not on items already on sale",
   "items_not_on_sale_hint": "Leaves out items a sale price list has reduced.",
   "items_picker_products": "{label}: products",
   "items_picker_variants": "{label}: variants",
-
   "conditions_title": "Conditions",
   "conditions_hint": "Leave a list empty for no limit. Every condition that's set must hold; within a list, any one value is enough.",
   "conditions_markets_hint": "Amounts are typed for these markets only.",
-  "conditions_markets_placeholder": "Every market",
   "conditions_channels": "Sales channels",
-  "conditions_channels_placeholder": "Every channel",
-  "conditions_groups": "Customer groups",
   "conditions_groups_hint": "Only signed-in customers in one of them.",
   "conditions_groups_placeholder": "Everyone",
   "conditions_customers_anyone": "Anyone. Name customers to make it only theirs.",
@@ -237,7 +219,6 @@
   "conditions_no_minimum": "No minimum",
   "conditions_min_quantity": "Minimum quantity",
   "conditions_min_quantity_hint": "Of the items it applies to.",
-
   "combinations_title": "Combinations",
   "combinations_hint": "Two discounts apply together only if each allows the other's kind. When they can't, buyers get whichever saves them more.",
   "combinations_product": "Product discounts",
@@ -245,14 +226,12 @@
   "combinations_shipping": "Shipping discounts",
   "combinations_lets_combine": "{more, plural, =0 {Lets it combine with {titles}.} other {Lets it combine with {titles} and # more.}}",
   "combinations_changes_nothing": "No live discount of this kind allows this one's kind, so this changes nothing yet.",
-
   "limits_title": "Limits",
   "limits_hint": "A use is counted when an order is placed with it. Cancelling the order doesn't give it back: raise the limit instead.",
   "limits_total": "Total uses",
   "limits_total_hint": "Across every buyer and code. Blank: no limit.",
   "limits_once": "Once per customer",
   "limits_once_hint": "Counted by the buyer's email, so a guest checkout counts too.",
-
   "schedule_title": "Schedule",
   "schedule_hint": "Times are in the store's time zone, {time_zone}.",
   "schedule_active_hint": "A draft never applies, whatever its dates say: switch it off to pause the discount.",
@@ -260,12 +239,10 @@
   "schedule_starts_hint": "Empty: at once.",
   "schedule_ends": "Ends",
   "schedule_ends_hint": "Empty: never.",
-
   "panel_untitled": "Untitled discount",
   "panel_code": "Code {code}",
   "panel_nothing_off": "Nothing off yet",
   "panel_preview_note": "A preview: the saved discount reads in the store’s own words.",
-
   "summary_nothing_yet": "Nothing off yet",
   "summary_amount_and_more": "{count, plural, one {{amount} (and # more market)} other {{amount} (and # more markets)}}",
   "summary_every_product": "every product",
@@ -309,7 +286,6 @@
   "summary_window": "{from} – {until}",
   "summary_from": "From {date}",
   "summary_until": "Until {date}",
-
   "problem_off_sign": "Without a sign: 20 is 20% off.",
   "problem_off_not_percent": "A percentage, like 20 for 20% off.",
   "problem_off_zero": "More than 0%.",
@@ -332,7 +308,6 @@
   "problem_total_uses": "A whole number, or blank for no limit.",
   "problem_date_time": "Enter a date and a time.",
   "problem_end_before_start": "The end must be after the start.",
-
   "refusal_market_gone": "This market no longer exists: clear its amount.",
   "refusal_currency_changed": "This market sells in another currency now: type its amount again.",
   "refusal_code_taken": "Another discount has the code {code}.",

@@ -20,7 +20,7 @@ import {
   type SortOption,
   type View,
 } from "@/components/resource-table/resource-table";
-import { ProductStatusBadge } from "@/components/status";
+import { ProductStatusBadge, statusLabel, statusOptions } from "@/components/status";
 import type { Definition } from "@/lib/custom-fields";
 import type { KeyIn, TFor } from "@/lib/messages";
 import { type Format, useFormat } from "@/lib/use-format";
@@ -34,9 +34,9 @@ const NO_NAMES: Record<string, string> = {};
 
 type Product = AdminSchemas["ProductSummaryResponse"];
 
-const SORT_OPTIONS: { value: string; label: KeyIn<"products"> }[] = [
-  { value: "newest", label: "products.list_sort_newest" },
-  { value: "oldest", label: "products.list_sort_oldest" },
+const SORT_OPTIONS: { value: string; label: KeyIn<"common" | "products"> }[] = [
+  { value: "newest", label: "common.sort_newest" },
+  { value: "oldest", label: "common.sort_oldest" },
   { value: "updated_desc", label: "products.list_sort_updated_desc" },
   { value: "updated_asc", label: "products.list_sort_updated_asc" },
   { value: "title_asc", label: "products.list_sort_title_asc" },
@@ -139,7 +139,7 @@ export function ProductsTable({
       kind: "multi",
       param: "status",
       label: t("common.status"),
-      options: STATUSES.map((value) => ({ value, label: t(`common.${value}`) })),
+      options: statusOptions("product", STATUSES, t),
     },
     {
       kind: "select",
@@ -162,7 +162,10 @@ export function ProductsTable({
   ];
   const views: View[] = [
     { label: t("common.all"), params: {} },
-    ...STATUSES.map((status) => ({ label: t(`common.${status}`), params: { status: [status] } })),
+    ...STATUSES.map((status) => ({
+      label: statusLabel("product", status, t),
+      params: { status: [status] },
+    })),
   ];
   const sortOptions: SortOption[] = SORT_OPTIONS.map(({ value, label }) => ({
     value,

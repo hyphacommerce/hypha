@@ -179,12 +179,12 @@ function LinesCard({ po, canEdit }: { po: PurchaseOrder; canEdit: boolean }) {
                         <Text weight="medium">{lineLabel(l)}</Text>
                         <Text type="supporting" color="secondary">
                           {[
-                            l.sku && t("purchasing.line_sku", { sku: l.sku }),
+                            l.sku && t("common.sku_named", { sku: l.sku }),
                             l.supplier_sku &&
                               t("purchasing.line_their_code", { code: l.supplier_sku }),
                           ]
                             .filter(Boolean)
-                            .join(" · ") || t("purchasing.no_sku")}
+                            .join(" · ") || t("common.no_sku")}
                         </Text>
                       </VStack>
                     </TableCell>
@@ -230,7 +230,7 @@ function LinesCard({ po, canEdit }: { po: PurchaseOrder; canEdit: boolean }) {
                       <TableCell>
                         <HStack gap={1} hAlign="end">
                           <IconButton
-                            label={t("purchasing.edit_named", { name: lineLabel(l) })}
+                            label={t("common.edit_named", { name: lineLabel(l) })}
                             icon={<PencilSquareIcon />}
                             size="sm"
                             variant="ghost"
@@ -239,7 +239,7 @@ function LinesCard({ po, canEdit }: { po: PurchaseOrder; canEdit: boolean }) {
                             }
                           />
                           <IconButton
-                            label={t("purchasing.remove_named", { name: lineLabel(l) })}
+                            label={t("common.remove_named", { name: lineLabel(l) })}
                             icon={<TrashIcon />}
                             size="sm"
                             variant="ghost"
@@ -349,7 +349,7 @@ function VariantChoice({
           })}
           value={chosen}
           onChange={setChosen}
-          placeholder={t("purchasing.choose_variant")}
+          placeholder={t("common.choose_variant")}
         />
         <HStack gap={2} hAlign="end">
           <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
@@ -538,14 +538,14 @@ function CostsCard({ po, canEdit }: { po: PurchaseOrder; canEdit: boolean }) {
                     <TableCell>
                       <HStack gap={1} hAlign="end">
                         <IconButton
-                          label={t("purchasing.edit_named", { name: costKindLabel(t, c.kind) })}
+                          label={t("common.edit_named", { name: costKindLabel(t, c.kind) })}
                           icon={<PencilSquareIcon />}
                           size="sm"
                           variant="ghost"
                           onClick={() => setEditing({ index })}
                         />
                         <IconButton
-                          label={t("purchasing.remove_named", { name: costKindLabel(t, c.kind) })}
+                          label={t("common.remove_named", { name: costKindLabel(t, c.kind) })}
                           icon={<TrashIcon />}
                           size="sm"
                           variant="ghost"
@@ -645,7 +645,7 @@ function CostDialog({
       <VStack gap={4} padding={4}>
         <div className="form-grid">
           <Selector
-            label={t("purchasing.cost_kind")}
+            label={t("common.kind")}
             options={COST_KINDS.map((value) => ({ value, label: costKindLabel(t, value) }))}
             value={kind}
             onChange={setKind}
@@ -963,7 +963,7 @@ function DetailsDialog({
             options={locations.map((l) => ({ value: l.id, label: l.name }))}
             value={destination || undefined}
             onChange={setDestination}
-            placeholder={t("purchasing.choose_location")}
+            placeholder={t("common.choose_location")}
           />
           <DateInput
             label={t("purchasing.expected")}

@@ -123,7 +123,7 @@ export function CatalogCard({
                   <TableCell>
                     <HStack hAlign="end">
                       <IconButton
-                        label={t("markets.catalog_remove_product", {
+                        label={t("common.remove_named", {
                           name: product.title ?? product.id,
                         })}
                         icon={<TrashIcon />}

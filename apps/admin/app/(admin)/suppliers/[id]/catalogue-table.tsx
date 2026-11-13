@@ -65,7 +65,7 @@ export function CatalogueTable({
           <Text weight="medium">{variantLabel(r)}</Text>
           {r.sku && (
             <Text type="supporting" color="secondary">
-              {t("suppliers.catalogue_sku", { sku: r.sku })}
+              {t("common.sku_named", { sku: r.sku })}
             </Text>
           )}
         </VStack>
@@ -109,14 +109,14 @@ export function CatalogueTable({
       renderCell: (r) => (
         <HStack gap={1} hAlign="end">
           <IconButton
-            label={t("suppliers.edit_named", { name: variantLabel(r) })}
+            label={t("common.edit_named", { name: variantLabel(r) })}
             icon={<PencilSquareIcon />}
             size="sm"
             variant="ghost"
             onClick={() => setEditing({ variant: r.variant, label: variantLabel(r), row: r })}
           />
           <IconButton
-            label={t("suppliers.remove_named", { name: variantLabel(r) })}
+            label={t("common.remove_named", { name: variantLabel(r) })}
             icon={<TrashIcon />}
             size="sm"
             variant="ghost"
@@ -249,7 +249,7 @@ function VariantChoice({
           })}
           value={chosen}
           onChange={setChosen}
-          placeholder={t("suppliers.choose_variant")}
+          placeholder={t("common.choose_variant")}
         />
         <HStack gap={2} hAlign="end">
           <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />

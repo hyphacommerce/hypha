@@ -58,7 +58,7 @@ export function CategoriesCard({
               onChange={(categories) => onChange({ categories: categories.toSorted() })}
               hasSearch
               triggerDisplay="count"
-              formatValue={(items) => t("products.categories_count", { count: items.length })}
+              formatValue={(items) => t("common.categories_count", { count: items.length })}
               width="100%"
             />
             {draft.categories.length > 0 && (

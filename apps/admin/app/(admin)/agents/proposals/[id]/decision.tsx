@@ -66,7 +66,7 @@ export function Decision({
         {error && <Banner status="error" title={error} onDismiss={() => setError(undefined)} />}
         <HStack gap={2}>
           <Button
-            label={t("agents.decide_approve")}
+            label={t("common.approve")}
             variant="primary"
             isLoading={isPending && !isRejecting}
             isDisabled={!canDecide}

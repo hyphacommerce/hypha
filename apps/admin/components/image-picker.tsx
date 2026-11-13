@@ -121,7 +121,7 @@ export function ImagePicker({
           {next && (
             <HStack hAlign="center">
               <Button
-                label={t("components.image_picker_load_more")}
+                label={t("common.load_more")}
                 variant="ghost"
                 isLoading={isLoading}
                 onClick={() => load(next)}

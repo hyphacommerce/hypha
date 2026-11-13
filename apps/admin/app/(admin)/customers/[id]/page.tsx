@@ -159,9 +159,7 @@ async function Customer({ id }: { id: string }) {
                   {t("common.orders")}
                 </Text>
                 {orders.length > 0 && (
-                  <Link href={`/orders?customer=${customer.id}`}>
-                    {t("customers.detail_orders_view_all")}
-                  </Link>
+                  <Link href={`/orders?customer=${customer.id}`}>{t("common.view_all")}</Link>
                 )}
               </HStack>
               {!recent.data ? (

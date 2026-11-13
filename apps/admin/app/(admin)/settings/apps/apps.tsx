@@ -223,7 +223,7 @@ function AppRow({
           ) : (
             <>
               <IconButton
-                label={t("apps.dev_edit_named", { name: app.name })}
+                label={t("common.edit_named", { name: app.name })}
                 icon={<PencilSquareIcon />}
                 size="sm"
                 variant="ghost"
@@ -239,7 +239,7 @@ function AppRow({
                 onClick={() => setConfirming("rotate")}
               />
               <IconButton
-                label={t("apps.dev_delete_named", { name: app.name })}
+                label={t("common.delete_named_label", { name: app.name })}
                 icon={<TrashIcon />}
                 size="sm"
                 variant="ghost"

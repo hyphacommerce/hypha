@@ -156,7 +156,7 @@ export function MediaSection({ id, media }: { id: string; media: Item[] }) {
           <HStack gap={2} vAlign="center">
             {isSaving && <Spinner size="sm" aria-label={t("products.media_saving")} />}
             <Button
-              label={t("products.media_pick")}
+              label={t("common.pick_from_library")}
               variant="secondary"
               isDisabled={items.length >= MAX_ITEMS}
               onClick={() => setIsPicking(true)}

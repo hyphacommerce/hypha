@@ -245,7 +245,7 @@ function OptionForm({
         />
         <IconButton
           label={t("products.option_move_up")}
-          tooltip={t("products.move_up")}
+          tooltip={t("common.move_up")}
           variant="ghost"
           icon={<ArrowUpIcon width={16} />}
           isDisabled={isFirst}
@@ -253,7 +253,7 @@ function OptionForm({
         />
         <IconButton
           label={t("products.option_move_down")}
-          tooltip={t("products.move_down")}
+          tooltip={t("common.move_down")}
           variant="ghost"
           icon={<ArrowDownIcon width={16} />}
           isDisabled={isLast}
@@ -310,7 +310,7 @@ function OptionForm({
               />
               <IconButton
                 label={t("products.option_value_move_up", value)}
-                tooltip={t("products.move_up")}
+                tooltip={t("common.move_up")}
                 size="sm"
                 variant="ghost"
                 icon={<ArrowUpIcon width={14} />}
@@ -319,7 +319,7 @@ function OptionForm({
               />
               <IconButton
                 label={t("products.option_value_move_down", value)}
-                tooltip={t("products.move_down")}
+                tooltip={t("common.move_down")}
                 size="sm"
                 variant="ghost"
                 icon={<ArrowDownIcon width={14} />}

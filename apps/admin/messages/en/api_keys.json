@@ -1,7 +1,6 @@
 {
   "page_title": "API keys",
   "page_description": "Keys for your own systems (secret) and your storefronts (publishable).",
-  "kind": "Kind",
   "kind_secret": "Secret",
   "kind_publishable": "Publishable",
   "access": "Access",
@@ -9,7 +8,6 @@
   "access_storefront_every": "Storefront of every channel",
   "access_scopes": "{count, plural, one {# scope} other {# scopes}}: {scopes}",
   "revoked": "Revoked",
-  "revoke": "Revoke",
   "create_key": "Create key",
   "empty_title": "No API keys",
   "empty_description": "Secret keys let your own systems call the admin API; publishable keys let a storefront read what a channel sells.",
@@ -25,13 +23,11 @@
   "name_description": "Shown to staff, so you know what uses it.",
   "name_placeholder_secret": "ERP sync",
   "name_placeholder_publishable": "Main storefront",
-  "scopes": "Scopes",
   "scopes_description": "Only scopes you hold yourself.",
   "channel_description": "The storefront reads and sells what this channel publishes.",
   "revoke_dialog_title": "Revoke {name}?",
   "revoke_dialog_description": "Every call with this key fails from now on. This can't be undone: make a new key instead.",
   "revoke_dialog_action": "Revoke key",
-  "create_kind": "Kind",
   "create_kind_secret": "Secret",
   "create_kind_publishable": "Publishable"
 }

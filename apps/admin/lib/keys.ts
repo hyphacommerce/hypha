@@ -8,3 +8,16 @@ import type { Translator } from "@hyphacommerce/i18n";
 export function hasKey<Keys extends string>(t: Translator<Keys>, key: string): key is Keys {
   return t.has(key);
 }
+
+/**
+ * The message under a key built from data, or `fallback` when `t` has none: a label by
+ * an API enum's value, with the value itself (or another message) for one this build
+ * doesn't know.
+ */
+export function labelOr<Keys extends string, Fallback extends string | undefined>(
+  t: Translator<Keys>,
+  key: string,
+  fallback: Fallback,
+): string | Fallback {
+  return hasKey(t, key) ? t(key) : fallback;
+}

@@ -16,13 +16,11 @@
   "invites_empty": "No pending invites",
   "invites_expires": "Expires",
   "invites_expired": "Expired",
-  "invites_revoke": "Revoke",
   "roles_title": "Roles",
   "roles_description": "What each role may do. Nobody grants a scope they don't hold themselves.",
   "roles_new": "New role",
   "roles_empty": "No roles",
   "roles_every_scope": "Every scope",
-  "roles_scopes": "Scopes",
   "roles_scopes_all": "All, including future ones",
   "roles_members": "Members",
   "revoke_dialog_title": "Revoke the invite for {email}?",
@@ -42,7 +40,6 @@
   "invite_dialog_role_description": "What they may do once they join.",
   "invite_dialog_resend": "Resend invite",
   "invite_dialog_send": "Send invite",
-  "role_dialog_scopes": "Scopes",
   "invite_dialog_title": "Invite staff",
   "role_dialog_new_title": "New role"
 }

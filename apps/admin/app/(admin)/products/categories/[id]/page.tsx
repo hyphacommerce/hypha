@@ -99,7 +99,7 @@ async function Category({
               />
             )}
             <Card>
-              <MetadataList title={t("categories.identifiers")}>
+              <MetadataList title={t("common.identifiers")}>
                 <MetadataListItem label={t("categories.category_id")}>
                   <Text type="supporting" color="secondary">
                     {category.id}

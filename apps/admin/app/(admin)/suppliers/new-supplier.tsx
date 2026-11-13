@@ -70,7 +70,7 @@ export function NewSupplier({ currency: storeCurrency }: { currency: string | nu
             options={currencyOptions(currencyCodes(currencies), format.locale)}
             value={currency || undefined}
             onChange={setCurrency}
-            placeholder={t("suppliers.choose_currency")}
+            placeholder={t("common.choose_currency")}
             hasSearch
           />
           <HStack gap={2} hAlign="end">

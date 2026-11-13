@@ -148,7 +148,7 @@ export function RulesCard({
                       {canWrite && (
                         <HStack gap={1} hAlign="end">
                           <IconButton
-                            label={t("checkout.rule_move_up", { name: rule.name })}
+                            label={t("common.move_up_named", { name: rule.name })}
                             icon={<ArrowUpIcon />}
                             size="sm"
                             variant="ghost"
@@ -156,7 +156,7 @@ export function RulesCard({
                             onClick={() => move(rule, index - 1)}
                           />
                           <IconButton
-                            label={t("checkout.rule_move_down", { name: rule.name })}
+                            label={t("common.move_down_named", { name: rule.name })}
                             icon={<ArrowDownIcon />}
                             size="sm"
                             variant="ghost"
@@ -164,7 +164,7 @@ export function RulesCard({
                             onClick={() => move(rule, index + 1)}
                           />
                           <IconButton
-                            label={t("checkout.rule_delete", { name: rule.name })}
+                            label={t("common.delete_named_label", { name: rule.name })}
                             icon={<TrashIcon />}
                             size="sm"
                             variant="ghost"

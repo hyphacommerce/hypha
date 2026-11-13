@@ -41,14 +41,14 @@ const ADDRESS_FIELDS: {
   label: KeyIn<"settings" | "common">;
   isRequired?: boolean;
 }[] = [
-  { key: "company", label: "settings.store_address_company" },
-  { key: "first_name", label: "settings.store_address_first_name" },
-  { key: "last_name", label: "settings.store_address_last_name", isRequired: true },
+  { key: "company", label: "common.company" },
+  { key: "first_name", label: "common.first_name" },
+  { key: "last_name", label: "common.last_name", isRequired: true },
   { key: "line1", label: "common.address", isRequired: true },
-  { key: "line2", label: "settings.store_address_line2" },
-  { key: "city", label: "settings.store_address_city", isRequired: true },
-  { key: "province", label: "settings.store_address_province" },
-  { key: "postal_code", label: "settings.store_address_postal_code" },
+  { key: "line2", label: "common.address_line2" },
+  { key: "city", label: "common.city", isRequired: true },
+  { key: "province", label: "common.region_or_province" },
+  { key: "postal_code", label: "common.postal_code" },
   { key: "phone", label: "common.phone" },
 ];
 
@@ -159,7 +159,7 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
         onSave={submit}
         onDiscard={discard}
       />
-      {state.saved && !isChanged && <Banner status="success" title={t("settings.store_saved")} />}
+      {state.saved && !isChanged && <Banner status="success" title={t("common.saved_notice")} />}
       <Card>
         <VStack gap={4}>
           <Text type="display-3" as="h2">
@@ -272,7 +272,7 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
             value={address.country || undefined}
             onChange={field("country")}
             hasSearch
-            placeholder={t("settings.store_country_placeholder")}
+            placeholder={t("common.choose_country")}
           />
         </VStack>
       </Card>

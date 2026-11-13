@@ -276,7 +276,7 @@ export function SearchSettingsForm({
                         />
                         <HStack gap={0}>
                           <IconButton
-                            label={t("settings.search_filter_move_up")}
+                            label={t("common.move_up")}
                             icon={<ArrowUpIcon width={16} />}
                             variant="ghost"
                             size="sm"
@@ -284,7 +284,7 @@ export function SearchSettingsForm({
                             onClick={() => move(i, i - 1)}
                           />
                           <IconButton
-                            label={t("settings.search_filter_move_down")}
+                            label={t("common.move_down")}
                             icon={<ArrowDownIcon width={16} />}
                             variant="ghost"
                             size="sm"
@@ -292,7 +292,7 @@ export function SearchSettingsForm({
                             onClick={() => move(i, i + 1)}
                           />
                           <IconButton
-                            label={t("settings.search_filter_remove", { name: c?.name ?? f.key })}
+                            label={t("common.remove_named", { name: c?.name ?? f.key })}
                             icon={<XMarkIcon width={16} />}
                             variant="ghost"
                             size="sm"
