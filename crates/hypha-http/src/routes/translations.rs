@@ -2,17 +2,17 @@
 //! apart from the resource. Admin reads of the resources themselves always answer the
 //! source language.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_core::PageRequest;
 use hypha_core::{Language, Stamped};
 use hypha_translations::{
-    FieldCounts, FieldInput, FieldRule, HasTranslations, InvalidWorkPosition, ResourceKind,
-    ResourceRef, SourceDigest, StoreLanguages, Translation, TranslationKey, TranslationSourceRepo,
-    TranslationState, WorkPosition, delete_translation, get_translations, list_translations,
-    put_translation, require_read, require_write, source_digests, translation_progress,
-    translation_worklist,
+    FieldCounts, FieldInput, FieldRule, HasTranslations, Inheritance, InvalidWorkPosition,
+    ResourceKind, ResourceRef, SourceDigest, StoreLanguages, Translation, TranslationKey,
+    TranslationRepo, TranslationSourceRepo, TranslationState, WorkPosition, delete_translation,
+    get_translations, list_translations, patch_translation, put_translation, require_read,
+    require_write, source_digests, translation_progress, translation_worklist,
 };
 use serde::{Deserialize, Serialize};
 
@@ -201,6 +201,15 @@ struct Languages {
     others: Vec<Language>,
 }
 
+impl Languages {
+    fn store(&self) -> StoreLanguages<'_> {
+        StoreLanguages {
+            default: &self.default,
+            others: &self.others,
+        }
+    }
+}
+
 async fn languages<S: Storage>(
     state: &AppState<S>,
     ports: &S::Ports<'_>,
@@ -288,12 +297,13 @@ pub struct FieldTranslationRequest {
 #[serde(deny_unknown_fields)]
 pub struct PutTranslationRequest {
     /// Every translated field of this language, by key. A field left out is removed, so
-    /// send the whole language; no fields at all deletes the translation.
+    /// send the whole language (a PATCH changes only the fields it names); no fields at
+    /// all deletes the translation.
     fields: BTreeMap<String, FieldTranslationRequest>,
 }
 
 /// Sets a resource's translation into one of the store's other languages, replacing the
-/// fields it had. Answers the resource's translations as they are then. Beside
+/// fields it had: a field left out is removed (to change a few, PATCH them). Answers the resource's translations as they are then. Beside
 /// `translations:write` it takes the resource's own read scope.
 #[utoipa::path(
     put,
@@ -320,15 +330,7 @@ pub async fn put<S: Storage>(
     let fields = req
         .fields
         .into_iter()
-        .map(|(key, field)| {
-            (
-                key,
-                FieldInput {
-                    value: field.value,
-                    source_digest: field.source_digest,
-                },
-            )
-        })
+        .map(|(key, field)| (key, field.into()))
         .collect();
     let loaded = source(&state, &ports, resource).await?;
     let languages = languages(&state, &ports).await?;
@@ -337,23 +339,101 @@ pub async fn put<S: Storage>(
         &ports,
         resource,
         &language,
-        StoreLanguages {
-            default: &languages.default,
-            others: &languages.others,
-        },
+        languages.store(),
         loaded.as_ref().map(|l| &l.source),
         fields,
     )
     .await?;
+    written(&ctx, &ports, resource, &languages, loaded).await
+}
+
+impl From<FieldTranslationRequest> for FieldInput {
+    fn from(field: FieldTranslationRequest) -> Self {
+        FieldInput {
+            value: field.value,
+            source_digest: field.source_digest,
+        }
+    }
+}
+
+/// What a write answers: the resource's translations as they are then.
+async fn written<S: HasTranslations>(
+    ctx: &hypha_core::Ctx,
+    ports: &S,
+    resource: ResourceRef,
+    languages: &Languages,
+    loaded: Option<Loaded>,
+) -> Result<Json<TranslationsResponse>, ApiError> {
     // The write found the resource, so the source is there.
     let loaded = loaded.unwrap_or_default();
-    let translations = get_translations(&ctx, &ports, resource).await?;
+    let translations = get_translations(ctx, ports, resource).await?;
     Ok(Json(TranslationsResponse::new(
         resource,
-        &languages,
+        languages,
         &loaded,
         &translations,
     )?))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PatchTranslationRequest {
+    /// The fields to change, by key (JSON Merge Patch): a field given an object is set,
+    /// by the same rules as a PUT's (blank removes it); `null` removes it; a field left
+    /// out keeps its translation.
+    fields: BTreeMap<String, FieldTranslationPatch>,
+}
+
+/// One field of a patch: the field's new translation, or `null` to remove it.
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(transparent)]
+pub struct FieldTranslationPatch(Option<FieldTranslationRequest>);
+
+/// Changes some fields of a resource's translation into one of the store's other
+/// languages, keeping the rest: what to send when translating a field or a few, since
+/// a PUT replaces the whole language. Creates the translation when there's none, and
+/// deletes it when no field is left. Answers the resource's translations as they are
+/// then. Beside `translations:write` it takes the resource's own read scope.
+#[utoipa::path(
+    patch,
+    path = "/admin/translations/{kind}/{id}/{language}",
+    params(
+        ("kind" = String, Path, description = "The kind of resource.", example = "product"),
+        ("id" = String, Path, description = "The resource's ID; the store's for `store` and `search_facet`.", example = "prod_00000000000000000000000000000000"),
+        ("language" = String, Path, description = "A language on the store's list, published or not; never its default.", example = "de"),
+    ),
+    request_body = PatchTranslationRequest,
+    responses((status = 200, description = "OK", body = TranslationsResponse)),
+    extensions(("x-hypha-scopes" = json!(["translations:write"]))),
+)]
+pub async fn patch<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    PathId((kind, id, language)): PathId<(String, String, String)>,
+    body: JsonBody<PatchTranslationRequest>,
+) -> Result<Json<TranslationsResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let resource = resource(&kind, &id)?;
+    require_write(&ctx, resource.kind)?;
+    let req = body.parse()?;
+    let fields = req
+        .fields
+        .into_iter()
+        .map(|(key, field)| (key, field.0.map(FieldInput::from)))
+        .collect();
+    let loaded = source(&state, &ports, resource).await?;
+    let languages = languages(&state, &ports).await?;
+    patch_translation(
+        &ctx,
+        &ports,
+        resource,
+        &language,
+        languages.store(),
+        loaded.as_ref().map(|l| &l.source),
+        fields,
+    )
+    .await?;
+    written(&ctx, &ports, resource, &languages, loaded).await
 }
 
 /// Removes a resource's translation into one language: its source text shows again.
@@ -411,10 +491,18 @@ pub struct TranslationSummaryResponse {
     /// translate and isn't counted. 0 until the resource was first read for the
     /// worklist (in the background, after an upgrade).
     total: u32,
-    /// Of those, the ones without a translation in `language`.
+    /// Of those, the ones without a translation in exactly `language`. For a regional
+    /// language (`de-AT`) some of them may be `inherited`.
     missing: u32,
     /// Of those translated, the ones whose source text changed since.
     outdated: u32,
+    /// Of those missing, the ones shoppers still read in the language without its
+    /// region (`de` for `de-AT`), as storefronts fall back to it: the base language's
+    /// translation when it's another of the store's languages, or the source when it's
+    /// the default (then every missing field is inherited). 0 for a language without a
+    /// region. `missing` − `inherited` are the fields a regional language's shoppers read
+    /// in the default language.
+    inherited: u32,
     /// The keys it translates (a key whose option, value, choice or facet is gone
     /// included, until the translation is next written); empty when it has none yet.
     fields: Vec<String>,
@@ -444,6 +532,7 @@ impl TranslationSummaryResponse {
             total: counts.total,
             missing: counts.missing,
             outdated: counts.outdated,
+            inherited: counts.inherited,
             fields: translation
                 .map(|t| t.fields().keys().cloned().collect())
                 .unwrap_or_default(),
@@ -565,6 +654,7 @@ pub async fn list<S: Storage>(
             &ports,
             kind,
             language.clone(),
+            store_languages.store(),
             Some(wanted),
             PageRequest { after, limit },
         )
@@ -600,12 +690,31 @@ pub async fn list<S: Storage>(
     // A resource without digests may not have been read for the worklist yet (after an
     // upgrade, or a read that failed): read it now, so its state isn't a guess.
     let unread: Vec<ResourceRef> = resources
-        .into_iter()
+        .iter()
         .filter(|r| !sources.contains_key(r))
+        .copied()
         .collect();
     for resource in unread {
         if let Some(loaded) = source(&state, &ports, resource).await? {
             sources.insert(resource, source_digests(&loaded.source));
+        }
+    }
+    // What each regional language inherits: its base's translations of the page's
+    // resources, one more read when the page has any.
+    let store_languages = languages(&state, &ports).await?;
+    let inheritance =
+        |l: &Language| Inheritance::of(l, &store_languages.default, &store_languages.others);
+    let mut bases: Vec<Language> = found
+        .items
+        .iter()
+        .filter_map(|t| inheritance(t.language()).base().cloned())
+        .collect();
+    bases.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    bases.dedup();
+    let mut base_translations: HashMap<(ResourceRef, Language), Translation> = HashMap::new();
+    if !bases.is_empty() {
+        for t in ports.translations().load(&resources, &bases).await? {
+            base_translations.insert((t.resource(), t.language().clone()), t);
         }
     }
     Ok(Json(PageResponse::new(
@@ -614,10 +723,14 @@ pub async fn list<S: Storage>(
         |t| ListAfter::Translation(TranslationKey::of(t)),
         |t| {
             let digests = sources.get(&t.resource()).map_or(&[][..], Vec::as_slice);
+            let inherits = inheritance(t.language());
+            let base = inherits
+                .base()
+                .and_then(|base| base_translations.get(&(t.resource(), base.clone())));
             TranslationSummaryResponse::new(
                 t.resource(),
                 t.language().clone(),
-                FieldCounts::of(digests, Some(&t)),
+                FieldCounts::of(digests, Some(&t), inherits.fallback(base)),
                 Some(&t),
             )
         },
@@ -625,7 +738,8 @@ pub async fn list<S: Storage>(
 }
 
 /// How far one language's translations cover the store's text, in fields with source
-/// text: `translated` + `missing` = `total`, and `outdated` are among `translated`.
+/// text: `translated` + `missing` = `total`, `outdated` are among `translated` and
+/// `inherited` among `missing`.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct LanguageProgressResponse {
     language: Language,
@@ -634,8 +748,15 @@ pub struct LanguageProgressResponse {
     translated: u64,
     /// Translated from a source text that has changed since.
     outdated: u64,
-    /// Without a translation.
+    /// Without a translation in exactly this language.
     missing: u64,
+    /// Of those missing, the ones shoppers still read in the language without its
+    /// region (`de` for `de-AT`), as storefronts fall back to it: the base language's
+    /// translation when it's another of the store's languages (published or not), or
+    /// the source when it's the default (then every missing field is inherited). 0 for
+    /// a language without a region. `missing` − `inherited` are the fields a regional
+    /// language's shoppers read in the default language.
+    inherited: u64,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -684,7 +805,7 @@ pub async fn progress<S: Storage>(
         .transpose()
         .map_err(|e| ApiError::invalid_query(format!("`kind`: {e}")))?;
     let languages = languages(&state, &ports).await?;
-    let counted = translation_progress(&ctx, &ports, kind, &languages.others).await?;
+    let counted = translation_progress(&ctx, &ports, kind, languages.store()).await?;
     Ok(Json(TranslationProgressResponse {
         default_language: languages.default,
         pending: counted.pending,
@@ -693,6 +814,7 @@ pub async fn progress<S: Storage>(
             .into_iter()
             .map(|p| LanguageProgressResponse {
                 missing: p.missing(),
+                inherited: p.inherited,
                 language: p.language,
                 total: p.total,
                 translated: p.translated,

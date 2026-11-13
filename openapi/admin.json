@@ -7106,6 +7106,17 @@
         "type": "string",
         "x-hypha-open-enum": true
       },
+      "FieldTranslationPatch": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/FieldTranslationRequest",
+            "description": "One field of a patch: the field's new translation, or `null` to remove it."
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
       "FieldTranslationRequest": {
         "additionalProperties": false,
         "description": "One field of a translation being written.",
@@ -7982,13 +7993,19 @@
         "type": "string"
       },
       "LanguageProgressResponse": {
-        "description": "How far one language's translations cover the store's text, in fields with source\ntext: `translated` + `missing` = `total`, and `outdated` are among `translated`.",
+        "description": "How far one language's translations cover the store's text, in fields with source\ntext: `translated` + `missing` = `total`, `outdated` are among `translated` and\n`inherited` among `missing`.",
         "properties": {
+          "inherited": {
+            "description": "Of those missing, the ones shoppers still read in the language without its\nregion (`de` for `de-AT`), as storefronts fall back to it: the base language's\ntranslation when it's another of the store's languages (published or not), or\nthe source when it's the default (then every missing field is inherited). 0 for\na language without a region. `missing` − `inherited` are the fields a regional\nlanguage's shoppers read in the default language.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "language": {
             "$ref": "#/components/schemas/Language"
           },
           "missing": {
-            "description": "Without a translation.",
+            "description": "Without a translation in exactly this language.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
@@ -8016,7 +8033,8 @@
           "total",
           "translated",
           "outdated",
-          "missing"
+          "missing",
+          "inherited"
         ],
         "type": "object"
       },
@@ -10264,6 +10282,25 @@
         },
         "required": [
           "email"
+        ],
+        "type": "object"
+      },
+      "PatchTranslationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "fields": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FieldTranslationPatch"
+            },
+            "description": "The fields to change, by key (JSON Merge Patch): a field given an object is set,\nby the same rules as a PUT's (blank removes it); `null` removes it; a field left\nout keeps its translation.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "fields"
         ],
         "type": "object"
       },
@@ -12654,7 +12691,7 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/FieldTranslationRequest"
             },
-            "description": "Every translated field of this language, by key. A field left out is removed, so\nsend the whole language; no fields at all deletes the translation.",
+            "description": "Every translated field of this language, by key. A field left out is removed, so\nsend the whole language (a PATCH changes only the fields it names); no fields at\nall deletes the translation.",
             "propertyNames": {
               "type": "string"
             },
@@ -17210,11 +17247,17 @@
             },
             "type": "array"
           },
+          "inherited": {
+            "description": "Of those missing, the ones shoppers still read in the language without its\nregion (`de` for `de-AT`), as storefronts fall back to it: the base language's\ntranslation when it's another of the store's languages, or the source when it's\nthe default (then every missing field is inherited). 0 for a language without a\nregion. `missing` − `inherited` are the fields a regional language's shoppers read\nin the default language.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
           "language": {
             "$ref": "#/components/schemas/Language"
           },
           "missing": {
-            "description": "Of those, the ones without a translation in `language`.",
+            "description": "Of those, the ones without a translation in exactly `language`. For a regional\nlanguage (`de-AT`) some of them may be `inherited`.",
             "format": "int32",
             "minimum": 0,
             "type": "integer"
@@ -17251,6 +17294,7 @@
           "total",
           "missing",
           "outdated",
+          "inherited",
           "fields"
         ],
         "type": "object"
@@ -56633,6 +56677,174 @@
           "translations:write"
         ]
       },
+      "patch": {
+        "operationId": "admin.translations.patch",
+        "parameters": [
+          {
+            "description": "The kind of resource.",
+            "example": "product",
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The resource's ID; the store's for `store` and `search_facet`.",
+            "example": "prod_00000000000000000000000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "A language on the store's list, published or not; never its default.",
+            "example": "de",
+            "in": "path",
+            "name": "language",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchTranslationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranslationsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Changes some fields of a resource's translation into one of the store's other\nlanguages, keeping the rest: what to send when translating a field or a few, since\na PUT replaces the whole language. Creates the translation when there's none, and\ndeletes it when no field is left. Answers the resource's translations as they are\nthen. Beside `translations:write` it takes the resource's own read scope.",
+        "tags": [
+          "translations"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "translations:write"
+        ]
+      },
       "put": {
         "operationId": "admin.translations.put",
         "parameters": [
@@ -56790,7 +57002,7 @@
             "bearer": []
           }
         ],
-        "summary": "Sets a resource's translation into one of the store's other languages, replacing the\nfields it had. Answers the resource's translations as they are then. Beside\n`translations:write` it takes the resource's own read scope.",
+        "summary": "Sets a resource's translation into one of the store's other languages, replacing the\nfields it had: a field left out is removed (to change a few, PATCH them). Answers the resource's translations as they are then. Beside\n`translations:write` it takes the resource's own read scope.",
         "tags": [
           "translations"
         ],

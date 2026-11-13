@@ -323,6 +323,17 @@ contains "the title, trimmed" '"de":{"value":"Tasse","source_digest":"'
 contains "up to date" '"language":"de","translated":1,"outdated":0'
 step "into an unpublished language too" 200 - -X PUT "$BASE/admin/translations/product/$MUG/fr" -H "$JSON" \
     -d '{"fields":{"title":{"value":"Tasse"}}}'
+step "a patch changes the fields it names" 200 - -X PATCH "$BASE/admin/translations/product/$MUG/de" -H "$JSON" \
+    -d '{"fields":{"title":{"value":"Becher"}}}'
+contains "the title changed" '"de":{"value":"Becher","source_digest":"'
+step "a patch checks the source's digest" 422 invalid_translation -X PATCH "$BASE/admin/translations/product/$MUG/de" \
+    -H "$JSON" -d '{"fields":{"title":{"value":"Tasse","source_digest":"0000000000000000000000000000000000000000000000000000000000000000"}}}'
+contains "says the source changed" '"code":"source_changed","key":"title"'
+step "null removes a field" 200 - -X PATCH "$BASE/admin/translations/product/$MUG/fr" -H "$JSON" -d '{"fields":{"title":null}}'
+contains "French went with its last field" '"translations":[{"language":"de",'
+step "a patch creates a translation" 200 - -X PATCH "$BASE/admin/translations/product/$MUG/fr" -H "$JSON" \
+    -d '{"fields":{"title":{"value":"Tasse"}}}'
+contains "French again" '"language":"fr","translated":1'
 step "never into the default language" 422 translation_into_default_language -X PUT "$BASE/admin/translations/product/$MUG/en" \
     -H "$JSON" -d '{"fields":{"title":{"value":"Mug"}}}'
 step "nor into a language the store doesn't list" 422 language_not_listed -X PUT "$BASE/admin/translations/product/$MUG/es" \
@@ -340,7 +351,7 @@ step "nothing of it is missing in German" 200 - "$BASE/admin/translations?kind=p
 lacks "the mug isn't listed" "\"id\":\"$MUG\""
 step "the worklist is in a language" 400 invalid_query "$BASE/admin/translations?state=missing"
 step "each language's progress" 200 - "$BASE/admin/translations/progress?kind=product"
-contains "German covers the mug" '"language":"de","total":1,"translated":1,"outdated":0,"missing":0'
+contains "German covers the mug" '"language":"de","total":1,"translated":1,"outdated":0,"missing":0,"inherited":0'
 step "the default language is fixed while anything is translated" 409 default_language_in_use -X PATCH "$BASE/admin/store" \
     -H "$JSON" -d '{"default_language":"es"}'
 step "remove the German translation" 204 - -X DELETE "$BASE/admin/translations/product/$MUG/de"
