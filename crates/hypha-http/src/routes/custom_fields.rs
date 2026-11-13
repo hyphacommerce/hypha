@@ -38,7 +38,7 @@ use super::{
 use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, PathId, Query, Storefront},
-    language::{self, Localized},
+    language::{self, LanguageParams, Localized},
     patch,
     state::{SharedState, Storage},
 };
@@ -656,10 +656,16 @@ pub struct StorefrontDefinitionFilters {
     /// Only this owner type's.
     #[param(inline)]
     owner_type: Option<OwnerTypeDto>,
-    /// The language to answer in (a BCP 47 tag, `de`, `pt-BR`): the store's default or
-    /// one it has published, else the store's default answers. `Content-Language` names
-    /// the one served. Text without a translation stays in the store's default language.
+    /// The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
+    /// `country`'s market offers (`/storefront/countries`): without it, or with one the
+    /// market doesn't offer, the market's default answers. Without `country`, out of the
+    /// store's default and the languages it has published, the store's default
+    /// otherwise. `Content-Language` names the one served. Text without a translation
+    /// stays in the store's default language.
     language: Option<String>,
+    /// Where the shopper is (ISO 3166-1 alpha-2): its market's languages are the ones
+    /// `language` chooses from, as on a product read. Changes nothing else.
+    country: Option<String>,
 }
 
 /// The custom fields storefronts read (`access.storefront: read`) on products, variants
@@ -686,7 +692,11 @@ pub async fn list_storefront<S: Storage>(
     let filters = query.parse()?;
     let definitions =
         storefront_definitions(&ctx, &ports, filters.owner_type.map(Into::into)).await?;
-    let served = language::served(&state, &ports, filters.language.as_deref(), None).await?;
+    let place = LanguageParams {
+        language: filters.language,
+        country: filters.country,
+    };
+    let served = language::served_in(&state, &ports, &place).await?;
     let resource = |d: &CustomFieldDefinition| {
         ResourceRef::new(ResourceKind::CustomFieldDefinition, d.id().as_uuid())
     };
@@ -696,19 +706,20 @@ pub async fn list_storefront<S: Storage>(
         items: definitions
             .iter()
             .map(|d| {
-                let text = |key: &str| overlay.text(resource(d), key);
+                let of_definition = resource(d);
                 StorefrontCustomFieldDefinitionResponse {
                     owner_type: d.owner_type().into(),
                     field: d.field_key().to_string(),
-                    name: text(keys::custom_field_definition::NAME)
-                        .unwrap_or(d.name())
+                    name: overlay
+                        .text_or(of_definition, keys::custom_field_definition::NAME, d.name())
                         .to_string(),
-                    // Only a definition with a description has one to translate.
-                    description: d.description().map(|description| {
-                        text(keys::custom_field_definition::DESCRIPTION)
-                            .unwrap_or(description)
-                            .to_string()
-                    }),
+                    description: overlay
+                        .optional(
+                            of_definition,
+                            keys::custom_field_definition::DESCRIPTION,
+                            d.description(),
+                        )
+                        .map(str::to_string),
                     field_type: d.field_type().to_string(),
                     position: d.position(),
                     choices: (d.field_type().base() == BaseType::Choice).then(|| {
@@ -717,8 +728,12 @@ pub async fn list_storefront<S: Storage>(
                             .iter()
                             .map(|c| ChoiceDto {
                                 key: c.key.clone(),
-                                label: text(&keys::custom_field_definition::choice_label(&c.key))
-                                    .unwrap_or(&c.label)
+                                label: overlay
+                                    .text_or(
+                                        of_definition,
+                                        &keys::custom_field_definition::choice_label(&c.key),
+                                        &c.label,
+                                    )
                                     .to_string(),
                             })
                             .collect()

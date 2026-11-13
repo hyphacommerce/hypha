@@ -16,7 +16,7 @@ use super::{
 use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, Query, Storefront},
-    language::{LanguageParams, Localized, ServedLanguage},
+    language::{self, LanguageParams, Localized},
     patch,
     state::{AppState, SharedState, Storage},
 };
@@ -332,23 +332,15 @@ pub async fn fetch_storefront<S: Storage>(
     use hypha_translations::{ResourceKind, ResourceRef, fields as keys};
     let (ports, ctx) = caller.authenticate(&state).await?;
     let params = query.parse()?;
-    // Checks `stores:read`, as the read through `read_store` does.
-    let store = match state.storage.directory_in(&ports) {
-        Some(directory) => get_store(&ctx, directory, state.store).await?,
-        None => get_store(&ctx, &state.storage.directory().await?, state.store).await?,
-    };
-    let served = ServedLanguage::of(params.language.as_deref(), &store, None);
+    let store = store_for(&state, &ctx, &ports).await?;
+    let served = language::served_in(&state, &ports, &params).await?;
     let of_store = ResourceRef::new(ResourceKind::Store, state.store.as_uuid());
     let overlay = served.overlay(&ports, &[of_store]).await?;
     let response = StorefrontStoreResponse {
         name: store.name().to_string(),
-        // Only a store with a description has one to translate.
-        description: store.description().map(|description| {
-            overlay
-                .text(of_store, keys::store::DESCRIPTION)
-                .unwrap_or(description)
-                .to_string()
-        }),
+        description: overlay
+            .optional(of_store, keys::store::DESCRIPTION, store.description())
+            .map(str::to_string),
         contact_email: store.contact_email().cloned(),
         default_language: store.default_language().clone(),
     };
@@ -394,12 +386,21 @@ pub(crate) async fn store_as_system<S: Storage>(
     state: &AppState<S>,
     ports: &S::Ports<'_>,
 ) -> Result<Store, ApiError> {
-    let ctx = Ctx::system();
+    store_for(state, &Ctx::system(), ports).await
+}
+
+/// The store's details for `ctx`, keeping `ports`: through them when they hold the
+/// directory, else through the directory beside them.
+pub(crate) async fn store_for<S: Storage>(
+    state: &AppState<S>,
+    ctx: &Ctx,
+    ports: &S::Ports<'_>,
+) -> Result<Store, ApiError> {
     Ok(match state.storage.directory_in(ports) {
-        Some(directory) => get_store(&ctx, directory, state.store).await?,
+        Some(directory) => get_store(ctx, directory, state.store).await?,
         None => {
             let directory = state.storage.directory().await?;
-            get_store(&ctx, &directory, state.store).await?
+            get_store(ctx, &directory, state.store).await?
         }
     })
 }

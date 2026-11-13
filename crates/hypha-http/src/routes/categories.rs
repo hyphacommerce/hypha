@@ -602,9 +602,11 @@ fn tree_resources(tree: &CategoryTree, parent: Option<CategoryId>, found: &mut V
 }
 
 fn translated_name<'a>(category: &'a Category, overlay: &'a Overlay) -> &'a str {
-    overlay
-        .text(category_resource(category), keys::category::NAME)
-        .unwrap_or(category.name())
+    overlay.text_or(
+        category_resource(category),
+        keys::category::NAME,
+        category.name(),
+    )
 }
 
 /// `CategoryRef` for a storefront read: the name as `overlay` translates it.
@@ -644,7 +646,7 @@ pub async fn list_storefront<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let params = query.parse()?;
     let tree = shown_categories(&ctx, &ports).await?;
-    let served = language::served(&state, &ports, params.language.as_deref(), None).await?;
+    let served = language::served_in(&state, &ports, &params).await?;
     let mut resources = Vec::new();
     tree_resources(&tree, None, &mut resources);
     let overlay = served.overlay(&ports, &resources).await?;
@@ -698,7 +700,7 @@ pub async fn fetch_by_handle_storefront<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let params = query.parse()?;
     let view = get_shown_category_by_handle(&ctx, &ports, &handle).await?;
-    let served = language::served(&state, &ports, params.language.as_deref(), None).await?;
+    let served = language::served_in(&state, &ports, &params).await?;
     let image = category_image(&ctx, &ports, &view.category).await?;
     let c = &view.category;
     let owner = c.id().as_uuid();
@@ -708,17 +710,14 @@ pub async fn fetch_by_handle_storefront<S: Storage>(
         .map(category_resource)
         .chain(asset_resources(image.as_slice()))
         .collect();
-    // The custom fields and the translations go out together: one round trip.
-    let (fields, overlay) = futures_util::future::try_join(
-        custom_fields::read(
-            &ctx,
-            &CallerKind::Storefront,
-            &ports,
-            &[OwnerType::Category],
-            &[owner],
-            None,
-        ),
-        async { Ok(served.overlay(&ports, &resources).await?) },
+    let overlay = served.overlay(&ports, &resources).await?;
+    let fields = custom_fields::read(
+        &ctx,
+        &CallerKind::Storefront,
+        &ports,
+        &[OwnerType::Category],
+        &[owner],
+        None,
     )
     .await?;
     let image = media_items_in(image.as_slice(), state.media.as_deref(), &overlay)
@@ -730,13 +729,13 @@ pub async fn fetch_by_handle_storefront<S: Storage>(
         id: c.id(),
         name: translated_name(c, &overlay).to_string(),
         handle: c.handle().as_str().to_string(),
-        // Only a category with a description has one to translate.
-        description: c.description().map(|d| {
-            overlay
-                .text(of_category, keys::category::DESCRIPTION)
-                .unwrap_or(d.as_html())
-                .to_string()
-        }),
+        description: overlay
+            .optional(
+                of_category,
+                keys::category::DESCRIPTION,
+                c.description().map(|d| d.as_html()),
+            )
+            .map(str::to_string),
         image,
         ancestors: view
             .ancestors

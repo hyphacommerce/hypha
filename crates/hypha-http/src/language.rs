@@ -7,8 +7,8 @@ use axum::{
     http::{HeaderValue, header},
     response::{IntoResponse, Response},
 };
-use hypha_core::{Language, RepoError};
-use hypha_markets::Market;
+use hypha_core::{CountryCode, Language, RepoError};
+use hypha_markets::{HasMarkets, Market, MarketRepo};
 use hypha_stores::Store;
 use hypha_translations::{HasTranslations, Overlay, ResourceRef};
 use serde::{Deserialize, Serialize};
@@ -18,15 +18,21 @@ use crate::{
     state::{AppState, Storage},
 };
 
-/// `language` on a read that takes nothing else from its query string.
+/// What a read that prices nothing takes to choose its language.
 #[derive(Deserialize, utoipa::IntoParams)]
 #[serde(deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
 pub struct LanguageParams {
-    /// The language to answer in (a BCP 47 tag, `de`, `pt-BR`): the store's default or
-    /// one it has published, else the store's default answers. `Content-Language` names
-    /// the one served. Text without a translation stays in the store's default language.
+    /// The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
+    /// `country`'s market offers (`/storefront/countries`): without it, or with one the
+    /// market doesn't offer, the market's default answers. Without `country`, out of the
+    /// store's default and the languages it has published, the store's default
+    /// otherwise. `Content-Language` names the one served. Text without a translation
+    /// stays in the store's default language.
     pub(crate) language: Option<String>,
+    /// Where the shopper is (ISO 3166-1 alpha-2): its market's languages are the ones
+    /// `language` chooses from, as on a product read. Changes nothing else.
+    pub(crate) country: Option<String>,
 }
 
 /// The language one read is answered in.
@@ -113,6 +119,24 @@ impl ServedLanguage {
             body,
         }
     }
+}
+
+/// The language a read that names its place only by `country` is answered in: in the
+/// market selling to it, or by the store's languages without a country or where no
+/// market sells. A country code that isn't one is refused, as product reads do.
+pub(crate) async fn served_in<S: Storage>(
+    state: &AppState<S>,
+    ports: &S::Ports<'_>,
+    params: &LanguageParams,
+) -> Result<ServedLanguage, ApiError> {
+    let market = match params.country.as_deref() {
+        Some(country) => {
+            let country = CountryCode::new(country)?;
+            ports.markets().get_by_country(country).await?
+        }
+        None => None,
+    };
+    served(state, ports, params.language.as_deref(), market.as_ref()).await
 }
 
 /// The language `asked` gets from the store as it is now; see `ServedLanguage::of`.

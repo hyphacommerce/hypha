@@ -104,7 +104,7 @@ in_language() {
     local name=$1 tag=$2
     shift 2
     pick_creds "$@"
-    if curl -s -o /dev/null -D - ${CREDS[@]+"${CREDS[@]}"} "$@" | tr -d '\r' | grep -qi "^content-language: $tag\$"; then
+    if curl -s -o /dev/null -D - ${CREDS[@]+"${CREDS[@]}"} "$@" | tr -d '\r' | grep -q "^[Cc]ontent-[Ll]anguage: $tag\$"; then
         echo "ok   $name"
     else
         echo "FAIL $name: no Content-Language: $tag"
@@ -734,6 +734,7 @@ lacks "is the market's default, not an error" '"title":"Tasse"'
 in_language "English, the market's first" en "$BASE/storefront/products/by-handle/mug?country=HR&language=fr"
 in_language "as without a language" en "$BASE/storefront/products/$MUG?country=HR"
 in_language "the categories take it too" de "$BASE/storefront/categories?language=de"
+in_language "and the country, for its market's default" en "$BASE/storefront/categories?country=HR"
 step "back to the source alone" 204 - -X DELETE "$BASE/admin/translations/product/$MUG/de"
 step "where the store sells" 200 - "$BASE/storefront/countries"
 contains "Croatia, in euros" "{\"country\":\"HR\",\"name\":\"Croatia\",\"market\":\"$MARKET\",\"currency\":\"EUR\",\"minor_units\":2"

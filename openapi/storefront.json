@@ -9139,9 +9139,18 @@
         "operationId": "storefront.categories.list",
         "parameters": [
           {
-            "description": "The language to answer in (a BCP 47 tag, `de`, `pt-BR`): the store's default or\none it has published, else the store's default answers. `Content-Language` names\nthe one served. Text without a translation stays in the store's default language.",
+            "description": "The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those\n`country`'s market offers (`/storefront/countries`): without it, or with one the\nmarket doesn't offer, the market's default answers. Without `country`, out of the\nstore's default and the languages it has published, the store's default\notherwise. `Content-Language` names the one served. Text without a translation\nstays in the store's default language.",
             "in": "query",
             "name": "language",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Where the shopper is (ISO 3166-1 alpha-2): its market's languages are the ones\n`language` chooses from, as on a product read. Changes nothing else.",
+            "in": "query",
+            "name": "country",
             "required": false,
             "schema": {
               "type": "string"
@@ -9237,9 +9246,18 @@
             }
           },
           {
-            "description": "The language to answer in (a BCP 47 tag, `de`, `pt-BR`): the store's default or\none it has published, else the store's default answers. `Content-Language` names\nthe one served. Text without a translation stays in the store's default language.",
+            "description": "The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those\n`country`'s market offers (`/storefront/countries`): without it, or with one the\nmarket doesn't offer, the market's default answers. Without `country`, out of the\nstore's default and the languages it has published, the store's default\notherwise. `Content-Language` names the one served. Text without a translation\nstays in the store's default language.",
             "in": "query",
             "name": "language",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Where the shopper is (ISO 3166-1 alpha-2): its market's languages are the ones\n`language` chooses from, as on a product read. Changes nothing else.",
+            "in": "query",
+            "name": "country",
             "required": false,
             "schema": {
               "type": "string"
@@ -9412,9 +9430,18 @@
             }
           },
           {
-            "description": "The language to answer in (a BCP 47 tag, `de`, `pt-BR`): the store's default or\none it has published, else the store's default answers. `Content-Language` names\nthe one served. Text without a translation stays in the store's default language.",
+            "description": "The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those\n`country`'s market offers (`/storefront/countries`): without it, or with one the\nmarket doesn't offer, the market's default answers. Without `country`, out of the\nstore's default and the languages it has published, the store's default\notherwise. `Content-Language` names the one served. Text without a translation\nstays in the store's default language.",
             "in": "query",
             "name": "language",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Where the shopper is (ISO 3166-1 alpha-2): its market's languages are the ones\n`language` chooses from, as on a product read. Changes nothing else.",
+            "in": "query",
+            "name": "country",
             "required": false,
             "schema": {
               "type": "string"
@@ -10032,9 +10059,18 @@
         "operationId": "storefront.stores.fetch",
         "parameters": [
           {
-            "description": "The language to answer in (a BCP 47 tag, `de`, `pt-BR`): the store's default or\none it has published, else the store's default answers. `Content-Language` names\nthe one served. Text without a translation stays in the store's default language.",
+            "description": "The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those\n`country`'s market offers (`/storefront/countries`): without it, or with one the\nmarket doesn't offer, the market's default answers. Without `country`, out of the\nstore's default and the languages it has published, the store's default\notherwise. `Content-Language` names the one served. Text without a translation\nstays in the store's default language.",
             "in": "query",
             "name": "language",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Where the shopper is (ISO 3166-1 alpha-2): its market's languages are the ones\n`language` chooses from, as on a product read. Changes nothing else.",
+            "in": "query",
+            "name": "country",
             "required": false,
             "schema": {
               "type": "string"

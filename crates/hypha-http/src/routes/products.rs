@@ -156,7 +156,7 @@ impl ProductMediaResponse {
 
     /// The item with the asset's alt text as `overlay` translates it.
     async fn translated(asset: &Asset, media: &Media, overlay: &Overlay) -> Result<Self, ApiError> {
-        let of_asset = ResourceRef::new(ResourceKind::Asset, asset.id().as_uuid());
+        let of_asset = asset_resource(asset);
         Ok(Self {
             asset_id: asset.id(),
             kind: asset.kind().into(),
@@ -166,13 +166,9 @@ impl ProductMediaResponse {
                 ApiError::internal(format!("attached asset {} has no file", asset.id()))
             })?,
             thumbnail_url: media.thumbnail_url(asset).await?,
-            // Only an asset with alt text has one to translate.
-            alt: asset.alt().map(|alt| {
-                overlay
-                    .text(of_asset, keys::asset::ALT)
-                    .unwrap_or(alt)
-                    .to_string()
-            }),
+            alt: overlay
+                .optional(of_asset, keys::asset::ALT, asset.alt())
+                .map(str::to_string),
             width: asset.width(),
             height: asset.height(),
         })
@@ -207,9 +203,11 @@ pub(super) async fn media_items_in(
 
 /// The assets' translatable resources, for a response's overlay.
 pub(super) fn asset_resources(assets: &[Asset]) -> impl Iterator<Item = ResourceRef> {
-    assets
-        .iter()
-        .map(|asset| ResourceRef::new(ResourceKind::Asset, asset.id().as_uuid()))
+    assets.iter().map(asset_resource)
+}
+
+fn asset_resource(asset: &Asset) -> ResourceRef {
+    ResourceRef::new(ResourceKind::Asset, asset.id().as_uuid())
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -256,9 +254,12 @@ struct Translated<'a> {
 }
 
 impl<'a> Translated<'a> {
+    /// A product nothing is translated of reads as stored, without a key built per
+    /// option value and variant.
     fn new(product: &Product, overlay: &'a Overlay) -> Self {
+        let resource = product_resource(product.id());
         Self {
-            overlay: Some((overlay, product_resource(product.id()))),
+            overlay: overlay.translates(resource).then_some((overlay, resource)),
         }
     }
 
@@ -996,12 +997,8 @@ async fn storefront_product<S: Storage>(
         .chain(asset_resources(&view.media))
         .chain(promotions.iter().map(|p| p.resource()))
         .collect();
-    // The custom fields and the translations go out together: one round trip.
-    let (fields, overlay) = futures_util::future::try_join(
-        product_fields(ctx, &CallerKind::Storefront, ports, &view.product),
-        async { Ok(served.overlay(ports, &resources).await?) },
-    )
-    .await?;
+    let overlay = served.overlay(ports, &resources).await?;
+    let fields = product_fields(ctx, &CallerKind::Storefront, ports, &view.product).await?;
     let response = StorefrontProductResponse::new(
         &view,
         offer.as_ref(),

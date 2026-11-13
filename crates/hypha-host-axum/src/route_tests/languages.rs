@@ -261,6 +261,45 @@ async fn a_read_falls_back_to_its_markets_default_language() {
             "{place}"
         );
     }
+
+    // The reads that price nothing take the country for its market's languages alone,
+    // so a page's reads agree.
+    let (status, json) = send(
+        &app,
+        "POST",
+        "/admin/categories",
+        Some(r#"{"name":"Mugs","handle":"mugs","visible":true}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{json}");
+    for route in [
+        "/storefront/categories",
+        "/storefront/categories/by-handle/mugs",
+        "/storefront/custom-field-definitions",
+        "/storefront/store",
+    ] {
+        let language = async |query: &str| read_ok(&app, &pk, &format!("{route}{query}")).await.0;
+        assert_eq!(language("").await, "en", "{route}");
+        assert_eq!(language("?country=HR").await, "de", "{route}");
+        assert_eq!(language("?country=HR&language=en").await, "en", "{route}");
+        assert_eq!(
+            language("?country=HR&language=de-AT").await,
+            "de",
+            "{route}"
+        );
+        assert_eq!(language("?country=DE").await, "en", "{route}");
+        assert_eq!(
+            language("?country=DE&language=de-AT").await,
+            "de-AT",
+            "{route}"
+        );
+        // A country code that isn't one is refused as the product read refuses it.
+        let (status, _, body) = read(&app, &pk, &format!("{route}?country=Croatia")).await;
+        let product = "/storefront/products/by-handle/mug?country=Croatia";
+        let (expected, _, product) = read(&app, &pk, product).await;
+        assert_eq!((status, code(&body)), (expected, code(&product)), "{route}");
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{route}");
+    }
 }
 
 #[tokio::test]
@@ -553,7 +592,7 @@ async fn the_stores_description_is_read_in_the_language_asked_for() {
         assert_eq!(language, "en", "{query:?}");
         assert_eq!(store["description"], "Mugs for every morning.", "{query:?}");
     }
-    let (status, _, body) = read(&app, &pk, "/storefront/store?country=HR").await;
+    let (status, _, body) = read(&app, &pk, "/storefront/store?lang=de").await;
     assert_eq!(
         (status, code(&body)),
         (StatusCode::BAD_REQUEST, "invalid_query")

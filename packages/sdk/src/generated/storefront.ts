@@ -5992,11 +5992,19 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description The language to answer in (a BCP 47 tag, `de`, `pt-BR`): the store's default or
-                 *     one it has published, else the store's default answers. `Content-Language` names
-                 *     the one served. Text without a translation stays in the store's default language.
+                 * @description The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
+                 *     `country`'s market offers (`/storefront/countries`): without it, or with one the
+                 *     market doesn't offer, the market's default answers. Without `country`, out of the
+                 *     store's default and the languages it has published, the store's default
+                 *     otherwise. `Content-Language` names the one served. Text without a translation
+                 *     stays in the store's default language.
                  */
                 language?: string;
+                /**
+                 * @description Where the shopper is (ISO 3166-1 alpha-2): its market's languages are the ones
+                 *     `language` chooses from, as on a product read. Changes nothing else.
+                 */
+                country?: string;
             };
             header?: never;
             path?: never;
@@ -6057,11 +6065,19 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description The language to answer in (a BCP 47 tag, `de`, `pt-BR`): the store's default or
-                 *     one it has published, else the store's default answers. `Content-Language` names
-                 *     the one served. Text without a translation stays in the store's default language.
+                 * @description The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
+                 *     `country`'s market offers (`/storefront/countries`): without it, or with one the
+                 *     market doesn't offer, the market's default answers. Without `country`, out of the
+                 *     store's default and the languages it has published, the store's default
+                 *     otherwise. `Content-Language` names the one served. Text without a translation
+                 *     stays in the store's default language.
                  */
                 language?: string;
+                /**
+                 * @description Where the shopper is (ISO 3166-1 alpha-2): its market's languages are the ones
+                 *     `language` chooses from, as on a product read. Changes nothing else.
+                 */
+                country?: string;
             };
             header?: never;
             path: {
@@ -6186,11 +6202,19 @@ export interface operations {
                 /** @description Only this owner type's. */
                 owner_type?: "product" | "variant" | "category" | "customer" | "order";
                 /**
-                 * @description The language to answer in (a BCP 47 tag, `de`, `pt-BR`): the store's default or
-                 *     one it has published, else the store's default answers. `Content-Language` names
-                 *     the one served. Text without a translation stays in the store's default language.
+                 * @description The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
+                 *     `country`'s market offers (`/storefront/countries`): without it, or with one the
+                 *     market doesn't offer, the market's default answers. Without `country`, out of the
+                 *     store's default and the languages it has published, the store's default
+                 *     otherwise. `Content-Language` names the one served. Text without a translation
+                 *     stays in the store's default language.
                  */
                 language?: string;
+                /**
+                 * @description Where the shopper is (ISO 3166-1 alpha-2): its market's languages are the ones
+                 *     `language` chooses from, as on a product read. Changes nothing else.
+                 */
+                country?: string;
             };
             header?: never;
             path?: never;
@@ -6594,11 +6618,19 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description The language to answer in (a BCP 47 tag, `de`, `pt-BR`): the store's default or
-                 *     one it has published, else the store's default answers. `Content-Language` names
-                 *     the one served. Text without a translation stays in the store's default language.
+                 * @description The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
+                 *     `country`'s market offers (`/storefront/countries`): without it, or with one the
+                 *     market doesn't offer, the market's default answers. Without `country`, out of the
+                 *     store's default and the languages it has published, the store's default
+                 *     otherwise. `Content-Language` names the one served. Text without a translation
+                 *     stays in the store's default language.
                  */
                 language?: string;
+                /**
+                 * @description Where the shopper is (ISO 3166-1 alpha-2): its market's languages are the ones
+                 *     `language` chooses from, as on a product read. Changes nothing else.
+                 */
+                country?: string;
             };
             header?: never;
             path?: never;
