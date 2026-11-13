@@ -20,5 +20,18 @@
   "shipping_free": "Free",
   "tax": "Tax",
   "including_tax": "Including tax",
-  "total": "Total"
+  "total": "Total",
+  "message_required": "Enter the {field}",
+  "message_required_choice": "Select the {field}",
+  "message_too_long": "The {field} is too long (at most {max, plural, one {# character} other {# characters}})",
+  "message_invalid_format": "Enter a valid {field}",
+  "message_invalid_format_example": "Enter a valid {field}, like {example}",
+  "message_unknown_region": "Select a valid {field}",
+  "message_region_mismatch": "This {field} isn't in {region}",
+  "message_house_number_missing": "Add a house number",
+  "message_apartment_missing": "Add an apartment, suite or unit number.",
+  "message_address_corrections_suggested": "This address may have a mistake. Check the suggested address.",
+  "message_address_ambiguous": "We couldn't pin this address down. Check the street, number and postal code.",
+  "message_address_undeliverable": "We couldn't find this address. Check it before you continue.",
+  "message_validation_unavailable": "We can't check your order right now. Try again in a moment."
 }

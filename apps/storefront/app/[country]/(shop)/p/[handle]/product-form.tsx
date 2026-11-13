@@ -37,7 +37,7 @@ import {
   addTransitionType,
 } from "@/components/view-transition";
 import { type FieldEntry, withVariant } from "@/lib/custom-fields";
-import { readPromotions } from "@/lib/discounts";
+import { readPromotions, summarisedPromotions } from "@/lib/discounts";
 import { breakLabel, sortedBreaks, unitPriceFor } from "@/lib/prices";
 import { hasSessionFlag } from "@/lib/session-flag";
 import { useT } from "@/lib/use-t";
@@ -278,13 +278,11 @@ export function ProductForm({
                 <Badge label={t("common.sold_out")} variant="neutral" />
               )}
             </HStack>
-            {promotions
-              .filter((p) => p.summary)
-              .map((p) => (
-                <Text key={p.title} type="supporting" color="secondary">
-                  {p.summary}
-                </Text>
-              ))}
+            {summarisedPromotions(t, promotions).map((p) => (
+              <Text key={p.title} type="supporting" color="secondary">
+                {p.summary}
+              </Text>
+            ))}
             {variant?.price && breaks.length > 0 && (
               <VStack
                 as="ul"

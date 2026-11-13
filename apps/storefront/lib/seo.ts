@@ -66,8 +66,9 @@ export function decimal(money: Money, digits: number): string {
 /**
  * Where each copy of a page lives, as `hreflang` alternates: one per place, by its tag
  * (`de-CH`, `sr-Latn-RS`; `alternatePlaces` in `lib/routing.ts`), and `x-default` for
- * the first (the first country in its default language). A tag two places share keeps
- * the first's. None for a page with one copy: there's nothing to point at.
+ * the first (the first country in its default language). `hreflangPlaces` gives each tag
+ * one place; should two still share one, the first keeps it. None for a page with one
+ * copy: there's nothing to point at.
  */
 export function localeAlternates(
   places: { tag: string; href: string }[],

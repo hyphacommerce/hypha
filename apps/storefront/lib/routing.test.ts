@@ -209,6 +209,59 @@ test("a single tree names no hreflang when its countries' defaults differ", () =
   assert.deepEqual(hreflangPlaces("folders", [DE, GB]), alternatePlaces("folders", [DE, GB]));
 });
 
+test("a regional language keeps its own tag in its country; the plain one there names none", () => {
+  const AT2 = { country: "AT", languages: ["de", "de-AT"] };
+  assert.deepEqual(alternatePlaces("folders", [DE, AT2]), [
+    { tag: "de-DE", segment: "de" },
+    { tag: "en-DE", segment: "en-de" },
+    { tag: "de-AT", segment: "at" },
+    { tag: "de-AT", segment: "de-at-at" },
+  ]);
+  assert.deepEqual(hreflangPlaces("folders", [DE, AT2]), [
+    { tag: "de-DE", segment: "de" },
+    { tag: "en-DE", segment: "en-de" },
+    { tag: "de-AT", segment: "de-at-at" },
+  ]);
+  // Listed the other way round, the regional one still wins.
+  const AT3 = { country: "AT", languages: ["de-AT", "de"] };
+  assert.deepEqual(hreflangPlaces("folders", [AT3]), [{ tag: "de-AT", segment: "at" }]);
+});
+
+test("a regional language offered elsewhere leaves its tag to the page in its country", () => {
+  const DE2 = { country: "DE", languages: ["de", "de-AT"] };
+  assert.deepEqual(hreflangPlaces("folders", [DE2, AT]), [
+    { tag: "de-DE", segment: "de" },
+    { tag: "de-AT", segment: "at" },
+  ]);
+});
+
+test("one language in two countries is one tag in each", () => {
+  assert.deepEqual(hreflangPlaces("folders", [DE, AT]), [
+    { tag: "de-DE", segment: "de" },
+    { tag: "en-DE", segment: "en-de" },
+    { tag: "de-AT", segment: "at" },
+  ]);
+});
+
+test("a script names no region: sr-Latn in Serbia is sr-Latn-RS", () => {
+  assert.deepEqual(hreflangPlaces("folders", [RS]), [
+    { tag: "sr-Latn-RS", segment: "rs" },
+    { tag: "en-GB", segment: "en-gb-rs" },
+  ]);
+});
+
+test("a single tree tags each language once, regional ones included", () => {
+  const AT2 = { country: "AT", languages: ["de", "de-AT"] };
+  assert.deepEqual(hreflangPlaces("single", [AT2]), [
+    { tag: "de", segment: "at" },
+    { tag: "de-AT", segment: "de-at-at" },
+  ]);
+  assert.deepEqual(hreflangPlaces("single", [DE, AT]), [
+    { tag: "de", segment: "de" },
+    { tag: "en", segment: "en-de" },
+  ]);
+});
+
 test("robots' prefixes: every place with folders, every other language in a single tree", () => {
   assert.deepEqual(prefixes("folders", COUNTRIES), ["/de", "/en-de", "/at", "/rs", "/en-gb-rs"]);
   assert.deepEqual(prefixes("single", COUNTRIES), ["", "/en", "/en-gb"]);

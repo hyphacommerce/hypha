@@ -13,6 +13,7 @@ import {
   type CartCode,
   type Promotion,
   codeMessage,
+  discountSentence,
   minus,
   promotionBadges,
 } from "@/lib/discounts";
@@ -81,27 +82,30 @@ export function AppliedDiscounts({
   if (applications.length === 0) return null;
   return (
     <VStack as="ul" gap={1} aria-label={t("discounts.applied_label")} className="shop-plain-list">
-      {applications.map((a) => (
-        <li key={a.index}>
-          <HStack gap={2} hAlign="between" vAlign="start">
-            <VStack gap={0}>
-              <Text type="supporting" weight="medium">
-                {a.code
-                  ? t("discounts.title_with_code", { title: a.title, code: a.code })
-                  : a.title}
-              </Text>
-              {a.summary && (
-                <Text type="supporting" color="secondary">
-                  {a.summary}
+      {applications.map((a) => {
+        const sentence = discountSentence(t, a, digits);
+        return (
+          <li key={a.index}>
+            <HStack gap={2} hAlign="between" vAlign="start">
+              <VStack gap={0}>
+                <Text type="supporting" weight="medium">
+                  {a.code
+                    ? t("discounts.title_with_code", { title: a.title, code: a.code })
+                    : a.title}
                 </Text>
-              )}
-            </VStack>
-            <Text type="supporting" color="accent" hasTabularNumbers>
-              {minus(a.amount, digits, t.locale)}
-            </Text>
-          </HStack>
-        </li>
-      ))}
+                {sentence && (
+                  <Text type="supporting" color="secondary">
+                    {sentence}
+                  </Text>
+                )}
+              </VStack>
+              <Text type="supporting" color="accent" hasTabularNumbers>
+                {minus(a.amount, digits, t.locale)}
+              </Text>
+            </HStack>
+          </li>
+        );
+      })}
     </VStack>
   );
 }

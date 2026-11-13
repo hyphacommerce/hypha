@@ -49,7 +49,7 @@ export function CartView() {
         <Card padding={5}>
           <VStack gap={2}>
             {error && <Banner status="error" title={error} />}
-            <CartMessages messages={placeMessages(cart.messages).top} />
+            <CartMessages t={t} messages={placeMessages(cart.messages).top} />
             <CartLines />
           </VStack>
         </Card>

@@ -569,7 +569,7 @@ export async function resolveAddress(input: {
   const problems: FieldProblems = {};
   for (const p of data.problems) {
     const field = asField(p.field);
-    if (field) problems[field] ??= p.message;
+    if (field) problems[field] ??= { code: p.code, message: p.message, params: p.params };
   }
   return {
     values: {

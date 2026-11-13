@@ -141,7 +141,7 @@ export default async function CheckoutPage({
         <Heading level={1} type="display-2">
           {t("checkout.title")}
         </Heading>
-        <CartMessages messages={messages.top} />
+        <CartMessages t={t} messages={messages.top} />
         <Grid columns={{ minWidth: 360, repeat: "fit" }} gap={8}>
           <VStack gap={8}>
             <DetailsForm
@@ -295,7 +295,7 @@ export default async function CheckoutPage({
                           )
                         }
                       />
-                      <CartMessages messages={messages.lines[index]} />
+                      <CartMessages t={t} messages={messages.lines[index]} />
                     </VStack>
                   );
                 })}
