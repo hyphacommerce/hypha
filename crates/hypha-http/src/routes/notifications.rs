@@ -490,17 +490,14 @@ async fn template_response<S: Storage>(
     languages: &StoreLanguages,
 ) -> Result<NotificationTemplateResponse, ApiError> {
     let branding = hypha_mail::branding(&*state.mail, ports).await?;
-    let written = template.locale.as_ref().unwrap_or(&languages.default);
-    let sample = MailContext::sample_in(template.key, &Locale::of(written.clone()))
+    let reader = template.locale.as_ref().unwrap_or(&languages.default);
+    let sources_language = template.sources_language(&languages.default);
+    // Formatted as this language's emails are (and its previews), by the sources' language.
+    let sample = MailContext::sample_in(template.key, &Locale::writing(reader, sources_language))
         .with_branding(branding.shop, branding.brand);
-    let (sources_language, sources_origin) = if template.customized {
-        (written.clone(), OriginDto::Merchant)
-    } else {
-        let origin = match template.origin() {
-            Origin::Merchant { .. } => OriginDto::Merchant,
-            Origin::Default { .. } => OriginDto::Default,
-        };
-        (template.language().clone(), origin)
+    let sources_origin = match (template.customized, template.origin()) {
+        (true, _) | (false, Origin::Merchant { .. }) => OriginDto::Merchant,
+        (false, Origin::Default { .. }) => OriginDto::Default,
     };
     Ok(NotificationTemplateResponse {
         summary: template.into(),
@@ -700,8 +697,9 @@ pub struct PreviewNotificationRequest {
     #[schema(required = false)]
     order: Option<OrderId>,
     /// The language the sources are written for (a BCP 47 tag, one of the store's):
-    /// rendered in that language's layout, its money and dates written its way. Absent:
-    /// the store's default.
+    /// rendered as that language's emails send, in its layout, with money and dates
+    /// written the way of the template's `sources_language` (a language still sending
+    /// another's sources keeps their formats). Absent: the store's default.
     #[serde(default)]
     #[schema(required = false)]
     language: Option<String>,

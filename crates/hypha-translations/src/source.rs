@@ -4,6 +4,8 @@
 
 use sha2::{Digest, Sha256};
 
+use crate::catalog::FieldRule;
+
 /// SHA-256 of a source text, in lowercase hex: what a translated field remembers of the
 /// text it translated.
 pub fn source_digest(text: &str) -> String {
@@ -26,6 +28,9 @@ pub struct SourceField {
     pub text: String,
     /// `source_digest(text)`.
     pub digest: String,
+    /// Its rule when it's the resource's own rather than the catalog's: a custom field
+    /// value's, by its definition.
+    pub rule: Option<FieldRule>,
 }
 
 impl SourceField {
@@ -35,7 +40,19 @@ impl SourceField {
             key: key.into(),
             digest: source_digest(&text),
             text,
+            rule: None,
         }
+    }
+
+    /// The field with a rule of its own (`rule`).
+    pub fn with_rule(mut self, rule: FieldRule) -> Self {
+        self.rule = Some(rule);
+        self
+    }
+
+    /// The rule a translation of it obeys: its own, else `catalog`'s.
+    pub fn rule_or(&self, catalog: FieldRule) -> FieldRule {
+        self.rule.unwrap_or(catalog)
     }
 }
 

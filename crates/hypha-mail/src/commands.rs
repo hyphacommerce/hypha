@@ -372,7 +372,9 @@ fn store_languages(branding: &Branding) -> (Language, Vec<Language>) {
 }
 
 /// Renders unsaved sources the way they'd send, with what `preview` renders them
-/// against, and the branding (for a test send's sender).
+/// against, and the branding (for a test send's sender). The sources and formats are
+/// `Sources::previewing`'s, the rule real sends load theirs by, so what the merchant sees
+/// is what that language's emails send.
 async fn render_preview<E: MailEnv, P: MailPorts>(
     env: &E,
     ports: &P,
@@ -381,7 +383,7 @@ async fn render_preview<E: MailEnv, P: MailPorts>(
     order: Option<OrderId>,
     language: Option<&Language>,
 ) -> Result<(Rendered, Branding), CommandError> {
-    let sources = input.sources(key)?;
+    let edited = input.sources(key)?;
     let branding = branding(env, ports).await?;
     let (default, others) = store_languages(&branding);
     let languages = TemplateLanguages {
@@ -391,19 +393,10 @@ async fn render_preview<E: MailEnv, P: MailPorts>(
     let locale = languages
         .locale(language)
         .map_err(CommandError::LanguageNotListed)?;
-    let written = locale.clone().unwrap_or_else(|| default.clone());
-    let reading = Locale::of(written);
-    let context = preview_context(env, ports, &branding, key, order, &reading).await?;
-    let locale = locale.as_ref();
-    let rendered = if key.is_layout() {
-        let confirmation =
-            template_in_effect(ports, TemplateKey::OrderConfirmation, locale, &default).await?;
-        render(sources.html(), &confirmation.sending_sources(), &context)?
-    } else {
-        let layout = template_in_effect(ports, TemplateKey::Layout, locale, &default).await?;
-        render(layout.sending_sources().html(), &sources, &context)?
-    };
-    Ok((rendered, branding))
+    let language = locale.unwrap_or_else(|| default.clone());
+    let sources = Sources::previewing(ports, key, edited, &language, &default).await?;
+    let context = preview_context(env, ports, &branding, key, order, &sources.locale).await?;
+    Ok((sources.render(&context)?, branding))
 }
 
 /// Renders unsaved sources of `key` written for `language` (none: the store's default):
