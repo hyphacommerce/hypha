@@ -529,6 +529,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "validation_apps",
             sql: include_str!("../migrations/0101_validation_apps.sql"),
         },
+        Migration {
+            version: 102,
+            name: "languages",
+            sql: include_str!("../migrations/0102_languages.sql"),
+        },
     ],
 };
 

@@ -149,6 +149,7 @@ pub fn event_scope(subject_kind: &str) -> Option<Scope> {
     Some(match subject_kind {
         "product" | "category" | "search_settings" => Scope::ProductsRead,
         "channel" => Scope::ChannelsRead,
+        "store" => Scope::StoresRead,
         "catalog" | "market" => Scope::MarketsRead,
         "price_list" => Scope::PricingRead,
         "tax_class" | "tax_region" => Scope::TaxesRead,
@@ -827,6 +828,11 @@ mod tests {
             Some(Scope::InventoryRead)
         );
         assert_eq!(event_scope("purchase_order"), Some(Scope::PurchasingRead));
+    }
+
+    #[test]
+    fn store_events_need_stores_read() {
+        assert_eq!(event_scope("store"), Some(Scope::StoresRead));
     }
 
     #[test]

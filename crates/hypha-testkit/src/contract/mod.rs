@@ -99,7 +99,7 @@ pub use shipping::{app_provider_repo, shipping_zone_repo};
 pub use spore_settings::spore_settings_repo;
 pub use staff_batch::staff_batch;
 pub use stock_movements::stock_movements;
-pub use stores::store_repo;
+pub use stores::{store_events, store_repo};
 pub use suppliers::{supplier_repo, supplier_variants};
 pub use tax::{tax_class_repo, tax_region_repo};
 pub use transfers::transfer_repo;

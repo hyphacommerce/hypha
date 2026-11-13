@@ -8315,6 +8315,13 @@
           "id": {
             "$ref": "#/components/schemas/MarketId"
           },
+          "languages": {
+            "description": "The languages shoppers are offered here, in order: the first is the market's\ndefault. Empty means the store's default language alone.",
+            "items": {
+              "$ref": "#/components/schemas/Language"
+            },
+            "type": "array"
+          },
           "name": {
             "type": "string"
           },
@@ -8335,6 +8342,7 @@
           "countries",
           "currency",
           "prices_include_tax",
+          "languages",
           "price_lists"
         ],
         "type": "object"
@@ -15198,6 +15206,39 @@
         "pattern": "^store_[0-9a-f]{32}$",
         "type": "string"
       },
+      "StoreLanguageRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "language": {
+            "description": "A BCP 47 tag such as `de` or `sr-Latn`.",
+            "type": "string"
+          },
+          "published": {
+            "description": "Whether shoppers are served it; `false` when absent.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "language"
+        ],
+        "type": "object"
+      },
+      "StoreLanguageResponse": {
+        "properties": {
+          "language": {
+            "$ref": "#/components/schemas/Language"
+          },
+          "published": {
+            "description": "Whether shoppers are served it: an unpublished language can be translated, but no\nstorefront read answers in it and no market offers it.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "language",
+          "published"
+        ],
+        "type": "object"
+      },
       "StoreResponse": {
         "properties": {
           "contact_email": {
@@ -15235,6 +15276,13 @@
           },
           "id": {
             "$ref": "#/components/schemas/StoreId"
+          },
+          "languages": {
+            "description": "The languages the content is translated into beside the default one, in the\nmerchant's order.",
+            "items": {
+              "$ref": "#/components/schemas/StoreLanguageResponse"
+            },
+            "type": "array"
           },
           "legal_address": {
             "oneOf": [
@@ -15276,6 +15324,7 @@
           "id",
           "name",
           "default_language",
+          "languages",
           "setup"
         ],
         "type": "object"
@@ -17026,6 +17075,13 @@
       "UpdateMarketRequest": {
         "additionalProperties": false,
         "properties": {
+          "languages": {
+            "description": "The languages shoppers are offered here, replacing the list: BCP 47 tags in\norder, the first the market's default, each the store's default language or one\nof its published ones (`422 language_not_offered`), each once. Empty for the\nstore's default language alone.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "name": {
             "description": "1 to 255 characters, trimmed.",
             "type": "string"
@@ -17441,7 +17497,7 @@
             ]
           },
           "default_language": {
-            "description": "A BCP 47 tag such as `en` or `sr-Latn`.",
+            "description": "A BCP 47 tag such as `en` or `sr-Latn`. Not one of `languages` (`409\ndefault_language_listed`, unless the same request takes it off that list), and\nmarkets that name the old one must still be offered it (`409 language_in_use`).",
             "type": "string"
           },
           "description": {
@@ -17450,6 +17506,13 @@
               "string",
               "null"
             ]
+          },
+          "languages": {
+            "description": "The other languages, replacing the list: at most 20, each once, never the default\none. A language markets offer can't be removed or unpublished (`409\nlanguage_in_use`, `details.markets: [{id, languages}]` for callers with\n`markets:read`).",
+            "items": {
+              "$ref": "#/components/schemas/StoreLanguageRequest"
+            },
+            "type": "array"
           },
           "legal_address": {
             "oneOf": [

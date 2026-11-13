@@ -2168,6 +2168,11 @@ export interface components {
         StorefrontCountryResponse: {
             country: components["schemas"]["CountryCode"];
             currency: components["schemas"]["Currency"];
+            /**
+             * @description The languages shoppers are offered here, in order: the first is the country's
+             *     default. Never empty: the store's default language when its market lists none.
+             */
+            languages: components["schemas"]["Language"][];
             market: components["schemas"]["MarketId"];
             /**
              * Format: int32

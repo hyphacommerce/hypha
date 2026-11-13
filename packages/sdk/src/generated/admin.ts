@@ -7275,6 +7275,11 @@ export interface components {
             countries: components["schemas"]["CountryCode"][];
             currency: components["schemas"]["Currency"];
             id: components["schemas"]["MarketId"];
+            /**
+             * @description The languages shoppers are offered here, in order: the first is the market's
+             *     default. Empty means the store's default language alone.
+             */
+            languages: components["schemas"]["Language"][];
             name: string;
             /** @description The catalog's price lists, by ID: the lowest live price among them wins. */
             price_lists: components["schemas"]["PriceListId"][];
@@ -9663,6 +9668,20 @@ export interface components {
          * @example store_0190f1a2b3c47d8e9f00112233445566
          */
         StoreId: string;
+        StoreLanguageRequest: {
+            /** @description A BCP 47 tag such as `de` or `sr-Latn`. */
+            language: string;
+            /** @description Whether shoppers are served it; `false` when absent. */
+            published?: boolean;
+        };
+        StoreLanguageResponse: {
+            language: components["schemas"]["Language"];
+            /**
+             * @description Whether shoppers are served it: an unpublished language can be translated, but no
+             *     storefront read answers in it and no market offers it.
+             */
+            published: boolean;
+        };
         StoreResponse: {
             contact_email?: components["schemas"]["Email"] | null;
             currency?: components["schemas"]["Currency"] | null;
@@ -9674,6 +9693,11 @@ export interface components {
             /** @description Plain text, at most 500 characters. */
             description?: string | null;
             id: components["schemas"]["StoreId"];
+            /**
+             * @description The languages the content is translated into beside the default one, in the
+             *     merchant's order.
+             */
+            languages: components["schemas"]["StoreLanguageResponse"][];
             legal_address?: components["schemas"]["PostalAddressResponse"] | null;
             /** @description The registered business name, for invoices and legal pages. */
             legal_name?: string | null;
@@ -10286,6 +10310,13 @@ export interface components {
             priority?: number;
         };
         UpdateMarketRequest: {
+            /**
+             * @description The languages shoppers are offered here, replacing the list: BCP 47 tags in
+             *     order, the first the market's default, each the store's default language or one
+             *     of its published ones (`422 language_not_offered`), each once. Empty for the
+             *     store's default language alone.
+             */
+            languages?: string[];
             /** @description 1 to 255 characters, trimmed. */
             name?: string;
             prices_include_tax?: boolean;
@@ -10435,10 +10466,21 @@ export interface components {
             contact_email?: string | null;
             /** @description An ISO 4217 code: the base currency costs are kept in. `null` clears it. */
             currency?: string | null;
-            /** @description A BCP 47 tag such as `en` or `sr-Latn`. */
+            /**
+             * @description A BCP 47 tag such as `en` or `sr-Latn`. Not one of `languages` (`409
+             *     default_language_listed`, unless the same request takes it off that list), and
+             *     markets that name the old one must still be offered it (`409 language_in_use`).
+             */
             default_language?: string;
             /** @description Plain text, at most 500 characters, trimmed; `null` or blank clears it. */
             description?: string | null;
+            /**
+             * @description The other languages, replacing the list: at most 20, each once, never the default
+             *     one. A language markets offer can't be removed or unpublished (`409
+             *     language_in_use`, `details.markets: [{id, languages}]` for callers with
+             *     `markets:read`).
+             */
+            languages?: components["schemas"]["StoreLanguageRequest"][];
             legal_address?: components["schemas"]["PostalAddressRequest"] | null;
             /** @description At most 255 characters, trimmed; `null` or blank clears it. */
             legal_name?: string | null;
