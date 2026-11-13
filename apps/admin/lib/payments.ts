@@ -1,5 +1,8 @@
 // Payments in the admin: the method presets staff start from, and which orders staff
-// can still mark paid. Plain data, for server and client code alike.
+// can still mark paid. Plain data and functions over a translator, for server and client
+// code alike.
+
+import type { TFor } from "./messages";
 
 /** A starting point for a new method: all `manual`, staff record the money. */
 export type PaymentPreset = {
@@ -12,6 +15,11 @@ export type PaymentPreset = {
   instructionsPlaceholder: string;
 };
 
+/**
+ * The presets in English.
+ *
+ * @deprecated Use `paymentPresets(t)`. Kept until the payment settings page moves to it.
+ */
 export const PAYMENT_PRESETS: PaymentPreset[] = [
   {
     value: "cash_on_delivery",
@@ -37,16 +45,34 @@ export const PAYMENT_PRESETS: PaymentPreset[] = [
   },
 ];
 
+/** The presets, in the order offered. */
+const PRESET_VALUES = ["cash_on_delivery", "bank_transfer", "custom"] as const;
+
+/**
+ * The presets as `t`'s language words them. A named preset's name is its label; staff
+ * can change it before saving.
+ */
+export function paymentPresets(t: TFor<"orders">): PaymentPreset[] {
+  return PRESET_VALUES.map((value) => ({
+    value,
+    label: t(`orders.payment_preset_${value}_label`),
+    description: t(`orders.payment_preset_${value}_description`),
+    name: value === "custom" ? "" : t(`orders.payment_preset_${value}_label`),
+    instructionsPlaceholder: t(`orders.payment_preset_${value}_instructions`),
+  }));
+}
+
 /** A provider a method can name besides `manual`: an installed app answering
  * `payments.start`, or a spore built into the API. */
 export type PaymentApp = { key: string; name: string; isBuiltIn: boolean };
 
 /**
  * What a provider key reads as: "Manual", or the app's or spore's name from its key
- * (`app_stripe`, `spore_stripe`).
+ * (`app_stripe`, `spore_stripe`). Without a translator "Manual" is English: every caller
+ * should pass one.
  */
-export function providerLabel(provider: string): string {
-  if (provider === "manual") return "Manual";
+export function providerLabel(provider: string, t?: TFor<"orders">): string {
+  if (provider === "manual") return t ? t("orders.payment_provider_manual") : "Manual";
   for (const prefix of ["app_", "spore_"])
     if (provider.startsWith(prefix)) return provider.slice(prefix.length);
   return provider;

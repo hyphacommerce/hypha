@@ -10,6 +10,7 @@ import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Text } from "@astryxdesign/core/Text";
 import { CheckCircleIcon as CheckCircleOutline } from "@heroicons/react/24/outline";
 import { CheckCircleIcon } from "@heroicons/react/24/solid";
+import { withEnglish } from "@hyphacommerce/i18n";
 import type { AdminPaths, AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { Suspense } from "react";
 
@@ -18,16 +19,15 @@ import { PageHeader } from "@/components/page-header";
 import { startOfDay, nextDay } from "@/components/resource-table/server";
 import { CardSkeleton } from "@/components/skeletons";
 import { CancelledBadge, FulfillmentBadge, PaymentBadge } from "@/components/status";
-import { type Currencies, formatMoney } from "@/lib/format";
+import { type Format, getFormat } from "@/lib/get-format";
 import {
-  loadCurrencies,
   loadSetup,
   loadStore,
   loadTimeZone,
   requireStaff,
   sessionClient,
 } from "@/lib/hypha";
-import { getT } from "@/lib/i18n";
+import { type T, getT } from "@/lib/i18n";
 import { LOW_STOCK } from "@/lib/inventory";
 import { hasScope } from "@/lib/navigation";
 
@@ -48,11 +48,12 @@ const RECENT = 5;
  * orders to fulfil and payments to collect) and the latest orders. The greeting and the banners render at once; each card streams in.
  */
 export default async function HomePage() {
-  const [me, store, setup, timeZone] = await Promise.all([
+  const [me, store, setup, timeZone, t] = await Promise.all([
     requireStaff(),
     loadStore(),
     loadSetup(),
     loadTimeZone(),
+    getT(),
   ]);
   const showChecklist = setup !== null && !setup.isFinished;
   const canSeeOrders = hasScope(me.scopes, "orders:read");
@@ -66,13 +67,17 @@ export default async function HomePage() {
     <Section padding={6}>
       <VStack gap={6} maxWidth={1280}>
         <PageHeader
-          title={`${greeting(now, timeZone)}, ${me.user.name}`}
-          description={[longDate(now, timeZone), store?.name].filter(Boolean).join(" · ")}
+          title={t(`home.greeting_${dayPart(now, timeZone)}`, { name: me.user.name })}
+          description={[longDate(now, timeZone, t.locale), store?.name]
+            .filter(Boolean)
+            .join(" · ")}
           actions={
             <>
-              {canSeeOrders && <Button label="View orders" variant="secondary" href="/orders" />}
+              {canSeeOrders && (
+                <Button label={t("home.view_orders")} variant="secondary" href="/orders" />
+              )}
               {hasScope(me.scopes, "products:write") && (
-                <Button label="Add product" variant="primary" href="/products/new" />
+                <Button label={t("home.add_product")} variant="primary" href="/products/new" />
               )}
             </>
           }
@@ -81,9 +86,15 @@ export default async function HomePage() {
         {!me.mfa_enabled && (
           <Banner
             status="warning"
-            title="Two-factor authentication is off"
-            description="Turn it on to protect your account; it takes a minute with any authenticator app."
-            endContent={<Button label="Set it up" variant="secondary" href="/account#two-factor" />}
+            title={t("home.two_factor_title")}
+            description={t("home.two_factor_description")}
+            endContent={
+              <Button
+                label={t("home.two_factor_action")}
+                variant="secondary"
+                href="/account#two-factor"
+              />
+            }
           />
         )}
 
@@ -119,17 +130,23 @@ function hasPaymentsRead(me: AdminSchemas["MeResponse"]): boolean {
   return hasScope(me.scopes, "payments:read");
 }
 
-/** "Good morning" by the store's clock, so a team abroad greets the store's day. */
-function greeting(now: Date, timeZone: string): string {
+/**
+ * Which greeting the hour calls for, by the store's clock, so a team abroad greets the
+ * store's day. The hour is computed, never shown: its locale is fixed.
+ */
+function dayPart(now: Date, timeZone: string): "morning" | "afternoon" | "evening" {
   const hour = Number(
     new Intl.DateTimeFormat("en-US", { hour: "numeric", hourCycle: "h23", timeZone }).format(now),
   );
-  return hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  return hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
 }
 
-/** "Thursday 22 October", in the store's time zone. */
-function longDate(now: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-GB", {
+/**
+ * "Thursday 22 October", in the store's time zone, as `locale` writes it. `Format` has no
+ * date with its weekday, so this one asks `Intl` itself, with the translator's locale.
+ */
+function longDate(now: Date, timeZone: string, locale: string): string {
+  return new Intl.DateTimeFormat(withEnglish(locale), {
     weekday: "long",
     day: "numeric",
     month: "long",
@@ -137,7 +154,7 @@ function longDate(now: Date, timeZone: string): string {
   }).format(now);
 }
 
-/** Today as YYYY-MM-DD in the store's time zone. */
+/** Today as YYYY-MM-DD in the store's time zone: computed, never shown, so its locale is fixed. */
 function today(now: Date, timeZone: string): string {
   return new Intl.DateTimeFormat("en-CA", {
     year: "numeric",
@@ -157,7 +174,8 @@ async function SetupState({
   me: AdminSchemas["MeResponse"];
   showChecklist: boolean;
 }) {
-  const steps = await setupSteps();
+  const t = await getT();
+  const steps = await setupSteps(t);
   return (
     <>
       {/* Only for staff who can see methods: without payments:read the checklist's
@@ -165,20 +183,24 @@ async function SetupState({
       {hasPaymentsRead(me) && steps.some((step) => step.key === "payment" && !step.isDone) && (
         <Banner
           status="warning"
-          title="Checkout is refused until a payment method is enabled"
-          description="Shoppers can't place orders with something to pay."
+          title={t("home.no_payment_title")}
+          description={t("home.no_payment_description")}
           endContent={
-            <Button label="Set up payments" variant="secondary" href="/settings/payments" />
+            <Button
+              label={t("home.no_payment_action")}
+              variant="secondary"
+              href="/settings/payments"
+            />
           }
         />
       )}
-      {showChecklist && <SetupChecklist steps={steps} />}
+      {showChecklist && <SetupChecklist steps={steps} t={t} />}
     </>
   );
 }
 
 /** What a storefront needs before it can sell, ticked as the data shows it done. */
-function SetupChecklist({ steps }: { steps: SetupStep[] }) {
+function SetupChecklist({ steps, t }: { steps: SetupStep[]; t: T }) {
   const done = steps.filter((step) => step.isDone).length;
   return (
     <Card>
@@ -186,22 +208,22 @@ function SetupChecklist({ steps }: { steps: SetupStep[] }) {
         <HStack gap={3} hAlign="between" vAlign="start" wrap="wrap">
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Get ready to sell
+              {t("home.checklist_title")}
             </Text>
             <Text type="supporting" color="secondary">
-              {done} of {steps.length} done. Each step opens the screen it's done on.
+              {t("home.checklist_progress", { done, total: steps.length })}
             </Text>
           </VStack>
-          <Button label="Continue the setup guide" variant="primary" href="/setup" />
+          <Button label={t("home.checklist_continue")} variant="primary" href="/setup" />
         </HStack>
         <VStack gap={3}>
           {steps.map((step) => (
-            <HStack key={step.label} gap={3} vAlign="start">
+            <HStack key={step.key} gap={3} vAlign="start">
               <Text color={step.isDone ? undefined : "secondary"}>
                 {step.isDone ? (
-                  <CheckCircleIcon width={20} aria-label="Done" />
+                  <CheckCircleIcon width={20} aria-label={t("common.done")} />
                 ) : (
-                  <CheckCircleOutline width={20} aria-label="Not done yet" />
+                  <CheckCircleOutline width={20} aria-label={t("home.checklist_not_done")} />
                 )}
               </Text>
               <VStack gap={0}>
@@ -235,7 +257,7 @@ type Tile = { label: string; value: string | string[]; hint: string; href: strin
  * largest page ("100+"): the tiles say what needs attention, not the books.
  */
 async function Tiles({ now, timeZone }: { now: Date; timeZone: string }) {
-  const [client, currencies] = await Promise.all([sessionClient(), loadCurrencies()]);
+  const [client, t, format] = await Promise.all([sessionClient(), getT(), getFormat()]);
   const day = today(now, timeZone);
   const placed = {
     placed_from: startOfDay(day, timeZone),
@@ -257,27 +279,27 @@ async function Tiles({ now, timeZone }: { now: Date; timeZone: string }) {
 
   const tiles: Tile[] = [
     {
-      label: "Orders today",
-      value: count(todays),
-      hint: "Placed since midnight",
+      label: t("home.tile_orders_today"),
+      value: count(t, todays),
+      hint: t("home.tile_orders_today_hint"),
       href: `/orders?placed=${day}..${day}`,
     },
     {
-      label: "Sales today",
-      value: sales(report.data?.total.sales, currencies),
-      hint: "Order totals, before refunds",
+      label: t("home.tile_sales_today"),
+      value: sales(t, format, report.data?.total.sales),
+      hint: t("home.tile_sales_today_hint"),
       href: `/orders?placed=${day}..${day}`,
     },
     {
-      label: "To fulfil",
-      value: count(unfulfilled),
-      hint: "Not yet shipped in full",
+      label: t("home.tile_to_fulfil"),
+      value: count(t, unfulfilled),
+      hint: t("home.tile_to_fulfil_hint"),
       href: "/orders?fulfillment_status=unfulfilled&fulfillment_status=partially_fulfilled&cancelled=false",
     },
     {
-      label: "Awaiting payment",
-      value: count(unpaid),
-      hint: "Manual methods to mark paid",
+      label: t("home.tile_awaiting_payment"),
+      value: count(t, unpaid),
+      hint: t("home.tile_awaiting_payment_hint"),
       href: "/orders?financial_status=pending&cancelled=false",
     },
   ];
@@ -325,7 +347,7 @@ async function Attention({
   canApprove: boolean;
   canSeeStock: boolean;
 }) {
-  const client = await sessionClient();
+  const [client, t] = await Promise.all([sessionClient(), getT()]);
   const [proposals, low] = await Promise.all([
     canApprove
       ? client.GET("/admin/agent-proposals", {
@@ -342,18 +364,18 @@ async function Attention({
   const waiting = proposals?.data;
   if (waiting && waiting.items.length > 0) {
     tiles.push({
-      label: "Proposals to review",
-      value: waiting.next_cursor ? `${waiting.items.length}+` : String(waiting.items.length),
-      hint: "Agents' changes waiting for your approval",
+      label: t("home.tile_proposals"),
+      value: counted(t, waiting.items.length, waiting.next_cursor != null),
+      hint: t("home.tile_proposals_hint"),
       href: "/agents/proposals",
     });
   }
   const running = low?.data;
   if (running) {
     tiles.push({
-      label: "Running low",
-      value: running.next_cursor ? `${running.items.length}+` : String(running.items.length),
-      hint: `Variants with fewer than ${LOW_STOCK} available`,
+      label: t("home.tile_low_stock"),
+      value: counted(t, running.items.length, running.next_cursor != null),
+      hint: t("home.tile_low_stock_hint", { count: LOW_STOCK }),
       href: `/inventory?below=${LOW_STOCK}`,
     });
   }
@@ -371,18 +393,24 @@ async function list(client: Client, query: OrderQuery): Promise<Listed> {
   return data ? { items: data.items, more: data.next_cursor != null } : null;
 }
 
-function count(listed: Listed): string {
-  if (!listed) return "—";
-  return listed.more ? `${listed.items.length}+` : String(listed.items.length);
+/** "12", or "100+" when there are more than were read. */
+function counted(t: T, shown: number, more: boolean): string {
+  return more ? t("home.count_or_more", { count: shown }) : t("home.count", { count: shown });
+}
+
+function count(t: T, listed: Listed): string {
+  if (!listed) return t("common.empty_value");
+  return counted(t, listed.items.length, listed.more);
 }
 
 /** Today's sales, one amount per currency; "—" with none. */
 function sales(
+  t: T,
+  format: Format,
   rows: AdminSchemas["SalesRowResponse"][] | undefined,
-  currencies: Currencies,
 ): string | string[] {
-  if (!rows || rows.length === 0) return "—";
-  return rows.map((row) => formatMoney(row.total, currencies));
+  if (!rows || rows.length === 0) return t("common.empty_value");
+  return rows.map((row) => format.money(row.total));
 }
 
 function TilesSkeleton() {
@@ -405,7 +433,7 @@ function TilesSkeleton() {
 
 /** The latest orders, newest first, as on a customer's page. */
 async function RecentOrders() {
-  const [client, currencies, t] = await Promise.all([sessionClient(), loadCurrencies(), getT()]);
+  const [client, format, t] = await Promise.all([sessionClient(), getFormat(), getT()]);
   const { data } = await client.GET("/admin/orders", { params: { query: { limit: RECENT } } });
   const orders = data?.items ?? [];
   return (
@@ -413,12 +441,12 @@ async function RecentOrders() {
       <VStack gap={3}>
         <HStack gap={3} hAlign="between" vAlign="center">
           <Text type="display-3" as="h2">
-            Recent orders
+            {t("home.recent_title")}
           </Text>
-          <Link href="/orders">View all</Link>
+          <Link href="/orders">{t("home.recent_view_all")}</Link>
         </HStack>
         {orders.length === 0 ? (
-          <Text color="secondary">No orders yet. They show up here as shoppers place them.</Text>
+          <Text color="secondary">{t("home.recent_empty")}</Text>
         ) : (
           <VStack gap={0}>
             {orders.map((o, i) => (
@@ -439,7 +467,7 @@ async function RecentOrders() {
                     </>
                   )}
                 </HStack>
-                <Text hasTabularNumbers>{formatMoney(o.total, currencies)}</Text>
+                <Text hasTabularNumbers>{format.money(o.total)}</Text>
               </div>
             ))}
           </VStack>

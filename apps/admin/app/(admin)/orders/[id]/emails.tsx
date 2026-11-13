@@ -15,17 +15,14 @@ import { useState } from "react";
 
 import { DateTime } from "@/components/date-time";
 import { MESSAGE_STATUS, templateName } from "@/lib/notifications";
+import { useT } from "@/lib/use-t";
 
 import { resendNotification } from "../actions";
 
 type Message = AdminSchemas["NotificationResponse"];
 
-/** How a status with an error reads its error. */
-const ERROR_LABEL: Record<string, string> = {
-  failed: "Failed: ",
-  skipped: "Skipped: ",
-  queued: "Retrying: ",
-};
+/** The statuses whose error has a sentence of its own; any other reads "Error: …". */
+const ERROR_STATUSES = ["failed", "skipped", "queued"] as const;
 
 export function EmailsCard({
   orderId,
@@ -40,13 +37,14 @@ export function EmailsCard({
   const [error, setError] = useState<string>();
   const [resending, setResending] = useState<string>();
   const toast = useToast();
+  const t = useT<"orders">();
 
   const resend = async (message: Message) => {
     setResending(message.id);
     try {
       const result = await resendNotification(orderId, message.id);
       setError(result.error);
-      if (!result.error) toast({ body: `Queued again for ${message.to}` });
+      if (!result.error) toast({ body: t("orders.emails_queued_again", { to: message.to }) });
     } finally {
       setResending(undefined);
     }
@@ -56,11 +54,11 @@ export function EmailsCard({
     <Card>
       <VStack gap={3}>
         <Text type="display-3" as="h2">
-          Emails
+          {t("orders.emails_title")}
         </Text>
         {error && <Banner status="error" title={error} onDismiss={() => setError(undefined)} />}
         {messages.length === 0 ? (
-          <Text color="secondary">No emails about this order yet.</Text>
+          <Text color="secondary">{t("orders.emails_empty")}</Text>
         ) : (
           <VStack gap={3}>
             {messages.map((message) => {
@@ -68,6 +66,10 @@ export function EmailsCard({
                 label: message.status,
                 variant: "neutral" as const,
               };
+              const sent = (
+                <DateTime key="time" value={message.sent_at ?? message.created_at} short />
+              );
+              const errorStatus = ERROR_STATUSES.find((s) => s === message.status) ?? "other";
               return (
                 <HStack key={message.id} gap={3} hAlign="between" vAlign="start" wrap="wrap">
                   <VStack gap={0.5}>
@@ -76,20 +78,22 @@ export function EmailsCard({
                       <Badge label={status.label} variant={status.variant} />
                     </HStack>
                     <Text type="supporting" color="secondary">
-                      To {message.to} ·{" "}
-                      <DateTime value={message.sent_at ?? message.created_at} short />
-                      {message.attempts > 1 ? ` · ${message.attempts} attempts` : ""}
+                      {message.attempts > 1
+                        ? t.rich("orders.emails_sent_to_attempts", {
+                            to: message.to,
+                            time: sent,
+                            attempts: message.attempts,
+                          })
+                        : t.rich("orders.emails_sent_to", { to: message.to, time: sent })}
                     </Text>
                     {message.error && message.status !== "sent" && (
                       <Text type="supporting" color="secondary">
-                        {ERROR_LABEL[message.status] ?? "Error: "}
-                        {message.error}
-                        {message.status === "queued" && message.next_attempt_at && (
-                          <>
-                            {" "}
-                            · next try <DateTime value={message.next_attempt_at} short />
-                          </>
-                        )}
+                        {message.status === "queued" && message.next_attempt_at
+                          ? t.rich("orders.emails_error_queued_next", {
+                              error: message.error,
+                              time: <DateTime key="time" value={message.next_attempt_at} short />,
+                            })
+                          : t(`orders.emails_error_${errorStatus}`, { error: message.error })}
                       </Text>
                     )}
                     {message.note && (
@@ -100,7 +104,7 @@ export function EmailsCard({
                   </VStack>
                   {canResend && message.status !== "sending" && message.status !== "queued" && (
                     <Button
-                      label="Resend"
+                      label={t("common.resend")}
                       variant="ghost"
                       size="sm"
                       isLoading={resending === message.id}

@@ -8,6 +8,7 @@ import { revalidatePath } from "next/cache";
 import { toHandle } from "@/lib/categories";
 import { parseMoney } from "@/lib/format";
 import { describe, loadCurrencies, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 
 /** The outcome of a step: a message to show, if it failed. */
 export type Result = { error?: string };
@@ -68,8 +69,12 @@ export async function addMarket(input: {
     body: { market: market.id },
   });
   refresh();
-  if (catalogError)
-    return { error: `The market was added, but not its catalog: ${await describe(catalogError)}` };
+  if (catalogError) {
+    const t = await getT();
+    return {
+      error: t("setup.market_without_catalog", { error: await describe(catalogError) }),
+    };
+  }
   return {};
 }
 
@@ -84,8 +89,9 @@ export async function addShipping(input: {
   price: string;
   currency: string;
 }): Promise<Result> {
+  const t = await getT();
   const amount = parseMoney(input.price, input.currency, await loadCurrencies());
-  if (amount === null) return { error: "Enter the rate as a number, like 5 or 4.90." };
+  if (amount === null) return { error: t("setup.shipping_rate_invalid") };
   const client = await sessionClient();
   const { data: zone, error } = await client.POST("/admin/shipping-zones", {
     body: { name: input.name, countries: input.countries },
@@ -107,7 +113,7 @@ export async function addShipping(input: {
   });
   refresh();
   if (optionError) {
-    return { error: `The zone was added, but not its rate: ${await describe(optionError)}` };
+    return { error: t("setup.shipping_zone_without_rate", { error: await describe(optionError) }) };
   }
   return {};
 }
@@ -127,16 +133,16 @@ export async function addProduct(input: {
   stock: string;
   location: string | null;
 }): Promise<Result> {
-  const client = await sessionClient();
+  const [client, t] = await Promise.all([sessionClient(), getT()]);
   const { data: market, error: marketError } = await client.GET("/admin/markets/{id}", {
     params: { path: { id: input.market } },
   });
   if (marketError) return { error: await describe(marketError) };
   const amount = parseMoney(input.price, market.currency, await loadCurrencies());
-  if (amount === null) return { error: "Enter the price as a number, like 18 or 18.50." };
+  if (amount === null) return { error: t("setup.product_price_invalid") };
   const count = input.track ? Number(input.stock.trim() || Number.NaN) : null;
   if (count !== null && (!Number.isInteger(count) || count < 0)) {
-    return { error: "Enter the stock on hand as a whole number, or turn off tracking." };
+    return { error: t("setup.product_stock_invalid") };
   }
 
   const { data: product, error } = await client.POST("/admin/products", {
@@ -147,9 +153,19 @@ export async function addProduct(input: {
     },
   });
   if (error) return { error: await describe(error) };
-  const partly = async (what: string, e: Parameters<typeof describe>[0]) => {
+  // What a later step's failure leaves: the product as a draft, and why.
+  const partly = async (
+    what: "catalog" | "stock" | "status",
+    e: Parameters<typeof describe>[0],
+  ) => {
     refresh();
-    return { error: `“${input.title}” was created as a draft, but ${what}: ${await describe(e)}` };
+    return {
+      error: t(`setup.product_partly_${what}`, {
+        title: input.title,
+        market: market.name,
+        error: await describe(e),
+      }),
+    };
   };
 
   if (market.catalog) {
@@ -157,40 +173,40 @@ export async function addProduct(input: {
       params: { path: { id: market.catalog } },
       body: { products: [product.id] },
     });
-    if (e) return partly(`not added to ${market.name}`, e);
+    if (e) return partly("catalog", e);
   }
 
   if (count !== null && input.location) {
     const { data: location, error: e } = await client.GET("/admin/locations/{id}", {
       params: { path: { id: input.location } },
     });
-    if (e) return partly("its stock wasn't set", e);
+    if (e) return partly("stock", e);
     if (!location.markets.includes(market.id)) {
       const { error: e2 } = await client.PATCH("/admin/locations/{id}", {
         params: { path: { id: location.id } },
         body: { markets: [...location.markets, market.id] },
       });
-      if (e2) return partly("its stock wasn't set", e2);
+      if (e2) return partly("stock", e2);
     }
     const variant = product.variants[0];
     const { data: item, error: e3 } = await client.POST("/admin/inventory-items", {
       body: { variant: variant.id, tracked: true },
     });
-    if (e3) return partly("its stock wasn't set", e3);
+    if (e3) return partly("stock", e3);
     if (!item.id)
-      return { error: `“${input.title}” was created as a draft, but its stock wasn't set.` };
+      return { error: t("setup.product_partly_stock_unknown", { title: input.title }) };
     const { error: e4 } = await client.PUT("/admin/inventory-items/{id}/levels/{location_id}", {
       params: { path: { id: item.id, location_id: location.id } },
       body: { on_hand: count },
     });
-    if (e4) return partly("its stock wasn't set", e4);
+    if (e4) return partly("stock", e4);
   }
 
   const { error: statusError } = await client.PATCH("/admin/products/{id}/status", {
     params: { path: { id: product.id } },
     body: { status: "active" },
   });
-  if (statusError) return partly("it wasn't activated", statusError);
+  if (statusError) return partly("status", statusError);
   refresh();
   return {};
 }

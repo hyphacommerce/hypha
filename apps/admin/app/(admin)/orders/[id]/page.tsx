@@ -30,17 +30,10 @@ import {
   PaymentBadge,
   PaymentStatusBadge,
 } from "@/components/status";
-import {
-  cancelReasonLabel,
-  type Currencies,
-  formatMoney,
-  formatUnitCost,
-  unitCostTotal,
-} from "@/lib/format";
+import { cancelReasonLabel, unitCostTotal } from "@/lib/format";
+import { type Format, getFormat } from "@/lib/get-format";
 import {
   channelNames,
-  loadCountries,
-  loadCurrencies,
   loaded,
   requireStaff,
   sessionClient,
@@ -56,18 +49,28 @@ import { EmailsCard } from "./emails";
 import { CancelOrderButton, FulfilButton, type Place, ShipmentsCard } from "./fulfilment";
 import { MarkPaid } from "./mark-paid";
 
-const RATE = new Intl.NumberFormat("en-IE", { maximumFractionDigits: 4 });
-
-const BACK: Crumb = { label: "Orders", href: "/orders" };
-
-/** "25%" from parts per million (250000). */
-function percent(ppm: number): string {
-  return `${RATE.format(ppm / 10_000)}%`;
+/** The way back to the list. */
+function back(t: T): Crumb {
+  return { label: t("common.orders"), href: "/orders" };
 }
 
-/** "1 item", "3 items". */
-function items(n: number): string {
-  return `${n} ${n === 1 ? "item" : "items"}`;
+/** "25%" from parts per million (250000). */
+function percent(format: Format, ppm: number): string {
+  return format.percent(ppm / 1_000_000, { maximumFractionDigits: 4 });
+}
+
+/** A tax as the items table shows it: "€4.00 (25%)", or a dash without one. */
+function taxCell(
+  t: T,
+  format: Format,
+  tax: { amount: AdminSchemas["Money"]; rate_ppm: number } | null | undefined,
+): string {
+  return tax
+    ? t("orders.detail_tax_with_rate", {
+        amount: format.money(tax.amount),
+        rate: percent(format, tax.rate_ppm),
+      })
+    : t("common.empty_value");
 }
 
 type OrderLine = AdminSchemas["OrderLineResponse"];
@@ -79,11 +82,13 @@ type OrderLine = AdminSchemas["OrderLineResponse"];
  */
 function UnitPrice({
   line,
-  currencies,
+  t,
+  format,
   listNames,
 }: {
   line: OrderLine;
-  currencies: Currencies;
+  t: T;
+  format: Format;
   listNames: Promise<Map<string, string>>;
 }) {
   const was = line.compare_at_price;
@@ -93,15 +98,15 @@ function UnitPrice({
     <VStack gap={0.5}>
       <HStack gap={2} wrap="wrap">
         <Text type="body" hasTabularNumbers>
-          {formatMoney(line.unit_price, currencies)}
+          {format.money(line.unit_price)}
         </Text>
         {isStruck && (
           <Text type="body" color="secondary" hasStrikethrough hasTabularNumbers>
-            {formatMoney(was, currencies)}
+            {format.money(was)}
           </Text>
         )}
       </HStack>
-      {line.unit_cost && <Margin line={line} cost={line.unit_cost} currencies={currencies} />}
+      {line.unit_cost && <Margin line={line} cost={line.unit_cost} t={t} format={format} />}
       {line.price_list && (
         <Link href={`/markets/price-lists/${line.price_list}`}>
           <Text type="supporting">
@@ -122,24 +127,34 @@ function UnitPrice({
 function Margin({
   line,
   cost,
-  currencies,
+  t,
+  format,
 }: {
   line: OrderLine;
   cost: AdminSchemas["UnitCost"];
-  currencies: Currencies;
+  t: T;
+  format: Format;
 }) {
   const costs = unitCostTotal(cost, line.quantity);
   const margin =
     costs.currency === line.total.currency
       ? { amount: line.total.amount - costs.amount, currency: costs.currency }
       : null;
+  // The margin's share of what the line was charged, to a whole percent.
   const share =
     margin && line.total.amount > 0 ? Math.round((margin.amount / line.total.amount) * 100) : null;
+  const values = { cost: format.unitCost(cost) };
   return (
     <Text type="supporting" color="secondary" hasTabularNumbers>
-      Cost {formatUnitCost(cost, currencies)}
-      {margin &&
-        ` · margin ${formatMoney(margin, currencies)}${share === null ? "" : ` (${share}%)`}`}
+      {margin === null
+        ? t("orders.detail_line_cost", values)
+        : share === null
+          ? t("orders.detail_line_cost_margin", { ...values, margin: format.money(margin) })
+          : t("orders.detail_line_cost_margin_share", {
+              ...values,
+              margin: format.money(margin),
+              share: format.percent(share / 100, { maximumFractionDigits: 0 }),
+            })}
     </Text>
   );
 }
@@ -183,44 +198,52 @@ function Charged({
   total,
   shares,
   discounts,
-  currencies,
+  t,
+  format,
 }: {
   before: AdminSchemas["Money"];
   total: AdminSchemas["Money"];
   shares: readonly DiscountShare[];
   /** The order's discounts, which `shares` name by index. */
   discounts: readonly OrderDiscount[];
-  currencies: Currencies;
+  t: T;
+  format: Format;
 }) {
-  if (shares.length === 0) return <>{formatMoney(total, currencies)}</>;
+  if (shares.length === 0) return <>{format.money(total)}</>;
   return (
     <VStack gap={0.5}>
       <Text type="supporting" color="secondary" hasStrikethrough hasTabularNumbers>
-        {formatMoney(before, currencies)}
+        {format.money(before)}
       </Text>
       <Text type="body" hasTabularNumbers>
-        {formatMoney(total, currencies)}
+        {format.money(total)}
       </Text>
-      {shares.map((share) => (
-        <Text key={share.application} type="supporting" color="secondary">
-          −{formatMoney(share.amount, currencies)}{" "}
-          {discounts[share.application]?.title ?? "Discount"}
-          {share.units ? ` (${items(share.units)})` : ""}
-        </Text>
-      ))}
+      {shares.map((share) => {
+        const values = {
+          amount: format.money(share.amount),
+          title: discounts[share.application]?.title ?? t("common.discount"),
+        };
+        return (
+          <Text key={share.application} type="supporting" color="secondary">
+            {share.units
+              ? t("orders.detail_discount_share_units", { ...values, count: share.units })
+              : t("orders.detail_discount_share", values)}
+          </Text>
+        );
+      })}
     </VStack>
   );
 }
 
 /** The discounts an order got, one row per reward, with what each took off. */
-function DiscountsList({ order, currencies }: { order: Order; currencies: Currencies }) {
+function DiscountsList({ order, t, format }: { order: Order; t: T; format: Format }) {
   if (order.discounts.length === 0) return null;
   return (
     <VStack gap={2}>
       <HStack gap={2} hAlign="between" vAlign="center">
-        <Text weight="semibold">Discounts</Text>
+        <Text weight="semibold">{t("orders.detail_discounts")}</Text>
         <Text weight="semibold" hasTabularNumbers>
-          −{formatMoney(order.discount_total, currencies)}
+          −{format.money(order.discount_total)}
         </Text>
       </HStack>
       {order.discounts.map((d) => (
@@ -233,14 +256,19 @@ function DiscountsList({ order, currencies }: { order: Order; currencies: Curren
               </Text>
             </Link>
             <Text type="supporting" color="secondary">
-              {[d.code ? `Code ${d.code}` : "Automatic", d.summary].join(" · ")}
+              {[
+                d.code
+                  ? t("orders.detail_discount_code", { code: d.code })
+                  : t("orders.detail_discount_automatic"),
+                d.summary,
+              ].join(" · ")}
             </Text>
           </VStack>
-          <Text hasTabularNumbers>−{formatMoney(d.amount, currencies)}</Text>
+          <Text hasTabularNumbers>−{format.money(d.amount)}</Text>
         </HStack>
       ))}
       <Text type="supporting" color="secondary">
-        Already taken off the lines and shipping above.
+        {t("orders.detail_discounts_note")}
       </Text>
     </VStack>
   );
@@ -266,11 +294,11 @@ function TotalRow({ label, children }: { label: ReactNode; children: ReactNode }
  * behind a skeleton of the page.
  */
 export default async function OrderPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+  const [{ id }, t] = await Promise.all([params, getT()]);
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={1280}>
-        <Suspense fallback={<DetailSkeleton back={BACK} />}>
+        <Suspense fallback={<DetailSkeleton back={back(t)} />}>
           <Order id={id} />
         </Suspense>
       </VStack>
@@ -279,7 +307,7 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
 }
 
 async function Order({ id }: { id: string }) {
-  const [client, t] = await Promise.all([sessionClient(), getT()]);
+  const [client, t, format] = await Promise.all([sessionClient(), getT(), getFormat()]);
   // All at once; a missing order still goes to the 404 page (`loaded`). Shipments and
   // locations need their own scopes; without them the page shows the order alone. The
   // emails need `notifications:read` and `orders:read` (they name the buyer); without
@@ -290,8 +318,6 @@ async function Order({ id }: { id: string }) {
     shipments,
     locations,
     channelName,
-    currencies,
-    countries,
     emails,
     me,
     extensions,
@@ -302,8 +328,6 @@ async function Order({ id }: { id: string }) {
     client.GET("/admin/orders/{id}/fulfillments", { params: { path: { id } } }),
     client.GET("/admin/locations"),
     channelNames(client),
-    loadCurrencies(),
-    loadCountries(),
     client.GET("/admin/notifications", { params: { query: { order: id } } }),
     requireStaff(),
     loadExtensions(),
@@ -316,7 +340,7 @@ async function Order({ id }: { id: string }) {
   // The address check names an app and a staff member by ID: their names, when it does
   // (IDs stay where the role can't read apps or users).
   const check = order.address_check;
-  const [format, people, apps] = await Promise.all([
+  const [addressFormat, people, apps] = await Promise.all([
     order.shipping_address
       ? client
           .GET("/admin/address-formats/{country}", {
@@ -333,7 +357,7 @@ async function Order({ id }: { id: string }) {
   ]);
   const canWriteOrders = me.scopes.includes("orders:write");
   const listNames = priceListNames(client, order.lines);
-  const countryName = (code: string) => countries.find((c) => c.code === code)?.name ?? code;
+
   const fulfillments = shipments.data?.items ?? [];
   const places: Place[] = (locations.data?.items ?? []).map((l) => ({ id: l.id, name: l.name }));
   const cancelled = order.cancelled_at !== null && order.cancelled_at !== undefined;
@@ -343,14 +367,13 @@ async function Order({ id }: { id: string }) {
   return (
     <>
       <PageHeader
-        title={`Order #${order.number}`}
-        description={
-          <>
-            Placed <DateTime value={order.placed_at} /> ·{" "}
-            {channelName.get(order.channel) ?? order.channel}
-          </>
-        }
-        back={BACK}
+        // An order's number is shown as it is, never grouped like a count.
+        title={t("orders.detail_title", { number: String(order.number) })}
+        description={t.rich("orders.detail_placed", {
+          time: <DateTime key="time" value={order.placed_at} />,
+          channel: channelName.get(order.channel) ?? order.channel,
+        })}
+        back={back(t)}
         badges={
           <HStack gap={1}>
             {cancelled && <CancelledBadge t={t} />}
@@ -377,8 +400,14 @@ async function Order({ id }: { id: string }) {
       {cancelled && (
         <Banner
           status="warning"
-          title="Cancelled"
-          description={`${order.cancel_reason ? cancelReasonLabel(t, order.cancel_reason) : "No reason given"}. Its stock was released.`}
+          title={t("orders.detail_cancelled_title")}
+          description={
+            order.cancel_reason
+              ? t("orders.detail_cancelled_reason", {
+                  reason: cancelReasonLabel(t, order.cancel_reason),
+                })
+              : t("orders.detail_cancelled_no_reason")
+          }
         />
       )}
 
@@ -387,17 +416,17 @@ async function Order({ id }: { id: string }) {
           <Card>
             <VStack gap={3}>
               <Text type="display-3" as="h2">
-                Items
+                {t("orders.detail_items")}
               </Text>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHeaderCell>Product</TableHeaderCell>
-                    <TableHeaderCell>Price</TableHeaderCell>
-                    <TableHeaderCell>Quantity</TableHeaderCell>
-                    <TableHeaderCell>Shipped</TableHeaderCell>
-                    <TableHeaderCell>Tax</TableHeaderCell>
-                    <TableHeaderCell>Total</TableHeaderCell>
+                    <TableHeaderCell>{t("common.product")}</TableHeaderCell>
+                    <TableHeaderCell>{t("common.price")}</TableHeaderCell>
+                    <TableHeaderCell>{t("common.quantity")}</TableHeaderCell>
+                    <TableHeaderCell>{t("orders.detail_column_shipped")}</TableHeaderCell>
+                    <TableHeaderCell>{t("common.tax")}</TableHeaderCell>
+                    <TableHeaderCell>{t("common.total")}</TableHeaderCell>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -412,7 +441,10 @@ async function Order({ id }: { id: string }) {
                           </Link>
                           {(line.variant_title || line.sku) && (
                             <Text type="supporting" color="secondary">
-                              {[line.variant_title, line.sku && `SKU ${line.sku}`]
+                              {[
+                                line.variant_title,
+                                line.sku && t("orders.detail_line_sku", { sku: line.sku }),
+                              ]
                                 .filter(Boolean)
                                 .join(" · ")}
                             </Text>
@@ -420,36 +452,36 @@ async function Order({ id }: { id: string }) {
                         </VStack>
                       </TableCell>
                       <TableCell>
-                        <UnitPrice line={line} currencies={currencies} listNames={listNames} />
+                        <UnitPrice line={line} t={t} format={format} listNames={listNames} />
                       </TableCell>
-                      <TableCell>{line.quantity}</TableCell>
+                      <TableCell>{format.number(line.quantity)}</TableCell>
                       <TableCell>
-                        {line.fulfilled_quantity} of {line.quantity}
+                        {t("orders.detail_line_shipped", {
+                          fulfilled: line.fulfilled_quantity,
+                          quantity: line.quantity,
+                        })}
                       </TableCell>
-                      <TableCell>
-                        {line.tax
-                          ? `${formatMoney(line.tax.amount, currencies)} (${percent(line.tax.rate_ppm)})`
-                          : "—"}
-                      </TableCell>
+                      <TableCell>{taxCell(t, format, line.tax)}</TableCell>
                       <TableCell>
                         <Charged
                           before={line.subtotal}
                           total={line.total}
                           shares={line.discounts}
                           discounts={order.discounts}
-                          currencies={currencies}
+                          t={t}
+                          format={format}
                         />
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
                 <TableFooter>
-                  <TotalRow label="Subtotal">{formatMoney(order.subtotal, currencies)}</TotalRow>
+                  <TotalRow label={t("common.subtotal")}>{format.money(order.subtotal)}</TotalRow>
                   {order.shipping_lines.map((shipping) => (
                     <TableRow key={shipping.group}>
                       <TableCell>
                         <VStack gap={0.5}>
-                          <Text>Shipping: {shipping.name}</Text>
+                          <Text>{t("orders.detail_shipping_line", { name: shipping.name })}</Text>
                           {shipping.provider && (
                             <Text type="supporting" color="secondary">
                               {[shipping.provider, shipping.service, shipping.reference]
@@ -462,43 +494,44 @@ async function Order({ id }: { id: string }) {
                       <TableCell />
                       <TableCell />
                       <TableCell />
-                      <TableCell>
-                        {shipping.tax
-                          ? `${formatMoney(shipping.tax.amount, currencies)} (${percent(shipping.tax.rate_ppm)})`
-                          : "—"}
-                      </TableCell>
+                      <TableCell>{taxCell(t, format, shipping.tax)}</TableCell>
                       <TableCell>
                         <Charged
                           before={shipping.amount}
                           total={shipping.total}
                           shares={shipping.discounts}
                           discounts={order.discounts}
-                          currencies={currencies}
+                          t={t}
+                          format={format}
                         />
                       </TableCell>
                     </TableRow>
                   ))}
-                  <TotalRow label={order.taxes_included ? "Tax (included)" : "Tax"}>
-                    {formatMoney(order.tax_total, currencies)}
+                  <TotalRow
+                    label={
+                      order.taxes_included ? t("orders.detail_tax_included") : t("common.tax")
+                    }
+                  >
+                    {format.money(order.tax_total)}
                   </TotalRow>
                   <TotalRow
                     label={
                       <Text type="body" weight="bold">
-                        Total
+                        {t("common.total")}
                       </Text>
                     }
                   >
                     <Text type="body" weight="bold">
-                      {formatMoney(order.total, currencies)}
+                      {format.money(order.total)}
                     </Text>
                   </TotalRow>
                 </TableFooter>
               </Table>
-              <DiscountsList order={order} currencies={currencies} />
+              <DiscountsList order={order} t={t} format={format} />
             </VStack>
           </Card>
 
-          <PaymentCard order={order} currencies={currencies} extensions={extensions} t={t} />
+          <PaymentCard order={order} format={format} extensions={extensions} t={t} />
 
           {fulfillments.length > 0 && (
             <ShipmentsCard order={order} fulfillments={fulfillments} places={places} />
@@ -521,21 +554,34 @@ async function Order({ id }: { id: string }) {
           )}
 
           <TimelineCard
+            title={t("orders.timeline_title")}
             events={[
               {
                 at: order.placed_at,
-                what: `Placed through ${channelName.get(order.channel) ?? "a channel"}`,
+                what: channelName.has(order.channel)
+                  ? t("orders.timeline_placed", { channel: channelName.get(order.channel) })
+                  : t("orders.timeline_placed_unknown"),
               },
-              ...fulfillments.map((f) => ({
-                at: f.created_at,
-                what: `Fulfilled ${items(f.lines.reduce((n, l) => n + l.quantity, 0))}${f.cancelled_at ? " (cancelled since)" : ""}`,
-              })),
+              ...fulfillments.map((f) => {
+                const count = f.lines.reduce((n, l) => n + l.quantity, 0);
+                return {
+                  at: f.created_at,
+                  what: f.cancelled_at
+                    ? t("orders.timeline_fulfilled_cancelled", { count })
+                    : t("orders.timeline_fulfilled", { count }),
+                };
+              }),
               ...order.payments.flatMap((p) => [
                 ...(p.paid_at
                   ? [
                       {
                         at: p.paid_at,
-                        what: `Paid ${formatMoney(p.amount, currencies)}${p.method_name ? ` by ${p.method_name}` : ""}`,
+                        what: p.method_name
+                          ? t("orders.timeline_paid_by", {
+                              amount: format.money(p.amount),
+                              method: p.method_name,
+                            })
+                          : t("orders.timeline_paid", { amount: format.money(p.amount) }),
                       },
                     ]
                   : []),
@@ -543,41 +589,47 @@ async function Order({ id }: { id: string }) {
                   ? [
                       {
                         at: p.voided_at,
-                        what: `Payment voided${p.method_name ? ` (${p.method_name})` : ""}`,
+                        what: p.method_name
+                          ? t("orders.timeline_voided_method", { method: p.method_name })
+                          : t("orders.timeline_voided"),
                       },
                     ]
                   : []),
               ]),
-              ...(order.cancelled_at ? [{ at: order.cancelled_at, what: "Cancelled" }] : []),
+              ...(order.cancelled_at
+                ? [{ at: order.cancelled_at, what: t("orders.timeline_cancelled") }]
+                : []),
             ]}
           />
         </div>
         <div>
           <Card>
-            <MetadataList title="Summary">
-              <MetadataListItem label="Total">
-                <Text weight="bold">{formatMoney(order.total, currencies)}</Text>
+            <MetadataList title={t("common.summary")}>
+              <MetadataListItem label={t("common.total")}>
+                <Text weight="bold">{format.money(order.total)}</Text>
               </MetadataListItem>
-              <MetadataListItem label="Payment">
+              <MetadataListItem label={t("orders.payment")}>
                 <PaymentBadge status={order.financial_status} t={t} />
               </MetadataListItem>
-              <MetadataListItem label="Fulfilment">
+              <MetadataListItem label={t("orders.fulfilment")}>
                 <FulfillmentBadge status={order.fulfillment_status} t={t} />
               </MetadataListItem>
-              <MetadataListItem label="Items">
-                {order.lines.reduce((n, l) => n + l.quantity, 0)}
+              <MetadataListItem label={t("orders.detail_items")}>
+                {format.number(order.lines.reduce((n, l) => n + l.quantity, 0))}
               </MetadataListItem>
             </MetadataList>
           </Card>
 
           <Card>
-            <MetadataList title="Customer">
-              <MetadataListItem label="Email">
+            <MetadataList title={t("common.customer")}>
+              <MetadataListItem label={t("common.email")}>
                 <Link href={`/customers/${order.customer}`}>{order.email}</Link>
               </MetadataListItem>
-              <MetadataListItem label="Country">{countryName(order.country)}</MetadataListItem>
-              <MetadataListItem label="Currency">{order.currency}</MetadataListItem>
-              <MetadataListItem label="Channel">
+              <MetadataListItem label={t("common.country")}>
+                {format.countryName(order.country)}
+              </MetadataListItem>
+              <MetadataListItem label={t("common.currency")}>{order.currency}</MetadataListItem>
+              <MetadataListItem label={t("common.channel")}>
                 {channelName.get(order.channel) ?? order.channel}
               </MetadataListItem>
             </MetadataList>
@@ -585,13 +637,13 @@ async function Order({ id }: { id: string }) {
 
           {order.shipping_address && (
             <Card>
-              <MetadataList title="Ships to">
-                <MetadataListItem label="Name">
+              <MetadataList title={t("orders.detail_ships_to")}>
+                <MetadataListItem label={t("common.name")}>
                   {[order.shipping_address.first_name, order.shipping_address.last_name]
                     .filter(Boolean)
                     .join(" ")}
                 </MetadataListItem>
-                <MetadataListItem label="Address">
+                <MetadataListItem label={t("common.address")}>
                   {[
                     order.shipping_address.company,
                     order.shipping_address.line1,
@@ -600,22 +652,26 @@ async function Order({ id }: { id: string }) {
                       .filter(Boolean)
                       .join(" "),
                     order.shipping_address.province_name ?? order.shipping_address.province,
-                    countryName(order.shipping_address.country),
+                    format.countryName(order.shipping_address.country),
                   ]
                     .filter(Boolean)
                     .join(", ")}
                 </MetadataListItem>
                 {order.shipping_address.phone && (
-                  <MetadataListItem label="Phone">{order.shipping_address.phone}</MetadataListItem>
+                  <MetadataListItem label={t("common.phone")}>
+                    {order.shipping_address.phone}
+                  </MetadataListItem>
                 )}
               </MetadataList>
-              {canWriteOrders && format && <EditAddressButton order={order} format={format} />}
+              {canWriteOrders && addressFormat && (
+                <EditAddressButton order={order} format={addressFormat} />
+              )}
             </Card>
           )}
 
           <AddressCheckCard
             order={order}
-            format={format}
+            format={addressFormat}
             canWrite={canWriteOrders}
             names={Object.fromEntries([...people, ...apps])}
           />
@@ -646,12 +702,12 @@ type Order = AdminSchemas["AdminOrderResponse"];
 /** How the order is paid for: each payment, newest first. */
 function PaymentCard({
   order,
-  currencies,
+  format,
   extensions,
   t,
 }: {
   order: Order;
-  currencies: Currencies;
+  format: Format;
   extensions: Extensions;
   t: T;
 }) {
@@ -661,53 +717,54 @@ function PaymentCard({
         <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
           <HStack gap={2} vAlign="center">
             <Text type="display-3" as="h2">
-              Payment
+              {t("orders.payment")}
             </Text>
             <PaymentBadge status={order.financial_status} t={t} />
           </HStack>
         </HStack>
         {order.payments.length === 0 ? (
-          <Text color="secondary">
-            No payment method. Mark the order paid when you collect the money, and a manual payment
-            of the total is recorded.
-          </Text>
+          <Text color="secondary">{t("orders.detail_no_payment")}</Text>
         ) : (
           <VStack gap={4}>
             {order.payments.map((payment) => (
               <VStack key={payment.id} gap={2}>
                 <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
                   <HStack gap={2} vAlign="center">
-                    <Text weight="medium">{payment.method_name ?? "Recorded by staff"}</Text>
+                    <Text weight="medium">
+                      {payment.method_name ?? t("orders.detail_payment_by_staff")}
+                    </Text>
                     <PaymentStatusBadge status={payment.status} t={t} />
                   </HStack>
-                  <Text weight="medium">{formatMoney(payment.amount, currencies)}</Text>
+                  <Text weight="medium">{format.money(payment.amount)}</Text>
                 </HStack>
                 <MetadataList>
-                  <MetadataListItem label="Provider">
-                    {providerLabel(payment.provider)}
+                  <MetadataListItem label={t("orders.detail_payment_provider")}>
+                    {providerLabel(payment.provider, t)}
                   </MetadataListItem>
                   {payment.reference && (
-                    <MetadataListItem label="Reference">{payment.reference}</MetadataListItem>
+                    <MetadataListItem label={t("orders.reference")}>
+                      {payment.reference}
+                    </MetadataListItem>
                   )}
                   {payment.paid_at && (
-                    <MetadataListItem label="Paid">
+                    <MetadataListItem label={t("orders.detail_payment_paid")}>
                       <DateTime value={payment.paid_at} />
                     </MetadataListItem>
                   )}
                   {payment.voided_at && (
-                    <MetadataListItem label="Voided">
+                    <MetadataListItem label={t("orders.detail_payment_voided")}>
                       <DateTime value={payment.voided_at} />
                     </MetadataListItem>
                   )}
                   {payment.refunded.amount > 0 && (
-                    <MetadataListItem label="Refunded">
-                      {formatMoney(payment.refunded, currencies)}
+                    <MetadataListItem label={t("orders.detail_payment_refunded")}>
+                      {format.money(payment.refunded)}
                     </MetadataListItem>
                   )}
                 </MetadataList>
                 {payment.instructions && (
                   <VStack gap={1}>
-                    <Text type="label">Instructions the shopper saw</Text>
+                    <Text type="label">{t("orders.detail_payment_instructions")}</Text>
                     <Text type="supporting" color="secondary">
                       <span style={{ whiteSpace: "pre-wrap" }}>{payment.instructions}</span>
                     </Text>
@@ -734,13 +791,19 @@ function PaymentCard({
 }
 
 /** What happened to the order, oldest first: what the order and its shipments record. */
-function TimelineCard({ events }: { events: { at: string; what: string }[] }) {
+function TimelineCard({
+  title,
+  events,
+}: {
+  title: string;
+  events: { at: string; what: string }[];
+}) {
   const sorted = events.toSorted((a, b) => a.at.localeCompare(b.at));
   return (
     <Card>
       <VStack gap={3}>
         <Text type="display-3" as="h2">
-          Timeline
+          {title}
         </Text>
         <VStack gap={2}>
           {sorted.map((e) => (

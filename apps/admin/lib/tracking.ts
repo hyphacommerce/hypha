@@ -1,6 +1,8 @@
 // Tracking numbers as the order page edits them: shared by the dialogs, which
 // check them, and the server actions, which send them.
 
+import type { TFor } from "./messages";
+
 /** One row of the form. Every field is text; blanks are left out when sent. */
 export type TrackingInput = { carrier: string; number: string; url: string };
 
@@ -14,12 +16,12 @@ function isBlank(row: TrackingInput): boolean {
 }
 
 /**
- * What's wrong with the rows, if anything: a carrier or link needs its number, so none
- * is dropped without a word. Fully blank rows are fine (they're left out).
+ * What's wrong with the rows, if anything, in `t`'s language: a carrier or link needs its
+ * number, so none is dropped without a word. Fully blank rows are fine (they're left out).
  */
-export function trackingProblem(rows: TrackingInput[]): string | undefined {
+export function trackingProblem(t: TFor<"orders">, rows: TrackingInput[]): string | undefined {
   if (rows.some((row) => !isBlank(row) && !row.number.trim())) {
-    return "Enter the tracking number for each carrier or link, or clear them.";
+    return t("orders.tracking_problem");
   }
   return undefined;
 }

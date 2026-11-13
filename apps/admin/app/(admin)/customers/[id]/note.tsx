@@ -15,8 +15,12 @@ import { useState, useTransition } from "react";
 
 import { saveCustomFields } from "@/components/custom-fields/actions";
 import type { Definition, FieldsResponse } from "@/lib/custom-fields";
+import { useT } from "@/lib/use-t";
 
 import { AddWellKnown } from "./labels";
+
+/** The scope a role needs to see the note: named as it is in every language. */
+const PROFILE_SCOPE = "customer_data:profile";
 
 export function NoteCard({
   customerId,
@@ -35,20 +39,20 @@ export function NoteCard({
   /** `custom_fields:write`: the field can be created. */
   canDefine: boolean;
 }) {
+  const t = useT<"customers">();
   if (!definition) {
     if (!canDefine) return null;
     return (
       <Card>
         <VStack gap={2}>
           <Text type="display-3" as="h2">
-            Note
+            {t("common.note")}
           </Text>
           <Text type="supporting" color="secondary">
-            Keep what staff should know about a customer here. It&apos;s a personal custom field:
-            hidden from roles without customer_data:profile, and erased with them.
+            {t("customers.note_missing_description", { scope: PROFILE_SCOPE })}
           </Text>
           <HStack>
-            <AddWellKnown which="note" label="Add a note field" />
+            <AddWellKnown which="note" label={t("customers.note_add_field")} />
           </HStack>
         </VStack>
       </Card>
@@ -86,6 +90,7 @@ function NoteEditor({
   canEdit: boolean;
 }) {
   const router = useRouter();
+  const t = useT<"customers">();
   const [text, setText] = useState(saved);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -112,7 +117,7 @@ function NoteEditor({
         </Text>
         {hidden ? (
           <Text type="supporting" color="secondary">
-            Personal: hidden from your role.
+            {t("customers.note_hidden")}
           </Text>
         ) : canEdit ? (
           <>
@@ -121,7 +126,7 @@ function NoteEditor({
               label={definition.name}
               isLabelHidden
               description={definition.description ?? undefined}
-              placeholder="What staff should know about this customer."
+              placeholder={t("customers.note_placeholder")}
               rows={5}
               maxLength={definition.validations.max_length ?? undefined}
               value={text}
@@ -133,7 +138,7 @@ function NoteEditor({
             {isDirty && (
               <HStack gap={2} hAlign="end">
                 <Button
-                  label="Discard"
+                  label={t("common.discard")}
                   variant="ghost"
                   size="sm"
                   onClick={() => {
@@ -142,7 +147,7 @@ function NoteEditor({
                   }}
                 />
                 <Button
-                  label="Save"
+                  label={t("common.save")}
                   variant="primary"
                   size="sm"
                   isLoading={isPending}
@@ -152,7 +157,7 @@ function NoteEditor({
             )}
           </>
         ) : saved === "" ? (
-          <Text color="secondary">No note.</Text>
+          <Text color="secondary">{t("customers.note_empty")}</Text>
         ) : (
           <Text style={{ whiteSpace: "pre-wrap" }}>{saved}</Text>
         )}
