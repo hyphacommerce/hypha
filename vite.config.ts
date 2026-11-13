@@ -118,7 +118,6 @@ export default defineConfig({
           "react/no-unstable-nested-components": ["warn", { allowAsProps: true }],
         },
       },
-      },
       {
         files: [
           "packages/cli/**",
