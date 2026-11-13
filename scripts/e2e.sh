@@ -313,7 +313,7 @@ MUG=$(id)
 MUG_VAR=$(variant)
 step "the mug's translatable fields" 200 - "$BASE/admin/translations/product/$MUG"
 contains "what it can be translated from and into" '"default_language":"en","languages":["de","fr"]'
-contains "the title's source text" '"key":"title","format":"text","max_length":255,"source":"Mug"'
+contains "the title's source text" '"key":"title","format":"text","max_length":255,"min_length":null,"source":"Mug"'
 step "nothing to translate in an empty description" 422 invalid_translation \
     -X PUT "$BASE/admin/translations/product/$MUG/de" -H "$JSON" -d '{"fields":{"description":{"value":"<p>Eine Tasse.</p>"}}}'
 contains "says why" '"code":"source_empty","key":"description"'
@@ -2191,7 +2191,7 @@ contains "brass" '"custom.material":"brass"'
 step "and their definitions, to name them" 200 - "$BASE/storefront/custom-field-definitions?owner_type=product"
 contains "by name" '"field":"custom.material","name":"Material"'
 step "the lamp's translatable fields" 200 - "$BASE/admin/translations/product/$LAMP"
-contains "its material" "\"key\":\"custom_fields.$MATERIAL_FIELD.value\",\"format\":\"text\",\"max_length\":255,\"source\":\"brass\""
+contains "its material" "\"key\":\"custom_fields.$MATERIAL_FIELD.value\",\"format\":\"text\",\"max_length\":255,\"min_length\":null,\"source\":\"brass\""
 contains "named by its definition" "\"custom_field\":{\"definition\":\"$MATERIAL_FIELD\",\"key\":\"custom.material\",\"name\":\"Material\",\"type\":\"text\""
 step "a text value is one line" 422 invalid_translation -X PUT "$BASE/admin/translations/product/$LAMP/de" -H "$JSON" \
     -d "{\"fields\":{\"custom_fields.$MATERIAL_FIELD.value\":{\"value\":\"Mes\\nsing\"}}}"
