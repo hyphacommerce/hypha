@@ -7,6 +7,7 @@ import { useMemo } from "react";
 
 import { NavigationProgress } from "@/components/navigation-progress";
 import { SiteLink } from "@/components/site-link";
+import { useSteadyCatalog } from "@/lib/use-steady-catalog";
 import { shopTheme } from "@/theme/shop";
 
 /** The shop's theme (`theme/shopTheme.ts`), always light like hyphacommerce.com, the
@@ -29,11 +30,8 @@ export function Providers({
 }) {
   // By content: the layout sends an equal catalog as a new object on every server
   // render, and Astryx would build its lookup again for each.
-  const sent = astryxMessages ? JSON.stringify(astryxMessages) : undefined;
-  const messages = useMemo(
-    () => (sent ? { [language]: JSON.parse(sent) } : undefined),
-    [language, sent],
-  );
+  const steady = useSteadyCatalog(astryxMessages);
+  const messages = useMemo(() => (steady ? { [language]: steady } : undefined), [language, steady]);
   return (
     <InternationalizationProvider locale={language} dir={direction} messages={messages}>
       <Theme theme={shopTheme} mode="light">

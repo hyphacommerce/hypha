@@ -6,7 +6,8 @@
 
 import type { Messages, Missing } from "@hyphacommerce/i18n";
 import { I18nProvider } from "@hyphacommerce/i18n/react";
-import { useMemo } from "react";
+
+import { useSteadyCatalog } from "@/lib/use-steady-catalog";
 
 /** A key no provider above the component was given: its namespace wasn't sent to this
  * page, and the key itself is on screen. */
@@ -32,12 +33,9 @@ export function MessagesProvider({
   messages: Messages;
   children: React.ReactNode;
 }) {
-  // By content, not identity: every server render of the layout (a navigation, an
-  // action's `refresh()`) sends an equal catalog as a new object, and the provider
-  // would make a new translator for it, compiling every message again and re-rendering
-  // everything that reads one.
-  const sent = JSON.stringify(messages);
-  const steady = useMemo<Messages>(() => JSON.parse(sent), [sent]);
+  // By content, not identity: the provider would otherwise make a new translator for
+  // each server render's equal catalog, compiling every message again.
+  const steady = useSteadyCatalog(messages);
   return (
     <I18nProvider language={language} locale={locale} messages={steady} onMissing={onMissing}>
       {children}
