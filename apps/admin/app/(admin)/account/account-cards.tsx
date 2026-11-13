@@ -16,6 +16,7 @@ import { type SubmitEvent, type ReactNode, startTransition, useState, useTransit
 
 import { DateTime } from "@/components/date-time";
 import { NewPasswordFields, fieldText, newPasswordProblem } from "@/components/new-password";
+import { capitalized } from "@/lib/format";
 import type { TFor } from "@/lib/messages";
 import { PSEUDO } from "@/lib/pseudo";
 import { useT } from "@/lib/use-t";
@@ -142,7 +143,9 @@ function ownName(tag: string): string {
   try {
     // Not the reader's `Format`: a language is offered under its own name, so someone who
     // can't read the current one still finds theirs.
-    return new Intl.DisplayNames(tag, { type: "language" }).of(tag) ?? tag;
+    const name = new Intl.DisplayNames(tag, { type: "language" }).of(tag);
+    // Shown alone: Serbian writes "srpski (latinica)" inside a sentence.
+    return name === undefined ? tag : capitalized(name, tag);
   } catch {
     return tag;
   }

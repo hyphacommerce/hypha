@@ -33,6 +33,8 @@ import {
   type StoreLanguage,
   canonicalTag,
   languageLabel,
+  languagesInUse,
+  offeredLanguages,
   sameTag,
 } from "@/lib/languages";
 import { useFormat } from "@/lib/use-format";
@@ -43,12 +45,19 @@ import { type BlockingMarket, type LanguagesResult, saveLanguages } from "./acti
 export function LanguagesForm({
   defaultLanguage,
   languages,
+  markets,
   canWrite,
   storeHref,
   facetsHref,
 }: {
   defaultLanguage: string;
   languages: StoreLanguage[];
+  /**
+   * The markets with the languages each offers, to refuse a change one of them is in
+   * the way of before it's confirmed; absent for a role that can't read markets, which
+   * the API's refusal tells instead.
+   */
+  markets?: BlockingMarket[];
   /** Whether the role may change the store (`stores:write`). */
   canWrite: boolean;
   /** The editor for the store's own text, for a role that can open it. */
@@ -56,7 +65,7 @@ export function LanguagesForm({
   /** The editor for the search filters' labels, likewise. */
   facetsHref?: string;
 }) {
-  const t = useT<"languages">();
+  const t = useT<"languages" | "errors">();
   const format = useFormat();
   const [failure, setFailure] = useState<LanguagesResult>({});
   const [isPending, startTransition] = useTransition();
@@ -67,6 +76,8 @@ export function LanguagesForm({
   const [removing, setRemoving] = useState<StoreLanguage>();
 
   const name = (tag: string) => format.languageName(tag);
+  // Messages put a language inside their sentence.
+  const inSentence = (tag: string) => format.languageNameInSentence(tag);
   const option = (tag: string) => ({ value: tag, label: languageLabel(format, tag) });
   const byLabel = (a: { label: string }, b: { label: string }) => format.compare(a.label, b.label);
   const isListed = (tag: string) =>
@@ -79,6 +90,24 @@ export function LanguagesForm({
     return result.error === undefined;
   };
 
+  type Change = Parameters<typeof saveLanguages>[0];
+  /**
+   * Whether markets still offer a language the change would take away: then they're
+   * shown, as the API's refusal would show them, and the change isn't made (or
+   * confirmed). The API checks again, for a market changed meanwhile.
+   */
+  const isBlocked = (change: Change): boolean => {
+    if (!markets) return false;
+    const inUse = languagesInUse(
+      offeredLanguages(defaultLanguage, languages),
+      offeredLanguages(change.defaultLanguage ?? defaultLanguage, change.languages ?? languages),
+      markets,
+    );
+    if (inUse.length === 0) return false;
+    setFailure({ error: t("errors.language_in_use"), markets: inUse });
+    return true;
+  };
+
   // The default language: a common tag, the stored one, or one of the store's others (a
   // typed tag among them).
   const defaultOptions = [
@@ -86,15 +115,20 @@ export function LanguagesForm({
   ]
     .map(option)
     .toSorted(byLabel);
-  const changeDefault = () =>
+  const changeDefault = () => {
+    // A listed language that becomes the default leaves the list in the same request.
+    const rest = languages.filter((l) => !sameTag(l.language, chosenDefault));
+    const change = {
+      defaultLanguage: chosenDefault,
+      languages: rest.length === languages.length ? undefined : rest,
+    };
+    // No market check here: a content language can't change while the store has
+    // translations, and that refusal is the API's to give. Naming markets would send the
+    // merchant after a fix that wouldn't let the change through.
     startTransition(async () => {
-      // A listed language that becomes the default leaves the list in the same request.
-      const rest = languages.filter((l) => !sameTag(l.language, chosenDefault));
-      await send({
-        defaultLanguage: chosenDefault,
-        languages: rest.length === languages.length ? undefined : rest,
-      });
+      await send(change);
     });
+  };
 
   // Adding: a typed tag wins over the select, so "de-AT" can be written out.
   const typedTag = typed.trim() === "" ? undefined : canonicalTag(typed);
@@ -122,12 +156,21 @@ export function LanguagesForm({
   // Each change sends the whole list built from the saved one, so a second change made
   // before the first's answer came back would undo it: every control waits while one is
   // in flight (the transition lasts until the page holds the saved list).
-  const publish = (language: string, published: boolean) =>
+  const publish = (language: string, published: boolean) => {
+    const change = {
+      languages: languages.map((l) => (l.language === language ? { ...l, published } : l)),
+    };
+    if (isBlocked(change)) return;
     startTransition(async () => {
-      await send({
-        languages: languages.map((l) => (l.language === language ? { ...l, published } : l)),
-      });
+      await send(change);
     });
+  };
+  // Removing deletes translations for good: what's in its way is said before it's
+  // confirmed, not after.
+  const askToRemove = (language: StoreLanguage) => {
+    if (isBlocked({ languages: languages.filter((l) => l.language !== language.language) })) return;
+    setRemoving(language);
+  };
 
   const remove = (language: string) =>
     startTransition(async () => {
@@ -176,7 +219,10 @@ export function LanguagesForm({
                   label={t("common.discard")}
                   variant="ghost"
                   isDisabled={isPending}
-                  onClick={() => setChosenDefault(defaultLanguage)}
+                  onClick={() => {
+                    setChosenDefault(defaultLanguage);
+                    setFailure({});
+                  }}
                 />
               </>
             )}
@@ -226,7 +272,9 @@ export function LanguagesForm({
                     </TableCell>
                     <TableCell>
                       <Switch
-                        label={t("languages.publish_named", { name: name(language.language) })}
+                        label={t("languages.publish_named", {
+                          name: inSentence(language.language),
+                        })}
                         isLabelHidden
                         size="sm"
                         value={language.published}
@@ -238,12 +286,14 @@ export function LanguagesForm({
                       {canWrite && (
                         <HStack gap={1} hAlign="end">
                           <IconButton
-                            label={t("common.remove_named", { name: name(language.language) })}
+                            label={t("common.remove_named", {
+                              name: inSentence(language.language),
+                            })}
                             icon={<TrashIcon />}
                             size="sm"
                             variant="ghost"
                             isDisabled={isPending}
-                            onClick={() => setRemoving(language)}
+                            onClick={() => askToRemove(language)}
                           />
                         </HStack>
                       )}
@@ -324,8 +374,8 @@ export function LanguagesForm({
           onOpenChange={(isOpen) => {
             if (!isOpen) setRemoving(undefined);
           }}
-          title={t("languages.remove_title", { name: name(removing.language) })}
-          description={t("languages.remove_description", { name: name(removing.language) })}
+          title={t("languages.remove_title", { name: inSentence(removing.language) })}
+          description={t("languages.remove_description", { name: inSentence(removing.language) })}
           actionLabel={t("languages.remove_action")}
           cancelLabel={t("common.cancel")}
           isActionLoading={isPending}
@@ -353,7 +403,7 @@ function BlockingMarkets({ markets }: { markets: BlockingMarket[] }) {
             ),
             market: market.name,
             languages: format.list(
-              market.languages.map((tag) => format.languageName(tag)),
+              market.languages.map((tag) => format.languageNameInSentence(tag)),
               "conjunction",
             ),
           })}

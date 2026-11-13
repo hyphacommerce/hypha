@@ -67,7 +67,7 @@
   "custom_fields_own": "Product",
   "custom_fields_variant": "Variant: {title}",
   "custom_fields_variant_untitled": "Default variant",
-  "translation_label": "{field} in {language}",
+  "translation_label": "{field} · {language}",
   "source_empty": "No text",
   "not_translated": "Not translated",
   "not_translatable": "Nothing to translate: the original has no text.",

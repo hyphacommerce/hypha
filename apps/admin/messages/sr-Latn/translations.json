@@ -67,7 +67,7 @@
   "custom_fields_own": "Proizvod",
   "custom_fields_variant": "Varijanta: {title}",
   "custom_fields_variant_untitled": "Podrazumevana varijanta",
-  "translation_label": "{field}, jezik {language}",
+  "translation_label": "{field} · {language}",
   "source_empty": "Nema teksta",
   "not_translated": "Nije prevedeno",
   "not_translatable": "Nema šta da se prevodi: original nema teksta.",

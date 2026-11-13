@@ -58,12 +58,15 @@ export function LanguagesCard({
         </VStack>
         {value.length === 0 ? (
           <Text color="secondary">
-            {t("markets.languages_empty", { language: languageLabel(format, storeDefault) })}
+            {t("markets.languages_empty", {
+              language: languageLabel(format, storeDefault, "in_sentence"),
+            })}
           </Text>
         ) : (
           <VStack gap={2}>
             {value.map((tag, index) => {
               const name = format.languageName(tag);
+              const inSentence = format.languageNameInSentence(tag);
               return (
                 <HStack key={tag} gap={2} vAlign="center" hAlign="between">
                   <HStack gap={2} vAlign="center" wrap="wrap">
@@ -75,7 +78,7 @@ export function LanguagesCard({
                   </HStack>
                   <HStack gap={1}>
                     <IconButton
-                      label={t("common.move_up_named", { name })}
+                      label={t("common.move_up_named", { name: inSentence })}
                       icon={<ArrowUpIcon />}
                       size="sm"
                       variant="ghost"
@@ -83,7 +86,7 @@ export function LanguagesCard({
                       onClick={() => onChange(moved(value, index, -1))}
                     />
                     <IconButton
-                      label={t("common.move_down_named", { name })}
+                      label={t("common.move_down_named", { name: inSentence })}
                       icon={<ArrowDownIcon />}
                       size="sm"
                       variant="ghost"
@@ -91,7 +94,7 @@ export function LanguagesCard({
                       onClick={() => onChange(moved(value, index, 1))}
                     />
                     <IconButton
-                      label={t("common.remove_named", { name })}
+                      label={t("common.remove_named", { name: inSentence })}
                       icon={<XMarkIcon />}
                       size="sm"
                       variant="ghost"

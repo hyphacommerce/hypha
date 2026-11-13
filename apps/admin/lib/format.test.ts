@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { createFormat, parseUnitCost, unitCostInput, unitCostTotal } from "./format.ts";
+import {
+  capitalized,
+  createFormat,
+  parseUnitCost,
+  unitCostInput,
+  unitCostTotal,
+} from "./format.ts";
 import { formatLocale } from "./pick-language.ts";
 
 const currencies = { EUR: 2, JPY: 0, KWD: 3, USD: 2 };
@@ -50,6 +56,37 @@ test("another language formats its own way", () => {
     ["z", "ä", "a"].toSorted((a, b) => format.compare(a, b)),
     ["a", "ä", "z"],
   );
+});
+
+test("a language name shown alone starts with a capital, as the storefront writes it", () => {
+  const format = createFormat("sr-Latn");
+  assert.equal(format.languageName("sr-Latn"), "Srpski (latinica)");
+  assert.equal(format.languageName("de"), "Nemački");
+  assert.equal(createFormat("fr").languageName("de"), "Allemand");
+});
+
+test("a language name in a sentence stays as Intl writes it there", () => {
+  assert.equal(createFormat("sr-Latn").languageNameInSentence("sr-Latn"), "srpski (latinica)");
+  assert.equal(createFormat("fr").languageNameInSentence("de"), "allemand");
+  assert.equal(createFormat(formatLocale("en")).languageNameInSentence("de"), "German");
+});
+
+test("a language without a name is its tag, uncapitalised", () => {
+  const format = createFormat("sr-Latn");
+  assert.equal(format.languageName("x-unknown"), "x-unknown");
+  assert.equal(format.languageNameInSentence("x-unknown"), "x-unknown");
+});
+
+test("capitals follow the locale's rules", () => {
+  assert.equal(capitalized("istanbul", "tr"), "İstanbul");
+  assert.equal(capitalized("istanbul", "en"), "Istanbul");
+});
+
+test("only the first character is capitalised", () => {
+  assert.equal(capitalized("éire", "fr"), "Éire");
+  assert.equal(capitalized("éire", "fr"), "Éire");
+  assert.equal(capitalized("𝓍y", "en"), "𝓍y");
+  assert.equal(capitalized("", "en"), "");
 });
 
 test("names Intl doesn't have fall back to the code", () => {

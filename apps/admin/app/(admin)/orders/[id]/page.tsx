@@ -258,6 +258,11 @@ function DiscountsList({ order, t, format }: { order: Order; t: T; format: Forma
                 {d.title}
               </Text>
             </Link>
+            {d.localized && (
+              <Text type="supporting" color="secondary">
+                {t("orders.detail_discount_localized", { title: d.localized.title })}
+              </Text>
+            )}
             <Text type="supporting" color="secondary">
               {[
                 d.code
@@ -486,6 +491,13 @@ async function Order({ id }: { id: string }) {
                       <TableCell>
                         <VStack gap={0.5}>
                           <Text>{t("orders.detail_shipping_line", { name: shipping.name })}</Text>
+                          {shipping.localized && (
+                            <Text type="supporting" color="secondary">
+                              {t("orders.detail_shipping_localized", {
+                                name: shipping.localized.name,
+                              })}
+                            </Text>
+                          )}
                           {shipping.provider && (
                             <Text type="supporting" color="secondary">
                               {[shipping.provider, shipping.service, shipping.reference]
@@ -746,6 +758,13 @@ function PaymentCard({
                   </HStack>
                   <Text weight="medium">{format.money(payment.amount)}</Text>
                 </HStack>
+                {payment.localized?.method_name && (
+                  <Text type="supporting" color="secondary">
+                    {t("orders.detail_payment_method_localized", {
+                      name: payment.localized.method_name,
+                    })}
+                  </Text>
+                )}
                 <MetadataList>
                   <MetadataListItem label={t("orders.detail_payment_provider")}>
                     {providerLabel(payment.provider, t)}
@@ -771,12 +790,25 @@ function PaymentCard({
                     </MetadataListItem>
                   )}
                 </MetadataList>
+                {/* What the buyer read, in the order's language; the store's own text
+                    beside it where that reads differently. */}
                 {payment.instructions && (
                   <VStack gap={1}>
                     <Text type="label">{t("orders.detail_payment_instructions")}</Text>
                     <Text type="supporting" color="secondary">
-                      <span style={{ whiteSpace: "pre-wrap" }}>{payment.instructions}</span>
+                      <span style={{ whiteSpace: "pre-wrap" }}>
+                        {payment.localized?.instructions ?? payment.instructions}
+                      </span>
                     </Text>
+                    {payment.localized?.instructions && (
+                      <Text type="supporting" color="secondary">
+                        <span style={{ whiteSpace: "pre-wrap" }}>
+                          {t("orders.detail_payment_instructions_source_text", {
+                            text: payment.instructions,
+                          })}
+                        </span>
+                      </Text>
+                    )}
                   </VStack>
                 )}
                 <AppActions
