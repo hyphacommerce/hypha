@@ -172,7 +172,8 @@ pub struct CartMessageResponse {
     /// showing another language words it from `code` and `params`.
     message: String,
     source: MessageSourceDto,
-    params: MessageParamsDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    params: Option<MessageParamsDto>,
 }
 
 /// Whether a message stops checkout: `error` does, `warning` never.
@@ -209,7 +210,7 @@ impl From<&Message> for CartMessageResponse {
             code: m.code().to_string(),
             path: m.path().to_string(),
             message: m.message().to_string(),
-            params: MessageParamsDto::from(m.params()),
+            params: MessageParamsDto::of(m.params()),
             source: match m.source() {
                 MessageSource::Format => MessageSourceDto::Format,
                 MessageSource::Verification => MessageSourceDto::Verification,

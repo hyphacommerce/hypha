@@ -1081,7 +1081,7 @@ export interface components {
              *     showing another language words it from `code` and `params`.
              */
             message: string;
-            params: components["schemas"]["MessageParamsDto"];
+            params?: components["schemas"]["MessageParamsDto"] | null;
             /**
              * @description An RFC 9535 JSONPath into this response, from a closed set: `$` (the cart),
              *     `$.email`, `$.shipping_address`, `$.shipping_address.<field>`,
@@ -1577,8 +1577,9 @@ export interface components {
         MarketId: string;
         /**
          * @description What a client needs to word a built-in cart message or an address problem from its
-         *     `code` in the shopper's language, rather than show the English `message`. Empty for a
-         *     checkout rule's or a validation app's message, which are worded by whoever wrote them.
+         *     `code` in the shopper's language, rather than show the English `message`. Absent where
+         *     there's nothing to say: a checkout rule's or a validation app's message (worded by
+         *     whoever wrote it), a built-in one that needs no data, a message stored before params.
          *     Fields are added, never renamed. By code:
          *
          *     - `required`, `unknown_region`: `field`.
@@ -2061,7 +2062,7 @@ export interface components {
             code: string;
             field: components["schemas"]["AddressFieldDto"];
             message: string;
-            params: components["schemas"]["MessageParamsDto"];
+            params?: components["schemas"]["MessageParamsDto"] | null;
         };
         /**
          * @description One result: a listing, a product or a variant (the request's `group`), shown by

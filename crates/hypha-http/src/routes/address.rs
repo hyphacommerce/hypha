@@ -44,8 +44,9 @@ impl From<AddressField> for AddressFieldDto {
 }
 
 /// What a client needs to word a built-in cart message or an address problem from its
-/// `code` in the shopper's language, rather than show the English `message`. Empty for a
-/// checkout rule's or a validation app's message, which are worded by whoever wrote them.
+/// `code` in the shopper's language, rather than show the English `message`. Absent where
+/// there's nothing to say: a checkout rule's or a validation app's message (worded by
+/// whoever wrote it), a built-in one that needs no data, a message stored before params.
 /// Fields are added, never renamed. By code:
 ///
 /// - `required`, `unknown_region`: `field`.
@@ -77,15 +78,16 @@ pub(crate) struct MessageParamsDto {
     max: Option<u32>,
 }
 
-impl From<&MessageParams> for MessageParamsDto {
-    fn from(p: &MessageParams) -> Self {
-        Self {
+impl MessageParamsDto {
+    /// `None` for params with nothing in them: the field is left out.
+    pub(crate) fn of(p: &MessageParams) -> Option<Self> {
+        (!p.is_empty()).then(|| Self {
             field: p.field.map(AddressFieldDto::from),
             example: p.example.clone(),
             region: p.region.clone(),
             region_name: p.region_name.clone(),
             max: p.max,
-        }
+        })
     }
 }
 

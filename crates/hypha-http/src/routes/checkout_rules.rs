@@ -295,7 +295,8 @@ pub struct TestAddressProblem {
     field: String,
     code: String,
     message: String,
-    params: MessageParamsDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    params: Option<MessageParamsDto>,
 }
 
 /// What the address's text tells.
@@ -383,7 +384,7 @@ pub async fn test<S: Storage>(
                         field: p.field.as_str().to_string(),
                         code: p.code.as_str().to_string(),
                         message: p.message.clone(),
-                        params: MessageParamsDto::from(&p.params),
+                        params: MessageParamsDto::of(&p.params),
                     })
                     .collect(),
                 address: None,
