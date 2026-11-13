@@ -298,7 +298,11 @@ generated module, so nobody is shown a raw key; that a shipped language is compl
 CI's rule (`i18n:check` fails for a missing key), not something the admin needs to run. Astryx's own
 strings follow by themselves: the index adds Astryx's shipped catalog for the language
 (`messages/astryx.generated.ts`, `lib/astryx-locales.ts`; `sr-Latn` reads Astryx's
-Cyrillic one through `serbianLatin`).
+Cyrillic one through `serbianLatin`). Where Astryx's catalog lacks keys its English has
+(its 0.7 Serbian has no rich text editor, comments or emoji picker), the admin translates
+them in `astryx-messages/<tag>.json` (flat, Astryx's full keys, ICU like ours), merged over
+Astryx's; `i18n:check` lists every Astryx key a shipped language still lacks, so an Astryx
+upgrade that adds strings fails it until they're translated there.
 
 ## The pseudo-language
 
@@ -313,7 +317,9 @@ never sent to the API.
 
 - `pnpm --filter admin i18n:check` (CI): the generated index is in step, every message is
   valid ICU, keys are snake_case, no language has a key English lacks or other
-  placeholders than English's, every shipped language is complete.
+  placeholders than English's, every shipped language is complete, and so are Astryx's
+  strings for it (Astryx's catalog with `astryx-messages/<tag>.json` over it, against
+  Astryx's English).
 - `i18n/no-literal-text` (in `pnpm lint`; the rule is `scripts/oxlint-i18n.mjs`, shared
   with the storefront) on the whole admin (`adminTranslated` in the root `vite.config.ts`:
   `app/**`, `components/**`, `resources/**`): no literal text between
@@ -341,7 +347,7 @@ instead of adding the same word to an area's file.
 | Progress | `saving`, `saved`, `saved_notice` ("Saved.", a banner), `deleting`, `loading`, `copied` |
 | States | `enabled`, `disabled`, `on`, `off`, `yes`, `no`, `none`, `all`, `any`, `other`, `optional`, `required`, `default`, `unknown`, `active`, `inactive`, `draft`, `archived`, `not_set`, `empty_value` ("—") |
 | Phases of a schedule | `phase_active`, `phase_scheduled`, `phase_expired`, `phase_draft` (price lists and discounts: `phaseBadge`, `phaseOptions` in `lib/price-lists.ts`) |
-| Fields | `name`, `title`, `description`, `status`, `type`, `kind`, `code`, `key`, `id`, `handle`, `email`, `phone`, `password`, `address`, `country`, `countries`, `currency`, `language`, `time_zone`, `date`, `time`, `created`, `updated`, `note`, `notes`, `details`, `settings`, `summary`, `reference`, `scopes`, `visibility`, `identifiers`, `customer_groups` |
+| Fields | `name` (a thing's), `person_name` (a person's: a customer, a staff member, a contact; Serbian says "Ime", not "Naziv"), `title`, `description`, `status`, `type`, `kind`, `code`, `key`, `id`, `handle`, `email`, `phone`, `password`, `address`, `country`, `countries`, `currency`, `language`, `time_zone`, `date`, `time`, `created`, `updated`, `note`, `notes`, `details`, `settings`, `summary`, `reference`, `scopes`, `visibility`, `identifiers`, `customer_groups` |
 | Address fields | `first_name`, `last_name`, `company`, `address_line2`, `city`, `postal_code`, `region_or_province` |
 | Money and lines | `total`, `subtotal`, `quantity`, `price`, `amount`, `tax`, `shipping`, `discount`, `sku`, `sku_named` (`{sku}`), `no_sku` |
 | Things | `product(s)`, `variant(s)`, `category`/`categories`, `order(s)`, `customer(s)`, `market(s)`, `channel(s)`, `location(s)`, `supplier`, `app(s)`, `role`, `home`, `your_account` |

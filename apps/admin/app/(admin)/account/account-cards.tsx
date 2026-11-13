@@ -102,14 +102,14 @@ export function ProfileCard({ name, email, role }: { name: string; email: string
       {error && <Banner status="error" title={error} />}
       {draft === undefined ? (
         <MetadataList>
-          <MetadataListItem label={t("common.name")}>{name}</MetadataListItem>
+          <MetadataListItem label={t("common.person_name")}>{name}</MetadataListItem>
           <MetadataListItem label={t("common.email")}>{email}</MetadataListItem>
           <MetadataListItem label={t("common.role")}>{role}</MetadataListItem>
         </MetadataList>
       ) : (
         <VStack gap={3}>
           <TextInput
-            label={t("common.name")}
+            label={t("common.person_name")}
             value={draft}
             onChange={setDraft}
             onEnter={save}

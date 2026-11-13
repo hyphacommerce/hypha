@@ -46,8 +46,8 @@ type Customer = AdminSchemas["CustomerSummaryResponse"];
 const SORT_OPTIONS: { value: string; label: KeyIn<"common" | "customers"> }[] = [
   { value: "newest", label: "common.sort_newest" },
   { value: "oldest", label: "common.sort_oldest" },
-  { value: "name_asc", label: "common.sort_name_asc" },
-  { value: "name_desc", label: "common.sort_name_desc" },
+  { value: "name_asc", label: "customers.list_sort_name_asc" },
+  { value: "name_desc", label: "customers.list_sort_name_desc" },
   { value: "email_asc", label: "customers.list_sort_email_asc" },
   { value: "email_desc", label: "customers.list_sort_email_desc" },
 ];

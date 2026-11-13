@@ -335,7 +335,7 @@ export function SupplierForm({
             <VStack key={c.key} gap={2}>
               <div className="form-grid">
                 <TextInput
-                  label={t("common.name")}
+                  label={t("common.person_name")}
                   value={c.name}
                   onChange={(v) => setContact(i, { name: v })}
                   isDisabled={isReadOnly}

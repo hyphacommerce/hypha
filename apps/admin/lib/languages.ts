@@ -88,6 +88,20 @@ export function canonicalTag(input: string): string | null {
     .join("-");
 }
 
+/**
+ * The tag without its region and what follows it (`de-AT` → `de`, `sr-Latn-RS` →
+ * `sr-Latn`): the language a regional wording falls back to, as the API reads it.
+ * `null` for a tag that names no region. Takes a canonical tag, as the API answers them.
+ */
+export function withoutRegion(tag: string): string | null {
+  const subtags = tag.split("-");
+  // In canonical case only a region is two capitals or three digits.
+  const at = subtags.findIndex(
+    (subtag, index) => index > 0 && /^([A-Z]{2}|[0-9]{3})$/.test(subtag),
+  );
+  return at === -1 ? null : subtags.slice(0, at).join("-");
+}
+
 /** Whether two tags name the same language, whatever their case. */
 export function sameTag(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase();
@@ -107,11 +121,15 @@ export function moved<T>(list: readonly T[], index: number, delta: number): T[] 
 
 /**
  * A language as lists and selects show it: its name in the reader's language with the
- * tag after it, "Serbian (Latin) (sr-Latn)"; the tag alone when `Intl` has no name.
+ * tag after it, "German (de)"; the tag alone when `Intl` has no name. A name that has
+ * parentheses of its own ("Serbian (Latin)", "Chinese (Traditional)", or full-width ones
+ * in Chinese and Japanese) gets the tag after a dot instead, "Serbian (Latin) · sr-Latn",
+ * so the two never read as doubled brackets.
  */
 export function languageLabel(format: { languageName(tag: string): string }, tag: string): string {
   const name = format.languageName(tag);
-  return name === tag ? tag : `${name} (${tag})`;
+  if (name === tag) return tag;
+  return /[(（]/.test(name) ? `${name} · ${tag}` : `${name} (${tag})`;
 }
 
 /**

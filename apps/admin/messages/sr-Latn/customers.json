@@ -1,5 +1,7 @@
 {
   "group": "Grupa",
+  "list_sort_name_asc": "Ime A–Š",
+  "list_sort_name_desc": "Ime Š–A",
   "list_sort_email_asc": "Imejl A–Š",
   "list_sort_email_desc": "Imejl Š–A",
   "list_search_placeholder": "Pretraga kupaca po imejl adresi, imenu ili telefonu",

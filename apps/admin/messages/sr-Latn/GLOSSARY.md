@@ -147,6 +147,7 @@ nominative. So a name is never put where another case is needed:
 | translation, to translate | prevod, prevesti | |
 | source, original (of a translation) | original | |
 | outdated (translation) | zastarelo | the original changed since |
+| inherited (from the language without its region) | nasleđeno; `iz jezika {base}` | `de-AT` reads `de` where it has no translation of its own |
 | mark as reviewed | označiti kao pregledano | |
 | store-wide text | tekstovi cele prodavnice | |
 | search filter (facet) | filter pretrage | |

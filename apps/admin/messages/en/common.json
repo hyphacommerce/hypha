@@ -84,6 +84,7 @@
   "archive": "Archive",
   "unarchive": "Unarchive",
   "name": "Name",
+  "person_name": "Name",
   "title": "Title",
   "description": "Description",
   "status": "Status",

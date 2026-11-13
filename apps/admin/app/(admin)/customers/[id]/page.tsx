@@ -212,7 +212,7 @@ async function Customer({ id }: { id: string }) {
               </Text>
               <MetadataList>
                 <MetadataListItem label={t("common.email")}>{customer.email}</MetadataListItem>
-                <MetadataListItem label={t("common.name")}>
+                <MetadataListItem label={t("common.person_name")}>
                   {name || t("common.empty_value")}
                 </MetadataListItem>
                 <MetadataListItem label={t("common.phone")}>

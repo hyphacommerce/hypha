@@ -84,6 +84,7 @@
   "archive": "Arhiviraj",
   "unarchive": "Vrati iz arhive",
   "name": "Naziv",
+  "person_name": "Ime",
   "title": "Naslov",
   "description": "Opis",
   "status": "Status",

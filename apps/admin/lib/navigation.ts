@@ -10,6 +10,7 @@ import {
   Cog6ToothIcon,
   CpuChipIcon,
   CubeIcon,
+  DocumentTextIcon,
   EnvelopeIcon,
   GlobeEuropeAfricaIcon,
   HomeIcon,
@@ -199,6 +200,13 @@ export const SETTINGS_GROUPS: { title: NavKey; description: NavKey; pages: Setti
         icon: LanguageIcon,
         scope: "stores:read",
         description: "nav.settings_languages_description",
+      },
+      {
+        label: "nav.settings_translations",
+        href: "/translations",
+        icon: DocumentTextIcon,
+        scope: "translations:read",
+        description: "nav.settings_translations_description",
       },
       {
         label: "nav.settings_channels",
