@@ -28,10 +28,16 @@ import {
   UsersIcon,
 } from "@heroicons/react/24/outline";
 
+import type { Key, TFor } from "./messages";
+
 export type NavIcon = typeof HomeIcon;
 
+/** A message of the `nav` namespace: nav items hold keys, and whoever shows one calls `t`. */
+export type NavKey = Extract<Key, `nav.${string}`>;
+
 export type NavItem = {
-  label: string;
+  /** The item's name, as a message key: `t(item.label)`. */
+  label: NavKey;
   href: string;
   icon?: NavIcon;
   /** The scope the page reads with; staff without it don't see the item. */
@@ -41,7 +47,7 @@ export type NavItem = {
 };
 
 /** A titled group of the side nav. */
-export type NavSection = { title: string; items: NavItem[] };
+export type NavSection = { title: NavKey; items: NavItem[] };
 
 /**
  * Whether `scopes` (the signed-in staff member's, from `GET /admin/me`) include `scope`.
@@ -78,7 +84,11 @@ export function visibleSections(scopes: readonly string[]): NavSection[] {
   })).filter((section) => section.items.length > 0);
 }
 
-export const SETTINGS_NAV: NavItem = { label: "Settings", href: "/settings", icon: Cog6ToothIcon };
+export const SETTINGS_NAV: NavItem = {
+  label: "nav.settings",
+  href: "/settings",
+  icon: Cog6ToothIcon,
+};
 
 /**
  * The side nav, in order. "Store" is what you sell and to whom; "Content" what
@@ -88,52 +98,63 @@ export const SETTINGS_NAV: NavItem = { label: "Settings", href: "/settings", ico
  */
 export const NAV_SECTIONS: NavSection[] = [
   {
-    title: "Store",
+    title: "nav.section_store",
     items: [
-      { label: "Home", href: "/", icon: HomeIcon },
-      { label: "Orders", href: "/orders", icon: ShoppingBagIcon, scope: "orders:read" },
+      { label: "nav.home", href: "/", icon: HomeIcon },
+      { label: "nav.orders", href: "/orders", icon: ShoppingBagIcon, scope: "orders:read" },
       {
-        label: "Products",
+        label: "nav.products",
         href: "/products",
         icon: CubeIcon,
         scope: "products:read",
-        children: [{ label: "Categories", href: "/products/categories", scope: "products:read" }],
+        children: [
+          { label: "nav.categories", href: "/products/categories", scope: "products:read" },
+        ],
       },
-      { label: "Inventory", href: "/inventory", icon: ArchiveBoxIcon, scope: "inventory:read" },
+      { label: "nav.inventory", href: "/inventory", icon: ArchiveBoxIcon, scope: "inventory:read" },
       {
-        label: "Purchasing",
+        label: "nav.purchasing",
         href: "/purchase-orders",
         icon: ClipboardDocumentListIcon,
         scope: "purchasing:read",
         children: [
-          { label: "Purchase orders", href: "/purchase-orders", scope: "purchasing:read" },
-          { label: "Suppliers", href: "/suppliers", scope: "purchasing:read" },
-          { label: "Transfers", href: "/transfers", scope: "inventory:read" },
+          { label: "nav.purchase_orders", href: "/purchase-orders", scope: "purchasing:read" },
+          { label: "nav.suppliers", href: "/suppliers", scope: "purchasing:read" },
+          { label: "nav.transfers", href: "/transfers", scope: "inventory:read" },
         ],
       },
       {
-        label: "Customers",
+        label: "nav.customers",
         href: "/customers",
         icon: UsersIcon,
         scope: "customers:read",
-        children: [{ label: "Groups", href: "/customers/groups", scope: "customers:read" }],
+        children: [
+          { label: "nav.customer_groups", href: "/customers/groups", scope: "customers:read" },
+        ],
       },
       {
-        label: "Markets",
+        label: "nav.markets",
         href: "/markets",
         icon: GlobeEuropeAfricaIcon,
         scope: "markets:read",
-        children: [{ label: "Price lists", href: "/markets/price-lists", scope: "pricing:read" }],
+        children: [
+          { label: "nav.price_lists", href: "/markets/price-lists", scope: "pricing:read" },
+        ],
       },
-      { label: "Discounts", href: "/discounts", icon: ReceiptPercentIcon, scope: "discounts:read" },
+      {
+        label: "nav.discounts",
+        href: "/discounts",
+        icon: ReceiptPercentIcon,
+        scope: "discounts:read",
+      },
     ],
   },
   {
-    title: "Content",
+    title: "nav.section_content",
     items: [
-      { label: "Media", href: "/media", icon: PhotoIcon, scope: "media:read" },
+      { label: "nav.media", href: "/media", icon: PhotoIcon, scope: "media:read" },
       {
-        label: "Custom fields",
+        label: "nav.custom_fields",
         href: "/custom-fields",
         icon: TableCellsIcon,
         scope: "custom_fields:read",
@@ -141,122 +162,122 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: "Manage",
+    title: "nav.section_manage",
     items: [
-      { label: "Apps", href: "/apps", icon: PuzzlePieceIcon, scope: "apps:read" },
+      { label: "nav.apps", href: "/apps", icon: PuzzlePieceIcon, scope: "apps:read" },
       {
-        label: "Agents",
+        label: "nav.agents",
         href: "/agents",
         icon: CpuChipIcon,
         scope: "agents:read",
-        children: [{ label: "Proposals", href: "/agents/proposals", scope: "agents:read" }],
+        children: [{ label: "nav.proposals", href: "/agents/proposals", scope: "agents:read" }],
       },
       SETTINGS_NAV,
     ],
   },
 ];
 
-export type SettingsPage = NavItem & { icon: NavIcon; description: string };
+export type SettingsPage = NavItem & { icon: NavIcon; description: NavKey };
 
 /** The settings index's groups, each a card of pages. */
-export const SETTINGS_GROUPS: { title: string; description: string; pages: SettingsPage[] }[] = [
+export const SETTINGS_GROUPS: { title: NavKey; description: NavKey; pages: SettingsPage[] }[] = [
   {
-    title: "Store",
-    description: "Who you are and where you sell.",
+    title: "nav.settings_group_store",
+    description: "nav.settings_group_store_description",
     pages: [
       {
-        label: "Store details",
+        label: "nav.settings_store",
         href: "/settings/store",
         icon: BuildingStorefrontIcon,
         scope: "stores:read",
-        description: "Name, address, language, time zone and the setup guide.",
+        description: "nav.settings_store_description",
       },
       {
-        label: "Channels",
+        label: "nav.settings_channels",
         href: "/settings/channels",
         icon: Squares2X2Icon,
         scope: "channels:read",
-        description: "Your storefronts and other sales channels, and their keys.",
+        description: "nav.settings_channels_description",
       },
     ],
   },
   {
-    title: "Selling",
-    description: "How shoppers pay, get their orders and find products.",
+    title: "nav.settings_group_selling",
+    description: "nav.settings_group_selling_description",
     pages: [
       {
-        label: "Payments",
+        label: "nav.settings_payments",
         href: "/settings/payments",
         icon: BanknotesIcon,
         scope: "payments:read",
-        description: "The payment methods offered at checkout.",
+        description: "nav.settings_payments_description",
       },
       {
-        label: "Shipping",
+        label: "nav.settings_shipping",
         href: "/settings/shipping",
         icon: TruckIcon,
         scope: "shipping:read",
-        description: "Zones, rates and live-rate apps.",
+        description: "nav.settings_shipping_description",
       },
       {
-        label: "Checkout",
+        label: "nav.settings_checkout",
         href: "/settings/checkout",
         icon: ShieldCheckIcon,
         scope: "checkout_rules:read",
-        description: "Rules on addresses and carts: no PO boxes, a phone for couriers.",
+        description: "nav.settings_checkout_description",
       },
       {
-        label: "Search",
+        label: "nav.settings_search",
         href: "/settings/search",
         icon: MagnifyingGlassIcon,
         scope: "products:read",
-        description: "Filters, synonyms and the search index.",
+        description: "nav.settings_search_description",
       },
     ],
   },
   {
-    title: "Notifications",
-    description: "What the store emails, and to whom.",
+    title: "nav.settings_group_notifications",
+    description: "nav.settings_group_notifications_description",
     pages: [
       {
-        label: "Emails",
+        label: "nav.settings_emails",
         href: "/settings/notifications",
         icon: EnvelopeIcon,
         scope: "notifications:read",
-        description: "Templates, the sender and staff alerts.",
+        description: "nav.settings_emails_description",
       },
     ],
   },
   {
-    title: "Team",
-    description: "Who can sign in, and what they may do.",
+    title: "nav.settings_group_team",
+    description: "nav.settings_group_team_description",
     pages: [
       {
-        label: "Staff and roles",
+        label: "nav.settings_staff",
         href: "/settings/staff",
         icon: UserGroupIcon,
         scope: "users:read",
-        description: "Invite staff, change their roles, and define roles.",
+        description: "nav.settings_staff_description",
       },
     ],
   },
   {
-    title: "Developers",
-    description: "Access for code: keys, webhooks and apps you connect by hand.",
+    title: "nav.settings_group_developers",
+    description: "nav.settings_group_developers_description",
     pages: [
       {
-        label: "API keys",
+        label: "nav.settings_api_keys",
         href: "/settings/api-keys",
         icon: KeyIcon,
         scope: "api_keys:read",
-        description: "Secret keys for your own code, publishable keys for storefronts.",
+        description: "nav.settings_api_keys_description",
       },
       {
-        label: "Webhooks and custom apps",
+        label: "nav.settings_apps",
         href: "/settings/apps",
         icon: CodeBracketIcon,
         scope: "apps:read",
-        description: "Apps made by hand: their webhooks, events and signing secrets.",
+        description: "nav.settings_apps_description",
       },
     ],
   },
@@ -264,7 +285,7 @@ export const SETTINGS_GROUPS: { title: string; description: string; pages: Setti
 
 /** The signed-in staff member's own page, from the account menu. */
 export const ACCOUNT_NAV: NavItem = {
-  label: "Your account",
+  label: "nav.account",
   href: "/account",
   icon: UserCircleIcon,
 };
@@ -278,7 +299,19 @@ export function visibleSettings(scopes: readonly string[]): typeof SETTINGS_GROU
 }
 
 /** The way back to the settings index, for a settings page's breadcrumb. */
-export const SETTINGS_CRUMB = { label: SETTINGS_NAV.label, href: SETTINGS_NAV.href };
+export function settingsCrumb(t: TFor<"nav">): { label: string; href: string } {
+  return { label: t(SETTINGS_NAV.label), href: SETTINGS_NAV.href };
+}
+
+/** The way back to the list of apps, for a breadcrumb. */
+export function appsCrumb(t: TFor<"nav">): { label: string; href: string } {
+  return { label: t("nav.apps"), href: "/apps" };
+}
+
+/** The way back to the list of agents, for a breadcrumb. */
+export function agentsCrumb(t: TFor<"nav">): { label: string; href: string } {
+  return { label: t("nav.agents"), href: "/agents" };
+}
 
 /** Whether `href` covers `pathname`: itself, or a page under it. */
 export function covers(pathname: string, href: string): boolean {

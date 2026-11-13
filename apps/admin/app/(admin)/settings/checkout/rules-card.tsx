@@ -27,14 +27,15 @@ import { Text } from "@astryxdesign/core/Text";
 import { ArrowDownIcon, ArrowUpIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { useState, useTransition } from "react";
 
-import { useCurrencies } from "@/components/currencies";
 import {
   PRESETS,
   type Rule,
   type RuleOptions,
   appliesSummary,
-  conditionSummary,
+  conditionsSummary,
 } from "@/lib/checkout-rules";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { deleteRule, moveRule, setRuleEnabled } from "./actions";
 
@@ -48,7 +49,8 @@ export function RulesCard({
   options: RuleOptions;
   canWrite: boolean;
 }) {
-  const currencies = useCurrencies();
+  const t = useT<"checkout">();
+  const format = useFormat();
   const [isAdding, setAdding] = useState(false);
   const [deleting, setDeleting] = useState<Rule>();
   const [error, setError] = useState<string>();
@@ -63,29 +65,33 @@ export function RulesCard({
         <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Checkout rules
+              {t("checkout.rules_title")}
             </Text>
             <Text type="supporting" color="secondary">
-              Evaluated on every change to a cart, in this order. At most 100.
+              {t("checkout.rules_description")}
             </Text>
           </VStack>
           {canWrite && (
-            <Button label="Add rule" variant="secondary" onClick={() => setAdding(true)} />
+            <Button
+              label={t("checkout.rules_add")}
+              variant="secondary"
+              onClick={() => setAdding(true)}
+            />
           )}
         </HStack>
         {error && <Banner status="error" title={error} onDismiss={() => setError(undefined)} />}
         {rules.length === 0 ? (
           <EmptyState
-            title="No checkout rules yet"
-            description="Refuse PO boxes for couriers, require a house number or a phone, keep address lines short for labels: start from a preset."
+            title={t("checkout.rules_empty_title")}
+            description={t("checkout.rules_empty_description")}
           />
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHeaderCell>Rule</TableHeaderCell>
-                <TableHeaderCell>Outcome</TableHeaderCell>
-                <TableHeaderCell>Enabled</TableHeaderCell>
+                <TableHeaderCell>{t("checkout.rules_column_rule")}</TableHeaderCell>
+                <TableHeaderCell>{t("checkout.rules_column_outcome")}</TableHeaderCell>
+                <TableHeaderCell>{t("common.enabled")}</TableHeaderCell>
                 <TableHeaderCell>
                   <span />
                 </TableHeaderCell>
@@ -93,7 +99,7 @@ export function RulesCard({
             </TableHeader>
             <TableBody>
               {rules.map((rule, index) => {
-                const where = appliesSummary(rule, options);
+                const where = appliesSummary(t, format, rule, options);
                 return (
                   <TableRow key={rule.id}>
                     <TableCell>
@@ -102,9 +108,7 @@ export function RulesCard({
                           {rule.name}
                         </Link>
                         <Text type="supporting" color="secondary">
-                          {rule.conditions
-                            .map((c) => conditionSummary(c, options, currencies))
-                            .join(" and ")}
+                          {conditionsSummary(t, format, rule.conditions, options)}
                         </Text>
                         {where && (
                           <Text type="supporting" color="secondary">
@@ -116,7 +120,11 @@ export function RulesCard({
                     <TableCell>
                       <VStack gap={0.5}>
                         <Badge
-                          label={rule.outcome.severity === "error" ? "Blocks checkout" : "Warns"}
+                          label={
+                            rule.outcome.severity === "error"
+                              ? t("checkout.outcome_blocks")
+                              : t("checkout.outcome_warns")
+                          }
                           variant={rule.outcome.severity === "error" ? "error" : "warning"}
                         />
                         <Text type="supporting" color="secondary">
@@ -126,7 +134,7 @@ export function RulesCard({
                     </TableCell>
                     <TableCell>
                       <Switch
-                        label={`Enforce ${rule.name}`}
+                        label={t("checkout.rule_enforce", { name: rule.name })}
                         isLabelHidden
                         size="sm"
                         value={rule.enabled}
@@ -140,7 +148,7 @@ export function RulesCard({
                       {canWrite && (
                         <HStack gap={1} hAlign="end">
                           <IconButton
-                            label={`Move ${rule.name} up`}
+                            label={t("common.move_up_named", { name: rule.name })}
                             icon={<ArrowUpIcon />}
                             size="sm"
                             variant="ghost"
@@ -148,7 +156,7 @@ export function RulesCard({
                             onClick={() => move(rule, index - 1)}
                           />
                           <IconButton
-                            label={`Move ${rule.name} down`}
+                            label={t("common.move_down_named", { name: rule.name })}
                             icon={<ArrowDownIcon />}
                             size="sm"
                             variant="ghost"
@@ -156,7 +164,7 @@ export function RulesCard({
                             onClick={() => move(rule, index + 1)}
                           />
                           <IconButton
-                            label={`Delete ${rule.name}`}
+                            label={t("common.delete_named_label", { name: rule.name })}
                             icon={<TrashIcon />}
                             size="sm"
                             variant="ghost"
@@ -180,11 +188,12 @@ export function RulesCard({
 
 /** "Add rule": a preset to start from, or a blank rule. */
 function PresetDialog({ onClose }: { onClose: () => void }) {
+  const t = useT<"checkout">();
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={640}>
       <DialogHeader
-        title="Add checkout rule"
-        subtitle="Start from a preset; everything can be changed before you save."
+        title={t("checkout.preset_dialog_title")}
+        subtitle={t("checkout.preset_dialog_subtitle")}
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
@@ -192,29 +201,29 @@ function PresetDialog({ onClose }: { onClose: () => void }) {
           {PRESETS.map((preset) => (
             <ClickableCard
               key={preset.key}
-              label={preset.title}
+              label={t(`checkout.preset_${preset.key}_title`)}
               href={`/settings/checkout/rules/new?preset=${preset.key}`}
               variant="muted"
               padding={3}
             >
               <VStack gap={0.5}>
-                <Text weight="medium">{preset.title}</Text>
+                <Text weight="medium">{t(`checkout.preset_${preset.key}_title`)}</Text>
                 <Text type="supporting" color="secondary">
-                  {preset.description}
+                  {t(`checkout.preset_${preset.key}_description`)}
                 </Text>
               </VStack>
             </ClickableCard>
           ))}
           <ClickableCard
-            label="Blank rule"
+            label={t("checkout.preset_blank_title")}
             href="/settings/checkout/rules/new"
             variant="muted"
             padding={3}
           >
             <VStack gap={0.5}>
-              <Text weight="medium">Blank rule</Text>
+              <Text weight="medium">{t("checkout.preset_blank_title")}</Text>
               <Text type="supporting" color="secondary">
-                Pick the conditions yourself.
+                {t("checkout.preset_blank_description")}
               </Text>
             </VStack>
           </ClickableCard>
@@ -225,15 +234,16 @@ function PresetDialog({ onClose }: { onClose: () => void }) {
 }
 
 function DeleteDialog({ rule, onClose }: { rule: Rule; onClose: () => void }) {
+  const t = useT<"checkout">();
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
   return (
     <AlertDialog
       isOpen
       onOpenChange={(isOpen) => !isOpen && onClose()}
-      title={`Delete ${rule.name}?`}
-      description={error ?? "Carts stop showing its message at once."}
-      actionLabel="Delete rule"
+      title={t("common.delete_named", { name: rule.name })}
+      description={error ?? t("checkout.rule_delete_description")}
+      actionLabel={t("checkout.rule_delete_action")}
       isActionLoading={isPending}
       onAction={() =>
         startTransition(async () => {

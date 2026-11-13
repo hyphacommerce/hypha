@@ -40,7 +40,7 @@ export async function createApp(input: {
       subscriptions: subscriptions(input.subscriptions),
     },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(PAGE);
   return { secret: data.secret };
 }
@@ -58,7 +58,7 @@ export async function updateApp(
       subscriptions: subscriptions(input.subscriptions),
     },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(PAGE);
   return {};
 }
@@ -69,7 +69,7 @@ export async function setEnabled(key: string, enabled: boolean): Promise<Result>
     params: { path: { key } },
     body: { enabled },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(PAGE);
   return {};
 }
@@ -79,14 +79,14 @@ export async function rotateSecret(key: string): Promise<SecretResult> {
   const { data, error } = await client.POST("/admin/apps/{key}/secret", {
     params: { path: { key } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   return { secret: data.secret };
 }
 
 export async function deleteApp(key: string): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.DELETE("/admin/apps/{key}", { params: { path: { key } } });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(PAGE);
   revalidatePath("/apps");
   return {};

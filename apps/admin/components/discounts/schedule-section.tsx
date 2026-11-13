@@ -9,6 +9,7 @@ import { Switch } from "@astryxdesign/core/Switch";
 import { Text } from "@astryxdesign/core/Text";
 
 import { useTimeZone } from "@/components/date-time";
+import { useT } from "@/lib/use-t";
 
 import { type SectionProps, fieldStatus } from "./fields";
 
@@ -17,6 +18,7 @@ const isMinute = (text: string): text is ISODateTimeString =>
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(text);
 
 export function ScheduleSection({ draft, errors, onChange, isReadOnly }: SectionProps) {
+  const t = useT<"discounts">();
   const timeZone = useTimeZone();
   const schedule = draft.schedule;
   return (
@@ -24,23 +26,23 @@ export function ScheduleSection({ draft, errors, onChange, isReadOnly }: Section
       <VStack gap={4}>
         <VStack gap={1}>
           <Text type="display-3" as="h2">
-            Schedule
+            {t("discounts.schedule_title")}
           </Text>
           <Text type="supporting" color="secondary">
-            Times are in the store&apos;s time zone, {timeZone}.
+            {t("discounts.schedule_hint", { time_zone: timeZone })}
           </Text>
         </VStack>
         <Switch
-          label="Active"
-          description="A draft never applies, whatever its dates say: switch it off to pause the discount."
+          label={t("common.active")}
+          description={t("discounts.schedule_active_hint")}
           value={draft.status === "active"}
           onChange={(on) => onChange({ ...draft, status: on ? "active" : "draft" }, ["status"])}
           isDisabled={isReadOnly}
         />
         <HStack gap={4} wrap="wrap">
           <DateTimeInput
-            label="Starts"
-            description="Empty: at once."
+            label={t("discounts.schedule_starts")}
+            description={t("discounts.schedule_starts_hint")}
             value={isMinute(schedule.startsAt) ? schedule.startsAt : undefined}
             onChange={(value) =>
               onChange({ ...draft, schedule: { ...schedule, startsAt: value ?? "" } }, [
@@ -54,8 +56,8 @@ export function ScheduleSection({ draft, errors, onChange, isReadOnly }: Section
             status={fieldStatus(errors["schedule.startsAt"])}
           />
           <DateTimeInput
-            label="Ends"
-            description="Empty: never."
+            label={t("discounts.schedule_ends")}
+            description={t("discounts.schedule_ends_hint")}
             value={isMinute(schedule.endsAt) ? schedule.endsAt : undefined}
             onChange={(value) =>
               onChange({ ...draft, schedule: { ...schedule, endsAt: value ?? "" } }, [

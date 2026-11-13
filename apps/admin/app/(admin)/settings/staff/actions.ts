@@ -17,7 +17,7 @@ const PAGE = "/settings/staff";
 export async function inviteStaff(email: string, role: string): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.POST("/admin/invites", { body: { email, role } });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(PAGE);
   return {};
 }
@@ -29,7 +29,7 @@ export async function inviteStaff(email: string, role: string): Promise<Result> 
 export async function revokeInvite(id: string): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.DELETE("/admin/invites/{id}", { params: { path: { id } } });
-  if (error && error.code !== "invite_not_found") return { error: describe(error) };
+  if (error && error.code !== "invite_not_found") return { error: await describe(error) };
   revalidatePath(PAGE);
   return {};
 }
@@ -48,7 +48,7 @@ export async function updateStaff(
     params: { path: { id } },
     body: change,
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(PAGE);
   return {};
 }
@@ -62,7 +62,7 @@ export async function saveRole(
   const { error } = id
     ? await client.PATCH("/admin/roles/{id}", { params: { path: { id } }, body })
     : await client.POST("/admin/roles", { body });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(PAGE);
   return {};
 }

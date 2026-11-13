@@ -1,5 +1,9 @@
 // Payments in the admin: the method presets staff start from, and which orders staff
-// can still mark paid. Plain data, for server and client code alike.
+// can still mark paid. Plain data and functions over a translator, for server and client
+// code alike.
+
+import type { TFor } from "./messages";
+import type { PAYMENT_NAME_DEFAULTS, StoreDefaults } from "./store-defaults.ts";
 
 /** A starting point for a new method: all `manual`, staff record the money. */
 export type PaymentPreset = {
@@ -12,30 +16,31 @@ export type PaymentPreset = {
   instructionsPlaceholder: string;
 };
 
-export const PAYMENT_PRESETS: PaymentPreset[] = [
-  {
-    value: "cash_on_delivery",
-    label: "Cash on delivery",
-    description: "The shopper pays the courier; you mark the order paid.",
-    name: "Cash on delivery",
-    instructionsPlaceholder: "Pay the courier in cash when your order arrives.",
-  },
-  {
-    value: "bank_transfer",
-    label: "Bank transfer",
-    description: "The shopper transfers the total; you mark the order paid when it lands.",
-    name: "Bank transfer",
-    instructionsPlaceholder:
-      "Transfer the total to IBAN HR12 3456 7890 1234 5678 9 (Your Store Ltd), with your order number as the reference.",
-  },
-  {
-    value: "custom",
-    label: "Other manual method",
-    description: "Anything else you collect yourself: a card terminal, an invoice.",
-    name: "",
-    instructionsPlaceholder: "What the shopper should do to pay.",
-  },
-];
+/** The names the presets' methods start with, in the store's default language. */
+export type PaymentNameDefaults = StoreDefaults<(typeof PAYMENT_NAME_DEFAULTS)[number]>;
+
+/** The presets, in the order offered. */
+const PRESET_VALUES = ["cash_on_delivery", "bank_transfer", "custom"] as const;
+
+/**
+ * The presets as `t`'s language words them. The name a method starts with is content
+ * (shoppers see it at checkout), so it comes from `names`, in the store's default
+ * language whatever the staff member's is; staff can change it before saving.
+ */
+export function paymentPresets(t: TFor<"payments">, names: PaymentNameDefaults): PaymentPreset[] {
+  const presetNames: Record<PaymentPreset["value"], string> = {
+    cash_on_delivery: names.payment_cash_on_delivery_name,
+    bank_transfer: names.payment_bank_transfer_name,
+    custom: "",
+  };
+  return PRESET_VALUES.map((value) => ({
+    value,
+    label: t(`payments.preset_${value}_label`),
+    description: t(`payments.preset_${value}_description`),
+    name: presetNames[value],
+    instructionsPlaceholder: t(`payments.preset_${value}_instructions`),
+  }));
+}
 
 /** A provider a method can name besides `manual`: an installed app answering
  * `payments.start`, or a spore built into the API. */
@@ -45,8 +50,8 @@ export type PaymentApp = { key: string; name: string; isBuiltIn: boolean };
  * What a provider key reads as: "Manual", or the app's or spore's name from its key
  * (`app_stripe`, `spore_stripe`).
  */
-export function providerLabel(provider: string): string {
-  if (provider === "manual") return "Manual";
+export function providerLabel(provider: string, t: TFor<"payments">): string {
+  if (provider === "manual") return t("payments.provider_manual");
   for (const prefix of ["app_", "spore_"])
     if (provider.startsWith(prefix)) return provider.slice(prefix.length);
   return provider;

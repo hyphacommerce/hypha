@@ -22,27 +22,31 @@ import { Tooltip } from "@astryxdesign/core/Tooltip";
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { useState } from "react";
 
-import { TEMPLATES, describeProblem, templateName } from "@/lib/notifications";
+import type { KeyIn } from "@/lib/messages";
+import { describeProblem, templateDescription, templateName } from "@/lib/notifications";
+import { useT } from "@/lib/use-t";
 
 import { setTemplateEnabled } from "./actions";
 
 type Template = AdminSchemas["NotificationTemplateSummary"];
 
-const GROUPS: { title: string; description: string; has: (t: Template) => boolean }[] = [
+type GroupKey = KeyIn<"notifications">;
+
+const GROUPS: { title: GroupKey; description: GroupKey; has: (row: Template) => boolean }[] = [
   {
-    title: "Customer emails",
-    description: "Sent to the customer about their order.",
-    has: (t) => t.audience === "buyer",
+    title: "notifications.templates_group_buyer",
+    description: "notifications.templates_group_buyer_description",
+    has: (row) => row.audience === "buyer",
   },
   {
-    title: "Staff emails",
-    description: "Sent to your team: new orders, invites and password resets.",
-    has: (t) => t.audience === "staff",
+    title: "notifications.templates_group_staff",
+    description: "notifications.templates_group_staff_description",
+    has: (row) => row.audience === "staff",
   },
   {
-    title: "Layout",
-    description: "The frame every email is shown in.",
-    has: (t) => !t.audience,
+    title: "notifications.templates_group_layout",
+    description: "notifications.templates_group_layout_description",
+    has: (row) => !row.audience,
   },
 ];
 
@@ -54,17 +58,17 @@ export function TemplatesCard({
   templates: Template[];
   canWrite: boolean;
 }) {
+  const t = useT<"notifications">();
   const [error, setError] = useState<string>();
   return (
     <Card>
       <VStack gap={5}>
         <VStack gap={1}>
           <Text type="display-3" as="h2">
-            Templates
+            {t("notifications.templates_title")}
           </Text>
           <Text type="supporting" color="secondary">
-            Each email starts from Hypha&apos;s default. Edit one to make it yours; reverting goes
-            back to the default.
+            {t("notifications.templates_description")}
           </Text>
         </VStack>
         {error && <Banner status="error" title={error} onDismiss={() => setError(undefined)} />}
@@ -74,25 +78,30 @@ export function TemplatesCard({
           return (
             <VStack key={group.title} gap={2}>
               <VStack gap={0.5}>
-                <Text type="label">{group.title}</Text>
+                <Text type="label">{t(group.title)}</Text>
                 <Text type="supporting" color="secondary">
-                  {group.description}
+                  {t(group.description)}
                 </Text>
               </VStack>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHeaderCell>Email</TableHeaderCell>
-                    <TableHeaderCell>State</TableHeaderCell>
-                    <TableHeaderCell>Sent</TableHeaderCell>
+                    <TableHeaderCell>{t("notifications.templates_column_email")}</TableHeaderCell>
+                    <TableHeaderCell>{t("notifications.templates_column_state")}</TableHeaderCell>
+                    <TableHeaderCell>{t("notifications.templates_column_sent")}</TableHeaderCell>
                     <TableHeaderCell>
                       <span />
                     </TableHeaderCell>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows.map((t) => (
-                    <TemplateRow key={t.key} template={t} canWrite={canWrite} onError={setError} />
+                  {rows.map((row) => (
+                    <TemplateRow
+                      key={row.key}
+                      template={row}
+                      canWrite={canWrite}
+                      onError={setError}
+                    />
                   ))}
                 </TableBody>
               </Table>
@@ -113,31 +122,34 @@ function TemplateRow({
   canWrite: boolean;
   onError: (error: string | undefined) => void;
 }) {
-  const name = templateName(template.key);
+  const t = useT<"notifications">();
+  const name = templateName(t, template.key);
   return (
     <TableRow>
       <TableCell>
         <VStack gap={0.5}>
           <Text weight="medium">{name}</Text>
           <Text type="supporting" color="secondary">
-            {TEMPLATES[template.key]?.description ?? ""}
+            {templateDescription(t, template.key) ?? ""}
           </Text>
         </VStack>
       </TableCell>
       <TableCell>
         <HStack gap={1} wrap="wrap">
           {template.customized ? (
-            <Badge label="Customized" variant="info" />
+            <Badge label={t("notifications.template_customized")} variant="info" />
           ) : (
-            <Badge label="Default" variant="neutral" />
+            <Badge label={t("common.default")} variant="neutral" />
           )}
-          {!template.enabled && <Badge label="Off" variant="warning" />}
+          {!template.enabled && <Badge label={t("common.off")} variant="warning" />}
           {template.problem && (
             <Tooltip
-              content={`${describeProblem(template.problem)}. Emails use the default until it's fixed.`}
+              content={t("notifications.template_broken_tooltip", {
+                problem: describeProblem(t, template.problem),
+              })}
             >
               <span>
-                <Badge label="Broken: sending the default" variant="error" />
+                <Badge label={t("notifications.template_broken")} variant="error" />
               </span>
             </Tooltip>
           )}
@@ -146,7 +158,7 @@ function TemplateRow({
       <TableCell>
         {template.can_disable ? (
           <Switch
-            label={`Send ${name}`}
+            label={t("notifications.template_send_label", { name })}
             isLabelHidden
             size="sm"
             value={template.enabled}
@@ -157,14 +169,14 @@ function TemplateRow({
           />
         ) : (
           <Text type="supporting" color="secondary">
-            Always
+            {t("notifications.template_always")}
           </Text>
         )}
       </TableCell>
       <TableCell>
         <HStack hAlign="end">
           <Button
-            label={canWrite ? "Edit" : "View"}
+            label={canWrite ? t("common.edit") : t("common.view")}
             variant="ghost"
             size="sm"
             href={`/settings/notifications/${template.key}`}

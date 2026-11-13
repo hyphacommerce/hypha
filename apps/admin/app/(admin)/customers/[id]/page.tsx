@@ -12,10 +12,12 @@ import { DateTime } from "@/components/date-time";
 import { type Crumb, PageHeader } from "@/components/page-header";
 import { DetailSkeleton } from "@/components/skeletons";
 import { CancelledBadge, FulfillmentBadge, PaymentBadge } from "@/components/status";
-import { customerName, formatMoney } from "@/lib/format";
+import { customerName } from "@/lib/format";
+import { getFormat } from "@/lib/get-format";
 import { loadExtensions } from "@/lib/app-extensions";
 import { definitionsOf } from "@/lib/custom-fields-server";
-import { loadCountries, loadCurrencies, loaded, requireStaff, sessionClient } from "@/lib/hypha";
+import { loadCountries, loaded, requireStaff, sessionClient } from "@/lib/hypha";
+import { type T, getT } from "@/lib/i18n";
 import { hasScope } from "@/lib/navigation";
 import type { AddressFormat } from "@/lib/address";
 import { wellKnownField, withoutWellKnown } from "@/lib/well-known-fields";
@@ -30,7 +32,13 @@ import { GroupsCard } from "./groups-card";
 import { CustomerLabels } from "./labels";
 import { NoteCard } from "./note";
 
-const BACK: Crumb = { label: "Customers", href: "/customers" };
+/** The way back to the list. */
+function back(t: T): Crumb {
+  return { label: t("common.customers"), href: "/customers" };
+}
+
+/** The scope the orders card needs: named as it is in every language. */
+const ORDERS_SCOPE = "orders:read";
 
 /**
  * A customer: their orders, note, details, account, groups, consent, addresses and
@@ -38,11 +46,11 @@ const BACK: Crumb = { label: "Customers", href: "/customers" };
  * skeleton of the page.
  */
 export default async function CustomerPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+  const [{ id }, t] = await Promise.all([params, getT()]);
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={1280}>
-        <Suspense fallback={<DetailSkeleton back={BACK} />}>
+        <Suspense fallback={<DetailSkeleton back={back(t)} />}>
           <Customer id={id} />
         </Suspense>
       </VStack>
@@ -68,11 +76,11 @@ async function addressFormatsOf(countries: string[]): Promise<Record<string, Add
 
 async function Customer({ id }: { id: string }) {
   const client = await sessionClient();
-  const [customer, countries, currencies, extensions, definitions, fields, me, groups] =
+  const [customer, countries, format, extensions, definitions, fields, me, groups, t] =
     await Promise.all([
       client.GET("/admin/customers/{id}", { params: { path: { id } } }).then(loaded),
       loadCountries(),
-      loadCurrencies(),
+      getFormat(),
       loadExtensions(),
       // Its custom fields: none shown without `custom_fields:read`.
       definitionsOf("customer"),
@@ -80,6 +88,7 @@ async function Customer({ id }: { id: string }) {
       requireStaff(),
       // The store's groups, for the groups card.
       client.GET("/admin/customer-groups").then((r) => r.data?.items ?? []),
+      getT(),
     ]);
   // Their latest orders. Needs `orders:read`; without it the card says so.
   const recent = await client.GET("/admin/orders", {
@@ -103,8 +112,8 @@ async function Customer({ id }: { id: string }) {
   return (
     <>
       <PageHeader
-        title={isErased ? "Erased customer" : name || customer.email}
-        back={BACK}
+        title={isErased ? t("customers.detail_erased_title") : name || customer.email}
+        back={back(t)}
         badges={
           <CustomerLabels
             customerId={customer.id}
@@ -147,16 +156,18 @@ async function Customer({ id }: { id: string }) {
             <VStack gap={3}>
               <HStack hAlign="between" vAlign="center">
                 <Text type="display-3" as="h2">
-                  Orders
+                  {t("common.orders")}
                 </Text>
                 {orders.length > 0 && (
-                  <Link href={`/orders?customer=${customer.id}`}>View all</Link>
+                  <Link href={`/orders?customer=${customer.id}`}>{t("common.view_all")}</Link>
                 )}
               </HStack>
               {!recent.data ? (
-                <Text color="secondary">Reading orders needs the orders:read scope.</Text>
+                <Text color="secondary">
+                  {t("customers.detail_orders_needs_scope", { scope: ORDERS_SCOPE })}
+                </Text>
               ) : orders.length === 0 ? (
-                <Text color="secondary">No orders yet.</Text>
+                <Text color="secondary">{t("customers.detail_orders_empty")}</Text>
               ) : (
                 <VStack gap={0}>
                   {orders.map((o, i) => (
@@ -169,15 +180,15 @@ async function Customer({ id }: { id: string }) {
                       </Text>
                       <HStack gap={1} wrap="wrap">
                         {o.cancelled_at ? (
-                          <CancelledBadge />
+                          <CancelledBadge t={t} />
                         ) : (
                           <>
-                            <PaymentBadge status={o.financial_status} />
-                            <FulfillmentBadge status={o.fulfillment_status} />
+                            <PaymentBadge status={o.financial_status} t={t} />
+                            <FulfillmentBadge status={o.fulfillment_status} t={t} />
                           </>
                         )}
                       </HStack>
-                      <Text hasTabularNumbers>{formatMoney(o.total, currencies)}</Text>
+                      <Text hasTabularNumbers>{format.money(o.total)}</Text>
                     </div>
                   ))}
                 </VStack>
@@ -196,31 +207,35 @@ async function Customer({ id }: { id: string }) {
           <Card>
             <VStack gap={3}>
               <Text type="display-3" as="h2">
-                Details
+                {t("common.details")}
               </Text>
               <MetadataList>
-                <MetadataListItem label="Email">{customer.email}</MetadataListItem>
-                <MetadataListItem label="Name">{name || "—"}</MetadataListItem>
-                <MetadataListItem label="Phone">{customer.phone ?? "—"}</MetadataListItem>
-                <MetadataListItem label="Orders">
+                <MetadataListItem label={t("common.email")}>{customer.email}</MetadataListItem>
+                <MetadataListItem label={t("common.name")}>
+                  {name || t("common.empty_value")}
+                </MetadataListItem>
+                <MetadataListItem label={t("common.phone")}>
+                  {customer.phone ?? t("common.empty_value")}
+                </MetadataListItem>
+                <MetadataListItem label={t("common.orders")}>
                   {stats.count === 0
-                    ? "None"
-                    : `${stats.count} · ${stats.amount_spent.map((m) => formatMoney(m, currencies)).join(" + ")}`}
+                    ? t("common.none")
+                    : `${format.number(stats.count)} · ${stats.amount_spent.map((m) => format.money(m)).join(" + ")}`}
                 </MetadataListItem>
                 {stats.first_placed_at && (
-                  <MetadataListItem label="First order">
+                  <MetadataListItem label={t("customers.detail_first_order")}>
                     <DateTime value={stats.first_placed_at} />
                   </MetadataListItem>
                 )}
                 {stats.last_placed_at && stats.count > 1 && (
-                  <MetadataListItem label="Last order">
+                  <MetadataListItem label={t("customers.detail_last_order")}>
                     <DateTime value={stats.last_placed_at} />
                   </MetadataListItem>
                 )}
-                <MetadataListItem label="Customer since">
+                <MetadataListItem label={t("customers.detail_since")}>
                   <DateTime value={customer.created_at} />
                 </MetadataListItem>
-                <MetadataListItem label="Last changed">
+                <MetadataListItem label={t("customers.detail_last_changed")}>
                   <DateTime value={customer.updated_at} />
                 </MetadataListItem>
               </MetadataList>

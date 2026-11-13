@@ -8,6 +8,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { Token } from "@astryxdesign/core/Token";
 
 import { type CategoryNode, flatten } from "@/lib/categories";
+import { useT } from "@/lib/use-t";
 
 import type { Draft } from "./draft";
 
@@ -24,6 +25,7 @@ export function CategoriesCard({
   draft: Draft;
   onChange: (change: Partial<Draft>) => void;
 }) {
+  const t = useT<"products">();
   const options = flatten(tree).map((row) => ({
     value: row.id,
     label: row.path,
@@ -34,31 +36,29 @@ export function CategoriesCard({
       <VStack gap={3}>
         <VStack gap={1}>
           <Text type="display-3" as="h2">
-            Categories
+            {t("common.categories")}
           </Text>
           <Text type="supporting" color="secondary">
-            Where shoppers find it when browsing. A category shows its subcategories' products too.{" "}
-            <Link href="/products/categories">Manage categories</Link>
+            {t("products.categories_hint")}{" "}
+            <Link href="/products/categories">{t("products.categories_manage")}</Link>
           </Text>
         </VStack>
         {options.length === 0 ? (
-          <Text color="secondary">No categories yet.</Text>
+          <Text color="secondary">{t("products.categories_none")}</Text>
         ) : (
           <VStack gap={2}>
             {/* The picker shows a count, the chips below the choice: badges inside the
                 trigger overflowed the card with a few long paths. */}
             <MultiSelector
-              label="Categories"
+              label={t("common.categories")}
               isLabelHidden
-              placeholder="Add to categories"
+              placeholder={t("products.categories_placeholder")}
               options={options}
               value={draft.categories}
               onChange={(categories) => onChange({ categories: categories.toSorted() })}
               hasSearch
               triggerDisplay="count"
-              formatValue={(items) =>
-                items.length === 1 ? "1 category" : `${items.length} categories`
-              }
+              formatValue={(items) => t("common.categories_count", { count: items.length })}
               width="100%"
             />
             {draft.categories.length > 0 && (

@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useEffectEvent, useRef, useState, useSyncExternalStore } from "react";
 
 import { ProductPicker } from "@/components/product-picker";
+import { useT } from "@/lib/use-t";
 
 import { appSessionToken } from "../../../extension-actions";
 
@@ -64,6 +65,7 @@ export function AppFrame({
   path: string;
   title: string;
 }) {
+  const t = useT<"apps">();
   const router = useRouter();
   const toast = useToast();
   const frame = useRef<HTMLIFrameElement>(null);
@@ -118,7 +120,7 @@ export function AppFrame({
   };
 
   if (adminOrigin && !target) {
-    return <Banner status="error" title="This app page's address isn't valid" />;
+    return <Banner status="error" title={t("apps.frame_invalid_address")} />;
   }
   return (
     <>
@@ -139,9 +141,9 @@ export function AppFrame({
       )}
       {picking && (
         <ProductPicker
-          title="Choose for the app"
+          title={t("apps.frame_picker_title")}
           mode={picking.multiple ? "multiple" : "single"}
-          confirmLabel={(n) => (n > 1 ? `Choose ${n} products` : "Choose product")}
+          confirmLabel={(count) => t("apps.frame_picker_confirm", { count })}
           onConfirm={async (products) => {
             finishPicking(products.map((p) => p.id));
           }}

@@ -11,13 +11,9 @@ import { type Crumb, PageHeader } from "@/components/page-header";
 import { DetailSkeleton } from "@/components/skeletons";
 import { definitionsOf } from "@/lib/custom-fields-server";
 import { loaded, requireStaff, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 
 import { CategoryForm, DeleteCategory, ImageCard, ProductsCard } from "./category-cards";
-
-const BACK: Crumb[] = [
-  { label: "Products", href: "/products" },
-  { label: "Categories", href: "/products/categories" },
-];
 
 /**
  * A category: its details, image and products. The way back renders at once; the
@@ -31,23 +27,34 @@ export default async function CategoryPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { id } = await params;
-  const query = await searchParams;
+  const [{ id }, query, t] = await Promise.all([params, searchParams, getT()]);
+  const back: Crumb[] = [
+    { label: t("common.products"), href: "/products" },
+    { label: t("common.categories"), href: "/products/categories" },
+  ];
   const cursor = typeof query.cursor === "string" ? query.cursor : undefined;
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={1280}>
-        <Suspense fallback={<DetailSkeleton back={BACK} />}>
-          <Category id={id} cursor={cursor} />
+        <Suspense fallback={<DetailSkeleton back={back} />}>
+          <Category id={id} cursor={cursor} back={back} />
         </Suspense>
       </VStack>
     </Section>
   );
 }
 
-async function Category({ id, cursor }: { id: string; cursor: string | undefined }) {
+async function Category({
+  id,
+  cursor,
+  back,
+}: {
+  id: string;
+  cursor: string | undefined;
+  back: Crumb[];
+}) {
   const client = await sessionClient();
-  const [category, tree, products, definitions, fields, me] = await Promise.all([
+  const [category, tree, products, definitions, fields, me, t] = await Promise.all([
     client.GET("/admin/categories/{id}", { params: { path: { id } } }).then(loaded),
     client.GET("/admin/categories").then(loaded),
     client
@@ -57,6 +64,7 @@ async function Category({ id, cursor }: { id: string; cursor: string | undefined
     definitionsOf("category"),
     client.GET("/admin/categories/{id}/custom-fields", { params: { path: { id } } }),
     requireStaff(),
+    getT(),
   ]);
   // Ancestors come nearest first; a breadcrumb reads from the top.
   const trail = category.ancestors.toReversed();
@@ -66,10 +74,10 @@ async function Category({ id, cursor }: { id: string; cursor: string | undefined
       <PageHeader
         title={category.name}
         back={[
-          ...BACK,
+          ...back,
           ...trail.map((a) => ({ label: a.name, href: `/products/categories/${a.id}` })),
         ]}
-        badges={!category.visible && <Badge label="Hidden" />}
+        badges={!category.visible && <Badge label={t("categories.hidden")} />}
         actions={<DeleteCategory id={category.id} name={category.name} />}
       />
 
@@ -91,8 +99,8 @@ async function Category({ id, cursor }: { id: string; cursor: string | undefined
               />
             )}
             <Card>
-              <MetadataList title="Identifiers">
-                <MetadataListItem label="Category ID">
+              <MetadataList title={t("common.identifiers")}>
+                <MetadataListItem label={t("categories.category_id")}>
                   <Text type="supporting" color="secondary">
                     {category.id}
                   </Text>

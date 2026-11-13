@@ -37,7 +37,7 @@ import {
   type BaseType,
   DIMENSIONS,
   type Definition,
-  OWNER_TYPES,
+  type FieldsT,
   type OwnerType,
   REFERENCE_KINDS,
   URL_SCHEMES,
@@ -48,6 +48,7 @@ import {
   mayBeFilterable,
   mayBeUnique,
   jsonObject,
+  ownerOf,
   parseType,
   scalarText,
   typeLabel,
@@ -55,6 +56,7 @@ import {
   validationsOf,
 } from "@/lib/custom-fields";
 import { currencyCodes } from "@/lib/format";
+import { useT } from "@/lib/use-t";
 import { type Suggestion, suggestionBody } from "@/lib/well-known-fields";
 
 import {
@@ -79,12 +81,13 @@ export function DefinitionsCard({
   /** `custom_fields:write`: the merchant's fields can change. */
   canWrite: boolean;
 }) {
+  const t = useT<"custom_fields">();
   const [editing, setEditing] = useState<Definition | "new">();
   const [deleting, setDeleting] = useState<Definition>();
   const [error, setError] = useState<string>();
   const [moving, setMoving] = useState<string>();
   const [, startTransition] = useTransition();
-  const ownerLabel = OWNER_TYPES.find((o) => o.value === owner)?.label ?? owner;
+  const ownerLabel = t(ownerOf(owner).label);
 
   const move = (definition: Definition, position: number) => {
     setMoving(definition.id);
@@ -105,13 +108,14 @@ export function DefinitionsCard({
                 {ownerLabel}
               </Text>
               <Text type="supporting" color="secondary">
-                Shown on each of their pages in this order.
-                {!canWrite && " Changing fields needs the custom_fields:write scope."}
+                {canWrite
+                  ? t("custom_fields.list_order_hint")
+                  : t("custom_fields.list_order_hint_read_only")}
               </Text>
             </VStack>
             {canWrite && (
               <Button
-                label="Add field"
+                label={t("custom_fields.add_field")}
                 variant="secondary"
                 icon={<PlusIcon />}
                 onClick={() => setEditing("new")}
@@ -120,22 +124,22 @@ export function DefinitionsCard({
           </HStack>
           {error && <Banner status="error" title={error} />}
           {definitions.length === 0 ? (
-            <Text color="secondary">No fields yet.</Text>
+            <Text color="secondary">{t("custom_fields.list_empty")}</Text>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHeaderCell>Field</TableHeaderCell>
-                  <TableHeaderCell>Type</TableHeaderCell>
-                  <TableHeaderCell>Uses</TableHeaderCell>
+                  <TableHeaderCell>{t("custom_fields.list_column_field")}</TableHeaderCell>
+                  <TableHeaderCell>{t("common.type")}</TableHeaderCell>
+                  <TableHeaderCell>{t("custom_fields.list_column_uses")}</TableHeaderCell>
                   <TableHeaderCell>
-                    <span className="visually-hidden">Actions</span>
+                    <span className="visually-hidden">{t("common.actions")}</span>
                   </TableHeaderCell>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {definitions.map((definition, i) => {
-                  const manager = managerLabel(definition);
+                  const manager = managerLabel(t, definition);
                   const isOwn = !definition.managed_by;
                   return (
                     <TableRow key={definition.id}>
@@ -148,20 +152,26 @@ export function DefinitionsCard({
                         </VStack>
                       </TableCell>
                       <TableCell>
-                        <Text>{typeLabel(definition.type)}</Text>
+                        <Text>{typeLabel(t, definition.type)}</Text>
                       </TableCell>
                       <TableCell>
                         <HStack gap={1} wrap="wrap">
                           {manager && <Badge label={manager} variant="info" />}
                           {definition.access.storefront === "read" && (
-                            <Badge label="Storefront" variant="success" />
+                            <Badge label={t("custom_fields.badge_storefront")} variant="success" />
                           )}
-                          {definition.capabilities.filterable && <Badge label="Filterable" />}
-                          {definition.capabilities.unique && <Badge label="Unique" />}
-                          {definition.personal && <Badge label="Personal" variant="warning" />}
-                          {definition.private && <Badge label="Private to its app" />}
+                          {definition.capabilities.filterable && (
+                            <Badge label={t("custom_fields.badge_filterable")} />
+                          )}
+                          {definition.capabilities.unique && (
+                            <Badge label={t("custom_fields.badge_unique")} />
+                          )}
+                          {definition.personal && (
+                            <Badge label={t("custom_fields.badge_personal")} variant="warning" />
+                          )}
+                          {definition.private && <Badge label={t("custom_fields.badge_private")} />}
                           {!isOwn && definition.access.admin === "read" && (
-                            <Badge label="Read-only for staff" />
+                            <Badge label={t("custom_fields.badge_staff_read_only")} />
                           )}
                         </HStack>
                       </TableCell>
@@ -169,7 +179,7 @@ export function DefinitionsCard({
                         {isOwn && canWrite && (
                           <HStack gap={1} hAlign="end">
                             <IconButton
-                              label={`Move ${definition.name} up`}
+                              label={t("common.move_up_named", { name: definition.name })}
                               icon={<ArrowUpIcon />}
                               size="sm"
                               variant="ghost"
@@ -177,7 +187,7 @@ export function DefinitionsCard({
                               onClick={() => move(definition, definition.position - 1)}
                             />
                             <IconButton
-                              label={`Move ${definition.name} down`}
+                              label={t("common.move_down_named", { name: definition.name })}
                               icon={<ArrowDownIcon />}
                               size="sm"
                               variant="ghost"
@@ -185,14 +195,16 @@ export function DefinitionsCard({
                               onClick={() => move(definition, definition.position + 1)}
                             />
                             <IconButton
-                              label={`Edit ${definition.name}`}
+                              label={t("common.edit_named", { name: definition.name })}
                               icon={<PencilSquareIcon />}
                               size="sm"
                               variant="ghost"
                               onClick={() => setEditing(definition)}
                             />
                             <IconButton
-                              label={`Delete ${definition.name}`}
+                              label={t("common.delete_named_label", {
+                                name: definition.name,
+                              })}
                               icon={<TrashIcon />}
                               size="sm"
                               variant="ghost"
@@ -235,6 +247,7 @@ function SuggestionsCard({
   suggestions: Suggestion[];
   onError: (error: string | undefined) => void;
 }) {
+  const t = useT<"custom_fields">();
   const [adding, setAdding] = useState<string>();
   const [, startTransition] = useTransition();
   const add = (suggestion: Suggestion) => {
@@ -250,11 +263,10 @@ function SuggestionsCard({
       <VStack gap={3}>
         <VStack gap={1}>
           <Text type="display-3" as="h2">
-            Suggested
+            {t("custom_fields.suggested_title")}
           </Text>
           <Text type="supporting" color="secondary">
-            Fields Hypha knows what to do with: the admin shows them in place, and apps expect them
-            by these names. Add the ones you want; change or delete them like any other.
+            {t("custom_fields.suggested_description")}
           </Text>
         </VStack>
         <VStack gap={3}>
@@ -264,16 +276,18 @@ function SuggestionsCard({
                 <HStack gap={1} vAlign="center" wrap="wrap">
                   <Text weight="medium">{suggestion.name}</Text>
                   <Text type="supporting" color="secondary">
-                    {suggestion.field} · {typeLabel(suggestion.type)}
+                    {suggestion.field} · {typeLabel(t, suggestion.type)}
                   </Text>
-                  {suggestion.personal && <Badge label="Personal" variant="warning" />}
+                  {suggestion.personal && (
+                    <Badge label={t("custom_fields.badge_personal")} variant="warning" />
+                  )}
                 </HStack>
                 <Text type="supporting" color="secondary">
                   {suggestion.why}
                 </Text>
               </VStack>
               <Button
-                label="Add"
+                label={t("common.add")}
                 variant="secondary"
                 size="sm"
                 icon={<PlusIcon />}
@@ -290,18 +304,18 @@ function SuggestionsCard({
 }
 
 function DeleteDialog({ definition, onClose }: { definition: Definition; onClose: () => void }) {
+  const t = useT<"custom_fields">();
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
   return (
     <AlertDialog
       isOpen
       onOpenChange={(isOpen) => !isOpen && onClose()}
-      title={`Delete ${definition.name}?`}
+      title={t("common.delete_named", { name: definition.name })}
       description={
-        error ??
-        `Every value of ${definition.field} goes with it, on every record, and it can't be undone. Filters and integrations using it stop working.`
+        error ?? t("custom_fields.delete_dialog_description", { field: definition.field })
       }
-      actionLabel="Delete field"
+      actionLabel={t("custom_fields.delete_dialog_action")}
       isActionLoading={isPending}
       onAction={() =>
         startTransition(async () => {
@@ -391,69 +405,68 @@ function formOf(definition?: Definition): Form {
 
 const typeOf = (form: Form) => (form.isList ? `list.${form.base}` : form.base);
 
-/** A whole number from the form, `undefined` for blank, or an error. */
-function count(text: string, what: string): number | undefined | { error: string } {
-  const t = text.trim();
-  if (t === "") return undefined;
-  return /^\d+$/.test(t) ? Number(t) : { error: `${what} is a whole number.` };
+/** A whole number from the form, `undefined` for blank, or `null` when it isn't one. */
+function count(text: string): number | undefined | null {
+  const typed = text.trim();
+  if (typed === "") return undefined;
+  return /^\d+$/.test(typed) ? Number(typed) : null;
 }
 
 /** A `min`/`max` in the type's own terms. */
 type Bound = number | string | { value: string; unit: string };
 
-function bound(form: Form, text: string, what: string): Bound | undefined | { error: string } {
-  const t = text.trim();
-  if (t === "") return undefined;
+function bound(
+  form: Form,
+  which: "min" | "max",
+  t: FieldsT,
+): Bound | undefined | { error: string } {
+  const typed = form[which].trim();
+  if (typed === "") return undefined;
   switch (form.base) {
     case "integer":
     case "money":
-      return /^-?\d+$/.test(t)
-        ? Number(t)
+      return /^-?\d+$/.test(typed)
+        ? Number(typed)
         : {
             error:
               form.base === "money"
-                ? `${what} is a whole number of minor units (cents).`
-                : `${what} is a whole number.`,
+                ? t(`custom_fields.error_${which}_minor_units`)
+                : t(`custom_fields.error_${which}_whole`),
           };
     case "measurement": {
-      const match = /^(-?\d+(?:\.\d+)?)\s*([a-z_]+)$/.exec(t);
+      const match = /^(-?\d+(?:\.\d+)?)\s*([a-z_]+)$/.exec(typed);
       return match
         ? { value: match[1], unit: match[2] }
-        : { error: `${what} is a number with its unit, like 1.5 ${unitsOf(form.dimension)[0]}.` };
+        : {
+            error: t(`custom_fields.error_${which}_measurement`, {
+              unit: unitsOf(form.dimension)[0],
+            }),
+          };
     }
     default:
-      return t;
+      return typed;
   }
 }
 
 const isError = (v: unknown): v is { error: string } =>
   typeof v === "object" && v !== null && "error" in v;
 
-/** The form's whole-number rules, with what each is called in a message. */
-const COUNTS = [
-  { name: "min_length", what: "The minimum length", read: (f: Form) => f.min_length },
-  { name: "max_length", what: "The maximum length", read: (f: Form) => f.max_length },
-  { name: "max_scale", what: "The number of decimals", read: (f: Form) => f.max_scale },
-  { name: "min_items", what: "The minimum number of items", read: (f: Form) => f.min_items },
-  { name: "max_items", what: "The maximum number of items", read: (f: Form) => f.max_items },
-] as const;
+/** The form's whole-number rules; `custom_fields.error_<name>` says what each must be. */
+const COUNTS = ["min_length", "max_length", "max_scale", "min_items", "max_items"] as const;
 
 /** The validations the form's type takes, or what to fix. */
-function validationsFrom(form: Form): Validations | { error: string } {
+function validationsFrom(form: Form, t: FieldsT): Validations | { error: string } {
   const allowed = new Set(validationsOf(typeOf(form)));
   const out: Validations = {};
-  for (const { name, what, read } of COUNTS) {
+  for (const name of COUNTS) {
     if (!allowed.has(name)) continue;
-    const n = count(read(form), what);
-    if (isError(n)) return n;
+    const n = count(form[name]);
+    if (n === null) return { error: t(`custom_fields.error_${name}`) };
     if (n !== undefined) out[name] = n;
   }
-  for (const [name, what] of [
-    ["min", "The minimum"],
-    ["max", "The maximum"],
-  ] as const) {
+  for (const name of ["min", "max"] as const) {
     if (!allowed.has(name)) continue;
-    const b = bound(form, form[name], what);
+    const b = bound(form, name, t);
     if (isError(b)) return b;
     if (b !== undefined) out[name] = jsonObject(b);
   }
@@ -473,15 +486,18 @@ function validationsFrom(form: Form): Validations | { error: string } {
     const choices = form.choices
       .map((c) => ({ key: c.key.trim(), label: c.label.trim() }))
       .filter((c) => c.key || c.label);
-    if (choices.length === 0) return { error: "Add at least one choice." };
+    if (choices.length === 0) return { error: t("custom_fields.error_choices_empty") };
     if (choices.some((c) => !c.key || !c.label)) {
-      return { error: "Give every choice a key and a label." };
+      return { error: t("custom_fields.error_choices_incomplete") };
     }
     out.choices = choices;
   }
   if (allowed.has("unique_items") && form.unique_items) out.unique_items = true;
   return out;
 }
+
+/** What stands for a key not typed yet: an identifier, the same in every language. */
+const KEY_EXAMPLE = "key";
 
 /** A key from a name: "Care instructions" → "care_instructions". */
 function keyFrom(name: string): string {
@@ -503,6 +519,7 @@ function DefinitionDialog({
   definition?: Definition;
   onClose: () => void;
 }) {
+  const t = useT<"custom_fields">();
   const currencies = useCurrencies();
   const [form, setForm] = useState(() => formOf(definition));
   // Until the key is typed in, it follows the name.
@@ -518,13 +535,11 @@ function DefinitionDialog({
   const isNew = definition === undefined;
 
   const submit = () => {
-    if (!form.name.trim()) return setError("Give the field a name.");
+    if (!form.name.trim()) return setError(t("custom_fields.error_name"));
     if (isNew && !/^[a-z][a-z0-9_]{1,63}$/.test(form.key)) {
-      return setError(
-        "The key is 2 to 64 lowercase letters, digits and _, starting with a letter.",
-      );
+      return setError(t("custom_fields.error_key"));
     }
-    const validations = validationsFrom(form);
+    const validations = validationsFrom(form, t);
     if (isError(validations)) return setError(validations.error);
     const capabilities = {
       filterable: mayBeFilterable(type) && form.filterable,
@@ -559,16 +574,26 @@ function DefinitionDialog({
     });
   };
 
-  const typeOptions = BASE_TYPES.map((t) => ({ value: t.value, label: t.label }));
+  const typeOptions = BASE_TYPES.map((base) => ({
+    value: base,
+    label: t(`custom_fields.type_${base}`),
+  }));
 
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={640} purpose="form">
       <DialogHeader
-        title={isNew ? "Add field" : `Edit ${definition.name}`}
+        title={
+          isNew
+            ? t("custom_fields.dialog_add_title")
+            : t("custom_fields.dialog_edit_title", { name: definition.name })
+        }
         subtitle={
           isNew
-            ? "Its key and type can't change later."
-            : `${definition.field} · ${typeLabel(definition.type)}. Its key and type can't change.`
+            ? t("custom_fields.dialog_new_subtitle")
+            : t("custom_fields.dialog_edit_subtitle", {
+                field: definition.field,
+                type: typeLabel(t, definition.type),
+              })
         }
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
@@ -577,8 +602,8 @@ function DefinitionDialog({
       <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
         <VStack gap={4} padding={4}>
           <TextInput
-            label="Name"
-            description="What staff see on the form."
+            label={t("common.name")}
+            description={t("custom_fields.dialog_name_hint")}
             value={form.name}
             onChange={(name) =>
               set({ name, ...(isKeyTouched.current ? {} : { key: keyFrom(name) }) })
@@ -586,8 +611,10 @@ function DefinitionDialog({
           />
           {isNew && (
             <TextInput
-              label="Key"
-              description={`Code reads it as custom.${form.key || "key"}: lowercase letters, digits and _.`}
+              label={t("common.key")}
+              description={t("custom_fields.dialog_key_hint", {
+                key: form.key || KEY_EXAMPLE,
+              })}
               value={form.key}
               onChange={(key) => {
                 isKeyTouched.current = true;
@@ -596,9 +623,9 @@ function DefinitionDialog({
             />
           )}
           <TextArea
-            label="Description"
+            label={t("common.description")}
             isOptional
-            description="Help shown under the field."
+            description={t("custom_fields.dialog_description_hint")}
             value={form.description}
             onChange={(description) => set({ description })}
             rows={2}
@@ -606,17 +633,17 @@ function DefinitionDialog({
           {isNew && (
             <HStack gap={3} vAlign="end" wrap="wrap">
               <Selector
-                label="Type"
+                label={t("common.type")}
                 options={typeOptions}
                 value={form.base}
                 onChange={(value: string) => {
-                  const base = BASE_TYPES.find((t) => t.value === value)?.value ?? "text";
+                  const base = BASE_TYPES.find((b) => b === value) ?? "text";
                   set({ base, isList: form.isList && isListable(base) });
                 }}
                 width={240}
               />
               <CheckboxInput
-                label="A list of values"
+                label={t("custom_fields.dialog_is_list")}
                 value={form.isList}
                 isDisabled={!isListable(form.base)}
                 onChange={(isList) => set({ isList })}
@@ -625,7 +652,7 @@ function DefinitionDialog({
           )}
           {isNew && (
             <Text type="supporting" color="secondary">
-              {BASE_TYPES.find((t) => t.value === form.base)?.description}
+              {t(`custom_fields.type_${form.base}_description`)}
             </Text>
           )}
 
@@ -637,13 +664,13 @@ function DefinitionDialog({
           />
 
           <VStack gap={2}>
-            <Text weight="medium">Access and uses</Text>
+            <Text weight="medium">{t("custom_fields.dialog_access_title")}</Text>
             <Selector
-              label="Storefront"
-              description="Whether storefronts can read the value."
+              label={t("custom_fields.dialog_storefront")}
+              description={t("custom_fields.dialog_storefront_hint")}
               options={[
-                { value: "none", label: "Hidden from storefronts" },
-                { value: "read", label: "Storefronts can read it" },
+                { value: "none", label: t("custom_fields.storefront_none") },
+                { value: "read", label: t("custom_fields.storefront_read") },
               ]}
               value={form.storefront}
               onChange={(value: string) => set({ storefront: value === "read" ? "read" : "none" })}
@@ -651,24 +678,24 @@ function DefinitionDialog({
             />
             {mayBeFilterable(type) && (
               <CheckboxInput
-                label="Filterable"
-                description="Offered as a filter on the list, and usable as a search filter."
+                label={t("custom_fields.dialog_filterable")}
+                description={t("custom_fields.dialog_filterable_hint")}
                 value={form.filterable}
                 onChange={(filterable) => set({ filterable })}
               />
             )}
             {mayBeUnique(type) && (
               <CheckboxInput
-                label="Unique"
-                description="No two records hold the same value (text ignoring case)."
+                label={t("custom_fields.dialog_unique")}
+                description={t("custom_fields.dialog_unique_hint")}
                 value={form.unique}
                 onChange={(unique) => set({ unique })}
               />
             )}
             {allowsPersonal(owner) && (
               <CheckboxInput
-                label="Personal data"
-                description="About a person (a birthday, a gift message): hidden from apps and keys without customer_data:profile."
+                label={t("custom_fields.dialog_personal")}
+                description={t("custom_fields.dialog_personal_hint")}
                 value={form.personal}
                 onChange={(personal) => set({ personal })}
               />
@@ -679,9 +706,9 @@ function DefinitionDialog({
       <VStack gap={3} padding={4}>
         {error && <Banner status="error" title={error} />}
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label={isNew ? "Add field" : "Save"}
+            label={isNew ? t("custom_fields.dialog_add_submit") : t("common.save")}
             variant="primary"
             isLoading={isPending}
             onClick={submit}
@@ -704,23 +731,24 @@ function ValidationsEditor({
   set: (change: Partial<Form>) => void;
   currencyList: string[];
 }) {
+  const t = useT<"custom_fields">();
   if (allowed.size === 0) return null;
   const boundHint: Partial<Record<BaseType, string>> = {
-    integer: "A whole number.",
-    decimal: "Like 12.50.",
-    date: "Like 2026-10-20.",
-    date_time: "RFC 3339, like 2026-10-20T09:30:00Z.",
-    money: "In minor units (cents), in the value's currency.",
-    measurement: `With its unit, like 1.5 ${unitsOf(form.dimension)[0]}.`,
+    integer: t("custom_fields.bound_hint_integer"),
+    decimal: t("custom_fields.bound_hint_decimal"),
+    date: t("custom_fields.bound_hint_date"),
+    date_time: t("custom_fields.bound_hint_date_time"),
+    money: t("custom_fields.bound_hint_money"),
+    measurement: t("custom_fields.bound_hint_measurement", { unit: unitsOf(form.dimension)[0] }),
   };
   return (
     <VStack gap={3}>
-      <Text weight="medium">Rules</Text>
+      <Text weight="medium">{t("custom_fields.rules_title")}</Text>
       {(allowed.has("min_length") || allowed.has("max_length")) && (
         <HStack gap={3} wrap="wrap">
           {allowed.has("min_length") && (
             <TextInput
-              label="Minimum length"
+              label={t("custom_fields.rule_min_length")}
               isOptional
               value={form.min_length}
               onChange={(min_length) => set({ min_length })}
@@ -729,7 +757,7 @@ function ValidationsEditor({
           )}
           {allowed.has("max_length") && (
             <TextInput
-              label="Maximum length"
+              label={t("custom_fields.rule_max_length")}
               isOptional
               value={form.max_length}
               onChange={(max_length) => set({ max_length })}
@@ -740,18 +768,18 @@ function ValidationsEditor({
       )}
       {allowed.has("pattern") && (
         <TextInput
-          label="Pattern"
+          label={t("custom_fields.rule_pattern")}
           isOptional
-          description="A regular expression the whole value matches, like [A-Z]{3}-\d+ (no look-around or back-references)."
+          description={t("custom_fields.rule_pattern_hint")}
           value={form.pattern}
           onChange={(pattern) => set({ pattern })}
         />
       )}
       {allowed.has("dimension") && (
         <Selector
-          label="Measures"
-          description="Required. Values take any unit of it."
-          options={DIMENSIONS}
+          label={t("custom_fields.rule_dimension")}
+          description={t("custom_fields.rule_dimension_hint")}
+          options={DIMENSIONS.map((d) => ({ value: d, label: t(`custom_fields.dimension_${d}`) }))}
           value={form.dimension}
           onChange={(dimension: string) => set({ dimension })}
           width={200}
@@ -760,7 +788,7 @@ function ValidationsEditor({
       {(allowed.has("min") || allowed.has("max")) && (
         <HStack gap={3} wrap="wrap">
           <TextInput
-            label="Minimum"
+            label={t("custom_fields.rule_min")}
             isOptional
             description={boundHint[form.base]}
             value={form.min}
@@ -768,7 +796,7 @@ function ValidationsEditor({
             width={220}
           />
           <TextInput
-            label="Maximum"
+            label={t("custom_fields.rule_max")}
             isOptional
             description={boundHint[form.base]}
             value={form.max}
@@ -779,7 +807,7 @@ function ValidationsEditor({
       )}
       {allowed.has("max_scale") && (
         <TextInput
-          label="Decimals at most"
+          label={t("custom_fields.rule_max_scale")}
           isOptional
           value={form.max_scale}
           onChange={(max_scale) => set({ max_scale })}
@@ -788,9 +816,9 @@ function ValidationsEditor({
       )}
       {allowed.has("schemes") && (
         <MultiSelector
-          label="Allowed schemes"
+          label={t("custom_fields.rule_schemes")}
           isOptional
-          description="Any of them when none is chosen."
+          description={t("custom_fields.rule_schemes_hint")}
           options={URL_SCHEMES.map((s) => ({ value: s, label: s }))}
           value={form.schemes}
           onChange={(schemes) => set({ schemes })}
@@ -798,18 +826,18 @@ function ValidationsEditor({
       )}
       {allowed.has("domains") && (
         <TextInput
-          label="Allowed domains"
+          label={t("custom_fields.rule_domains")}
           isOptional
-          description="Comma-separated, like example.com, shop.example.com. Any when empty."
+          description={t("custom_fields.rule_domains_hint")}
           value={form.domains}
           onChange={(domains) => set({ domains })}
         />
       )}
       {allowed.has("currencies") && (
         <MultiSelector
-          label="Currencies"
+          label={t("custom_fields.rule_currencies")}
           isOptional
-          description="Any currency when none is chosen."
+          description={t("custom_fields.rule_currencies_hint")}
           options={currencyList.map((c) => ({ value: c, label: c }))}
           value={form.currencies}
           hasSearch
@@ -818,9 +846,9 @@ function ValidationsEditor({
       )}
       {allowed.has("kind") && (
         <Selector
-          label="Refers to"
-          description="Required: what the value points at."
-          options={REFERENCE_KINDS.map((k) => ({ value: k.value, label: k.label }))}
+          label={t("custom_fields.rule_kind")}
+          description={t("custom_fields.rule_kind_hint")}
+          options={REFERENCE_KINDS.map((k) => ({ value: k.value, label: t(k.label) }))}
           value={form.kind}
           onChange={(kind: string) => set({ kind })}
           width={200}
@@ -832,22 +860,22 @@ function ValidationsEditor({
       {(allowed.has("min_items") || allowed.has("max_items")) && (
         <HStack gap={3} wrap="wrap" vAlign="end">
           <TextInput
-            label="Fewest items"
+            label={t("custom_fields.rule_min_items")}
             isOptional
             value={form.min_items}
             onChange={(min_items) => set({ min_items })}
             width={140}
           />
           <TextInput
-            label="Most items"
+            label={t("custom_fields.rule_max_items")}
             isOptional
-            description="Up to 128."
+            description={t("custom_fields.rule_max_items_hint")}
             value={form.max_items}
             onChange={(max_items) => set({ max_items })}
             width={140}
           />
           <CheckboxInput
-            label="No item twice"
+            label={t("custom_fields.rule_unique_items")}
             value={form.unique_items}
             onChange={(unique_items) => set({ unique_items })}
           />
@@ -868,6 +896,7 @@ function ChoicesEditor({
   choices: Choice[];
   onChange: (choices: Choice[]) => void;
 }) {
+  const t = useT<"custom_fields">();
   const [rows, setRows] = useState(() =>
     (choices.length > 0 ? choices : [{ key: "", label: "" }]).map((c, i) => ({
       ...c,
@@ -882,17 +911,16 @@ function ChoicesEditor({
   };
   return (
     <VStack gap={2}>
-      <Text weight="medium">Choices</Text>
+      <Text weight="medium">{t("custom_fields.choices_title")}</Text>
       <Text type="supporting" color="secondary">
-        Keys are lowercase letters, digits, _ and -; they&apos;re what&apos;s stored, so they
-        can&apos;t change once saved. Labels are what staff and shoppers see.
+        {t("custom_fields.choices_hint")}
       </Text>
       {rows.map((row) => (
         <HStack key={row.id} gap={2} vAlign="end">
           <TextInput
-            label="Label"
+            label={t("custom_fields.choices_label")}
             isLabelHidden
-            placeholder="Label"
+            placeholder={t("custom_fields.choices_label")}
             value={row.label}
             onChange={(label) =>
               update(
@@ -909,16 +937,20 @@ function ChoicesEditor({
             }
           />
           <TextInput
-            label="Key"
+            label={t("common.key")}
             isLabelHidden
-            placeholder="key"
+            placeholder={t("custom_fields.choices_key_placeholder")}
             value={row.key}
             isDisabled={row.isSaved}
             onChange={(key) => update(rows.map((r) => (r.id === row.id ? { ...r, key } : r)))}
             width={180}
           />
           <IconButton
-            label={`Remove ${row.label || "choice"}`}
+            label={
+              row.label
+                ? t("custom_fields.choices_remove_named", { label: row.label })
+                : t("custom_fields.choices_remove")
+            }
             icon={<TrashIcon />}
             size="sm"
             variant="ghost"
@@ -929,7 +961,7 @@ function ChoicesEditor({
       ))}
       <HStack>
         <Button
-          label="Add choice"
+          label={t("custom_fields.choices_add")}
           size="sm"
           variant="secondary"
           icon={<PlusIcon />}

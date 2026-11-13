@@ -8,6 +8,7 @@ import { type GridFilters, gridPage } from "@/app/(admin)/markets/price-lists/gr
 import { type SearchParams, one } from "@/components/resource-table/params";
 import { flatten } from "@/lib/categories";
 import { describe, loaded, requireStaff, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import { hasScope } from "@/lib/navigation";
 
 import { pricesHref } from "@/lib/price-editor";
@@ -34,9 +35,9 @@ export default async function PriceEditorPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<SearchParams>;
 }) {
-  const [{ id }, query] = await Promise.all([params, searchParams]);
+  const [{ id }, query, t] = await Promise.all([params, searchParams, getT()]);
   return (
-    <Suspense fallback={<EditorSkeleton id={id} />}>
+    <Suspense fallback={<EditorSkeleton id={id} backLabel={t("common.back")} />}>
       <Editor id={id} filters={filtersOf(query)} cursor={one(query, "cursor")} />
     </Suspense>
   );
@@ -71,7 +72,7 @@ async function Editor({
       nextCursor={page.nextCursor}
       isFirstPage={!cursor}
       filters={filters}
-      error={page.failure?.error ? describe(page.failure.error) : undefined}
+      error={page.failure?.error ? await describe(page.failure.error) : undefined}
       categories={flatten(tree).map((row) => ({ value: row.id, label: row.path }))}
       canWrite={hasScope(me.scopes, "pricing:write")}
     />
@@ -79,13 +80,13 @@ async function Editor({
 }
 
 /** The editor's frame while the list and its prices load: the way back works already. */
-function EditorSkeleton({ id }: { id: string }) {
+function EditorSkeleton({ id, backLabel }: { id: string; backLabel: string }) {
   return (
     <div className="pe" aria-busy>
       <header className="pe-bar">
         <div className="pe-title">
           <Button
-            label="Back"
+            label={backLabel}
             size="sm"
             variant="ghost"
             icon={<ArrowLeftIcon width={16} height={16} />}

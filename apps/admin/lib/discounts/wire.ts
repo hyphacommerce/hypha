@@ -6,6 +6,7 @@
 
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
+import type { Format } from "../format.ts";
 import { formatAmount } from "../price-grid/money.ts";
 import { fromLocalInput, percentInput, toLocalInput } from "../price-lists.ts";
 import {
@@ -27,11 +28,12 @@ import {
 } from "./draft.ts";
 import {
   type CheckContext,
+  type DiscountsT,
   type MarketOption,
   type PathMapper,
   type Problem,
+  amountsOf,
   checkDraft,
-  parseAmounts,
   parseCount,
   parseOff,
   problemsFromDetails,
@@ -53,15 +55,18 @@ type Amounts = Record<string, Money>;
 /** A request to send, or the problems that keep the draft from being one. */
 export type Built<T> = { body: T } | { problems: Problem[] };
 
+/** What building a request reads of the context: no problem is worded here. */
+type ShapeContext = Omit<CheckContext, "t">;
+
 // ---- draft → API ----
 
 /** Money by market, for the markets amounts are typed for; blanks left out. */
 function moneyOf(
   text: PerMarketText,
   markets: readonly MarketOption[],
-  ctx: CheckContext,
+  ctx: ShapeContext,
 ): Amounts {
-  const parsed = parseAmounts(text, markets, ctx.currencies, "", { allowZero: true }).amounts;
+  const parsed = amountsOf(text, markets, ctx.currencies, { allowZero: true });
   const out: Amounts = {};
   for (const market of markets) {
     const amount = parsed[market.id];
@@ -89,7 +94,7 @@ type AllocationMode = "draft" | "each" | "default";
 function valueOf(
   value: ValueDraft,
   markets: readonly MarketOption[],
-  ctx: CheckContext,
+  ctx: ShapeContext,
   mode: AllocationMode,
 ): Value {
   switch (value.type) {
@@ -131,14 +136,14 @@ function thresholdOf(
   threshold: Pick<ThresholdDraft, "quantity" | "amounts">,
   type: "quantity" | "amount",
   markets: readonly MarketOption[],
-  ctx: CheckContext,
+  ctx: ShapeContext,
 ): Threshold {
   return type === "quantity"
     ? { type: "quantity", quantity: countOf(threshold.quantity) }
     : { type: "amount", amounts: moneyOf(threshold.amounts, markets, ctx) };
 }
 
-function kindOf(kind: KindDraft, markets: readonly MarketOption[], ctx: CheckContext): Kind {
+function kindOf(kind: KindDraft, markets: readonly MarketOption[], ctx: ShapeContext): Kind {
   switch (kind.type) {
     case "standard": {
       const rewards: Reward[] = [];
@@ -201,7 +206,7 @@ type ConditionType = Condition["type"];
 function conditionsOf(
   c: ConditionsDraft,
   markets: readonly MarketOption[],
-  ctx: CheckContext,
+  ctx: ShapeContext,
 ): Condition[] {
   const out: Condition[] = [];
   if (c.markets.length > 0) out.push({ type: "markets", markets: [...c.markets] });
@@ -221,7 +226,7 @@ function conditionsOf(
 }
 
 /** Every field of a discount a draft sets, as the create request names them. */
-function fieldsOf(draft: DiscountDraft, ctx: CheckContext) {
+function fieldsOf(draft: DiscountDraft, ctx: ShapeContext) {
   const markets = amountMarkets(draft.conditions, ctx.markets);
   return {
     title: draft.title.trim(),
@@ -658,7 +663,7 @@ function kindPath(kind: KindDraft, rest: Rest): string {
 
 // What a request's shape needs of the context: with no markets to type amounts for,
 // nothing reads the currencies or the time zone.
-const SHAPE_ONLY: CheckContext = { markets: [], currencies: {}, timeZone: "UTC" };
+const SHAPE_ONLY: ShapeContext = { markets: [], currencies: {}, timeZone: "UTC" };
 
 /** The condition types `draft` sends, in the order `conditionsOf` sends them. */
 function conditionTypes(draft: DiscountDraft): ConditionType[] {
@@ -728,17 +733,21 @@ export function apiPathMapper(draft: DiscountDraft): PathMapper {
 
 // ---- labels ----
 
-const count = (n: number) => n.toLocaleString("en");
-
 /** "Automatic", "1 code", "2,000 codes". */
-export function methodLabel(d: Pick<Discount, "method" | "code_count">): string {
-  if (d.method === "automatic") return "Automatic";
-  return d.code_count === 1 ? "1 code" : `${count(d.code_count)} codes`;
+export function methodLabel(d: Pick<Discount, "method" | "code_count">, t: DiscountsT): string {
+  if (d.method === "automatic") return t("discounts.method_automatic");
+  return t("discounts.codes_count", { count: d.code_count });
 }
 
 /** "12", or "12 of 100" with a limit. */
-export function usesLabel(d: Pick<Discount, "used" | "limits">): string {
-  return d.limits.total == null ? count(d.used) : `${count(d.used)} of ${count(d.limits.total)}`;
+export function usesLabel(
+  d: Pick<Discount, "used" | "limits">,
+  t: DiscountsT,
+  format: Pick<Format, "number">,
+): string {
+  return d.limits.total == null
+    ? format.number(d.used)
+    : t("discounts.uses_of_limit", { used: d.used, limit: d.limits.total });
 }
 
 // ---- refusals ----
@@ -758,7 +767,7 @@ function detail(details: unknown, key: string): string | undefined {
  * says which (`invalid_discount`'s problems, a market an amount names, a code taken),
  * else under "" (the whole form).
  */
-export function refusalProblems(refusal: Refusal, draft: DiscountDraft): Problem[] {
+export function refusalProblems(refusal: Refusal, draft: DiscountDraft, t: DiscountsT): Problem[] {
   const map = apiPathMapper(draft);
   const path = detail(refusal.details, "path");
   const market = detail(refusal.details, "market");
@@ -770,24 +779,20 @@ export function refusalProblems(refusal: Refusal, draft: DiscountDraft): Problem
     case "invalid_discount":
       return problemsFromDetails(refusal.details, map);
     case "market_not_found":
-      return at("This market no longer exists: clear its amount.");
+      return at(t("discounts.refusal_market_gone"));
     case "discount_currency_mismatch":
-      return at("This market sells in another currency now: type its amount again.");
+      return at(t("discounts.refusal_currency_changed"));
     case "discount_code_taken": {
       const code = detail(refusal.details, "code");
-      const message = code ? `Another discount has the code ${code}.` : "Another discount has it.";
+      const message = code
+        ? t("discounts.refusal_code_taken", { code })
+        : t("discounts.refusal_code_taken_unnamed");
       return [{ path: "code", message }];
     }
     case "invalid_discount_code":
-      return [{ path: "code", message: "1 to 64 characters, without spaces." }];
+      return [{ path: "code", message: t("discounts.refusal_code_invalid") }];
     case "too_many_automatic_discounts":
-      return [
-        {
-          path: "",
-          message:
-            "The store has as many live automatic discounts as it can hold. End or pause one first, or save this one as a draft.",
-        },
-      ];
+      return [{ path: "", message: t("discounts.refusal_too_many_automatic") }];
     default:
       return [{ path: "", message: refusal.message }];
   }

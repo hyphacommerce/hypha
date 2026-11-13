@@ -19,6 +19,8 @@ import {
 import { Text } from "@astryxdesign/core/Text";
 import { useState } from "react";
 
+import { useT } from "@/lib/use-t";
+
 import { type ValidationApp, setValidationApps } from "./actions";
 
 export function ValidationAppsCard({
@@ -32,6 +34,7 @@ export function ValidationAppsCard({
   names: Record<string, string>;
   canWrite: boolean;
 }) {
+  const t = useT<"checkout">();
   const [error, setError] = useState<string>();
   // The whole list goes with each change: the API replaces what was set.
   const change = async (app: string, part: Partial<ValidationApp>) => {
@@ -44,27 +47,20 @@ export function ValidationAppsCard({
       <VStack gap={3}>
         <VStack gap={1}>
           <Text type="display-3" as="h2">
-            Validation apps
+            {t("checkout.validation_title")}
           </Text>
-          <Text color="secondary">
-            Apps that check a cart as the shopper goes: when the address is set, when an option is
-            chosen and at checkout. Their errors stop checkout and their warnings show under the
-            field. At most five.
-          </Text>
+          <Text color="secondary">{t("checkout.validation_description")}</Text>
         </VStack>
         {error && <Banner status="error" title={error} />}
         {apps.length === 0 ? (
-          <Text color="secondary">
-            No installed app validates checkouts. Install one whose manifest declares
-            checkout.validate and is granted carts:read.
-          </Text>
+          <Text color="secondary">{t("checkout.validation_empty")}</Text>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHeaderCell>App</TableHeaderCell>
-                <TableHeaderCell>Asked</TableHeaderCell>
-                <TableHeaderCell>Block checkout when this app fails</TableHeaderCell>
+                <TableHeaderCell>{t("common.app")}</TableHeaderCell>
+                <TableHeaderCell>{t("checkout.validation_column_asked")}</TableHeaderCell>
+                <TableHeaderCell>{t("checkout.validation_column_block")}</TableHeaderCell>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -84,7 +80,7 @@ export function ValidationAppsCard({
                     </TableCell>
                     <TableCell>
                       <Switch
-                        label={`Ask ${name}`}
+                        label={t("checkout.validation_ask", { app: name })}
                         isLabelHidden
                         size="sm"
                         value={a.enabled}
@@ -94,7 +90,7 @@ export function ValidationAppsCard({
                     </TableCell>
                     <TableCell>
                       <Switch
-                        label={`Block checkout when ${name} fails`}
+                        label={t("checkout.validation_block", { app: name })}
                         isLabelHidden
                         size="sm"
                         value={a.block_on_failure}

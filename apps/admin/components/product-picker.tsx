@@ -18,23 +18,16 @@ import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { MagnifyingGlassIcon, PhotoIcon } from "@heroicons/react/24/outline";
 import { useEffect, useRef, useState, useTransition } from "react";
 
-import { ProductStatusBadge } from "@/components/status";
+import { ProductStatusBadge, statusLabel } from "@/components/status";
+import { useT } from "@/lib/use-t";
 
 import { type PickerProduct, pickerProducts } from "./product-picker-actions";
 
 type Status = AdminSchemas["ProductStatus"];
 
-const STATUSES: { value: Status; label: string }[] = [
-  { value: "active", label: "Active" },
-  { value: "draft", label: "Draft" },
-  { value: "archived", label: "Archived" },
-];
+const STATUSES: Status[] = ["active", "draft", "archived"];
 
 export type { PickerProduct };
-
-function addLabel(n: number): string {
-  return n > 1 ? `Add ${n} products` : "Add product";
-}
 
 /** What a search is for, to tell whether the list shown answers it. */
 function searchKey(q: string, statuses: Status[]): string {
@@ -44,10 +37,10 @@ function searchKey(q: string, statuses: Status[]): string {
 export function ProductPicker({
   title,
   description,
-  confirmLabel = addLabel,
+  confirmLabel,
   mode = "multiple",
   isAlreadyIn,
-  alreadyInLabel = "Already added",
+  alreadyInLabel: alreadyInLabelProp,
   onConfirm,
   onClose,
 }: {
@@ -67,6 +60,8 @@ export function ProductPicker({
   onConfirm: (products: PickerProduct[]) => Promise<{ error?: string } | void>;
   onClose: () => void;
 }) {
+  const t = useT();
+  const alreadyInLabel = alreadyInLabelProp ?? t("components.product_picker_already_added");
   const [q, setQ] = useState("");
   const [statuses, setStatuses] = useState<Status[]>([]);
   const [items, setItems] = useState<PickerProduct[]>();
@@ -150,9 +145,9 @@ export function ProductPicker({
       </div>
       <VStack gap={3} padding={4}>
         <TextInput
-          label="Search products"
+          label={t("components.product_picker_search_label")}
           isLabelHidden
-          placeholder="Search by title, handle or SKU"
+          placeholder={t("components.product_picker_search_placeholder")}
           startIcon={MagnifyingGlassIcon}
           value={q}
           onChange={setQ}
@@ -160,13 +155,13 @@ export function ProductPicker({
           hasAutoFocus
         />
         <HStack gap={2} vAlign="center" wrap="wrap">
-          {STATUSES.map((s) => (
+          {STATUSES.map((status) => (
             <ToggleButton
-              key={s.value}
-              label={s.label}
+              key={status}
+              label={statusLabel("product", status, t)}
               size="sm"
-              isPressed={statuses.includes(s.value)}
-              onPressedChange={() => toggleStatus(s.value)}
+              isPressed={statuses.includes(status)}
+              onPressedChange={() => toggleStatus(status)}
             />
           ))}
         </HStack>
@@ -183,12 +178,14 @@ export function ProductPicker({
         ) : items && items.length === 0 ? (
           <VStack gap={1} padding={6} hAlign="center">
             <Text weight="medium">
-              {q || statuses.length ? "No products match" : "No products yet"}
+              {q || statuses.length
+                ? t("components.product_picker_no_match_title")
+                : t("components.product_picker_empty_title")}
             </Text>
             <Text type="supporting" color="secondary">
               {q || statuses.length
-                ? "Try other words, or clear the status filters."
-                : "Create a product first, then add it here."}
+                ? t("components.product_picker_no_match_description")
+                : t("components.product_picker_empty_description")}
             </Text>
           </VStack>
         ) : (
@@ -210,7 +207,7 @@ export function ProductPicker({
                   {/* The checkbox toggles itself; the row mustn't toggle it back. */}
                   <div role="presentation" onClick={(e) => e.stopPropagation()}>
                     <CheckboxInput
-                      label={`Pick ${product.title}`}
+                      label={t("components.product_picker_pick", { title: product.title })}
                       isLabelHidden
                       value={already || isPicked}
                       isDisabled={already}
@@ -230,19 +227,27 @@ export function ProductPicker({
                       {product.title}
                     </Text>
                     <Text type="supporting" color="secondary" maxLines={1}>
-                      /{product.handle}
-                      {product.variantCount > 1 && ` · ${product.variantCount} variants`}
-                      {already && ` · ${alreadyInLabel}`}
+                      {[
+                        `/${product.handle}`,
+                        ...(product.variantCount > 1
+                          ? [
+                              t("common.variants_count", {
+                                count: product.variantCount,
+                              }),
+                            ]
+                          : []),
+                        ...(already ? [alreadyInLabel] : []),
+                      ].join(" · ")}
                     </Text>
                   </VStack>
-                  <ProductStatusBadge status={product.status} />
+                  <ProductStatusBadge status={product.status} t={t} />
                 </div>
               );
             })}
             {next && (
               <HStack hAlign="center" padding={3}>
                 <Button
-                  label="Load more"
+                  label={t("common.load_more")}
                   variant="ghost"
                   size="sm"
                   isLoading={isLoadingMore}
@@ -258,16 +263,19 @@ export function ProductPicker({
         <Text type="supporting" color="secondary">
           {picked.size === 0
             ? mode === "single"
-              ? "Pick a product"
-              : "Pick one or more products"
+              ? t("components.product_picker_hint_single")
+              : t("components.product_picker_hint_multiple")
             : mode === "single"
               ? [...picked.values()][0]?.title
-              : `${picked.size} selected`}
+              : t("common.selected_count", { count: picked.size })}
         </Text>
         <HStack gap={2}>
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label={confirmLabel(picked.size)}
+            label={
+              confirmLabel?.(picked.size) ??
+              t("components.product_picker_add", { count: picked.size })
+            }
             variant="primary"
             isDisabled={picked.size === 0}
             isLoading={isSaving}

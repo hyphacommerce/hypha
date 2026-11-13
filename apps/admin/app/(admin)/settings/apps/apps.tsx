@@ -24,9 +24,17 @@ import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { KeyIcon, PencilSquareIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { useState, useTransition } from "react";
 
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
+
 import { createApp, deleteApp, rotateSecret, setEnabled, updateApp } from "./actions";
 
 type App = AdminSchemas["AppResponse"];
+
+/** The header an app verifies, and examples of what the form takes: never translated. */
+const SIGNATURE_HEADER = "Hypha-Signature";
+const WEBHOOK_EXAMPLE = "https://erp.example.com/hypha";
+const EVENTS_EXAMPLE = "order.*, product.updated";
 
 /** What the last action on an app said, shown above the table. */
 type Message = { text: string; isError: boolean };
@@ -35,6 +43,7 @@ export function AppsCard({ apps }: { apps: App[] }) {
   const [editing, setEditing] = useState<App | "new">();
   const [secret, setSecret] = useState<{ appKey: string; secret: string }>();
   const [message, setMessage] = useState<Message>();
+  const t = useT<"apps">();
 
   return (
     <Card>
@@ -42,14 +51,17 @@ export function AppsCard({ apps }: { apps: App[] }) {
         <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Apps
+              {t("common.apps")}
             </Text>
             <Text type="supporting" color="secondary">
-              Your ERP, a fulfilment service, or your own code: anything that verifies the
-              Hypha-Signature header.
+              {t("apps.dev_card_description", { header: SIGNATURE_HEADER })}
             </Text>
           </VStack>
-          <Button label="Add app" variant="secondary" onClick={() => setEditing("new")} />
+          <Button
+            label={t("apps.dev_add_app")}
+            variant="secondary"
+            onClick={() => setEditing("new")}
+          />
         </HStack>
         {message && (
           <Banner
@@ -59,14 +71,14 @@ export function AppsCard({ apps }: { apps: App[] }) {
           />
         )}
         {apps.length === 0 ? (
-          <Text color="secondary">No apps yet.</Text>
+          <Text color="secondary">{t("apps.dev_empty")}</Text>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHeaderCell>App</TableHeaderCell>
-                <TableHeaderCell>Webhook</TableHeaderCell>
-                <TableHeaderCell>On</TableHeaderCell>
+                <TableHeaderCell>{t("common.app")}</TableHeaderCell>
+                <TableHeaderCell>{t("apps.dev_column_webhook")}</TableHeaderCell>
+                <TableHeaderCell>{t("common.on")}</TableHeaderCell>
                 <TableHeaderCell>
                   <span />
                 </TableHeaderCell>
@@ -117,6 +129,7 @@ function AppRow({
   // Both break a live app at once, so each asks first.
   const [confirming, setConfirming] = useState<"delete" | "rotate">();
   const [isPending, startTransition] = useTransition();
+  const t = useT<"apps">();
 
   return (
     <TableRow>
@@ -136,19 +149,19 @@ function AppRow({
             <Text type="code">{app.webhook.url}</Text>
             <HStack gap={1} wrap="wrap">
               {app.subscriptions.length === 0 ? (
-                <Badge label="No events" variant="warning" />
+                <Badge label={t("apps.dev_no_events")} variant="warning" />
               ) : (
                 app.subscriptions.map((pattern) => <Badge key={pattern} label={pattern} />)
               )}
             </HStack>
           </VStack>
         ) : (
-          <Text color="secondary">None</Text>
+          <Text color="secondary">{t("common.none")}</Text>
         )}
       </TableCell>
       <TableCell>
         <Switch
-          label={`Use ${app.name}`}
+          label={t("apps.dev_use_app", { name: app.name })}
           isLabelHidden
           size="sm"
           value={app.enabled}
@@ -160,16 +173,16 @@ function AppRow({
           {confirming === "delete" ? (
             <>
               <Text type="supporting" color="secondary">
-                Its rate settings go too.
+                {t("apps.dev_delete_warning")}
               </Text>
               <Button
-                label="Cancel"
+                label={t("common.cancel")}
                 size="sm"
                 variant="ghost"
                 onClick={() => setConfirming(undefined)}
               />
               <Button
-                label="Delete app"
+                label={t("apps.dev_delete_app")}
                 size="sm"
                 variant="destructive"
                 isLoading={isPending}
@@ -184,16 +197,16 @@ function AppRow({
           ) : confirming === "rotate" ? (
             <>
               <Text type="supporting" color="secondary">
-                The current secret stops working at once.
+                {t("apps.dev_rotate_warning")}
               </Text>
               <Button
-                label="Cancel"
+                label={t("common.cancel")}
                 size="sm"
                 variant="ghost"
                 onClick={() => setConfirming(undefined)}
               />
               <Button
-                label="New secret"
+                label={t("apps.dev_new_secret")}
                 size="sm"
                 variant="destructive"
                 isLoading={isPending}
@@ -210,23 +223,23 @@ function AppRow({
           ) : (
             <>
               <IconButton
-                label={`Edit ${app.name}`}
+                label={t("common.edit_named", { name: app.name })}
                 icon={<PencilSquareIcon />}
                 size="sm"
                 variant="ghost"
                 onClick={onEdit}
               />
               <IconButton
-                label={`New secret for ${app.name}`}
+                label={t("apps.dev_new_secret_for", { name: app.name })}
                 icon={<KeyIcon />}
                 size="sm"
                 variant="ghost"
-                tooltip="New secret: the current one stops working at once."
+                tooltip={t("apps.dev_new_secret_tooltip")}
                 isDisabled={isPending}
                 onClick={() => setConfirming("rotate")}
               />
               <IconButton
-                label={`Delete ${app.name}`}
+                label={t("common.delete_named_label", { name: app.name })}
                 icon={<TrashIcon />}
                 size="sm"
                 variant="ghost"
@@ -250,6 +263,8 @@ function AppDialog({
   onClose: () => void;
   onCreated: (key: string, secret: string) => void;
 }) {
+  const t = useT<"apps">();
+  const format = useFormat();
   const [name, setName] = useState(app?.name ?? "");
   const [key, setKey] = useState<string>();
   const [webhookUrl, setWebhookUrl] = useState(app?.webhook?.url ?? "");
@@ -270,7 +285,7 @@ function AppDialog({
     if (!isComplete) return;
     const timeoutMs = Number(timeout);
     if (!Number.isInteger(timeoutMs))
-      return setError("Enter the timeout in milliseconds, like 10000.");
+      return setError(t("apps.dev_timeout_invalid", { example: "10000" }));
     const input = { name, webhookUrl, timeoutMs, subscriptions: patterns };
     startTransition(async () => {
       if (app) {
@@ -288,50 +303,60 @@ function AppDialog({
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={560} purpose="form">
       <DialogHeader
-        title={app ? `Edit ${app.name}` : "Add app"}
-        subtitle={
-          app
-            ? "Changes apply to the next events; ones already on their way keep going."
-            : "Hypha signs every call to it with a secret it shows you next."
+        title={
+          app ? t("apps.dev_dialog_edit_title", { name: app.name }) : t("apps.dev_dialog_add_title")
         }
+        subtitle={app ? t("apps.dev_dialog_edit_subtitle") : t("apps.dev_dialog_add_subtitle")}
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
-        <TextInput label="Name" placeholder="ERP" value={name} onChange={setName} />
+        <TextInput
+          label={t("common.name")}
+          placeholder={t("apps.dev_name_placeholder")}
+          value={name}
+          onChange={setName}
+        />
         {!app && (
           <TextInput
-            label="Key"
-            description="app_ and lowercase letters, digits and _. Can't change later."
+            label={t("common.key")}
+            description={t("apps.dev_key_description", { prefix: "app_" })}
             value={shownKey}
             onChange={setKey}
           />
         )}
         <TextInput
-          label="Webhook URL"
-          description="Where Hypha POSTs events: https://, or http://localhost while developing. Leave empty for none."
-          placeholder="https://erp.example.com/hypha"
+          label={t("apps.dev_webhook_url")}
+          description={t("apps.dev_webhook_url_description")}
+          placeholder={WEBHOOK_EXAMPLE}
           value={webhookUrl}
           onChange={setWebhookUrl}
         />
         <TextInput
-          label="Events"
-          description="Event types, separated by commas: order.placed, a whole kind like product.*, or * for all."
-          placeholder="order.*, product.updated"
+          label={t("apps.dev_events")}
+          description={t("apps.dev_events_description", {
+            one: "order.placed",
+            kind: "product.*",
+            all: "*",
+          })}
+          placeholder={EVENTS_EXAMPLE}
           value={patterns}
           onChange={setPatterns}
         />
         <TextInput
-          label="Timeout (ms)"
-          description="1,000 to 30,000. Slower answers count as failures and are retried."
+          label={t("apps.dev_timeout")}
+          description={t("apps.dev_timeout_description", {
+            min: format.number(1000),
+            max: format.number(30000),
+          })}
           value={timeout}
           onChange={setTimeoutMs}
           onEnter={submit}
         />
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label={app ? "Save" : "Add app"}
+            label={app ? t("common.save") : t("apps.dev_dialog_add_submit")}
             variant="primary"
             isLoading={isPending}
             isDisabled={!isComplete}
@@ -352,17 +377,18 @@ function SecretDialog({
   secret: string;
   onClose: () => void;
 }) {
+  const t = useT<"apps">();
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={560}>
       <DialogHeader
-        title={`Signing secret for ${appKey}`}
-        subtitle="Copy it now: it isn't shown again. The app checks the Hypha-Signature header with it."
+        title={t("apps.dev_secret_title", { key: appKey })}
+        subtitle={t("apps.dev_secret_subtitle", { header: SIGNATURE_HEADER })}
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={4} padding={4}>
         <CodeBlock code={secret} />
         <HStack hAlign="end">
-          <Button label="Done" variant="primary" onClick={onClose} />
+          <Button label={t("common.done")} variant="primary" onClick={onClose} />
         </HStack>
       </VStack>
     </Dialog>

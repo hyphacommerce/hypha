@@ -1,90 +1,70 @@
 // Notifications in the admin: what each template is called and does, how a message's
-// status reads, and the variables a template can print. Plain data, for server and
-// client code alike.
+// status reads, and the variables a template can print. Plain functions, for server and
+// client code alike: the ones that build text take the caller's translator.
 
-/** A template's name and what it's for, by its stable key. */
-export const TEMPLATES: Record<string, { name: string; description: string }> = {
-  layout: {
-    name: "Email layout",
-    description: "The shared frame around every email: logo, colours and footer.",
-  },
-  order_confirmation: {
-    name: "Order confirmation",
-    description: "Sent to the customer when they place an order.",
-  },
-  order_shipped: {
-    name: "Order shipped",
-    description: "Sent when you fulfil items and choose to notify the customer.",
-  },
-  order_tracking_updated: {
-    name: "Tracking updated",
-    description: "Sent when a shipment's tracking changes and you choose to notify.",
-  },
-  order_cancelled: {
-    name: "Order cancelled",
-    description: "Sent when you cancel an order and choose to notify the customer.",
-  },
-  staff_new_order: {
-    name: "New order",
-    description: "Sent to the staff recipients when an order is placed.",
-  },
-  staff_invite: {
-    name: "Staff invite",
-    description: "Sent to someone invited to the admin, with the link to join.",
-  },
-  staff_password_reset: {
-    name: "Password reset",
-    description: "Sent to a staff member who asked to reset their password.",
-  },
-  customer_login_code: {
-    name: "Customer sign-in code",
-    description: "Sent to a customer signing in to the storefront, with their six-digit code.",
-  },
-  customer_erasure_requested: {
-    name: "Erasure requested",
-    description:
-      "Sent to a customer who asked from their account to have their data erased, with the date it runs.",
-  },
-  supplier_purchase_order: {
-    name: "Purchase order",
-    description: "Sent to a supplier when you send them a purchase order.",
-  },
-};
+import { labelOr } from "./keys.ts";
+import type { TFor } from "./messages";
+
+type NotificationsT = TFor<"notifications">;
 
 /** A template key as people read it; an unknown one as it is. */
-export function templateName(key: string): string {
-  return TEMPLATES[key]?.name ?? key;
+export function templateName(t: NotificationsT, key: string): string {
+  const name = `notifications.template_${key}_name`;
+  return labelOr(t, name, key);
 }
 
-/** A message's status: its label and badge colour. */
-export const MESSAGE_STATUS: Record<
-  string,
-  { label: string; variant: "success" | "neutral" | "warning" | "error" | "info" }
+/** What a template is for, by its stable key; nothing for an unknown one. */
+export function templateDescription(t: NotificationsT, key: string): string | undefined {
+  const description = `notifications.template_${key}_description`;
+  return labelOr(t, description, undefined);
+}
+
+const MESSAGE_STATUSES = ["queued", "sending", "sent", "failed", "skipped"] as const;
+
+const MESSAGE_STATUS_VARIANTS: Record<
+  (typeof MESSAGE_STATUSES)[number],
+  "success" | "neutral" | "error" | "info"
 > = {
-  queued: { label: "Queued", variant: "info" },
-  sending: { label: "Sending", variant: "info" },
-  sent: { label: "Sent", variant: "success" },
-  failed: { label: "Failed", variant: "error" },
-  skipped: { label: "Skipped", variant: "neutral" },
+  queued: "info",
+  sending: "info",
+  sent: "success",
+  failed: "error",
+  skipped: "neutral",
 };
 
-/** Which source a template problem is in, as the editor names it. */
-export const PART_NAMES: Record<string, string> = {
-  subject: "Subject",
-  html: "HTML",
-  text: "Plain text",
-  layout: "Email layout",
-};
+/**
+ * A message's status as a badge: its label, in `t`'s language, and its colour. The order's
+ * emails are where messages are listed, so the words are `orders`'. An unknown status as
+ * it is.
+ */
+export function messageStatus(
+  t: TFor<"orders">,
+  status: string,
+): { label: string; variant: "success" | "neutral" | "error" | "info" } {
+  const known = MESSAGE_STATUSES.find((s) => s === status);
+  if (!known) return { label: status, variant: "neutral" };
+  return { label: t(`orders.emails_status_${known}`), variant: MESSAGE_STATUS_VARIANTS[known] };
+}
+
+/** Which source a template problem is in, as the editor names it; an unknown one as it is. */
+function partName(t: NotificationsT, part: string): string {
+  const name = `notifications.part_${part}`;
+  return labelOr(t, name, part);
+}
 
 /** Where a template problem is: its part, its line (from 1, when known) and the words. */
 export type Problem = { part: string; line?: number | null; message: string };
 
-/** "HTML, line 4: …": a problem for a banner. */
-export function describeProblem(problem: Problem): string {
-  const part = PART_NAMES[problem.part] ?? problem.part;
+/** "HTML, line 4: …": a problem for a banner. The words are the API's, as it wrote them. */
+export function describeProblem(t: NotificationsT, problem: Problem): string {
+  const part = partName(t, problem.part);
   return problem.line
-    ? `${part}, line ${problem.line}: ${problem.message}`
-    : `${part}: ${problem.message}`;
+    ? t("notifications.problem_at_line", {
+        part,
+        line: String(problem.line),
+        message: problem.message,
+      })
+    : t("notifications.problem_in_part", { part, message: problem.message });
 }
 
 /** A template problem among an error's `details`, if the API sent one. */
@@ -103,17 +83,20 @@ export type Variable = { path: string; sample: string; isList: boolean };
 /**
  * Every printable path of a template's sample context, depth first: `order.total.formatted`
  * and the like. A list shows its first item's fields under `name[0]`, so a loop's
- * variable (`{% for line in order.lines %}{{ line.title }}`) is easy to find.
+ * variable (`{% for line in order.lines %}{{ line.title }}`) is easy to find. Paths and
+ * sample values are the template's own; only a list's count is words.
  */
-export function variablePaths(value: unknown, prefix = ""): Variable[] {
+export function variablePaths(t: TFor<"common">, value: unknown, prefix = ""): Variable[] {
   if (Array.isArray(value)) {
-    const out: Variable[] = [{ path: prefix, sample: `${value.length} items`, isList: true }];
-    if (value.length > 0) out.push(...variablePaths(value[0], `${prefix}[0]`));
+    const out: Variable[] = [
+      { path: prefix, sample: t("common.items_count", { count: value.length }), isList: true },
+    ];
+    if (value.length > 0) out.push(...variablePaths(t, value[0], `${prefix}[0]`));
     return out;
   }
   if (typeof value === "object" && value !== null) {
     return Object.entries(value).flatMap(([key, inner]) =>
-      variablePaths(inner, prefix ? `${prefix}.${key}` : key),
+      variablePaths(t, inner, prefix ? `${prefix}.${key}` : key),
     );
   }
   const sample =

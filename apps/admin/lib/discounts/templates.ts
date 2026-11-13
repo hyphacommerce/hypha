@@ -8,6 +8,7 @@ import {
   emptyItems,
   emptyValue,
 } from "./draft.ts";
+import type { StoreDefaults } from "../store-defaults.ts";
 
 export type TemplateKey =
   | "amount_off_products"
@@ -16,11 +17,16 @@ export type TemplateKey =
   | "volume"
   | "free_shipping";
 
+/** The stored text a template fills in, in the store's default language. */
+export type TemplateDefaults = StoreDefaults<"discount_free_shipping_title">;
+
+/** What a server page picks for `TemplateDefaults`. */
+export const TEMPLATE_DEFAULTS = ["discount_free_shipping_title"] as const;
+
+/** A starting point. `discounts.template_<key>` names it, with its `…_description`. */
 export type Template = {
   key: TemplateKey;
-  label: string;
-  description: string;
-  make: () => DiscountDraft;
+  make: (defaults: TemplateDefaults) => DiscountDraft;
 };
 
 function base(change: Partial<DiscountDraft>): DiscountDraft {
@@ -83,10 +89,12 @@ export function volumeTiers(): DiscountDraft {
   });
 }
 
-export function freeShipping(): DiscountDraft {
+export function freeShipping(defaults: TemplateDefaults): DiscountDraft {
   return base({
     method: "automatic",
-    title: "Free shipping",
+    // Stored content: the title buyers see, in the store's language rather than the
+    // staff member's.
+    title: defaults.discount_free_shipping_title,
     kind: {
       type: "standard",
       product: null,
@@ -99,36 +107,11 @@ export function freeShipping(): DiscountDraft {
 }
 
 export const TEMPLATES: readonly Template[] = [
-  {
-    key: "amount_off_products",
-    label: "Amount off products",
-    description: "A percentage or an amount off some products, or a fixed price for them.",
-    make: amountOffProducts,
-  },
-  {
-    key: "amount_off_order",
-    label: "Amount off order",
-    description: "A percentage or an amount off the order's subtotal, above a minimum or not.",
-    make: amountOffOrder,
-  },
-  {
-    key: "buy_x_get_y",
-    label: "Buy X get Y",
-    description: "Buy some items, get others free or reduced: the cheapest qualifying ones.",
-    make: buyXGetY,
-  },
-  {
-    key: "volume",
-    label: "Volume",
-    description: "Tiers: more off the more of some items a cart holds, or the more it spends.",
-    make: volumeTiers,
-  },
-  {
-    key: "free_shipping",
-    label: "Free shipping",
-    description: "Shipping free, or reduced, for orders above a minimum.",
-    make: freeShipping,
-  },
+  { key: "amount_off_products", make: amountOffProducts },
+  { key: "amount_off_order", make: amountOffOrder },
+  { key: "buy_x_get_y", make: buyXGetY },
+  { key: "volume", make: volumeTiers },
+  { key: "free_shipping", make: freeShipping },
 ];
 
 export function templateOf(key: string): Template | undefined {

@@ -35,6 +35,11 @@ export default defineConfig({
       ...(api
         ? { API: bindings.worker({ worker: api }), HYPHA_CALLER_KEY: bindings.secret() }
         : {}),
+      // Development's pseudo-language (`lib/language.ts`), from the environment the dev
+      // server is started in.
+      ...(deploy.HYPHA_I18N_PSEUDO
+        ? { HYPHA_I18N_PSEUDO: bindings.text(deploy.HYPHA_I18N_PSEUDO) }
+        : {}),
     },
   }),
 });

@@ -28,7 +28,8 @@ import { ProductPicker } from "@/components/product-picker";
 import { RichTextField } from "@/components/rich-text-field";
 import { SaveBar } from "@/components/save-bar";
 import { ProductStatusBadge } from "@/components/status";
-import { type CategoryNode, VISIBILITY, subtree } from "@/lib/categories";
+import { type CategoryNode, subtree, visibilityOptions } from "@/lib/categories";
+import { useT } from "@/lib/use-t";
 
 import {
   addCategoryProducts,
@@ -60,6 +61,7 @@ export function CategoryForm({
   main: ReactNode;
   side: ReactNode;
 }) {
+  const t = useT<"categories">();
   const saved = {
     name: category.name,
     handle: category.handle,
@@ -106,31 +108,31 @@ export function CategoryForm({
           setError(undefined);
         }}
       />
-      {isSaved && !isDirty && <Banner status="success" title="Saved." />}
+      {isSaved && !isDirty && <Banner status="success" title={t("common.saved_notice")} />}
       <div className="detail-columns">
         <div>
           <Card>
             <VStack gap={4}>
               <Text type="display-3" as="h2">
-                Details
+                {t("common.details")}
               </Text>
               <div className="form-grid">
                 <TextInput
-                  label="Name"
-                  description="Shown to shoppers in menus and on its page."
+                  label={t("common.name")}
+                  description={t("categories.name_description")}
                   value={form.name}
                   onChange={(name) => set({ name })}
                 />
                 <TextInput
-                  label="Handle"
-                  description="Its address in the storefront. Moving it keeps it."
+                  label={t("common.handle")}
+                  description={t("categories.handle_description")}
                   value={form.handle}
                   onChange={(handle) => set({ handle })}
                 />
               </div>
               <RichTextField
-                label="Description"
-                description="For the category page and search engines."
+                label={t("common.description")}
+                description={t("categories.description_hint")}
                 isOptional
                 value={form.description}
                 onChange={(description) => set({ description })}
@@ -143,7 +145,7 @@ export function CategoryForm({
           <Card>
             <VStack gap={4}>
               <Text type="display-3" as="h2">
-                Placement
+                {t("categories.placement")}
               </Text>
               <ParentSelector
                 tree={tree}
@@ -152,9 +154,9 @@ export function CategoryForm({
                 exclude={subtree(tree, category.id)}
               />
               <Selector
-                label="Visibility"
-                description="Hiding it hides everything below it too."
-                options={[...VISIBILITY]}
+                label={t("common.visibility")}
+                description={t("categories.visibility_description")}
+                options={visibilityOptions(t)}
                 value={form.visibility}
                 onChange={(visibility) => set({ visibility })}
               />
@@ -169,6 +171,7 @@ export function CategoryForm({
 
 /** The category's image, picked from the media library; in use while it's set. */
 export function ImageCard({ id, image }: { id: string; image: Media | null }) {
+  const t = useT<"categories">();
   const [isPicking, setIsPicking] = useState(false);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -186,24 +189,23 @@ export function ImageCard({ id, image }: { id: string; image: Media | null }) {
         <HStack gap={2} hAlign="between" vAlign="center">
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Image
+              {t("categories.image_title")}
             </Text>
             <Text type="supporting" color="secondary">
-              Shown on the category page and in menus. It can't be deleted from the library while
-              it's here.
+              {t("categories.image_hint")}
             </Text>
           </VStack>
           <HStack gap={2}>
             {image && (
               <Button
-                label="Remove"
+                label={t("common.remove")}
                 variant="ghost"
                 isLoading={isPending}
                 onClick={() => set(null)}
               />
             )}
             <Button
-              label={image ? "Change" : "Pick from library"}
+              label={image ? t("common.change") : t("common.pick_from_library")}
               variant="secondary"
               onClick={() => setIsPicking(true)}
             />
@@ -218,7 +220,7 @@ export function ImageCard({ id, image }: { id: string; image: Media | null }) {
             style={{ maxWidth: 240, borderRadius: 8, objectFit: "cover" }}
           />
         ) : (
-          <Text color="secondary">No image.</Text>
+          <Text color="secondary">{t("categories.image_none")}</Text>
         )}
       </VStack>
       {isPicking && (
@@ -238,6 +240,7 @@ export function ProductsCard({
   page: AdminSchemas["CategoryProductPage"];
   isFirstPage: boolean;
 }) {
+  const t = useT<"categories">();
   const [error, setError] = useState<string>();
   const [isAdding, setIsAdding] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -250,23 +253,29 @@ export function ProductsCard({
         <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Products
+              {t("common.products")}
             </Text>
             <Text type="supporting" color="secondary">
-              The ones directly in it. The storefront lists its subcategories' products too.
+              {t("categories.products_hint")}
             </Text>
           </VStack>
-          <Button label="Add products" variant="secondary" onClick={() => setIsAdding(true)} />
+          <Button
+            label={t("categories.products_add")}
+            variant="secondary"
+            onClick={() => setIsAdding(true)}
+          />
         </HStack>
         {error && <Banner status="error" title={error} />}
         {page.items.length === 0 ? (
-          <Text color="secondary">{isFirstPage ? "No products yet." : "No more products."}</Text>
+          <Text color="secondary">
+            {isFirstPage ? t("categories.products_none") : t("categories.products_no_more")}
+          </Text>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHeaderCell>Product</TableHeaderCell>
-                <TableHeaderCell>Status</TableHeaderCell>
+                <TableHeaderCell>{t("common.product")}</TableHeaderCell>
+                <TableHeaderCell>{t("common.status")}</TableHeaderCell>
                 <TableHeaderCell>
                   <span />
                 </TableHeaderCell>
@@ -287,16 +296,20 @@ export function ProductsCard({
                       </VStack>
                     ) : (
                       // An ID stored as given that names no product.
-                      <Text color="secondary">{product.id} (no such product)</Text>
+                      <Text color="secondary">
+                        {t("categories.product_missing", { id: product.id })}
+                      </Text>
                     )}
                   </TableCell>
                   <TableCell>
-                    {product.status && <ProductStatusBadge status={product.status} />}
+                    {product.status && <ProductStatusBadge status={product.status} t={t} />}
                   </TableCell>
                   <TableCell>
                     <HStack hAlign="end">
                       <IconButton
-                        label={`Remove ${product.title ?? product.id}`}
+                        label={t("common.remove_named", {
+                          name: product.title ?? product.id,
+                        })}
                         icon={<TrashIcon />}
                         size="sm"
                         variant="ghost"
@@ -315,14 +328,15 @@ export function ProductsCard({
           query={{}}
           isFirstPage={isFirstPage}
           nextCursor={page.next_cursor}
+          t={t}
         />
       </VStack>
       {isAdding && (
         <ProductPicker
-          title="Add products"
-          description="They're listed directly in this category."
+          title={t("categories.products_add")}
+          description={t("categories.picker_description")}
           isAlreadyIn={(product) => product.categories.includes(id)}
-          alreadyInLabel="Already in this category"
+          alreadyInLabel={t("categories.picker_already_in")}
           onConfirm={async (products) => {
             const result = await addCategoryProducts(
               id,
@@ -340,20 +354,21 @@ export function ProductsCard({
 
 /** Delete, confirmed in an alert dialog: the category and its membership go. */
 export function DeleteCategory({ id, name }: { id: string; name: string }) {
+  const t = useT<"categories">();
   const [isOpen, setIsOpen] = useState(false);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
 
   return (
     <>
-      <Button label="Delete" variant="ghost" onClick={() => setIsOpen(true)} />
+      <Button label={t("common.delete")} variant="ghost" onClick={() => setIsOpen(true)} />
       {error && <Banner status="error" title={error} />}
       <AlertDialog
         isOpen={isOpen}
         onOpenChange={setIsOpen}
-        title={`Delete ${name}?`}
-        description="Its products stay; they just leave this category. A category with subcategories can't be deleted until they're moved or deleted."
-        actionLabel="Delete category"
+        title={t("common.delete_named", { name })}
+        description={t("categories.delete_description")}
+        actionLabel={t("categories.delete_action")}
         isActionLoading={isPending}
         onAction={() =>
           startTransition(async () => {

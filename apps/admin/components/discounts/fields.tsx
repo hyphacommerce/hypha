@@ -13,6 +13,7 @@ import { Token } from "@astryxdesign/core/Token";
 
 import type { DiscountDraft, PerMarketText, ValueDraft } from "@/lib/discounts/draft";
 import type { FieldErrors, MarketOption } from "@/lib/discounts/validate";
+import { useT } from "@/lib/use-t";
 
 export type Option = { value: string; label: string };
 
@@ -54,11 +55,11 @@ export function AmountsByMarket({
   errors,
   onChange,
   isReadOnly,
-  placeholder = "Not offered",
+  placeholder,
 }: {
   label: string;
   description?: string;
-  /** What a blank input means. */
+  /** What a blank input means; "Not offered" unless given. */
   placeholder?: string;
   amounts: PerMarketText;
   markets: readonly MarketOption[];
@@ -67,6 +68,7 @@ export function AmountsByMarket({
   onChange: (amounts: PerMarketText) => void;
   isReadOnly?: boolean;
 }) {
+  const t = useT<"discounts">();
   const own = errors[path];
   return (
     <VStack gap={2}>
@@ -79,14 +81,14 @@ export function AmountsByMarket({
         )}
       </VStack>
       {markets.length === 0 ? (
-        <Text color="secondary">No market to price it in yet.</Text>
+        <Text color="secondary">{t("discounts.amounts_no_market")}</Text>
       ) : (
         <HStack gap={3} wrap="wrap">
           {markets.map((m) => (
             <TextInput
               key={m.id}
               label={`${m.name} (${m.currency})`}
-              placeholder={placeholder}
+              placeholder={placeholder ?? t("discounts.amounts_not_offered")}
               value={amounts[m.id] ?? ""}
               onChange={(text) => onChange({ ...amounts, [m.id]: text })}
               isDisabled={isReadOnly}
@@ -126,12 +128,6 @@ export function IdTokens({
   );
 }
 
-const VALUE_LABELS: Record<ValueDraft["type"], string> = {
-  percent: "Percentage",
-  amount: "Amount off",
-  fixed_price: "Fixed price",
-};
-
 /**
  * A reward's value: its type, then the percentage or the amounts, and for an amount off
  * items how it's spread. `free` adds a "Free" choice (shipping), which is 100% off.
@@ -157,6 +153,7 @@ export function ValueFields({
   hasAllocation?: boolean;
   hasFree?: boolean;
 }) {
+  const t = useT<"discounts">();
   const isFree = hasFree && value.type === "percent" && value.percent.trim() === "100";
   const choice = isFree ? "free" : value.type;
   const choose = (next: string) => {
@@ -168,16 +165,21 @@ export function ValueFields({
   };
   return (
     <VStack gap={3}>
-      <SegmentedControl label="Value" value={choice} onChange={choose} isDisabled={isReadOnly}>
-        {hasFree && <SegmentedControlItem value="free" label="Free" />}
-        {types.map((t) => (
-          <SegmentedControlItem key={t} value={t} label={VALUE_LABELS[t]} />
+      <SegmentedControl
+        label={t("discounts.value_label")}
+        value={choice}
+        onChange={choose}
+        isDisabled={isReadOnly}
+      >
+        {hasFree && <SegmentedControlItem value="free" label={t("discounts.value_free")} />}
+        {types.map((type) => (
+          <SegmentedControlItem key={type} value={type} label={t(`discounts.value_type_${type}`)} />
         ))}
       </SegmentedControl>
       {value.type === "percent" && !isFree && (
         <TextInput
-          label="Percentage off"
-          description="20 is 20% off; 100 makes it free."
+          label={t("discounts.value_percent")}
+          description={t("discounts.value_percent_hint")}
           value={value.percent}
           onChange={(percent) => onChange({ ...value, percent })}
           isDisabled={isReadOnly}
@@ -187,11 +189,11 @@ export function ValueFields({
       )}
       {(value.type === "amount" || value.type === "fixed_price") && (
         <AmountsByMarket
-          label={value.type === "amount" ? "Amount off" : "Price"}
+          label={value.type === "amount" ? t("discounts.value_amount") : t("common.price")}
           description={
             value.type === "amount"
-              ? "In each market's currency, as shoppers see prices there (with tax where prices include it). A market left blank isn't offered the discount."
-              : "What each unit costs instead, when that's lower than its price. A market left blank isn't offered the discount."
+              ? t("discounts.value_amount_hint")
+              : t("discounts.value_fixed_price_hint")
           }
           amounts={value.amounts}
           markets={markets}
@@ -203,7 +205,7 @@ export function ValueFields({
       )}
       {hasAllocation && value.type === "amount" && (
         <RadioList
-          label="Taken off"
+          label={t("discounts.value_allocation")}
           value={value.allocation}
           onChange={(allocation) =>
             onChange({
@@ -216,20 +218,24 @@ export function ValueFields({
         >
           <RadioListItem
             value="across"
-            label="Once, across the items"
-            description="Split over the items it covers in proportion to their prices."
+            label={t("discounts.value_allocation_across")}
+            description={t("discounts.value_allocation_across_hint")}
           />
-          <RadioListItem value="each" label="Off each item" description="Per unit in the cart." />
+          <RadioListItem
+            value="each"
+            label={t("discounts.value_allocation_each")}
+            description={t("discounts.value_allocation_each_hint")}
+          />
           <RadioListItem
             value="cheapest"
-            label="Off the cheapest items"
-            description="Only the cheapest units it covers."
+            label={t("discounts.value_allocation_cheapest")}
+            description={t("discounts.value_allocation_cheapest_hint")}
           />
         </RadioList>
       )}
       {hasAllocation && value.type === "amount" && value.allocation === "cheapest" && (
         <TextInput
-          label="How many of the cheapest"
+          label={t("discounts.value_cheapest_units")}
           value={value.cheapestUnits}
           onChange={(cheapestUnits) => onChange({ ...value, cheapestUnits })}
           isDisabled={isReadOnly}

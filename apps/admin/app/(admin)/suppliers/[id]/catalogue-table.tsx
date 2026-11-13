@@ -21,8 +21,10 @@ import { useCurrencies } from "@/components/currencies";
 import { ProductPicker } from "@/components/product-picker";
 import { type PickerVariant, pickerVariants } from "@/components/product-picker-actions";
 import { ResourceTable } from "@/components/resource-table/resource-table";
-import { formatUnitCost, parseUnitCost, unitCostInput } from "@/lib/format";
+import { parseUnitCost, unitCostInput } from "@/lib/format";
 import { type CatalogueRow, daysLabel, variantLabel } from "@/lib/purchasing";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { removeCatalogueRow, setCatalogueRow } from "../actions";
 
@@ -41,7 +43,8 @@ export function CatalogueTable({
   page?: { items: CatalogueRow[]; next_cursor: string | null; error?: string };
   canWrite: boolean;
 }) {
-  const currencies = useCurrencies();
+  const t = useT<"suppliers" | "purchasing">();
+  const format = useFormat();
   const [isPicking, setIsPicking] = useState(false);
   const [pickedProduct, setPickedProduct] = useState<{
     title: string;
@@ -55,14 +58,14 @@ export function CatalogueTable({
   const columns: TableColumn<CatalogueRow>[] = [
     {
       key: "variant",
-      header: "Variant",
+      header: t("common.variant"),
       width: proportional(3, { minWidth: 220 }),
       renderCell: (r) => (
         <VStack gap={0}>
           <Text weight="medium">{variantLabel(r)}</Text>
           {r.sku && (
             <Text type="supporting" color="secondary">
-              SKU {r.sku}
+              {t("common.sku_named", { sku: r.sku })}
             </Text>
           )}
         </VStack>
@@ -70,29 +73,31 @@ export function CatalogueTable({
     },
     {
       key: "supplier_sku",
-      header: "Their code",
+      header: t("suppliers.their_code"),
       width: pixel(140),
       renderCell: (r) => <Text>{r.supplier_sku ?? "—"}</Text>,
     },
     {
       key: "unit_cost",
-      header: "Price",
+      header: t("common.price"),
       width: pixel(130),
       align: "end",
-      renderCell: (r) => <Text>{r.unit_cost ? formatUnitCost(r.unit_cost, currencies) : "—"}</Text>,
+      renderCell: (r) => <Text>{r.unit_cost ? format.unitCost(r.unit_cost) : "—"}</Text>,
     },
     {
       key: "moq",
-      header: "Minimum",
+      header: t("suppliers.minimum"),
       width: pixel(100),
       align: "end",
-      renderCell: (r) => <Text>{r.min_order_quantity ?? "—"}</Text>,
+      renderCell: (r) => (
+        <Text>{r.min_order_quantity == null ? "—" : format.number(r.min_order_quantity)}</Text>
+      ),
     },
     {
       key: "lead",
-      header: "Lead time",
+      header: t("suppliers.lead_time"),
       width: pixel(110),
-      renderCell: (r) => <Text>{daysLabel(r.lead_time_days)}</Text>,
+      renderCell: (r) => <Text>{daysLabel(t, r.lead_time_days)}</Text>,
     },
   ];
   if (canWrite) {
@@ -104,14 +109,14 @@ export function CatalogueTable({
       renderCell: (r) => (
         <HStack gap={1} hAlign="end">
           <IconButton
-            label={`Edit ${variantLabel(r)}`}
+            label={t("common.edit_named", { name: variantLabel(r) })}
             icon={<PencilSquareIcon />}
             size="sm"
             variant="ghost"
             onClick={() => setEditing({ variant: r.variant, label: variantLabel(r), row: r })}
           />
           <IconButton
-            label={`Remove ${variantLabel(r)}`}
+            label={t("common.remove_named", { name: variantLabel(r) })}
             icon={<TrashIcon />}
             size="sm"
             variant="ghost"
@@ -123,7 +128,11 @@ export function CatalogueTable({
   }
 
   const add = canWrite && supplier && (
-    <Button label="Add variant" variant="secondary" onClick={() => setIsPicking(true)} />
+    <Button
+      label={t("suppliers.add_variant")}
+      variant="secondary"
+      onClick={() => setIsPicking(true)}
+    />
   );
 
   return (
@@ -140,17 +149,16 @@ export function CatalogueTable({
         toolbarEnd={add}
         empty={{
           icon: <ListBulletIcon width={32} />,
-          title: "Nothing listed yet",
-          description:
-            "Add the variants this supplier sells, with their code and price: purchase orders start from them.",
+          title: t("suppliers.catalogue_empty_title"),
+          description: t("suppliers.catalogue_empty_description"),
           action: add || undefined,
         }}
       />
       {isPicking && (
         <ProductPicker
-          title="Add a product's variant"
+          title={t("suppliers.picker_title")}
           mode="single"
-          confirmLabel={() => "Choose variant"}
+          confirmLabel={() => t("suppliers.picker_confirm")}
           onClose={() => setIsPicking(false)}
           onConfirm={async ([product]) => {
             if (!product) return;
@@ -190,9 +198,9 @@ export function CatalogueTable({
       <AlertDialog
         isOpen={removing !== undefined}
         onOpenChange={(open) => !open && setRemoving(undefined)}
-        title={removing ? `Remove ${variantLabel(removing)}?` : ""}
-        description="It's taken off this supplier's catalogue. Purchase orders keep what they copied."
-        actionLabel="Remove"
+        title={removing ? t("suppliers.remove_row_title", { name: variantLabel(removing) }) : ""}
+        description={t("suppliers.remove_row_description")}
+        actionLabel={t("common.remove")}
         isActionLoading={isPending}
         onAction={() =>
           startTransition(async () => {
@@ -219,30 +227,34 @@ function VariantChoice({
   onClose: () => void;
   onChoose: (variant: PickerVariant) => void;
 }) {
+  const t = useT<"suppliers">();
   const [chosen, setChosen] = useState<string>();
   const variant = product.variants.find((v) => v.id === chosen);
   return (
     <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={440} purpose="form">
       <DialogHeader
         title={product.title}
-        subtitle="Which variant does this supplier sell?"
+        subtitle={t("suppliers.choice_subtitle")}
         onOpenChange={(open) => !open && onClose()}
       />
       <VStack gap={4} padding={4}>
         <Selector
-          label="Variant"
-          options={product.variants.map((v) => ({
-            value: v.id,
-            label: `${v.title ?? "Default"}${v.sku ? ` · ${v.sku}` : ""}${listed.has(v.id) ? " (listed)" : ""}`,
-          }))}
+          label={t("common.variant")}
+          options={product.variants.map((v) => {
+            const name = [v.title ?? t("common.default"), v.sku].filter(Boolean).join(" · ");
+            return {
+              value: v.id,
+              label: listed.has(v.id) ? t("suppliers.variant_listed", { variant: name }) : name,
+            };
+          })}
           value={chosen}
           onChange={setChosen}
-          placeholder="Choose a variant"
+          placeholder={t("common.choose_variant")}
         />
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label="Next"
+            label={t("common.next")}
             variant="primary"
             isDisabled={!variant}
             onClick={() => variant && onChoose(variant)}
@@ -273,6 +285,7 @@ function RowDialog({
   editing: Editing;
   onClose: () => void;
 }) {
+  const t = useT<"suppliers">();
   const currencies = useCurrencies();
   const row = editing.row;
   const [sku, setSku] = useState(row?.supplier_sku ?? "");
@@ -308,47 +321,53 @@ function RowDialog({
     <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={480} purpose="form">
       <DialogHeader
         title={editing.label}
-        subtitle="What this supplier calls it and charges for it."
+        subtitle={t("suppliers.row_subtitle")}
         onOpenChange={(open) => !open && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
         <div className="form-grid">
-          <TextInput label="Their code" isOptional value={sku} onChange={setSku} />
+          <TextInput label={t("suppliers.their_code")} isOptional value={sku} onChange={setSku} />
           <TextInput
-            label={`Price per unit (${currency})`}
+            label={t("suppliers.price_per_unit", { currency })}
             isOptional
-            description="Up to 4 decimals past the cent."
+            description={t("suppliers.price_description")}
             value={cost}
             onChange={setCost}
             status={
               cost.trim() === "" || parsedCost !== null
                 ? undefined
-                : { type: "error", message: "An amount like 4.125" }
+                : { type: "error", message: t("suppliers.price_invalid") }
             }
           />
           <TextInput
-            label="Minimum order"
+            label={t("suppliers.minimum_order")}
             isOptional
             value={moq}
             onChange={setMoq}
-            status={moqValue === undefined ? { type: "error", message: "At least 1" } : undefined}
+            status={
+              moqValue === undefined
+                ? { type: "error", message: t("suppliers.minimum_order_invalid") }
+                : undefined
+            }
           />
           <TextInput
-            label="Lead time (days)"
+            label={t("suppliers.lead_time_days")}
             isOptional
-            description="Overrides the supplier's."
+            description={t("suppliers.lead_time_overrides")}
             value={lead}
             onChange={setLead}
             status={
-              leadValue === undefined ? { type: "error", message: "0 to 365 days" } : undefined
+              leadValue === undefined
+                ? { type: "error", message: t("suppliers.lead_time_invalid") }
+                : undefined
             }
           />
         </div>
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label="Save"
+            label={t("common.save")}
             variant="primary"
             isLoading={isPending}
             isDisabled={!isValid}

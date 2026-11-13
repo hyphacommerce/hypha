@@ -9,6 +9,7 @@ import { listPage, pageQuery } from "@/components/resource-table/server";
 import { FormSkeleton } from "@/components/skeletons";
 import { type Discount, methodLabel, withDiscountMarkets } from "@/lib/discounts/wire";
 import { loaded, perRequest, requireStaff, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import { hasScope } from "@/lib/navigation";
 
 import { loadLive, loadNames, loadOptions } from "../data";
@@ -17,8 +18,6 @@ import { CodesTable } from "./codes-table";
 import { DeleteDiscount } from "./delete-discount";
 import { type DiscountTab, DiscountTabs } from "./discount-tabs";
 import { UsageTable } from "./usage-table";
-
-const BACK: Crumb[] = [{ label: "Discounts", href: "/discounts" }];
 
 /** The discounts this request read, by ID: the header and the tab share one read. */
 const discountReads = perRequest(async () => new Map<string, Promise<Discount>>());
@@ -59,15 +58,16 @@ export default async function DiscountPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<SearchParams>;
 }) {
-  const [{ id }, query] = await Promise.all([params, searchParams]);
+  const [{ id }, query, t] = await Promise.all([params, searchParams, getT()]);
   const tab = tabOf(one(query, "tab"));
+  const back: Crumb[] = [{ label: t("discounts.title"), href: "/discounts" }];
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={1320}>
         <Suspense
           fallback={
             <>
-              <PageHeader back={BACK} />
+              <PageHeader back={back} />
               {tabFallback(id, tab)}
             </>
           }
@@ -88,7 +88,8 @@ async function DiscountView({
   tab: DiscountTab;
   query: SearchParams;
 }) {
-  const [discount, me] = await Promise.all([loadDiscount(id), requireStaff()]);
+  const [discount, me, t] = await Promise.all([loadDiscount(id), requireStaff(), getT()]);
+  const back: Crumb[] = [{ label: t("discounts.title"), href: "/discounts" }];
   const hasCodes = discount.method === "codes";
   // Usage names buyers and their orders, so it needs reading both.
   const hasUsage = hasScope(me.scopes, "customers:read") && hasScope(me.scopes, "orders:read");
@@ -98,9 +99,9 @@ async function DiscountView({
     <>
       <PageHeader
         title={discount.title}
-        back={BACK}
-        badges={<DiscountStatusBadge phase={discount.phase} />}
-        description={`${methodLabel(discount)} · ${discount.summary}`}
+        back={back}
+        badges={<DiscountStatusBadge t={t} phase={discount.phase} />}
+        description={`${methodLabel(discount, t)} · ${discount.summary}`}
       />
       <DiscountTabs id={id} tab={tab} hasCodes={hasCodes} hasUsage={hasUsage}>
         <Suspense fallback={tabFallback(id, tab)}>
@@ -167,7 +168,7 @@ async function Codes({ id, params }: { id: string; params: SearchParams }) {
   return (
     <CodesTable
       id={id}
-      page={listPage(result, `/discounts/${id}`, params)}
+      page={await listPage(result, `/discounts/${id}`, params)}
       canWrite={hasScope(me.scopes, "discounts:write")}
       batch={one(params, "batch")?.trim() || null}
     />
@@ -189,7 +190,7 @@ async function Usage({
   });
   return (
     <UsageTable
-      page={listPage(result, `/discounts/${id}`, params)}
+      page={await listPage(result, `/discounts/${id}`, params)}
       used={discount.used}
       totals={discount.discounted_total}
     />

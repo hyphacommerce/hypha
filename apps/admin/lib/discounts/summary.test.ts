@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { type DiscountDraft, emptyDraft, emptyItems, emptyValue } from "./draft.ts";
 import { type SummaryContext, draftSummary, shortMoney } from "./summary.ts";
 import { buyXGetY, freeShipping, volumeTiers } from "./templates.ts";
+import { format, t } from "./testing.ts";
 
 const ctx: SummaryContext = {
   markets: [
@@ -13,6 +14,8 @@ const ctx: SummaryContext = {
   currencies: { EUR: 2, GBP: 2 },
   names: { pcat_kits: "Grow kits", pcat_cultures: "Cultures", mkt_ie: "Ireland" },
   today: "2026-10-24",
+  t,
+  format,
 };
 
 function productDraft(value: DiscountDraft["kind"]): DiscountDraft {
@@ -42,9 +45,9 @@ test("the note's example reads as written", () => {
 });
 
 test("whole amounts drop their zeros, others keep their digits", () => {
-  assert.equal(shortMoney(5000, "EUR", 2), "€50");
-  assert.equal(shortMoney(1250, "EUR", 2), "€12.50");
-  assert.equal(shortMoney(500, "JPY", 0), "JP¥500");
+  assert.equal(shortMoney(5000, "EUR", 2, format), "€50");
+  assert.equal(shortMoney(1250, "EUR", 2, format), "€12.50");
+  assert.equal(shortMoney(500, "JPY", 0, format), "JP¥500");
 });
 
 test("amounts in two currencies show both", () => {
@@ -101,7 +104,7 @@ test("several rewards join with a plus", () => {
 });
 
 test("free shipping over a minimum, combining with product and order discounts", () => {
-  const draft = freeShipping();
+  const draft = freeShipping({ discount_free_shipping_title: "Free shipping" });
   draft.conditions.minSubtotal.amounts = { mkt_ie: "50" };
   assert.equal(
     draftSummary(draft, ctx),

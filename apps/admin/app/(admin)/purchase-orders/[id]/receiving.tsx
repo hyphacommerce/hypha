@@ -15,10 +15,10 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { useState, useTransition } from "react";
 
-import { useCurrencies } from "@/components/currencies";
 import { DateTime } from "@/components/date-time";
-import { formatUnitCost } from "@/lib/format";
 import { type PurchaseOrder, lineLabel, poNumber } from "@/lib/purchasing";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { cancelReceipt, receivePurchaseOrder, trackVariants } from "../actions";
 
@@ -37,11 +37,12 @@ function outstanding(po: PurchaseOrder): Counts {
 
 /** "Receive": where the goods came in, and how many of each were accepted or refused. */
 export function ReceiveButton({ po, places }: { po: PurchaseOrder; places: Place[] }) {
+  const t = useT<"purchasing">();
   const [isOpen, setIsOpen] = useState(false);
   if (po.status !== "ordered") return null;
   return (
     <>
-      <Button label="Receive" variant="primary" onClick={() => setIsOpen(true)} />
+      <Button label={t("purchasing.receive")} variant="primary" onClick={() => setIsOpen(true)} />
       {isOpen && <ReceiveDialog po={po} places={places} onClose={() => setIsOpen(false)} />}
     </>
   );
@@ -56,6 +57,8 @@ function ReceiveDialog({
   places: Place[];
   onClose: () => void;
 }) {
+  const t = useT<"purchasing">();
+  const format = useFormat();
   const [location, setLocation] = useState(po.destination ?? places[0]?.id);
   const [counts, setCounts] = useState<Counts>(() => outstanding(po));
   const [note, setNote] = useState("");
@@ -103,20 +106,20 @@ function ReceiveDialog({
     return (
       <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={560}>
         <DialogHeader
-          title="Received"
-          subtitle="Some of it had no stock record, so one was made, untracked: whether it sells didn't change."
+          title={t("purchasing.received_dialog_title")}
+          subtitle={t("purchasing.received_untracked_subtitle")}
           onOpenChange={(isOpen) => !isOpen && onClose()}
         />
         <VStack gap={4} padding={4}>
           {error && <Banner status="error" title={error} />}
-          <Text>{untracked.map(nameOf).join(", ")}</Text>
+          <Text>{format.list(untracked.map(nameOf))}</Text>
           <Text type="supporting" color="secondary">
-            Track their stock to sell only what's on hand.
+            {t("purchasing.received_track_hint")}
           </Text>
           <HStack gap={2} hAlign="end">
-            <Button label="Not now" variant="ghost" onClick={onClose} />
+            <Button label={t("purchasing.not_now")} variant="ghost" onClick={onClose} />
             <Button
-              label="Track stock"
+              label={t("purchasing.track_stock")}
               variant="primary"
               isLoading={isPending}
               onClick={() =>
@@ -136,14 +139,14 @@ function ReceiveDialog({
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={640} purpose="form">
       <DialogHeader
-        title={`Receive ${poNumber(po.number)}`}
-        subtitle="Accepted units go on hand at their landed cost; refused ones are only counted."
+        title={t("purchasing.receive_dialog_title", { number: poNumber(po.number) })}
+        subtitle={t("purchasing.receive_dialog_subtitle")}
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
         <Selector
-          label="Arrived at"
+          label={t("purchasing.receive_arrived_at")}
           options={places.map((place) => ({ value: place.id, label: place.name }))}
           value={location}
           onChange={setLocation}
@@ -156,18 +159,21 @@ function ReceiveDialog({
                 <VStack gap={0}>
                   <Text weight="medium">{lineLabel(line)}</Text>
                   <Text type="supporting" color="secondary">
-                    {line.outstanding} of {line.quantity} still to come
+                    {t("purchasing.receive_still_to_come", {
+                      outstanding: line.outstanding,
+                      quantity: line.quantity,
+                    })}
                   </Text>
                 </VStack>
                 <HStack gap={2}>
                   <NumberInput
-                    label="Accepted"
+                    label={t("purchasing.accepted")}
                     min={0}
                     value={c.accepted}
                     onChange={(accepted) => set(line.variant, { accepted })}
                   />
                   <NumberInput
-                    label="Refused"
+                    label={t("purchasing.refused")}
                     min={0}
                     value={c.rejected}
                     onChange={(rejected) => set(line.variant, { rejected })}
@@ -178,23 +184,27 @@ function ReceiveDialog({
           })}
         </VStack>
         <TextInput
-          label="Note"
+          label={t("common.note")}
           isOptional
-          placeholder="Pallet 1 of 2"
+          placeholder={t("purchasing.receive_note_placeholder")}
           value={note}
           onChange={setNote}
         />
         {over.length > 0 && (
           <Banner
             status="warning"
-            title="More than was ordered"
-            description={`${over.map((l) => lineLabel(l)).join(", ")}: the supplier sent more than is still to come. Receive it anyway?`}
+            title={t("purchasing.receive_over_title")}
+            description={t("purchasing.receive_over_description", {
+              lines: format.list(over.map((l) => lineLabel(l))),
+            })}
           />
         )}
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label={over.length > 0 ? "Receive anyway" : "Receive"}
+            label={
+              over.length > 0 ? t("purchasing.receive_anyway") : t("purchasing.receive_submit")
+            }
             variant="primary"
             isLoading={isPending}
             isDisabled={!location || lines.length === 0}
@@ -218,13 +228,14 @@ export function ReceiptsCard({
   places: Place[];
   canWrite: boolean;
 }) {
+  const t = useT<"purchasing">();
   const nameOf = (id: string) => places.find((place) => place.id === id)?.name ?? id;
   if (receipts.length === 0) return null;
   return (
     <Card>
       <VStack gap={4}>
         <Text type="display-3" as="h2">
-          Receipts
+          {t("purchasing.receipts_title")}
         </Text>
         {receipts.map((receipt) => (
           <ReceiptRow
@@ -251,7 +262,8 @@ function ReceiptRow({
   at: string;
   canWrite: boolean;
 }) {
-  const currencies = useCurrencies();
+  const t = useT<"purchasing">();
+  const format = useFormat();
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -265,18 +277,26 @@ function ReceiptRow({
     <VStack gap={2}>
       <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
         <Text type="supporting" color="secondary">
-          {stands ? "" : "Taken back · "}At {at}, <DateTime value={receipt.created_at} />
+          {t.rich(stands ? "purchasing.receipt_at" : "purchasing.receipt_at_taken_back", {
+            place: at,
+            time: <DateTime key="time" value={receipt.created_at} />,
+          })}
         </Text>
         {stands &&
           canWrite &&
           (confirming ? (
             <HStack gap={1} vAlign="center">
               <Text type="supporting" color="secondary">
-                Its units come off stock.
+                {t("purchasing.receipt_take_back_hint")}
               </Text>
-              <Button label="Keep" size="sm" variant="ghost" onClick={() => setConfirming(false)} />
               <Button
-                label="Take back"
+                label={t("purchasing.receipt_keep")}
+                size="sm"
+                variant="ghost"
+                onClick={() => setConfirming(false)}
+              />
+              <Button
+                label={t("purchasing.receipt_take_back")}
                 size="sm"
                 variant="destructive"
                 isLoading={isPending}
@@ -290,7 +310,7 @@ function ReceiptRow({
             </HStack>
           ) : (
             <Button
-              label="Take back"
+              label={t("purchasing.receipt_take_back")}
               size="sm"
               variant="ghost"
               onClick={() => setConfirming(true)}
@@ -298,15 +318,29 @@ function ReceiptRow({
           ))}
       </HStack>
       {error && <Banner status="error" title={error} />}
-      {receipt.lines.map((line) => (
-        <Text key={line.variant} color={stands ? undefined : "secondary"}>
-          {line.accepted} × {label(line.variant)}
-          {line.rejected > 0 ? `, ${line.rejected} refused` : ""}
-          {line.landed_unit_cost && line.accepted > 0
-            ? ` · ${formatUnitCost(line.landed_unit_cost, currencies)} each`
-            : ""}
-        </Text>
-      ))}
+      {receipt.lines.map((line) => {
+        const counts = { accepted: line.accepted, name: label(line.variant) };
+        const refused = line.rejected > 0;
+        const cost =
+          line.landed_unit_cost && line.accepted > 0
+            ? format.unitCost(line.landed_unit_cost)
+            : null;
+        return (
+          <Text key={line.variant} color={stands ? undefined : "secondary"}>
+            {cost
+              ? refused
+                ? t("purchasing.receipt_line_refused_cost", {
+                    ...counts,
+                    rejected: line.rejected,
+                    cost,
+                  })
+                : t("purchasing.receipt_line_cost", { ...counts, cost })
+              : refused
+                ? t("purchasing.receipt_line_refused", { ...counts, rejected: line.rejected })
+                : t("purchasing.receipt_line", counts)}
+          </Text>
+        );
+      })}
       {receipt.note && (
         <Text type="supporting" color="secondary">
           {receipt.note}

@@ -20,7 +20,7 @@ export async function createGroup(
 ): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.POST("/admin/customer-groups", { body });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }
@@ -34,7 +34,7 @@ export async function updateGroup(
     params: { path: { id } },
     body,
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }
@@ -45,7 +45,7 @@ export async function deleteGroup(id: string): Promise<Result> {
   const { error } = await client.DELETE("/admin/customer-groups/{id}", {
     params: { path: { id } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }
@@ -57,7 +57,7 @@ export async function setCustomerGroups(customer: string, groups: string[]): Pro
     params: { path: { id: customer } },
     body: { groups },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/customers/${customer}`);
   revalidatePath("/customers");
   return {};

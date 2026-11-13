@@ -3,13 +3,14 @@
 import type { ReactNode } from "react";
 
 import { UrlTabs } from "@/components/url-tabs";
+import { useT } from "@/lib/use-t";
 
 export type DiscountTab = "settings" | "codes" | "usage";
 
 const TABS = [
-  { value: "settings", label: "Settings" },
-  { value: "codes", label: "Codes" },
-  { value: "usage", label: "Usage" },
+  { value: "settings", label: "common.settings" },
+  { value: "codes", label: "discounts.tab_codes" },
+  { value: "usage", label: "discounts.tab_usage" },
 ] as const;
 
 /**
@@ -30,13 +31,14 @@ export function DiscountTabs({
   hasUsage: boolean;
   children: ReactNode;
 }) {
+  const t = useT<"discounts">();
   return (
     <UrlTabs
       tabs={TABS.filter(
-        (t) => (t.value !== "codes" || hasCodes) && (t.value !== "usage" || hasUsage),
-      )}
+        ({ value }) => (value !== "codes" || hasCodes) && (value !== "usage" || hasUsage),
+      ).map(({ value, label }) => ({ value, label: t(label) }))}
       value={tab}
-      href={(t) => (t === "settings" ? `/discounts/${id}` : `/discounts/${id}?tab=${t}`)}
+      href={(to) => (to === "settings" ? `/discounts/${id}` : `/discounts/${id}?tab=${to}`)}
     >
       {children}
     </UrlTabs>

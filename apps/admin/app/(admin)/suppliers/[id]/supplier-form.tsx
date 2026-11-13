@@ -20,8 +20,11 @@ import { useState, useTransition } from "react";
 import { useCurrencies } from "@/components/currencies";
 import { SaveBar } from "@/components/save-bar";
 import { currencyCodes } from "@/lib/format";
+import type { KeyIn } from "@/lib/messages";
 import type { PaymentTerms, Supplier } from "@/lib/purchasing";
 import { type Country, countryOptions, currencyOptions } from "@/lib/regions";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { type SupplierPatch, updateSupplier } from "../actions";
 
@@ -43,16 +46,21 @@ type AddressDraft = {
   phone: string;
 };
 
-const ADDRESS_FIELDS: { key: keyof AddressDraft; label: string; isRequired?: boolean }[] = [
-  { key: "company", label: "Company" },
-  { key: "first_name", label: "First name" },
-  { key: "last_name", label: "Attention of (last name)", isRequired: true },
-  { key: "line1", label: "Address", isRequired: true },
-  { key: "line2", label: "Address line 2" },
-  { key: "city", label: "City", isRequired: true },
-  { key: "province", label: "Region or province" },
-  { key: "postal_code", label: "Postal code" },
-  { key: "phone", label: "Phone" },
+/** The address fields in the form's order, each with its label's message key. */
+const ADDRESS_FIELDS: {
+  key: keyof AddressDraft;
+  label: KeyIn<"suppliers" | "common">;
+  isRequired?: boolean;
+}[] = [
+  { key: "company", label: "common.company" },
+  { key: "first_name", label: "common.first_name" },
+  { key: "last_name", label: "suppliers.address_last_name", isRequired: true },
+  { key: "line1", label: "common.address", isRequired: true },
+  { key: "line2", label: "common.address_line2" },
+  { key: "city", label: "common.city", isRequired: true },
+  { key: "province", label: "common.region_or_province" },
+  { key: "postal_code", label: "common.postal_code" },
+  { key: "phone", label: "common.phone" },
 ];
 
 const MAX_CONTACTS = 10;
@@ -148,6 +156,8 @@ export function SupplierForm({
   countries: Country[];
   isReadOnly: boolean;
 }) {
+  const t = useT<"suppliers" | "purchasing">();
+  const format = useFormat();
   const currencies = useCurrencies();
   const terms = supplier.payment_terms;
   const [name, setName] = useState(supplier.name);
@@ -244,36 +254,43 @@ export function SupplierForm({
           onDiscard={discard}
         />
       )}
-      {saved && !isChanged && <Banner status="success" title="Saved." />}
+      {saved && !isChanged && <Banner status="success" title={t("common.saved_notice")} />}
       <Card>
         <VStack gap={4}>
           <Text type="display-3" as="h2">
-            Supplier
+            {t("common.supplier")}
           </Text>
           <div className="form-grid">
-            <TextInput label="Name" value={name} onChange={setName} isDisabled={isReadOnly} />
+            <TextInput
+              label={t("common.name")}
+              value={name}
+              onChange={setName}
+              isDisabled={isReadOnly}
+            />
             <Selector
-              label="Currency"
-              description="What they invoice in. Fixed while their catalogue has prices."
-              options={currencyOptions(currencyCodes(currencies))}
+              label={t("common.currency")}
+              description={t("suppliers.currency_description")}
+              options={currencyOptions(currencyCodes(currencies), format.locale)}
               value={currency}
               onChange={setCurrency}
               isDisabled={isReadOnly}
               hasSearch
             />
             <TextInput
-              label="Lead time (days)"
-              description="How long an order takes to arrive: the default expected date."
+              label={t("suppliers.lead_time_days")}
+              description={t("suppliers.lead_time_description")}
               isOptional
               value={lead}
               onChange={setLead}
               isDisabled={isReadOnly}
               status={
-                leadDays === undefined ? { type: "error", message: "0 to 365 days" } : undefined
+                leadDays === undefined
+                  ? { type: "error", message: t("suppliers.lead_time_invalid") }
+                  : undefined
               }
             />
             <TextInput
-              label="Tax number"
+              label={t("suppliers.tax_number")}
               isOptional
               value={taxNumber}
               onChange={setTaxNumber}
@@ -281,8 +298,8 @@ export function SupplierForm({
             />
           </div>
           <TextArea
-            label="Notes"
-            description="For staff only."
+            label={t("common.notes")}
+            description={t("suppliers.staff_only")}
             isOptional
             maxLength={5000}
             rows={3}
@@ -291,8 +308,8 @@ export function SupplierForm({
             isDisabled={isReadOnly}
           />
           <Switch
-            label="Archived"
-            description="Archived suppliers take no new purchase orders."
+            label={t("common.archived")}
+            description={t("suppliers.archived_description")}
             value={archived}
             onChange={setArchived}
             isDisabled={isReadOnly}
@@ -303,35 +320,35 @@ export function SupplierForm({
         <VStack gap={4}>
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Contacts
+              {t("suppliers.contacts_title")}
             </Text>
             <Text type="supporting" color="secondary">
-              Purchase orders are emailed to the primary contact. Up to {MAX_CONTACTS}.
+              {t("suppliers.contacts_hint", { max: MAX_CONTACTS })}
             </Text>
           </VStack>
           {contacts.length === 0 && (
             <Text type="supporting" color="secondary">
-              No contacts yet.
+              {t("suppliers.no_contacts")}
             </Text>
           )}
           {contacts.map((c, i) => (
             <VStack key={c.key} gap={2}>
               <div className="form-grid">
                 <TextInput
-                  label="Name"
+                  label={t("common.name")}
                   value={c.name}
                   onChange={(v) => setContact(i, { name: v })}
                   isDisabled={isReadOnly}
                 />
                 <TextInput
-                  label="Email"
+                  label={t("common.email")}
                   isOptional
                   value={c.email}
                   onChange={(v) => setContact(i, { email: v })}
                   isDisabled={isReadOnly}
                 />
                 <TextInput
-                  label="Phone"
+                  label={t("common.phone")}
                   isOptional
                   value={c.phone}
                   onChange={(v) => setContact(i, { phone: v })}
@@ -340,14 +357,14 @@ export function SupplierForm({
               </div>
               <HStack gap={3} vAlign="center">
                 <CheckboxInput
-                  label="Primary: purchase orders go here"
+                  label={t("suppliers.contact_primary")}
                   value={c.primary}
                   onChange={(on) => setContact(i, { primary: on })}
                   isDisabled={isReadOnly}
                 />
                 {!isReadOnly && (
                   <Button
-                    label="Remove contact"
+                    label={t("suppliers.remove_contact")}
                     variant="ghost"
                     icon={<TrashIcon />}
                     onClick={() => setContacts(contacts.filter((_, j) => j !== i))}
@@ -359,7 +376,7 @@ export function SupplierForm({
           {!isReadOnly && contacts.length < MAX_CONTACTS && (
             <HStack>
               <Button
-                label="Add contact"
+                label={t("suppliers.add_contact")}
                 variant="secondary"
                 onClick={() =>
                   setContacts([
@@ -381,16 +398,16 @@ export function SupplierForm({
       <Card>
         <VStack gap={4}>
           <Text type="display-3" as="h2">
-            Payment terms
+            {t("suppliers.payment_terms")}
           </Text>
           <div className="form-grid">
             <Selector
-              label="When they're paid"
+              label={t("suppliers.terms_when")}
               options={[
-                { value: "", label: "Not set" },
-                { value: "in_advance", label: "In advance" },
-                { value: "on_receipt", label: "On receipt" },
-                { value: "net", label: "Net days after ordering" },
+                { value: "", label: t("common.not_set") },
+                { value: "in_advance", label: t("purchasing.terms_in_advance") },
+                { value: "on_receipt", label: t("purchasing.terms_on_receipt") },
+                { value: "net", label: t("suppliers.terms_net_option") },
               ]}
               value={termsType}
               onChange={(v) => setTermsType(asTermsType(v))}
@@ -398,19 +415,23 @@ export function SupplierForm({
             />
             {termsType === "net" && (
               <TextInput
-                label="Days"
+                label={t("suppliers.terms_days")}
                 value={netDays}
                 onChange={setNetDays}
                 isDisabled={isReadOnly}
-                status={isNetValid ? undefined : { type: "error", message: "1 to 365 days" }}
+                status={
+                  isNetValid
+                    ? undefined
+                    : { type: "error", message: t("suppliers.terms_days_invalid") }
+                }
               />
             )}
           </div>
           {termsType !== "" && (
             <TextInput
-              label="Note"
+              label={t("common.note")}
               isOptional
-              placeholder="2% off within 10 days"
+              placeholder={t("suppliers.terms_note_placeholder")}
               value={termsNote}
               onChange={setTermsNote}
               isDisabled={isReadOnly}
@@ -422,17 +443,17 @@ export function SupplierForm({
         <VStack gap={4}>
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Address
+              {t("common.address")}
             </Text>
             <Text type="supporting" color="secondary">
-              Printed on purchase orders. Leave every field blank to have none.
+              {t("suppliers.address_hint")}
             </Text>
           </VStack>
           <div className="form-grid">
             {ADDRESS_FIELDS.map((f) => (
               <TextInput
                 key={f.key}
-                label={f.label}
+                label={t(f.label)}
                 isOptional={!f.isRequired}
                 value={address[f.key]}
                 onChange={field(f.key)}
@@ -441,13 +462,13 @@ export function SupplierForm({
             ))}
           </div>
           <Selector
-            label="Country"
-            options={countryOptions(countries)}
+            label={t("common.country")}
+            options={countryOptions(countries, format.locale)}
             value={address.country || undefined}
             onChange={field("country")}
             isDisabled={isReadOnly}
             hasSearch
-            placeholder="Choose a country"
+            placeholder={t("common.choose_country")}
           />
         </VStack>
       </Card>

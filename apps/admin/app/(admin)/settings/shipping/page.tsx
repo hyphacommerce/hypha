@@ -5,21 +5,23 @@ import { Suspense } from "react";
 import { PageHeader } from "@/components/page-header";
 import { FormSkeleton } from "@/components/skeletons";
 import { loaded, sessionClient } from "@/lib/hypha";
-import { SETTINGS_CRUMB } from "@/lib/navigation";
+import { getT } from "@/lib/i18n";
+import { settingsCrumb } from "@/lib/navigation";
 
 import { ProvidersCard, type RateApp } from "./providers";
 import { ZonesSection } from "./zones";
 
 /** Settings → Shipping: where the store ships, what each zone offers, and the rate apps
  * that quote live prices. The header renders at once; the zones and providers stream in. */
-export default function ShippingSettingsPage() {
+export default async function ShippingSettingsPage() {
+  const t = await getT();
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={960}>
         <PageHeader
-          back={SETTINGS_CRUMB}
-          title="Shipping"
-          description="Zones are the countries you ship to; each offers its options at checkout."
+          back={settingsCrumb(t)}
+          title={t("shipping.page_title")}
+          description={t("shipping.page_description")}
         />
         <Suspense fallback={<FormSkeleton cards={2} />}>
           <Shipping />

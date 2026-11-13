@@ -2,15 +2,15 @@ import { VStack } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
 import { Suspense } from "react";
 
-import { type Crumb, PageHeader } from "@/components/page-header";
+import { PageHeader } from "@/components/page-header";
 import { type SearchParams, one, oneOf } from "@/components/resource-table/params";
 import { listPage, pageQuery } from "@/components/resource-table/server";
 import { PROPOSAL_STATUSES } from "@/lib/agents";
 import { sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
+import { agentsCrumb } from "@/lib/navigation";
 
 import { ProposalsTable } from "./proposals-table";
-
-const BACK: Crumb = { label: "Agents", href: "/agents" };
 
 /**
  * The proposals inbox: what agents asked to write, waiting for a person. By default the
@@ -22,14 +22,14 @@ export default async function ProposalsPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const params = await searchParams;
+  const [params, t] = await Promise.all([searchParams, getT()]);
   return (
     <Section padding={6}>
       <VStack gap={5}>
         <PageHeader
-          title="Proposals"
-          back={BACK}
-          description="Changes agents want to make. Each shows exactly what it would do; nothing changes until someone approves it."
+          title={t("agents.proposals_title")}
+          back={agentsCrumb(t)}
+          description={t("agents.proposals_description")}
         />
         <Suspense fallback={<ProposalsTable />}>
           <ProposalRows params={params} />
@@ -59,7 +59,7 @@ async function ProposalRows({ params }: { params: SearchParams }) {
   ]);
   return (
     <ProposalsTable
-      page={listPage(result, "/agents/proposals", params)}
+      page={await listPage(result, "/agents/proposals", params)}
       agents={Object.fromEntries((agents.data?.items ?? []).map((a) => [a.id, a.name]))}
     />
   );

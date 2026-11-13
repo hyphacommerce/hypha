@@ -12,6 +12,7 @@ import { Text } from "@astryxdesign/core/Text";
 import type { CSSProperties, ReactNode } from "react";
 
 import { Wordmark } from "@/components/wordmark";
+import { useT } from "@/lib/use-t";
 
 // Grid emits minmax(MIN, 1fr) where MIN is a hard floor: 320 − 2×24 (page) − 2×16
 // (stacked inset) = 240, so the column fits the narrowest phone.
@@ -54,6 +55,7 @@ export function AuthCard({
   subtitle: string;
   children: ReactNode;
 }) {
+  const t = useT<"auth">();
   return (
     <Center axis="both" padding={6} style={pageStyle}>
       <style>{AUTH_CARD_CSS}</style>
@@ -89,10 +91,10 @@ export function AuthCard({
               <div style={brandPanel}>
                 <VStack gap={2}>
                   <Text type="display-2" as="p">
-                    Run your store.
+                    {t("auth.brand_title")}
                   </Text>
                   <Text type="body" color="secondary">
-                    Products, markets, inventory and orders, in one place.
+                    {t("auth.brand_description")}
                   </Text>
                 </VStack>
               </div>

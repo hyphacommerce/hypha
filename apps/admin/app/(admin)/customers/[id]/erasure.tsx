@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { DateTime } from "@/components/date-time";
+import { useT } from "@/lib/use-t";
 
 import { cancelErasure, requestErasure } from "../actions";
 
@@ -33,6 +34,7 @@ export function EraseCustomer({
   isErased: boolean;
 }) {
   const router = useRouter();
+  const t = useT<"customers">();
   const [isOpen, setIsOpen] = useState(false);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -40,7 +42,7 @@ export function EraseCustomer({
   return (
     <>
       <Button
-        label="Erase personal data"
+        label={t("customers.erase_button")}
         variant="ghost"
         icon={<ShieldExclamationIcon />}
         onClick={() => setIsOpen(true)}
@@ -49,12 +51,9 @@ export function EraseCustomer({
         <AlertDialog
           isOpen
           onOpenChange={(open) => !open && setIsOpen(false)}
-          title={`Erase ${name}'s personal data?`}
-          description={
-            error ??
-            "After the cancel window, their name, contact details, addresses, notes and consent are removed from the customer and their orders, carts and emails. Orders, totals and countries stay. Apps are told to delete their copies. This can't be undone once it runs."
-          }
-          actionLabel="Request erasure"
+          title={t("customers.erase_dialog_title", { name })}
+          description={error ?? t("customers.erase_dialog_description")}
+          actionLabel={t("customers.erase_dialog_action")}
           isActionLoading={isPending}
           onAction={() =>
             startTransition(async () => {
@@ -86,17 +85,19 @@ export function ErasureBanner({
   canErase: boolean;
 }) {
   const router = useRouter();
+  const t = useT<"customers">();
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
   if (erasedAt) {
     return (
       <Banner
         status="info"
-        title="This customer's personal data was erased"
+        title={t("customers.erased_banner_title")}
         description={
           <Text>
-            On <DateTime value={erasedAt} />. What stays: their orders' statistics, their groups and
-            a placeholder email that can't receive mail. The customer is read-only.
+            {t.rich("customers.erased_banner_description", {
+              time: <DateTime key="time" value={erasedAt} />,
+            })}
           </Text>
         }
       />
@@ -106,18 +107,19 @@ export function ErasureBanner({
   return (
     <Banner
       status="warning"
-      title="Erasure requested"
+      title={t("customers.erasure_banner_title")}
       description={
         <VStack gap={2}>
           <Text>
-            Their personal data is removed on <DateTime value={erasureDueAt} />. Until then it can
-            be cancelled.
+            {t.rich("customers.erasure_banner_description", {
+              time: <DateTime key="time" value={erasureDueAt} />,
+            })}
           </Text>
           {error && <Text type="supporting">{error}</Text>}
           {canErase && (
             <HStack>
               <Button
-                label="Cancel erasure"
+                label={t("customers.erasure_cancel")}
                 variant="secondary"
                 size="sm"
                 isLoading={isPending}
@@ -139,9 +141,10 @@ export function ErasureBanner({
 
 /** Downloads the customer's data as one JSON document. */
 export function ExportCustomer({ id }: { id: string }) {
+  const t = useT<"customers">();
   return (
     <Button
-      label="Export data"
+      label={t("customers.export_button")}
       variant="ghost"
       icon={<ArrowDownTrayIcon />}
       href={`/customers/${id}/export`}

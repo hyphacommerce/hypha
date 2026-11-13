@@ -3,7 +3,9 @@
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { revalidatePath } from "next/cache";
 
+import { createFormat } from "@/lib/format";
 import { describe, sessionClient } from "@/lib/hypha";
+import { type T, getT } from "@/lib/i18n";
 
 /** The outcome of an edit: a message to show, if it failed. */
 export type Result = { error?: string };
@@ -19,7 +21,7 @@ function refresh() {
 export async function createDefinition(body: CreateRequest): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.POST("/admin/custom-field-definitions", { body });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }
@@ -31,16 +33,20 @@ export async function updateDefinition(id: string, body: UpdateRequest): Promise
     body,
   });
   if (error) {
-    if (error.code !== "custom_field_values_invalid") return { error: describe(error) };
+    if (error.code !== "custom_field_values_invalid") return { error: await describe(error) };
     // Name the records to fix, not just how many (the first few of the API's list).
     const details: unknown = error.details;
     const owners: unknown =
       typeof details === "object" && details !== null ? Reflect.get(details, "owners") : undefined;
-    const names = Array.isArray(owners) ? await ownerNames(client, owners.slice(0, 5)) : [];
+    const [t, described] = await Promise.all([getT(), describe(error)]);
+    const names = Array.isArray(owners) ? await ownerNames(client, owners.slice(0, 5), t) : [];
     return {
       error: names.length
-        ? `${describe(error)} Starting with: ${names.join(", ")}.`
-        : describe(error),
+        ? t("custom_fields.values_invalid_starting_with", {
+            error: described,
+            names: createFormat(t.locale).list(names, "unit"),
+          })
+        : described,
     };
   }
   refresh();
@@ -51,7 +57,7 @@ type Client = Awaited<ReturnType<typeof sessionClient>>;
 
 /** What staff call each record (a product's title, a customer's email, …); its ID if it
  *  can't be read. */
-async function ownerNames(client: Client, owners: unknown[]): Promise<string[]> {
+async function ownerNames(client: Client, owners: unknown[], t: T): Promise<string[]> {
   return Promise.all(
     owners.map(async (owner) => {
       const id = String(owner);
@@ -70,7 +76,7 @@ async function ownerNames(client: Client, owners: unknown[]): Promise<string[]> 
       }
       if (id.startsWith("ord_")) {
         const { data } = await client.GET("/admin/orders/{id}", path);
-        return data ? `order #${data.number}` : id;
+        return data ? t("custom_fields.owner_order_number", { number: String(data.number) }) : id;
       }
       return id;
     }),
@@ -84,7 +90,7 @@ export async function moveDefinition(id: string, position: number): Promise<Resu
     params: { path: { id } },
     body: { position },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }
@@ -95,7 +101,7 @@ export async function deleteDefinition(id: string): Promise<Result> {
   const { error } = await client.DELETE("/admin/custom-field-definitions/{id}", {
     params: { path: { id } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }

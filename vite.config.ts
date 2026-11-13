@@ -23,6 +23,19 @@ const generated = [
   "spores/*/element/*.js",
   // Astro's generated content types (apps/site).
   "**/.astro/**",
+  // The catalogs' index (`apps/admin/scripts/i18n-index.mjs`).
+  "apps/*/messages/*.generated.ts",
+];
+
+/**
+ * The admin's files: every word they show comes from its catalogs
+ * (`apps/admin/messages/`), so literal text in their JSX is an error
+ * (`i18n/no-literal-text`), and so is calling anything deprecated.
+ */
+const adminTranslated = [
+  "apps/admin/app/**",
+  "apps/admin/components/**",
+  "apps/admin/resources/**",
 ];
 
 export default defineConfig({
@@ -84,6 +97,27 @@ export default defineConfig({
           // <a key={key}>…</a> })`): called while rendering, never mounted as components.
           "react/no-unstable-nested-components": ["warn", { allowAsProps: true }],
         },
+      },
+      {
+        // The admin's words come from its catalogs (`apps/admin/messages/`, through `t`):
+        // literal text in JSX would be English in every language. The rule is ours
+        // (`scripts/oxlint-i18n.mjs`: text between tags and in the props people read;
+        // punctuation and symbols pass), shared with the storefront. It sees JSX only: a
+        // sentence built in an object or an action isn't caught; the pseudo-language
+        // shows those.
+        files: adminTranslated,
+        plugins: ["react", "jsx-a11y", "nextjs"],
+        jsPlugins: ["./scripts/oxlint-i18n.mjs"],
+        rules: {
+          "i18n/no-literal-text": "error",
+          // An interim overload (a helper kept in English for callers not moved yet) is
+          // marked `@deprecated`: nothing here may call one.
+          "typescript/no-deprecated": "error",
+          // A message's tags are given as functions (`t.rich(key, { link: (chunks, key) =>
+          // <a key={key}>…</a> })`): called while rendering, never mounted as components.
+          "react/no-unstable-nested-components": ["warn", { allowAsProps: true }],
+        },
+      },
       },
       {
         files: [

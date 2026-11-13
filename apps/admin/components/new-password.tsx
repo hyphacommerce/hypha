@@ -8,12 +8,24 @@ import { VStack } from "@astryxdesign/core/Layout";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { useState } from "react";
 
+import type { TFor } from "@/lib/messages";
+import { useT } from "@/lib/use-t";
+
 export const PASSWORD_MIN = 8;
 
-/** What's wrong with the pair, for the form to show, or nothing. */
-export function newPasswordProblem(password: string, repeated: string): string | undefined {
-  if (password.length < PASSWORD_MIN) return `Use at least ${PASSWORD_MIN} characters.`;
-  if (password !== repeated) return "The two passwords don't match.";
+/**
+ * What's wrong with the pair, for the form to show, or nothing, in the language of `t`
+ * (the form's `useT()`).
+ */
+export function newPasswordProblem(
+  password: string,
+  repeated: string,
+  t: TFor<"components">,
+): string | undefined {
+  if (password.length < PASSWORD_MIN) {
+    return t("components.new_password_too_short", { min: PASSWORD_MIN });
+  }
+  if (password !== repeated) return t("components.new_password_mismatch");
   return undefined;
 }
 
@@ -23,29 +35,24 @@ export function fieldText(fields: FormData, name: string): string {
   return typeof value === "string" ? value : "";
 }
 
-export function NewPasswordFields({
-  label = "New password",
-  size = "lg",
-}: {
-  label?: string;
-  size?: "md" | "lg";
-}) {
+export function NewPasswordFields({ label, size = "lg" }: { label?: string; size?: "md" | "lg" }) {
+  const t = useT();
   const [password, setPassword] = useState("");
   const [repeated, setRepeated] = useState("");
   return (
     <VStack gap={2}>
       <TextInput
-        label={label}
+        label={label ?? t("components.new_password_label")}
         type="password"
         htmlName="new-password"
         autoComplete="new-password"
-        description={`At least ${PASSWORD_MIN} characters.`}
+        description={t("components.new_password_hint", { min: PASSWORD_MIN })}
         value={password}
         onChange={setPassword}
         size={size}
       />
       <TextInput
-        label="Repeat it"
+        label={t("components.new_password_repeat")}
         type="password"
         htmlName="repeat-password"
         autoComplete="new-password"

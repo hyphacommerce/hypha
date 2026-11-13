@@ -1,3 +1,14 @@
+import type { TFor } from "../messages";
+
+/** A translator that has the price lists' messages: a server's `T`, or `useT<"price_lists">()`. */
+export type PriceT = TFor<"components" | "price_lists">;
+
+/**
+ * A translator that can say what's wrong with a typed amount: any of the admin's, since
+ * those messages are `components`' (the discount forms take amounts too).
+ */
+export type AmountT = TFor<"components">;
+
 /** An amount in integer minor units (1050 is 10.50 EUR), as the SDK's `Money`. */
 export type Money = { amount: number; currency: string };
 

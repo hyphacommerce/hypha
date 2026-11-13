@@ -28,21 +28,40 @@ import {
   generationProblem,
 } from "@/lib/discounts/codes";
 import { parseCount } from "@/lib/discounts/validate";
+import type { Format } from "@/lib/format";
+import type { TFor } from "@/lib/messages";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { addCodes, generateCodes, removeCodes, setCodesActive } from "../actions";
 
 type Code = AdminSchemas["DiscountCodeResponse"];
 
-const FILTERS: FilterDef[] = [
-  { kind: "search", param: "q", label: "Search", placeholder: "Search codes" },
-  { kind: "text", param: "batch", label: "Batch", placeholder: "A batch's label" },
+type DiscountsT = TFor<"common" | "discounts">;
+
+/** What a prefix looks like: a code, the same in every language. */
+const PREFIX_EXAMPLE = "SPRING-";
+
+const filters = (t: DiscountsT): FilterDef[] => [
+  {
+    kind: "search",
+    param: "q",
+    label: t("common.search"),
+    placeholder: t("discounts.codes_search_placeholder"),
+  },
+  {
+    kind: "text",
+    param: "batch",
+    label: t("discounts.codes_filter_batch"),
+    placeholder: t("discounts.codes_batch_placeholder"),
+  },
   {
     kind: "select",
     param: "active",
-    label: "Status",
+    label: t("common.status"),
     options: [
-      { value: "true", label: "Active" },
-      { value: "false", label: "Inactive" },
+      { value: "true", label: t("common.active") },
+      { value: "false", label: t("common.inactive") },
     ],
   },
 ];
@@ -51,46 +70,48 @@ const FILTERS: FilterDef[] = [
 const MAX_ADDED = 1000;
 const MAX_GENERATED = 10_000;
 
-const COLUMNS: TableColumn<Code>[] = [
+const columns = (t: DiscountsT, format: Format): TableColumn<Code>[] => [
   {
     key: "code",
-    header: "Code",
+    header: t("common.code"),
     width: proportional(2, { minWidth: 180 }),
     renderCell: (c) => <Text weight="semibold">{c.normalized}</Text>,
   },
   {
     key: "used",
-    header: "Uses",
+    header: t("discounts.codes_column_uses"),
     width: pixel(120),
     align: "end",
     renderCell: (c) => (
       <Text>
         {c.usage_limit == null
-          ? c.used.toLocaleString("en")
-          : `${c.used.toLocaleString("en")} of ${c.usage_limit.toLocaleString("en")}`}
+          ? format.number(c.used)
+          : t("discounts.uses_of_limit", { used: c.used, limit: c.usage_limit })}
       </Text>
     ),
   },
   {
     key: "active",
-    header: "Status",
+    header: t("common.status"),
     width: pixel(110),
     renderCell: (c) =>
       c.active ? (
-        <Badge label="Active" variant="success" />
+        <Badge label={t("common.active")} variant="success" />
       ) : (
-        <Badge label="Inactive" variant="neutral" />
+        <Badge label={t("common.inactive")} variant="neutral" />
       ),
   },
   {
     key: "batch",
-    header: "Batch",
+    header: t("discounts.codes_column_batch"),
     width: proportional(1, { minWidth: 120 }),
-    renderCell: (c) => <Text color={c.batch ? undefined : "secondary"}>{c.batch ?? "None"}</Text>,
+    renderCell: (c) => (
+      <Text color={c.batch ? undefined : "secondary"}>{c.batch ?? t("common.none")}</Text>
+    ),
   },
   {
     key: "created_at",
-    header: "Added",
+    header: t("discounts.codes_column_added"),
     width: pixel(160),
     renderCell: (c) =>
       c.created_at ? (
@@ -108,6 +129,7 @@ function limitFrom(text: string): number | null | "invalid" {
 }
 
 function AddCodesDialog({ id, onClose }: { id: string; onClose: () => void }) {
+  const t = useT<"discounts">();
   const [text, setText] = useState("");
   const [limit, setLimit] = useState("");
   const [batch, setBatch] = useState("");
@@ -117,9 +139,11 @@ function AddCodesDialog({ id, onClose }: { id: string; onClose: () => void }) {
 
   const submit = () => {
     const usageLimit = limitFrom(limit);
-    if (codes.length === 0) return setError("Type at least one code.");
-    if (codes.length > MAX_ADDED) return setError(`At most ${MAX_ADDED} codes at once.`);
-    if (usageLimit === "invalid") return setError("Uses per code: a whole number, or blank.");
+    if (codes.length === 0) return setError(t("discounts.codes_add_none"));
+    if (codes.length > MAX_ADDED) {
+      return setError(t("discounts.codes_add_too_many", { max: MAX_ADDED }));
+    }
+    if (usageLimit === "invalid") return setError(t("discounts.codes_uses_per_code_invalid"));
     startTransition(async () => {
       const result = await addCodes(
         id,
@@ -134,38 +158,38 @@ function AddCodesDialog({ id, onClose }: { id: string; onClose: () => void }) {
   return (
     <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={520} purpose="form">
       <DialogHeader
-        title="Add codes"
-        subtitle="Codes are compared ignoring case: welcome10 and WELCOME10 are one code, unique in the store."
+        title={t("discounts.codes_add_title")}
+        subtitle={t("discounts.codes_add_subtitle")}
         onOpenChange={(open) => !open && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
         <TextArea
-          label="Codes"
-          description="One per line, or separated by commas."
+          label={t("discounts.codes_add_label")}
+          description={t("discounts.codes_add_hint")}
           rows={6}
           value={text}
           onChange={setText}
         />
         <TextInput
-          label="Uses per code"
+          label={t("discounts.codes_uses_per_code")}
           isOptional
-          description="Blank: only the discount's own limits."
+          description={t("discounts.codes_add_limit_hint")}
           value={limit}
           onChange={setLimit}
           width={200}
         />
         <TextInput
-          label="Batch"
+          label={t("discounts.codes_batch")}
           isOptional
-          description="A label to find, export or remove them by later."
+          description={t("discounts.codes_batch_hint")}
           value={batch}
           onChange={setBatch}
         />
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label={codes.length > 1 ? `Add ${codes.length} codes` : "Add code"}
+            label={t("discounts.codes_add_submit", { count: codes.length })}
             variant="primary"
             isLoading={isPending}
             onClick={submit}
@@ -177,6 +201,7 @@ function AddCodesDialog({ id, onClose }: { id: string; onClose: () => void }) {
 }
 
 function GenerateDialog({ id, onClose }: { id: string; onClose: () => void }) {
+  const t = useT<"discounts">();
   const [count, setCount] = useState("100");
   const [prefix, setPrefix] = useState("");
   const [length, setLength] = useState("12");
@@ -190,11 +215,11 @@ function GenerateDialog({ id, onClose }: { id: string; onClose: () => void }) {
     const size = parseCount(length);
     const usageLimit = limitFrom(limit);
     if (n === null || n > MAX_GENERATED) {
-      return setError(`How many: 1 to ${MAX_GENERATED.toLocaleString("en")}.`);
+      return setError(t("discounts.codes_generate_count_invalid", { max: MAX_GENERATED }));
     }
-    const problem = generationProblem(size ?? 0, prefix);
+    const problem = generationProblem(size ?? 0, prefix, t);
     if (size === null || problem) return setError(problem ?? undefined);
-    if (usageLimit === "invalid") return setError("Uses per code: a whole number, or blank.");
+    if (usageLimit === "invalid") return setError(t("discounts.codes_uses_per_code_invalid"));
     startTransition(async () => {
       const result = await generateCodes(id, {
         count: n,
@@ -211,48 +236,62 @@ function GenerateDialog({ id, onClose }: { id: string; onClose: () => void }) {
   return (
     <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={520} purpose="form">
       <DialogHeader
-        title="Generate codes"
-        subtitle="Random codes without look-alike characters (no 0/O or 1/I/L), for flyers, partners or one per customer."
+        title={t("discounts.codes_generate_title")}
+        subtitle={t("discounts.codes_generate_subtitle")}
         onOpenChange={(open) => !open && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
         <HStack gap={3} wrap="wrap">
-          <TextInput label="How many" value={count} onChange={setCount} width={140} />
           <TextInput
-            label="Length"
-            description={`${MIN_GENERATED_LENGTH} to ${MAX_GENERATED_LENGTH}, the prefix included, with at least ${MIN_RANDOM_CHARACTERS} random characters.`}
+            label={t("discounts.codes_generate_count")}
+            value={count}
+            onChange={setCount}
+            width={140}
+          />
+          <TextInput
+            label={t("discounts.codes_generate_length")}
+            description={t("discounts.codes_generate_length_hint", {
+              min: MIN_GENERATED_LENGTH,
+              max: MAX_GENERATED_LENGTH,
+              random: MIN_RANDOM_CHARACTERS,
+            })}
             value={length}
             onChange={setLength}
             width={140}
           />
         </HStack>
         <TextInput
-          label="Prefix"
+          label={t("discounts.codes_generate_prefix")}
           isOptional
-          placeholder="SPRING-"
+          placeholder={PREFIX_EXAMPLE}
           value={prefix}
           onChange={setPrefix}
           width={240}
         />
         <TextInput
-          label="Uses per code"
+          label={t("discounts.codes_uses_per_code")}
           isOptional
-          description="1 for single-use codes; blank for only the discount's own limits."
+          description={t("discounts.codes_generate_limit_hint")}
           value={limit}
           onChange={setLimit}
           width={200}
         />
         <TextInput
-          label="Batch"
+          label={t("discounts.codes_batch")}
           isOptional
-          description="A label to find, export or remove them by later."
+          description={t("discounts.codes_batch_hint")}
           value={batch}
           onChange={setBatch}
         />
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
-          <Button label="Generate" variant="primary" isLoading={isPending} onClick={submit} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
+          <Button
+            label={t("discounts.codes_generate_submit")}
+            variant="primary"
+            isLoading={isPending}
+            onClick={submit}
+          />
         </HStack>
       </VStack>
     </Dialog>
@@ -268,19 +307,16 @@ function RemoveDialog({
   which: Which;
   onClose: (removed: boolean) => void;
 }) {
+  const t = useT<"discounts">();
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
-  const what = describeWhich(which);
   return (
     <AlertDialog
       isOpen
       onOpenChange={(open) => !open && onClose(false)}
-      title={`Remove ${what}?`}
-      description={
-        error ??
-        "Buyers can't enter them any more, and carts holding them see them go. Orders keep their discount."
-      }
-      actionLabel="Remove"
+      title={t("discounts.codes_remove_title", whichValues(which))}
+      description={error ?? t("discounts.codes_remove_description")}
+      actionLabel={t("common.remove")}
       isActionLoading={isPending}
       onAction={() =>
         startTransition(async () => {
@@ -295,10 +331,20 @@ function RemoveDialog({
 
 type Which = { codes: string[] } | { batch: string };
 
-/** "SPRING10", "3 codes", "every code of the batch flyers". */
-function describeWhich(which: Which): string {
-  if ("batch" in which) return `every code of the batch ${which.batch}`;
-  return which.codes.length === 1 ? (which.codes[0] ?? "") : `${which.codes.length} codes`;
+/**
+ * What a dialog's title names, as its message tells them apart: one code by itself
+ * ("SPRING10"), several by their count ("3 codes"), a batch by its label ("every code of
+ * the batch flyers").
+ */
+function whichValues(which: Which) {
+  if ("batch" in which) return { which: "batch", batch: which.batch, code: "", count: 0 };
+  const [code = ""] = which.codes;
+  return {
+    which: which.codes.length === 1 ? "one" : "many",
+    batch: "",
+    code,
+    count: which.codes.length,
+  };
 }
 
 function ActivateDialog({
@@ -312,21 +358,27 @@ function ActivateDialog({
   active: boolean;
   onClose: (done: boolean) => void;
 }) {
+  const t = useT<"discounts">();
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
-  const what = describeWhich(which);
   return (
     <AlertDialog
       isOpen
       onOpenChange={(open) => !open && onClose(false)}
-      title={active ? `Reactivate ${what}?` : `Deactivate ${what}?`}
+      title={
+        active
+          ? t("discounts.codes_reactivate_title", whichValues(which))
+          : t("discounts.codes_deactivate_title", whichValues(which))
+      }
       description={
         error ??
         (active
-          ? "Buyers can enter them again, within their limits."
-          : "Carts refuse them as unknown until they're reactivated. Their uses so far stay, and orders keep their discount.")
+          ? t("discounts.codes_reactivate_description")
+          : t("discounts.codes_deactivate_description"))
       }
-      actionLabel={active ? "Reactivate" : "Deactivate"}
+      actionLabel={
+        active ? t("discounts.codes_reactivate_action") : t("discounts.codes_deactivate_action")
+      }
       isActionLoading={isPending}
       onAction={() =>
         startTransition(async () => {
@@ -358,6 +410,8 @@ export function CodesTable({
   /** The batch the list is filtered by, for exporting and removing it. */
   batch?: string | null;
 }) {
+  const t = useT<"discounts">();
+  const format = useFormat();
   const [open, setOpen] = useState<Open | null>(null);
   const exportHref = `/discounts/${id}/codes/export${batch ? `?batch=${encodeURIComponent(batch)}` : ""}`;
   return (
@@ -366,33 +420,33 @@ export function CodesTable({
         rows={page?.items}
         nextCursor={page?.next_cursor}
         isLoading={!page}
-        columns={COLUMNS}
+        columns={columns(t, format)}
         idKey="normalized"
         isSelectable={canWrite}
-        rowLabel={(c) => `Select ${c.normalized}`}
-        filters={FILTERS}
+        rowLabel={(c) => t("discounts.codes_select", { code: c.normalized })}
+        filters={filters(t)}
         error={page?.error}
         toolbarEnd={
           <HStack gap={2}>
             <Button
-              label={batch ? "Export batch" : "Export CSV"}
+              label={batch ? t("discounts.codes_export_batch") : t("discounts.codes_export_csv")}
               variant="secondary"
               href={exportHref}
             />
             {canWrite && batch && (
               <>
                 <Button
-                  label="Deactivate batch"
+                  label={t("discounts.codes_deactivate_batch")}
                   variant="secondary"
                   onClick={() => setOpen({ kind: "activate", which: { batch }, active: false })}
                 />
                 <Button
-                  label="Reactivate batch"
+                  label={t("discounts.codes_reactivate_batch")}
                   variant="secondary"
                   onClick={() => setOpen({ kind: "activate", which: { batch }, active: true })}
                 />
                 <Button
-                  label="Remove batch"
+                  label={t("discounts.codes_remove_batch")}
                   variant="secondary"
                   onClick={() => setOpen({ kind: "remove", which: { batch } })}
                 />
@@ -400,14 +454,14 @@ export function CodesTable({
             )}
             {canWrite && (
               <Button
-                label="Generate"
+                label={t("discounts.codes_generate")}
                 variant="secondary"
                 onClick={() => setOpen({ kind: "generate" })}
               />
             )}
             {canWrite && (
               <Button
-                label="Add codes"
+                label={t("discounts.codes_add")}
                 variant="primary"
                 onClick={() => setOpen({ kind: "add" })}
               />
@@ -420,7 +474,7 @@ export function CodesTable({
             <HStack gap={2}>
               {selected.some((c) => c.active) && (
                 <Button
-                  label="Deactivate"
+                  label={t("discounts.codes_deactivate")}
                   variant="secondary"
                   size="sm"
                   onClick={() => setOpen({ kind: "activate", which, active: false, clear })}
@@ -428,14 +482,14 @@ export function CodesTable({
               )}
               {selected.some((c) => !c.active) && (
                 <Button
-                  label="Reactivate"
+                  label={t("discounts.codes_reactivate")}
                   variant="secondary"
                   size="sm"
                   onClick={() => setOpen({ kind: "activate", which, active: true, clear })}
                 />
               )}
               <Button
-                label="Remove"
+                label={t("common.remove")}
                 variant="secondary"
                 size="sm"
                 onClick={() => setOpen({ kind: "remove", which, clear })}
@@ -445,12 +499,12 @@ export function CodesTable({
         }}
         empty={{
           icon: <TicketIcon width={32} />,
-          title: "No codes yet",
+          title: t("discounts.codes_empty_title"),
           description: canWrite
-            ? "Add the codes buyers will type, or generate a batch of random ones."
-            : "Nobody has added codes to this discount.",
+            ? t("discounts.codes_empty_description")
+            : t("discounts.codes_empty_description_read_only"),
         }}
-        noResults={{ title: "No codes match" }}
+        noResults={{ title: t("discounts.codes_no_results") }}
       />
       {open?.kind === "add" && <AddCodesDialog id={id} onClose={() => setOpen(null)} />}
       {open?.kind === "generate" && <GenerateDialog id={id} onClose={() => setOpen(null)} />}

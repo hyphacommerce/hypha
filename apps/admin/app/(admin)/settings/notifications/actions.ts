@@ -27,7 +27,7 @@ function refresh() {
 export async function updateNotificationSettings(patch: SettingsPatch): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.PATCH("/admin/notification-settings", { body: patch });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }
@@ -39,7 +39,7 @@ export async function setTemplateEnabled(key: string, enabled: boolean): Promise
     params: { path: { key } },
     body: { enabled },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }
@@ -57,7 +57,7 @@ export async function saveTemplate(key: string, sources: Sources): Promise<Templ
     params: { path: { key } },
     body: body(key, sources),
   });
-  if (error) return { error: describe(error), problem: problemOf(error.details) };
+  if (error) return { error: await describe(error), problem: problemOf(error.details) };
   refresh();
   return {};
 }
@@ -68,7 +68,7 @@ export async function revertTemplate(key: string): Promise<Result & { sources?: 
   const { data, error } = await client.DELETE("/admin/notification-templates/{key}", {
     params: { path: { key } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return { sources: { subject: data.subject, html: data.html, text: data.text ?? null } };
 }
@@ -84,7 +84,7 @@ export async function previewTemplate(
     params: { path: { key } },
     body: { ...body(key, sources), order },
   });
-  if (error) return { error: describe(error), problem: problemOf(error.details) };
+  if (error) return { error: await describe(error), problem: problemOf(error.details) };
   return { rendered: data };
 }
 
@@ -99,6 +99,6 @@ export async function sendTestEmail(
     params: { path: { key } },
     body: { ...body(key, sources), order },
   });
-  if (error) return { error: describe(error), problem: problemOf(error.details) };
+  if (error) return { error: await describe(error), problem: problemOf(error.details) };
   return { sentTo: data.sent_to };
 }

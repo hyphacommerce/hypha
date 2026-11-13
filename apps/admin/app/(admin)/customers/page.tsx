@@ -8,6 +8,7 @@ import { listPage, pageQuery } from "@/components/resource-table/server";
 import { fieldQuery, isFilterOffered } from "@/lib/custom-fields";
 import { definitionsOf } from "@/lib/custom-fields-server";
 import { requireStaff, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import { hasScope } from "@/lib/navigation";
 import { wellKnownField } from "@/lib/well-known-fields";
 import { CustomersTable } from "@/resources/customers";
@@ -20,12 +21,12 @@ export default async function CustomersPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const [params, me] = await Promise.all([searchParams, requireStaff()]);
+  const [params, me, t] = await Promise.all([searchParams, requireStaff(), getT()]);
   const canLabel = hasScope(me.scopes, "customers:write");
   return (
     <Section padding={6}>
       <VStack gap={5}>
-        <PageHeader title="Customers" />
+        <PageHeader title={t("common.customers")} />
         <Suspense fallback={<CustomersTable canLabel={canLabel} />}>
           <CustomerRows params={params} canLabel={canLabel} />
         </Suspense>
@@ -59,7 +60,7 @@ async function CustomerRows({ params, canLabel }: { params: SearchParams; canLab
   });
   return (
     <CustomersTable
-      page={listPage(result, "/customers", params)}
+      page={await listPage(result, "/customers", params)}
       fieldFilters={fieldFilters}
       labels={labels}
       groups={groups}

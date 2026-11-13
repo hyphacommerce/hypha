@@ -217,6 +217,9 @@ importers:
       '@hyphacommerce/app-bridge-host':
         specifier: workspace:*
         version: link:../../packages/app-bridge-host
+      '@hyphacommerce/i18n':
+        specifier: workspace:*
+        version: link:../../packages/i18n
       '@hyphacommerce/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk

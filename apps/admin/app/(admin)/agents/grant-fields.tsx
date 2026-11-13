@@ -24,6 +24,7 @@ import {
   personalDataLabel,
 } from "@/lib/agents";
 import { hasScope } from "@/lib/navigation";
+import { useT } from "@/lib/use-t";
 
 import type { GrantField } from "./actions";
 import type { GrantDraft, GrantProblem } from "./grant";
@@ -46,11 +47,12 @@ export function GrantFields({
   problem?: GrantProblem;
   isReadOnly?: boolean;
 }) {
+  const t = useT<"agents" | "apps">();
   const applyNote =
     cap === "propose"
-      ? 'This deployment lets agents only propose (agents.writes = "propose"), so apply acts as propose.'
+      ? t("agents.grant_cap_propose", { setting: 'agents.writes = "propose"' })
       : cap === "off"
-        ? 'This deployment lets agents only read (agents.writes = "off").'
+        ? t("agents.grant_cap_off", { setting: 'agents.writes = "off"' })
         : undefined;
 
   const toggleRead = (scope: string, on: boolean) =>
@@ -77,9 +79,7 @@ export function GrantFields({
     });
 
   const lacks = (scope: string) =>
-    hasScope(myScopes, scope)
-      ? undefined
-      : `Your role doesn't have ${scope}, so you can't give it.`;
+    hasScope(myScopes, scope) ? undefined : t("agents.grant_lacks_scope", { scope });
   const problemFor = (scope: string) =>
     problem?.scope === scope ? (
       <FieldStatus type="error" message={problem.error} variant="detached" />
@@ -99,7 +99,7 @@ export function GrantFields({
     const isReadIncluded = read !== undefined && isWritten;
     // Apply is for someone who could approve the same write: they hold its scope.
     const applyBlocked = isProposeOnly
-      ? "Always proposed: a person approves every use."
+      ? t("agents.grant_always_proposed")
       : (lacks(scope) ?? applyNote);
     const mode = value.write[scope] ?? "propose";
     return (
@@ -111,20 +111,24 @@ export function GrantFields({
         </VStack>
         {read ? (
           <CheckboxInput
-            label={`See ${label.toLowerCase()}`}
+            label={t("agents.grant_see_area", { area: label })}
             isLabelHidden
             value={value.read.includes(read) || isReadIncluded}
             onChange={(on) => toggleRead(read, on)}
             isDisabled={isReadOnly || isReadIncluded || Boolean(lacks(read))}
             disabledMessage={
-              isReadOnly ? undefined : isReadIncluded ? "Changing includes seeing." : lacks(read)
+              isReadOnly
+                ? undefined
+                : isReadIncluded
+                  ? t("agents.grant_change_includes_see")
+                  : lacks(read)
             }
           />
         ) : (
           <span />
         )}
         <CheckboxInput
-          label={`Change ${label.toLowerCase()}`}
+          label={t("agents.grant_change_area", { area: label })}
           isLabelHidden
           value={isWritten}
           onChange={(on) => toggleWrite(scope, read, on)}
@@ -134,15 +138,15 @@ export function GrantFields({
         <div className="grant-mode">
           {isWritten && (
             <SegmentedControl
-              label={`How it changes ${label.toLowerCase()}`}
+              label={t("agents.grant_how_area", { area: label })}
               size="sm"
               value={isProposeOnly ? "propose" : mode}
               onChange={(next) => setMode(scope, next === "apply" ? "apply" : "propose")}
               isDisabled={isReadOnly || applyBlocked !== undefined}
               disabledMessage={isReadOnly ? undefined : applyBlocked}
             >
-              <SegmentedControlItem value="propose" label="Propose" />
-              <SegmentedControlItem value="apply" label="Apply" />
+              <SegmentedControlItem value="propose" label={t("agents.grant_mode_propose")} />
+              <SegmentedControlItem value="apply" label={t("agents.grant_mode_apply")} />
             </SegmentedControl>
           )}
         </div>
@@ -156,11 +160,10 @@ export function GrantFields({
         <VStack gap={3}>
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Store access
+              {t("agents.grant_store_title")}
             </Text>
             <Text type="supporting" color="secondary">
-              What it may see and change. A change it proposes waits in the proposals inbox until
-              someone approves it; one it applies is written at once. Propose is the default.
+              {t("agents.grant_store_description")}
             </Text>
           </VStack>
           {applyNote && <Banner status="info" title={applyNote} />}
@@ -169,33 +172,33 @@ export function GrantFields({
           <div>
             <div className="grant-row">
               <Text type="supporting" color="secondary">
-                Area
+                {t("agents.grant_column_area")}
               </Text>
               <Text type="supporting" color="secondary">
-                See
+                {t("agents.grant_column_see")}
               </Text>
               <Text type="supporting" color="secondary">
-                Change
+                {t("agents.grant_column_change")}
               </Text>
               <Text type="supporting" color="secondary">
-                How
+                {t("agents.grant_column_how")}
               </Text>
             </div>
             {GRANT_AREAS.map(({ area, canWrite }) => {
               const read = `${area}:read`;
-              const label = areaLabel(area);
+              const label = areaLabel(t, area);
               if (canWrite) return writeRow(`${area}:write`, label, read, false);
               return (
                 <div key={area} className="grant-row">
                   <VStack gap={0}>
                     <Text weight="medium">{label}</Text>
                     <Text type="supporting" color="secondary">
-                      Agents may only see these.
+                      {t("agents.grant_read_only_area")}
                     </Text>
                     {problemFor(read)}
                   </VStack>
                   <CheckboxInput
-                    label={`See ${label.toLowerCase()}`}
+                    label={t("agents.grant_see_area", { area: label })}
                     isLabelHidden
                     value={value.read.includes(read)}
                     onChange={(on) => toggleRead(read, on)}
@@ -207,7 +210,7 @@ export function GrantFields({
                 </div>
               );
             })}
-            {PROPOSE_ONLY.map(({ scope, label }) => writeRow(scope, label, undefined, true))}
+            {PROPOSE_ONLY.map(({ scope, label }) => writeRow(scope, t(label), undefined, true))}
           </div>
         </VStack>
       </Card>
@@ -216,23 +219,22 @@ export function GrantFields({
         <VStack gap={3}>
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Customers' personal data
+              {t("apps.detail_personal_title")}
             </Text>
             <Text type="supporting" color="secondary">
-              Off by default: without these, names, emails, phone numbers and addresses are left out
-              of everything the agent reads.
+              {t("agents.grant_personal_description")}
             </Text>
           </VStack>
           <Banner
             status="warning"
-            title="The agent's model provider sees what the agent reads"
-            description="Grant personal data only when the job needs it, and only if your agreement with that provider covers it."
+            title={t("agents.grant_personal_warning_title")}
+            description={t("agents.grant_personal_warning_description")}
           />
           {sectionProblem("customer_data")}
           {CUSTOMER_DATA.map((scope) => (
             <VStack key={scope} gap={0}>
               <CheckboxInput
-                label={personalDataLabel(scope)}
+                label={personalDataLabel(t, scope)}
                 description={scope}
                 value={value.customerData.includes(scope)}
                 onChange={(on) => toggleData(scope, on)}
@@ -249,22 +251,25 @@ export function GrantFields({
         <VStack gap={3}>
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Operations
+              {t("agents.grant_operations_title")}
             </Text>
             <Text type="supporting" color="secondary">
-              Optionally, only these operations exist for the agent, within its scopes.
+              {t("agents.grant_operations_description")}
             </Text>
           </VStack>
           <Switch
-            label="Only allow listed operations"
+            label={t("agents.grant_operations_only_listed")}
             value={value.operations !== null}
             onChange={(on) => onChange({ ...value, operations: on ? "" : null })}
             isDisabled={isReadOnly}
           />
           {value.operations !== null && (
             <TextArea
-              label="Operations"
-              description="Operation IDs as the API documents name them, one per line, like admin.orders.list or admin.products.update."
+              label={t("agents.grant_operations_field")}
+              description={t("agents.grant_operations_field_description", {
+                first: "admin.orders.list",
+                second: "admin.products.update",
+              })}
               rows={5}
               value={value.operations}
               onChange={(operations) => onChange({ ...value, operations })}

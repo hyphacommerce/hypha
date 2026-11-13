@@ -12,15 +12,12 @@ import {
   oneOf,
 } from "@/components/resource-table/params";
 import { listPage, nextDay, pageQuery, startOfDay } from "@/components/resource-table/server";
-import {
-  channelNames,
-  loadCountries,
-  loadCurrencies,
-  loadTimeZone,
-  sessionClient,
-} from "@/lib/hypha";
+import { getFormat } from "@/lib/get-format";
+import { channelNames, loadCountries, loadTimeZone, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import { fieldQuery, isFilterOffered } from "@/lib/custom-fields";
 import { definitionsOf } from "@/lib/custom-fields-server";
+import { countryName } from "@/lib/regions";
 import { OrdersTable } from "@/resources/orders";
 
 const PAYMENT: AdminSchemas["FinancialStatusDto"][] = [
@@ -46,11 +43,11 @@ export default async function OrdersPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const params = await searchParams;
+  const [params, t] = await Promise.all([searchParams, getT()]);
   return (
     <Section padding={6}>
       <VStack gap={5}>
-        <PageHeader title="Orders" />
+        <PageHeader title={t("common.orders")} />
         <Suspense fallback={<OrdersTable />}>
           <OrderRows params={params} />
         </Suspense>
@@ -69,7 +66,7 @@ async function OrderRows({ params }: { params: SearchParams }) {
   const timeZone = placed ? await loadTimeZone() : "UTC";
   // Filterable custom fields.
   const fieldFilters = (await definitionsOf("order")).filter(isFilterOffered);
-  const [result, markets, channelName, currencies, countries] = await Promise.all([
+  const [result, markets, channelName, format, countries] = await Promise.all([
     client.GET("/admin/orders", {
       params: {
         query: {
@@ -93,20 +90,19 @@ async function OrderRows({ params }: { params: SearchParams }) {
     }),
     client.GET("/admin/markets"),
     channelNames(client),
-    loadCurrencies(),
+    getFormat(),
     loadCountries(),
   ]);
 
   const sold = markets.data?.items ?? [];
-  const countryName = new Map(countries.map((c) => [c.code, c.name]));
   const soldTo = [...new Set(sold.flatMap((m) => m.countries))]
-    .map((code) => ({ value: code, label: countryName.get(code) ?? code }))
-    .toSorted((a, b) => a.label.localeCompare(b.label));
+    .map((code) => ({ value: code, label: countryName(code, countries, format.locale) }))
+    .toSorted((a, b) => format.compare(a.label, b.label));
 
   return (
     <OrdersTable
-      page={listPage(result, "/orders", params)}
-      currencies={currencies}
+      page={await listPage(result, "/orders", params)}
+
       channels={Object.fromEntries(channelName)}
       countries={soldTo}
       orderCurrencies={[...new Set(sold.map((m) => m.currency))].toSorted()}
