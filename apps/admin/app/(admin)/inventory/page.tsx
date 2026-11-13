@@ -55,7 +55,7 @@ async function InventoryRows({ params }: { params: SearchParams }) {
   ]);
   return (
     <InventoryTable
-      page={listPage(result, "/inventory", params)}
+      page={await listPage(result, "/inventory", params)}
       locations={Object.fromEntries(locations)}
       location={location}
     />

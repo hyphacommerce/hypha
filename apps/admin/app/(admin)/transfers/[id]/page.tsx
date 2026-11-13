@@ -6,6 +6,7 @@ import { type Crumb, PageHeader } from "@/components/page-header";
 import { DetailSkeleton } from "@/components/skeletons";
 import { TransferStatusBadge } from "@/components/status";
 import { loaded, requireStaff, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import { hasScope } from "@/lib/navigation";
 import { trNumber } from "@/lib/transfers";
 
@@ -33,10 +34,11 @@ export default async function TransferPage({ params }: { params: Promise<{ id: s
 
 async function Transfer({ id }: { id: string }) {
   const client = await sessionClient();
-  const [transfer, me, locations] = await Promise.all([
+  const [transfer, me, locations, t] = await Promise.all([
     client.GET("/admin/transfers/{id}", { params: { path: { id } } }).then(loaded),
     requireStaff(),
     client.GET("/admin/locations"),
+    getT(),
   ]);
   const canWrite = hasScope(me.scopes, "inventory:write");
   const places = (locations.data?.items ?? []).map((l) => ({ id: l.id, name: l.name }));
@@ -60,7 +62,7 @@ async function Transfer({ id }: { id: string }) {
       <PageHeader
         title={trNumber(transfer.number)}
         back={BACK}
-        badges={<TransferStatusBadge status={transfer.status} />}
+        badges={<TransferStatusBadge status={transfer.status} t={t} />}
         description={`${nameOf(transfer.origin)} → ${nameOf(transfer.destination)}`}
         actions={
           canWrite && <TransferActions transfer={transfer} atOrigin={atOrigin} places={places} />

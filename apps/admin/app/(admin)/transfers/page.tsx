@@ -62,7 +62,7 @@ async function Rows({ params, canWrite }: { params: SearchParams; canWrite: bool
   ]);
   return (
     <TransfersTable
-      page={listPage(result, "/transfers", params)}
+      page={await listPage(result, "/transfers", params)}
       locations={Object.fromEntries(locations)}
       canWrite={canWrite}
     />

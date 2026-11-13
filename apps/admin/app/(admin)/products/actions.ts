@@ -27,7 +27,7 @@ export async function createProduct(
       price: { amount, currency: input.currency },
     },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath("/products");
   redirect(`/products/${data.id}`);
 }
@@ -41,7 +41,7 @@ export async function setProductStatus(
     params: { path: { id } },
     body: { status },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/products/${id}`);
   revalidatePath("/products");
   return {};
@@ -53,7 +53,7 @@ export async function deleteProduct(id: string): Promise<FormState> {
   const { error } = await client.DELETE("/admin/products/{id}", {
     params: { path: { id } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath("/products");
   redirect("/products");
 }
@@ -62,8 +62,8 @@ export async function deleteProduct(id: string): Promise<FormState> {
  * cases a form handles itself (removing variants with an option value). */
 export type EditResult = { error?: string; code?: string; details?: unknown };
 
-function failed(error: ApiError): EditResult {
-  return { error: describe(error), code: error.code, details: error.details };
+async function failed(error: ApiError): Promise<EditResult> {
+  return { error: await describe(error), code: error.code, details: error.details };
 }
 
 /** Edits change the product page; titles, handles and media also show in the list. */
@@ -110,7 +110,7 @@ export async function saveProduct(
         params: { path: { id } },
         body: plan.product,
       });
-      if (error) return { error: describe(error) };
+      if (error) return { error: await describe(error) };
       product = data;
     }
     let options: AdminSchemas["OptionResponse"][] | undefined;
@@ -119,7 +119,7 @@ export async function saveProduct(
         params: { path: { id } },
         body: { options: plan.options.options, remove_variants: plan.options.removeVariants },
       });
-      if (error) return { error: describe(error) };
+      if (error) return { error: await describe(error) };
       product = data;
       options = data.options;
     }
@@ -132,7 +132,7 @@ export async function saveProduct(
         params: { path: { id } },
         body: { variants },
       });
-      if (error) return { error: describe(error), options };
+      if (error) return { error: await describe(error), options };
       product = data;
     }
     // Categories and channels are memberships, apart from the product and each other:
@@ -153,7 +153,7 @@ export async function saveProduct(
         : undefined,
     ]);
     const failure = categories?.error ?? channels?.error;
-    if (failure) return { error: describe(failure), options };
+    if (failure) return { error: await describe(failure), options };
     const stored = {
       product,
       categories: categories?.data?.categories,
@@ -170,7 +170,7 @@ export async function saveProduct(
       if (error) {
         return {
           ...stored,
-          error: describe(error),
+          error: await describe(error),
           options,
           fieldProblems: problemsOf(error.code, error.details),
         };
@@ -238,7 +238,7 @@ export async function libraryPage(
     const { data, error } = await client.GET("/admin/assets", {
       params: { query: { cursor: next, limit: 60, q: q?.trim() || undefined } },
     });
-    if (error) return { error: describe(error) };
+    if (error) return { error: await describe(error) };
     const items = data.items.filter((a) => a.kind !== "file");
     next = data.next_cursor ?? undefined;
     if (items.length > 0 || !next) return { items, next };
@@ -264,7 +264,7 @@ export async function variantStock(variant: string): Promise<{ stock?: Stock; er
   const { data, error } = await client.GET("/admin/variants/{id}/inventory", {
     params: { path: { id: variant } },
   });
-  return error ? { error: describe(error) } : { stock: data };
+  return error ? { error: await describe(error) } : { stock: data };
 }
 
 /**
@@ -285,7 +285,7 @@ export async function saveVariantStock(
       const { data, error } = await client.POST("/admin/inventory-items", {
         body: { variant: current.variant, tracked: true, continue_selling: change.continueSelling },
       });
-      if (error) return { error: describe(error) };
+      if (error) return { error: await describe(error) };
       stock = data;
     } else if (
       stock.tracked !== change.tracked ||
@@ -295,7 +295,7 @@ export async function saveVariantStock(
         params: { path: { id: stock.id } },
         body: { tracked: change.tracked, continue_selling: change.continueSelling },
       });
-      if (error) return { error: describe(error) };
+      if (error) return { error: await describe(error) };
       stock = data;
     }
     const item = stock.id;
@@ -310,7 +310,7 @@ export async function saveVariantStock(
           note: change.note.trim() === "" ? null : change.note,
         },
       });
-      if (error) return { error: describe(error), stock };
+      if (error) return { error: await describe(error), stock };
       stock = data;
     }
     return { stock };
@@ -336,5 +336,5 @@ export async function productPrices(
     params: { path: { id }, query: { quantity, group } },
   });
   if (data) return { prices: data };
-  return { error: error ? describe(error) : "The prices couldn't be read." };
+  return { error: error ? await describe(error) : "The prices couldn't be read." };
 }

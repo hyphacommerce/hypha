@@ -19,7 +19,8 @@ import { useState, useTransition } from "react";
 
 import { DateTime } from "@/components/date-time";
 import { ShipmentBadge } from "@/components/status";
-import { CANCEL_REASONS } from "@/lib/format";
+import { CANCEL_REASONS, cancelReasonLabel } from "@/lib/format";
+import { useT } from "@/lib/use-t";
 import { COLLECTED } from "@/lib/payments";
 
 import { MAX_TRACKING, NO_TRACKING, type TrackingInput, trackingProblem } from "@/lib/tracking";
@@ -265,6 +266,7 @@ function Shipment({
   from: string;
   describe: (line: string) => string;
 }) {
+  const t = useT();
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string>();
@@ -275,7 +277,7 @@ function Shipment({
     <VStack gap={2}>
       <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
         <HStack gap={2} vAlign="center">
-          <ShipmentBadge status={fulfillment.status} />
+          <ShipmentBadge status={fulfillment.status} t={t} />
           <Text type="supporting" color="secondary">
             From {from}, <DateTime value={fulfillment.created_at} />
           </Text>
@@ -321,10 +323,10 @@ function Shipment({
       <Text>
         {fulfillment.lines.map((line) => `${line.quantity} × ${describe(line.line)}`).join(", ")}
       </Text>
-      {fulfillment.tracking.map((t) => (
-        <Text key={t.number} type="supporting">
-          {t.carrier ? `${t.carrier} ` : ""}
-          {t.url ? <Link href={t.url}>{t.number}</Link> : t.number}
+      {fulfillment.tracking.map((tracking) => (
+        <Text key={tracking.number} type="supporting">
+          {tracking.carrier ? `${tracking.carrier} ` : ""}
+          {tracking.url ? <Link href={tracking.url}>{tracking.number}</Link> : tracking.number}
         </Text>
       ))}
       {editing && (
@@ -395,8 +397,6 @@ function TrackingDialog({
   );
 }
 
-const REASONS = Object.entries(CANCEL_REASONS).map(([value, label]) => ({ value, label }));
-
 /** "Cancel order": refused while shipments stand, so it says so instead. */
 export function CancelOrderButton({ order }: { order: Order }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -420,6 +420,8 @@ function CancelOrderDialog({ order, onClose }: { order: Order; onClose: () => vo
   const [notify, setNotify] = useState(true);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
+  const t = useT<"orders">();
+  const reasons = CANCEL_REASONS.map((value) => ({ value, label: cancelReasonLabel(t, value) }));
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={520} purpose="form">
       <DialogHeader
@@ -435,7 +437,7 @@ function CancelOrderDialog({ order, onClose }: { order: Order; onClose: () => vo
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
-        <Selector label="Reason" options={REASONS} value={reason} onChange={setReason} />
+        <Selector label="Reason" options={reasons} value={reason} onChange={setReason} />
         <CheckboxInput label="Email the customer" value={notify} onChange={setNotify} />
         <HStack gap={2} hAlign="end">
           <Button label="Keep order" variant="ghost" onClick={onClose} />

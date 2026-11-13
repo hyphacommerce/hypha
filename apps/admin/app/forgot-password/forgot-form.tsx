@@ -8,12 +8,14 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { type FormEvent, startTransition, useActionState, useState } from "react";
 
 import { fieldText } from "@/components/new-password";
+import { useT } from "@/lib/use-t";
 
 import { requestPasswordReset } from "../login/actions";
 import { AuthCard } from "../login/auth-card";
 
 /** Asks for a reset link by email. */
 export function ForgotForm() {
+  const t = useT<"auth">();
   const [email, setEmail] = useState("");
   const [isIncomplete, setIsIncomplete] = useState(false);
   const [state, request, isPending] = useActionState(requestPasswordReset, {});
@@ -29,41 +31,38 @@ export function ForgotForm() {
   if (state.sentTo) {
     return (
       <AuthCard
-        title="Check your email"
-        subtitle={`If ${state.sentTo} belongs to a staff account, a link to choose a new password is on its way. It works once, for a limited time.`}
+        title={t("auth.forgot_sent_title")}
+        subtitle={t("auth.forgot_sent_subtitle", { email: state.sentTo })}
       >
         <Link href="/login" size="sm" color="secondary" type="supporting">
-          Back to sign in
+          {t("auth.back_to_sign_in")}
         </Link>
       </AuthCard>
     );
   }
 
   return (
-    <AuthCard
-      title="Forgot your password?"
-      subtitle="Enter your email and we'll send you a link to choose a new one."
-    >
+    <AuthCard title={t("auth.forgot_title")} subtitle={t("auth.forgot_subtitle")}>
       {isIncomplete ? (
-        <Banner status="error" title="Enter your email." />
+        <Banner status="error" title={t("auth.forgot_incomplete")} />
       ) : (
         state.error && <Banner status="error" title={state.error} />
       )}
       <form onSubmit={submit} noValidate>
         <VStack gap={4}>
           <TextInput
-            label="Email"
+            label={t("common.email")}
             type="email"
             htmlName="email"
             autoComplete="username"
-            placeholder="name@company.com"
+            placeholder={t("auth.email_placeholder")}
             value={email}
             onChange={setEmail}
             size="lg"
             hasAutoFocus
           />
           <Button
-            label="Send the link"
+            label={t("auth.forgot_submit")}
             type="submit"
             variant="primary"
             size="lg"
@@ -72,7 +71,7 @@ export function ForgotForm() {
         </VStack>
       </form>
       <Link href="/login" size="sm" color="secondary" type="supporting">
-        Back to sign in
+        {t("auth.back_to_sign_in")}
       </Link>
     </AuthCard>
   );

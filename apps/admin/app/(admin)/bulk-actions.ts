@@ -44,7 +44,7 @@ export async function setProductsStatus(
       params: { path: { id: p.id } },
       body: { status },
     });
-    if (error) result.failed.push({ id: p.id, label: p.label, error: describe(error) });
+    if (error) result.failed.push({ id: p.id, label: p.label, error: await describe(error) });
     else result.changed += 1;
   });
   revalidatePath("/products");
@@ -64,7 +64,7 @@ export async function setProductsPublished(
     ? await client.POST("/admin/channels/{id}/products", options)
     : await client.DELETE("/admin/channels/{id}/products", options);
   revalidatePath("/products");
-  if (error) return { changed: 0, unchanged: 0, failed: [], error: describe(error) };
+  if (error) return { changed: 0, unchanged: 0, failed: [], error: await describe(error) };
   return { changed: ids.length, unchanged: 0, failed: [] };
 }
 
@@ -82,7 +82,7 @@ export async function setProductsInCategory(
     : await client.DELETE("/admin/categories/{id}/products", options);
   revalidatePath("/products");
   revalidatePath(`/products/categories/${category}`);
-  if (error) return { changed: 0, unchanged: 0, failed: [], error: describe(error) };
+  if (error) return { changed: 0, unchanged: 0, failed: [], error: await describe(error) };
   return { changed: ids.length, unchanged: 0, failed: [] };
 }
 
@@ -96,7 +96,7 @@ export async function markOrdersPaid(orders: (Item & { pending: boolean })[]): P
     const { error } = await client.POST("/admin/orders/{id}/paid", {
       params: { path: { id: o.id } },
     });
-    if (error) result.failed.push({ id: o.id, label: o.label, error: describe(error) });
+    if (error) result.failed.push({ id: o.id, label: o.label, error: await describe(error) });
     else result.changed += 1;
   });
   revalidatePath("/orders");
@@ -116,7 +116,7 @@ export async function setCustomersGroup(
     ? await client.POST("/admin/customer-groups/{id}/customers", options)
     : await client.DELETE("/admin/customer-groups/{id}/customers", options);
   revalidatePath("/customers", "layout");
-  if (error) return { changed: 0, unchanged: 0, failed: [], error: describe(error) };
+  if (error) return { changed: 0, unchanged: 0, failed: [], error: await describe(error) };
   return { changed: ids.length, unchanged: 0, failed: [] };
 }
 
@@ -138,7 +138,7 @@ export async function setCustomersLabel(
     body: { owners, add: add ? [label] : [], remove: add ? [] : [label] },
   });
   revalidatePath("/customers");
-  if (error) return { changed: 0, unchanged: 0, failed: [], error: describe(error) };
+  if (error) return { changed: 0, unchanged: 0, failed: [], error: await describe(error) };
   const changed = data.items.filter((i) => i.added.length > 0 || i.removed.length > 0).length;
   return { changed, unchanged: owners.length - changed, failed: [] };
 }

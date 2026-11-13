@@ -6,7 +6,8 @@ import { PageHeader } from "@/components/page-header";
 import type { SearchParams } from "@/components/resource-table/params";
 import { listPage, pageQuery } from "@/components/resource-table/server";
 import { channelNames, requireStaff, sessionClient } from "@/lib/hypha";
-import { SETTINGS_CRUMB } from "@/lib/navigation";
+import { getT } from "@/lib/i18n";
+import { settingsCrumb } from "@/lib/navigation";
 
 import { ApiKeys } from "./api-keys";
 
@@ -16,12 +17,13 @@ export default async function ApiKeysPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
+  const t = await getT();
   const params = await searchParams;
   return (
     <Section padding={6}>
       <VStack gap={5}>
         <PageHeader
-          back={SETTINGS_CRUMB}
+          back={settingsCrumb(t)}
           title="API keys"
           description="Keys for your own systems (secret) and your storefronts (publishable)."
         />
@@ -42,7 +44,7 @@ async function ApiKeyRows({ params }: { params: SearchParams }) {
   ]);
   return (
     <ApiKeys
-      page={listPage(result, "/settings/api-keys", params)}
+      page={await listPage(result, "/settings/api-keys", params)}
       channels={Object.fromEntries(channelName)}
       scopes={me.scopes}
       canWrite={me.scopes.includes("api_keys:write")}

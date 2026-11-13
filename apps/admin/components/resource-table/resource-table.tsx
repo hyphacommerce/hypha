@@ -35,6 +35,8 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useState, useTransition } from "react";
 
 import { RowsSkeleton } from "@/components/skeletons";
+import { type Format, useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { CURSOR, PREV, encodePrevious, href, previous, withChanges } from "./params";
 
@@ -185,17 +187,9 @@ function TextFilter({
   );
 }
 
-const DAY = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
-
 /** "1 Oct" from `2026-10-01`. */
-function dayLabel(d?: string): string {
-  return d ? DAY.format(new Date(`${d}T00:00:00Z`)) : "";
-}
-
-/** "1 Oct – 17 Oct" from `2026-10-01..2026-10-17`. */
-function rangeLabel(raw: string): string {
-  const [start, end] = raw.split("..");
-  return `${dayLabel(start)} – ${dayLabel(end)}`;
+function dayLabel(format: Format, d?: string): string {
+  return d ? format.date(`${d}T12:00:00Z`, "short") : "";
 }
 
 /** A day as the date inputs take it; the URL may hold anything. */
@@ -264,7 +258,14 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
+  const t = useT();
+  const format = useFormat();
   const [isPending, startTransition] = useTransition();
+  /** "1 Oct – 17 Oct" from `2026-10-01..2026-10-17`. */
+  const rangeLabel = (raw: string) => {
+    const [start, end] = raw.split("..");
+    return t("table.date_range", { start: dayLabel(format, start), end: dayLabel(format, end) });
+  };
 
   const go = (changes: Record<string, string | string[] | undefined>, keepPage = false) => {
     const reset: Record<string, undefined> = keepPage
@@ -397,9 +398,16 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
             formatValue={(items) =>
               items.length === 0
                 ? filter.label
-                : items.length <= 2
-                  ? `${filter.label}: ${items.map((i) => i.label).join(", ")}`
-                  : `${filter.label}: ${items.length}`
+                : t("table.filter_value", {
+                    label: filter.label,
+                    value:
+                      items.length <= 2
+                        ? format.list(
+                            items.map((i) => i.label),
+                            "unit",
+                          )
+                        : format.number(items.length),
+                  })
             }
             options={filter.options}
             value={params.getAll(filter.param)}
@@ -443,7 +451,10 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
       <Token
         key={filter.param}
         size="sm"
-        label={`${filter.label}: ${values.map(label).join(", ")}`}
+        label={t("table.filter_value", {
+          label: filter.label,
+          value: format.list(values.map(label), "unit"),
+        })}
         onRemove={() => go({ [filter.param]: undefined })}
       />,
     ];
@@ -451,15 +462,16 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
 
   const sortMenu = sortOptions && (
     <Selector
-      label="Sort"
+      label={t("common.sort")}
       isLabelHidden
       variant="ghost"
       size="sm"
       options={sortOptions.map((o) => ({
         value: o.value,
-        label: isAllowed(o.value)
-          ? `Sort: ${o.label}`
-          : `Sort: ${o.label}${o.unavailable ? ` (${o.unavailable})` : ""}`,
+        label:
+          isAllowed(o.value) || !o.unavailable
+            ? t("table.sort_by", { label: o.label })
+            : t("table.sort_by_unavailable", { label: o.label, reason: o.unavailable }),
         disabled: !isAllowed(o.value),
       }))}
       value={sort}
@@ -472,17 +484,19 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
       <EmptyState
         title={noResults.title}
         description={noResults.description}
-        actions={noResults.action ?? <Button label="Clear filters" onClick={clearFilters} />}
+        actions={
+          noResults.action ?? <Button label={t("table.clear_filters")} onClick={clearFilters} />
+        }
       />
     ) : isFiltered ? (
       <EmptyState
-        title="Nothing matches these filters"
-        actions={<Button label="Clear filters" onClick={clearFilters} />}
+        title={t("table.no_match_filters")}
+        actions={<Button label={t("table.clear_filters")} onClick={clearFilters} />}
       />
     ) : current ? (
       <EmptyState
-        title="No more here"
-        actions={<Button label="First page" onClick={() => toPage(1)} />}
+        title={t("table.no_more")}
+        actions={<Button label={t("table.first_page")} onClick={() => toPage(1)} />}
       />
     ) : (
       <EmptyState
@@ -503,13 +517,13 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
           {views && (
             <>
               <Selector
-                label="View"
+                label={t("table.view_label")}
                 isLabelHidden
                 variant="ghost"
                 size="sm"
                 options={[
                   ...views.map((v, i) => ({ value: String(i), label: v.label })),
-                  ...(viewIndex < 0 ? [{ value: "custom", label: "Custom" }] : []),
+                  ...(viewIndex < 0 ? [{ value: "custom", label: t("table.view_custom") }] : []),
                 ]}
                 value={viewIndex < 0 ? "custom" : String(viewIndex)}
                 onChange={(value: string) => {
@@ -540,12 +554,14 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
           {sortMenu}
           {others.length > 0 && (
             <Button
-              label={activeCount ? `Filters (${activeCount})` : "Filters"}
+              label={
+                activeCount ? t("table.filters_count", { count: activeCount }) : t("table.filters")
+              }
               variant={isFilterRowOpen || activeCount ? "secondary" : "ghost"}
               size="sm"
               icon={<AdjustmentsHorizontalIcon width={16} aria-hidden />}
               isIconOnly={!activeCount}
-              tooltip="Filters"
+              tooltip={t("table.filters")}
               onClick={() => setFilterRowOpen(!isFilterRowOpen)}
             />
           )}
@@ -557,29 +573,34 @@ export function ResourceTable<T extends Row>(props: Props<T>) {
         <div className="rt-filters">
           {others.map(control)}
           {isFiltered && (
-            <Button label="Clear all" variant="ghost" size="sm" onClick={clearFilters} />
+            <Button label={t("table.clear_all")} variant="ghost" size="sm" onClick={clearFilters} />
           )}
         </div>
       )}
       {!isFilterRowOpen && chips.length > 0 && (
         <div className="rt-chips">
           {chips}
-          <Button label="Clear all" variant="ghost" size="sm" onClick={clearFilters} />
+          <Button label={t("table.clear_all")} variant="ghost" size="sm" onClick={clearFilters} />
         </div>
       )}
 
       {error && (
         <div className="rt-banner">
-          <Banner status="error" title="These filters can't be used" description={error} />
+          <Banner status="error" title={t("table.filters_refused")} description={error} />
         </div>
       )}
 
       {!isLoading && selectionState.hasSelection && (
         <div className="rt-selection">
-          <Text weight="medium">{selected.length} selected</Text>
+          <Text weight="medium">{t("common.selected_count", { count: selected.length })}</Text>
           {renderBulkActions?.(selected, selectionState.clearSelection)}
           <div style={{ flex: 1 }} />
-          <Button label="Clear" variant="ghost" size="sm" onClick={selectionState.clearSelection} />
+          <Button
+            label={t("common.clear")}
+            variant="ghost"
+            size="sm"
+            onClick={selectionState.clearSelection}
+          />
         </div>
       )}
 
@@ -632,22 +653,23 @@ function Pages({
   hasMore: boolean;
   toPage: (p: number) => void;
 }) {
+  const t = useT();
   if (page === 1 && !hasMore) return null;
   return (
     <div className="rt-footer">
       <Text type="supporting" color="secondary">
-        Page {page} · {count} shown
+        {t("table.page_status", { page, count })}
       </Text>
       <HStack gap={2}>
         <Button
-          label="Previous"
+          label={t("common.previous")}
           variant="secondary"
           size="sm"
           isDisabled={page === 1}
           onClick={() => toPage(page - 1)}
         />
         <Button
-          label="Next"
+          label={t("common.next")}
           variant="secondary"
           size="sm"
           isDisabled={!hasMore}
@@ -660,9 +682,21 @@ function Pages({
 
 // ---------- whole lists ----------
 
-/** Compares rows by the text `pick` reads, for `ClientResourceTable`'s `compare`. */
-export function byText<T>(pick: (row: T) => string): (a: T, b: T) => number {
-  return (a, b) => pick(a).localeCompare(pick(b));
+/** Orders two strings; the table passes its language's (`format.compare`). */
+type CompareText = (a: string, b: string) => number;
+
+/** How a sortable column compares two rows; `compareText` is the staff member's language's. */
+type RowCompare<T> = (a: T, b: T, compareText?: CompareText) => number;
+
+/**
+ * Compares rows by the text `pick` reads, for `ClientResourceTable`'s `compare`: in the
+ * staff member's language's order, which the table hands it.
+ */
+export function byText<T>(pick: (row: T) => string): RowCompare<T> {
+  return (a, b, compareText) => {
+    const [x, y] = [pick(a), pick(b)];
+    return compareText ? compareText(x, y) : x.localeCompare(y);
+  };
 }
 
 type ClientProps<T extends Row> = {
@@ -674,7 +708,7 @@ type ClientProps<T extends Row> = {
   searchText?: (row: T) => string;
   searchLabel?: string;
   /** How each sortable column compares. */
-  compare?: Record<string, (a: T, b: T) => number>;
+  compare?: Record<string, RowCompare<T>>;
   empty: EmptyText & { icon?: ReactNode };
   toolbarEnd?: ReactNode;
 };
@@ -696,6 +730,8 @@ export function ClientResourceTable<T extends Row>(props: ClientProps<T>) {
     toolbarEnd,
   } = props;
   const router = useRouter();
+  const t = useT();
+  const format = useFormat();
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<TableSortState>([]);
   const sortPlugin = useTableSortable<T>({
@@ -714,9 +750,10 @@ export function ClientResourceTable<T extends Row>(props: ClientProps<T>) {
     const entry = sort[0];
     const cmp = entry && compare[entry.sortKey];
     if (!cmp) return found;
-    const sorted = found.toSorted(cmp);
+    const compareText: CompareText = (x, y) => format.compare(x, y);
+    const sorted = found.toSorted((a, b) => cmp(a, b, compareText));
     return entry.direction === "descending" ? sorted.toReversed() : sorted;
-  }, [rows, q, sort, searchText, compare]);
+  }, [rows, q, sort, searchText, compare, format]);
 
   return (
     <div className="rt">
@@ -725,9 +762,9 @@ export function ClientResourceTable<T extends Row>(props: ClientProps<T>) {
           <div className="rt-search">
             {searchText && (
               <TextInput
-                label={searchLabel ?? "Search"}
+                label={searchLabel ?? t("common.search")}
                 isLabelHidden
-                placeholder={searchLabel ?? "Search"}
+                placeholder={searchLabel ?? t("common.search")}
                 startIcon={MagnifyingGlassIcon}
                 hasClear
                 size="sm"
@@ -752,8 +789,8 @@ export function ClientResourceTable<T extends Row>(props: ClientProps<T>) {
           emptyState={
             q ? (
               <EmptyState
-                title={`Nothing matches “${q}”`}
-                actions={<Button label="Clear search" onClick={() => setQ("")} />}
+                title={t("table.no_match_search", { query: q })}
+                actions={<Button label={t("table.clear_search")} onClick={() => setQ("")} />}
               />
             ) : (
               <EmptyState

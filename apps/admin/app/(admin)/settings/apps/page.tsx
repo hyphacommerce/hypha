@@ -5,18 +5,20 @@ import { Suspense } from "react";
 import { PageHeader } from "@/components/page-header";
 import { CardSkeleton } from "@/components/skeletons";
 import { loaded, sessionClient } from "@/lib/hypha";
-import { SETTINGS_CRUMB } from "@/lib/navigation";
+import { getT } from "@/lib/i18n";
+import { settingsCrumb } from "@/lib/navigation";
 
 import { AppsCard } from "./apps";
 
 /** Settings → Apps: external apps, their signing secrets, and the events they get as
  * webhooks. The header renders at once; the apps stream in. */
-export default function AppsSettingsPage() {
+export default async function AppsSettingsPage() {
+  const t = await getT();
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={960}>
         <PageHeader
-          back={SETTINGS_CRUMB}
+          back={settingsCrumb(t)}
           title="Webhooks and custom apps"
           description="Services Hypha calls, signed with each app's secret: webhooks for the events they subscribe to, and live shipping rates."
         />

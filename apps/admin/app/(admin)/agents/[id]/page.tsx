@@ -148,5 +148,5 @@ async function Activity({ id, params }: { id: string; params: SearchParams }) {
   const result = await client.GET("/admin/agents/{id}/calls", {
     params: { path: { id }, query: pageQuery(params) },
   });
-  return <ActivityTable page={listPage(result, `/agents/${id}`, params)} />;
+  return <ActivityTable page={await listPage(result, `/agents/${id}`, params)} />;
 }

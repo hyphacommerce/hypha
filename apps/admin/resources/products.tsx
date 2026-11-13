@@ -23,6 +23,7 @@ import {
 import { ProductStatusBadge } from "@/components/status";
 import type { Definition } from "@/lib/custom-fields";
 import { type Currencies, formatMoney } from "@/lib/format";
+import { useT } from "@/lib/use-t";
 
 import { type BulkOutcome, BulkOutcomeBanner, ProductBulkActions } from "./bulk";
 
@@ -123,6 +124,7 @@ export function ProductsTable({
   /** Category paths by ID ("Clothing › Shirts"). */
   categories?: Record<string, string>;
 }) {
+  const t = useT();
   const [outcome, setOutcome] = useState<BulkOutcome>();
   const shortName = Object.fromEntries(
     Object.entries(categories).map(([id, path]) => [id, path.split(" › ").at(-1) ?? path]),
@@ -177,7 +179,7 @@ export function ProductsTable({
       key: "status",
       header: "Status",
       width: pixel(110),
-      renderCell: (product) => <ProductStatusBadge status={product.status} />,
+      renderCell: (product) => <ProductStatusBadge status={product.status} t={t} />,
     },
     {
       key: "channels",

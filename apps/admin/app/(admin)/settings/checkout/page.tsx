@@ -6,7 +6,8 @@ import { Suspense } from "react";
 import { PageHeader } from "@/components/page-header";
 import { CardSkeleton } from "@/components/skeletons";
 import { isMissingScope, loaded, requireStaff, sessionClient } from "@/lib/hypha";
-import { SETTINGS_CRUMB } from "@/lib/navigation";
+import { getT } from "@/lib/i18n";
+import { settingsCrumb } from "@/lib/navigation";
 
 import { AppSettingCard } from "./app-setting-card";
 import { loadAnsweringApps, loadRuleOptions } from "./data";
@@ -17,12 +18,13 @@ import { ValidationAppsCard } from "./validation-apps-card";
  * Settings → Checkout: the rules a cart must meet to be checked out, in the order
  * they're evaluated. The header renders at once; the rules stream in.
  */
-export default function CheckoutSettingsPage() {
+export default async function CheckoutSettingsPage() {
+  const t = await getT();
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={960}>
         <PageHeader
-          back={SETTINGS_CRUMB}
+          back={settingsCrumb(t)}
           title="Checkout"
           description="Address verification and autocomplete, apps that validate carts, and rules on the shipping address and the cart: an error stops checkout with your message under the field, a warning only shows it."
         />

@@ -1,0 +1,8 @@
+{
+  "cancel_reason_customer": "The customer asked",
+  "cancel_reason_inventory": "Out of stock or can't ship",
+  "cancel_reason_declined": "Payment declined",
+  "cancel_reason_fraud": "Fraud",
+  "cancel_reason_staff": "Staff error",
+  "cancel_reason_other": "Other"
+}

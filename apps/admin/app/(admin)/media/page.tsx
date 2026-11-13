@@ -43,5 +43,5 @@ async function MediaRows({ params, view }: { params: SearchParams; view: "grid" 
       },
     },
   });
-  return <MediaLibrary page={listPage(result, "/media", params)} view={view} />;
+  return <MediaLibrary page={await listPage(result, "/media", params)} view={view} />;
 }

@@ -22,6 +22,7 @@ import { useState, useTransition } from "react";
 import { Pager } from "@/components/pager";
 import { ProductPicker } from "@/components/product-picker";
 import { ProductStatusBadge } from "@/components/status";
+import { useT } from "@/lib/use-t";
 
 import { addCatalogProducts, createCatalog, removeCatalogProduct } from "../actions";
 
@@ -41,6 +42,7 @@ export function CatalogCard({
   page?: Page;
   isFirstPage: boolean;
 }) {
+  const t = useT();
   const [error, setError] = useState<string>();
   const [isAdding, setIsAdding] = useState(false);
   // The catalog's products on this page: the picker marks them. (Products on other pages
@@ -109,7 +111,7 @@ export function CatalogCard({
                     )}
                   </TableCell>
                   <TableCell>
-                    {product.status && <ProductStatusBadge status={product.status} />}
+                    {product.status && <ProductStatusBadge status={product.status} t={t} />}
                   </TableCell>
                   <TableCell>
                     <HStack hAlign="end">
@@ -137,6 +139,7 @@ export function CatalogCard({
             param="products"
             isFirstPage={isFirstPage}
             nextCursor={page.next_cursor}
+            t={t}
           />
         )}
       </VStack>

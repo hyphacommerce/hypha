@@ -28,6 +28,7 @@ import {
 import type { Definition } from "@/lib/custom-fields";
 import { type Currencies, formatMoney } from "@/lib/format";
 import { UNPAID } from "@/lib/payments";
+import { useT } from "@/lib/use-t";
 
 import { type BulkOutcome, BulkOutcomeBanner, OrderBulkActions } from "./bulk";
 
@@ -83,6 +84,7 @@ export function OrdersTable({
   /** Filterable custom fields, offered as filters. */
   fieldFilters?: Definition[];
 }) {
+  const t = useT();
   const [outcome, setOutcome] = useState<BulkOutcome>();
   const filters: FilterDef[] = [
     {
@@ -157,9 +159,9 @@ export function OrdersTable({
             #{order.number}
           </Link>
           {order.cancelled_at ? (
-            <CancelledBadge />
+            <CancelledBadge t={t} />
           ) : order.address_review ? (
-            <NeedsReviewBadge />
+            <NeedsReviewBadge t={t} />
           ) : (
             <Text type="supporting" color="secondary">
               {order.item_count} {order.item_count === 1 ? "item" : "items"}
@@ -199,7 +201,7 @@ export function OrdersTable({
         order.cancelled_at ? (
           <Text color="secondary">—</Text>
         ) : (
-          <PaymentBadge status={order.financial_status} />
+          <PaymentBadge status={order.financial_status} t={t} />
         ),
     },
     {
@@ -210,7 +212,7 @@ export function OrdersTable({
         order.cancelled_at ? (
           <Text color="secondary">—</Text>
         ) : (
-          <FulfillmentBadge status={order.fulfillment_status} />
+          <FulfillmentBadge status={order.fulfillment_status} t={t} />
         ),
     },
     {

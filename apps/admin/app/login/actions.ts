@@ -13,6 +13,7 @@ import {
   startSession,
   takeNext,
 } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 
 export type FormState = { error?: string };
 
@@ -23,7 +24,7 @@ export async function login(
 ): Promise<FormState> {
   const client = await publicClient();
   const { data, error } = await client.POST("/admin/auth/login", { body: input });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   if (data.status === "authenticated") {
     await startSession(data.session);
     redirect(await landing(data.session.token, await takeNext()));
@@ -40,7 +41,7 @@ export async function finishLogin(_previous: FormState, code: string): Promise<F
   const { data, error } = await client.POST("/admin/auth/login/mfa", {
     body: { challenge, code },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   if (data.status !== "authenticated") redirect("/login");
   await startSession(data.session);
   redirect(await landing(data.session.token, await takeNext()));
@@ -56,7 +57,7 @@ export async function requestPasswordReset(
 ): Promise<FormState & { sentTo?: string }> {
   const client = await publicClient();
   const { error } = await client.POST("/admin/auth/password-reset", { body: { email } });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   return { sentTo: email };
 }
 
@@ -71,8 +72,8 @@ export async function confirmPasswordReset(
     return {
       error:
         error.code === "invalid_token"
-          ? "This reset link expired or was already used. Ask for a new one."
-          : describe(error),
+          ? (await getT())("auth.reset_link_expired")
+          : await describe(error),
     };
   }
   redirect("/login?reset=done");
@@ -92,8 +93,8 @@ export async function acceptInvite(
     return {
       error:
         error.code === "invalid_token"
-          ? "This invite expired or was already used. Ask the person who invited you for a new one."
-          : describe(error),
+          ? (await getT())("auth.invite_expired")
+          : await describe(error),
     };
   }
   await startSession(data.session);

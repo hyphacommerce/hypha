@@ -65,7 +65,7 @@ async function Rows({ params, canWrite }: { params: SearchParams; canWrite: bool
   ]);
   return (
     <PurchaseOrdersTable
-      page={listPage(result, "/purchase-orders", params)}
+      page={await listPage(result, "/purchase-orders", params)}
       locations={Object.fromEntries(locations)}
       canWrite={canWrite}
     />

@@ -149,7 +149,7 @@ async function Catalogue({ supplier, params }: { supplier: Supplier; params: Sea
     <CatalogueTable
       supplier={supplier.id}
       currency={supplier.currency}
-      page={listPage(result, `/suppliers/${supplier.id}`, params)}
+      page={await listPage(result, `/suppliers/${supplier.id}`, params)}
       canWrite={hasScope(me.scopes, "purchasing:write")}
     />
   );
@@ -166,7 +166,7 @@ async function Orders({ supplier, params }: { supplier: Supplier; params: Search
   ]);
   return (
     <PurchaseOrdersTable
-      page={listPage(result, `/suppliers/${supplier.id}`, params)}
+      page={await listPage(result, `/suppliers/${supplier.id}`, params)}
       locations={Object.fromEntries(locations)}
       canWrite={hasScope(me.scopes, "purchasing:write")}
     />

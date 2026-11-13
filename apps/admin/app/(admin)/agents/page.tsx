@@ -51,7 +51,7 @@ async function AgentRows({ params, canWrite }: { params: SearchParams; canWrite:
   ]);
   return (
     <AgentsTable
-      page={listPage(result, "/agents", params)}
+      page={await listPage(result, "/agents", params)}
       settings={settings ?? undefined}
       people={Object.fromEntries(people)}
       myScopes={me.scopes}

@@ -43,7 +43,7 @@ export async function createPaymentMethod(input: MethodInput): Promise<Result> {
       enabled: input.enabled,
     },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }
@@ -61,7 +61,7 @@ export async function updatePaymentMethod(id: string, input: MethodInput): Promi
       enabled: input.enabled,
     },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }
@@ -72,7 +72,7 @@ export async function setPaymentMethodEnabled(id: string, enabled: boolean): Pro
     params: { path: { id } },
     body: { enabled },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }
@@ -94,7 +94,7 @@ export async function reorderPaymentMethods(
     });
     if (error) {
       refresh();
-      return { error: describe(error) };
+      return { error: await describe(error) };
     }
   }
   refresh();
@@ -106,7 +106,7 @@ export async function deletePaymentMethod(id: string): Promise<Result> {
   const { error } = await client.DELETE("/admin/payment-methods/{id}", {
     params: { path: { id } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }

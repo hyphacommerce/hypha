@@ -71,7 +71,7 @@ async function Editor({
       nextCursor={page.nextCursor}
       isFirstPage={!cursor}
       filters={filters}
-      error={page.failure?.error ? describe(page.failure.error) : undefined}
+      error={page.failure?.error ? await describe(page.failure.error) : undefined}
       categories={flatten(tree).map((row) => ({ value: row.id, label: row.path }))}
       canWrite={hasScope(me.scopes, "pricing:write")}
     />

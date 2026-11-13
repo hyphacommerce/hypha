@@ -16,6 +16,8 @@
     "start": "vite preview",
     "test": "node --test \"lib/**/*.test.ts\"",
     "typecheck": "node scripts/clean-next-types.mjs && tsc --noEmit",
+    "i18n:index": "node scripts/i18n-index.mjs",
+    "i18n:check": "node scripts/i18n-index.mjs --check && node scripts/i18n-check.mjs",
     "theme:build": "astryx theme build theme/hyphaTheme.ts --out theme/hypha.css",
     "theme:check": "astryx theme build theme/hyphaTheme.ts --out theme/hypha.css --check"
   },
@@ -32,6 +34,7 @@
     "@heroicons/react": "2.2.0",
     "@hyphacommerce/app-blocks": "workspace:*",
     "@hyphacommerce/app-bridge-host": "workspace:*",
+    "@hyphacommerce/i18n": "workspace:*",
     "@hyphacommerce/sdk": "workspace:*",
     "@lexical/code": "0.52.0",
     "@lexical/extension": "0.52.0",

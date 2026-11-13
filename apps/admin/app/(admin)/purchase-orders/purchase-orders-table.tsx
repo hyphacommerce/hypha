@@ -19,6 +19,7 @@ import {
 import { PurchaseOrderStatusBadge, ReceiptStatusBadge } from "@/components/status";
 import { formatMoney } from "@/lib/format";
 import { type PurchaseOrderSummary, poNumber } from "@/lib/purchasing";
+import { useT } from "@/lib/use-t";
 
 const FILTERS: FilterDef[] = [
   {
@@ -71,6 +72,7 @@ export function PurchaseOrdersTable({
   canWrite: boolean;
 }) {
   const currencies = useCurrencies();
+  const t = useT();
   const columns: TableColumn<PurchaseOrderSummary>[] = [
     {
       key: "number",
@@ -102,7 +104,7 @@ export function PurchaseOrdersTable({
       key: "status",
       header: "Status",
       width: pixel(120),
-      renderCell: (po) => <PurchaseOrderStatusBadge status={po.status} />,
+      renderCell: (po) => <PurchaseOrderStatusBadge status={po.status} t={t} />,
     },
     {
       key: "receipt",
@@ -112,7 +114,7 @@ export function PurchaseOrdersTable({
         po.status === "draft" || po.status === "cancelled" ? (
           <Text color="secondary">—</Text>
         ) : (
-          <ReceiptStatusBadge status={po.receipt_status} />
+          <ReceiptStatusBadge status={po.receipt_status} t={t} />
         ),
     },
     {

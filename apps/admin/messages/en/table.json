@@ -1,0 +1,20 @@
+{
+  "first_page": "First page",
+  "next_page": "Next page",
+  "date_range": "{start} – {end}",
+  "filter_value": "{label}: {value}",
+  "sort_by": "Sort: {label}",
+  "sort_by_unavailable": "Sort: {label} ({reason})",
+  "clear_filters": "Clear filters",
+  "clear_all": "Clear all",
+  "clear_search": "Clear search",
+  "no_match_filters": "Nothing matches these filters",
+  "no_match_search": "Nothing matches “{query}”",
+  "no_more": "No more here",
+  "view_label": "View",
+  "view_custom": "Custom",
+  "filters": "Filters",
+  "filters_count": "Filters ({count})",
+  "filters_refused": "These filters can't be used",
+  "page_status": "Page {page} · {count} shown"
+}

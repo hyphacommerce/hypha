@@ -14,7 +14,7 @@ export async function createSupplier(
 ): Promise<Result> {
   const client = await sessionClient();
   const { data, error } = await client.POST("/admin/suppliers", { body: input });
-  if (!data) return { error: error ? describe(error) : "Couldn't add the supplier." };
+  if (!data) return { error: error ? await describe(error) : "Couldn't add the supplier." };
   revalidatePath("/suppliers");
   redirect(`/suppliers/${data.id}`);
 }
@@ -28,7 +28,7 @@ export async function updateSupplier(id: string, patch: SupplierPatch): Promise<
     params: { path: { id } },
     body: patch,
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/suppliers/${id}`);
   return {};
 }
@@ -36,7 +36,7 @@ export async function updateSupplier(id: string, patch: SupplierPatch): Promise<
 export async function deleteSupplier(id: string): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.DELETE("/admin/suppliers/{id}", { params: { path: { id } } });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath("/suppliers");
   redirect("/suppliers");
 }
@@ -52,7 +52,7 @@ export async function setCatalogueRow(
     params: { path: { id, variant_id: variant } },
     body: row,
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/suppliers/${id}`);
   return {};
 }
@@ -62,7 +62,7 @@ export async function removeCatalogueRow(id: string, variant: string): Promise<R
   const { error } = await client.DELETE("/admin/suppliers/{id}/variants/{variant_id}", {
     params: { path: { id, variant_id: variant } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/suppliers/${id}`);
   return {};
 }

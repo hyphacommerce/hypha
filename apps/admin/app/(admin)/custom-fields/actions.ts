@@ -19,7 +19,7 @@ function refresh() {
 export async function createDefinition(body: CreateRequest): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.POST("/admin/custom-field-definitions", { body });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }
@@ -31,7 +31,7 @@ export async function updateDefinition(id: string, body: UpdateRequest): Promise
     body,
   });
   if (error) {
-    if (error.code !== "custom_field_values_invalid") return { error: describe(error) };
+    if (error.code !== "custom_field_values_invalid") return { error: await describe(error) };
     // Name the records to fix, not just how many (the first few of the API's list).
     const details: unknown = error.details;
     const owners: unknown =
@@ -39,8 +39,8 @@ export async function updateDefinition(id: string, body: UpdateRequest): Promise
     const names = Array.isArray(owners) ? await ownerNames(client, owners.slice(0, 5)) : [];
     return {
       error: names.length
-        ? `${describe(error)} Starting with: ${names.join(", ")}.`
-        : describe(error),
+        ? `${await describe(error)} Starting with: ${names.join(", ")}.`
+        : await describe(error),
     };
   }
   refresh();
@@ -84,7 +84,7 @@ export async function moveDefinition(id: string, position: number): Promise<Resu
     params: { path: { id } },
     body: { position },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }
@@ -95,7 +95,7 @@ export async function deleteDefinition(id: string): Promise<Result> {
   const { error } = await client.DELETE("/admin/custom-field-definitions/{id}", {
     params: { path: { id } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }

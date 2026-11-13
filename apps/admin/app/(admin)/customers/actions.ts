@@ -28,7 +28,7 @@ function refresh(customer: string) {
 export async function updateCustomer(id: string, body: UpdateCustomerRequest): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.PATCH("/admin/customers/{id}", { params: { path: { id } }, body });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(id);
   return {};
 }
@@ -54,7 +54,7 @@ export async function saveAddress(
     if (problems && Object.keys(problems).length > 0) {
       return { error: "Check the highlighted fields.", problems };
     }
-    return { error: describe(error) };
+    return { error: await describe(error) };
   }
   refresh(customer);
   return {};
@@ -74,7 +74,7 @@ export async function setConsent(
     params: { path: { id, channel } },
     body,
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(id);
   return { applied: data.applied };
 }
@@ -85,7 +85,7 @@ export async function revokeSessions(id: string): Promise<Result> {
   const { error } = await client.POST("/admin/customers/{id}/sessions/revoke", {
     params: { path: { id } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(id);
   return {};
 }
@@ -96,7 +96,7 @@ export async function requestErasure(id: string): Promise<Result> {
   const { error } = await client.POST("/admin/customers/{id}/erasure", {
     params: { path: { id } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(id);
   return {};
 }
@@ -107,7 +107,7 @@ export async function cancelErasure(id: string): Promise<Result> {
   const { error } = await client.DELETE("/admin/customers/{id}/erasure", {
     params: { path: { id } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(id);
   return {};
 }
@@ -116,7 +116,7 @@ export async function cancelErasure(id: string): Promise<Result> {
 export async function deleteCustomer(id: string): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.DELETE("/admin/customers/{id}", { params: { path: { id } } });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath("/customers");
   return {};
 }
@@ -126,7 +126,7 @@ export async function removeAddress(customer: string, address: string): Promise<
   const { error } = await client.DELETE("/admin/customers/{id}/addresses/{address_id}", {
     params: { path: { id: customer, address_id: address } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(customer);
   return {};
 }
@@ -154,7 +154,7 @@ export async function addWellKnownField(which: WellKnown): Promise<Result> {
   const suggestions = await client.GET("/admin/custom-field-definitions/suggestions", {
     params: { query: { owner_type: "customer" } },
   });
-  if (suggestions.error) return { error: describe(suggestions.error) };
+  if (suggestions.error) return { error: await describe(suggestions.error) };
   const suggestion = suggestions.data.items.find((s) => s.key === WELL_KNOWN[which].key);
   if (!suggestion) return { error: "The API doesn't offer this field." };
   if (suggestion.existing) {
@@ -165,7 +165,7 @@ export async function addWellKnownField(which: WellKnown): Promise<Result> {
   const { error } = await client.POST("/admin/custom-field-definitions", {
     body: suggestionBody(suggestion),
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   // Definitions shape every customer page and the list's filters.
   revalidatePath("/", "layout");
   return {};

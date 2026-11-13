@@ -20,7 +20,7 @@ export async function markOrderPaid(id: string, reference: string): Promise<Acti
     params: { path: { id } },
     body: { reference: reference.trim() === "" ? null : reference.trim() },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/orders/${id}`);
   revalidatePath("/orders");
   return {};
@@ -57,7 +57,7 @@ export async function fulfilOrder(
       notify: input.notify,
     },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(orderId);
   return {};
 }
@@ -75,7 +75,7 @@ export async function updateTracking(
     params: { path: { id: fulfillmentId } },
     body: { tracking: trackingBody(input), notify },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(orderId);
   return {};
 }
@@ -86,7 +86,7 @@ export async function takeBack(orderId: string, fulfillmentId: string): Promise<
   const { error } = await client.POST("/admin/fulfillments/{id}/cancel", {
     params: { path: { id: fulfillmentId } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(orderId);
   return {};
 }
@@ -101,7 +101,7 @@ export async function cancelOrder(
     params: { path: { id: orderId } },
     body: { reason, notify },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(orderId);
   return {};
 }
@@ -115,7 +115,7 @@ export async function resendNotification(orderId: string, id: string): Promise<A
   const { error } = await client.POST("/admin/notifications/{id}/resend", {
     params: { path: { id } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/orders/${orderId}`);
   return {};
 }
@@ -126,7 +126,7 @@ export async function markAddressValid(id: string): Promise<ActionResult> {
   const { error } = await client.POST("/admin/orders/{id}/address-check/mark-valid", {
     params: { path: { id } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(id);
   return {};
 }
@@ -149,7 +149,7 @@ export async function changeOrderAddress(
     if (problems && Object.keys(problems).length > 0) {
       return { error: "Check the highlighted fields.", problems };
     }
-    return { error: describe(error) };
+    return { error: await describe(error) };
   }
   refresh(id);
   return {};

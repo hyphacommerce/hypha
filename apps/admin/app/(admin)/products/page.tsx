@@ -78,7 +78,7 @@ async function ProductRows({ params }: { params: SearchParams }) {
   ]);
   return (
     <ProductsTable
-      page={listPage(result, "/products", params)}
+      page={await listPage(result, "/products", params)}
       currencies={currencies}
       channels={Object.fromEntries(channelName)}
       categories={Object.fromEntries(pathsById(categories.data?.items ?? []))}

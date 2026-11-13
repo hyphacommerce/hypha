@@ -16,6 +16,7 @@ import {
 } from "@/components/resource-table/resource-table";
 import { TransferStatusBadge } from "@/components/status";
 import { type TransferSummary, trNumber } from "@/lib/transfers";
+import { useT } from "@/lib/use-t";
 
 const FILTERS: FilterDef[] = [
   {
@@ -51,15 +52,16 @@ export function TransfersTable({
   locations?: Record<string, string>;
   canWrite: boolean;
 }) {
+  const t = useT();
   const place = (id: string) => locations[id] ?? "A location";
   const columns: TableColumn<TransferSummary>[] = [
     {
       key: "number",
       header: "Transfer",
       width: pixel(120),
-      renderCell: (t) => (
-        <Link href={`/transfers/${t.id}`} weight="semibold" color="primary">
-          {trNumber(t.number)}
+      renderCell: (transfer) => (
+        <Link href={`/transfers/${transfer.id}`} weight="semibold" color="primary">
+          {trNumber(transfer.number)}
         </Link>
       ),
     },
@@ -67,9 +69,9 @@ export function TransfersTable({
       key: "route",
       header: "From → to",
       width: proportional(2, { minWidth: 220 }),
-      renderCell: (t) => (
+      renderCell: (transfer) => (
         <Text>
-          {place(t.origin)} → {place(t.destination)}
+          {place(transfer.origin)} → {place(transfer.destination)}
         </Text>
       ),
     },
@@ -77,15 +79,15 @@ export function TransfersTable({
       key: "status",
       header: "Status",
       width: pixel(130),
-      renderCell: (t) => <TransferStatusBadge status={t.status} />,
+      renderCell: (transfer) => <TransferStatusBadge status={transfer.status} t={t} />,
     },
     {
       key: "expected",
       header: "Expected",
       width: pixel(140),
-      renderCell: (t) =>
-        t.expected_at ? (
-          <CalendarDate value={t.expected_at} short />
+      renderCell: (transfer) =>
+        transfer.expected_at ? (
+          <CalendarDate value={transfer.expected_at} short />
         ) : (
           <Text color="secondary">—</Text>
         ),
@@ -95,7 +97,7 @@ export function TransfersTable({
       header: "Units",
       width: pixel(100),
       align: "end",
-      renderCell: (t) => <Text>{t.units}</Text>,
+      renderCell: (transfer) => <Text>{transfer.units}</Text>,
     },
   ];
   return (
@@ -105,7 +107,7 @@ export function TransfersTable({
       isLoading={!page}
       columns={columns}
       idKey="id"
-      rowHref={(t) => `/transfers/${t.id}`}
+      rowHref={(transfer) => `/transfers/${transfer.id}`}
       isSelectable={false}
       filters={FILTERS}
       views={VIEWS}

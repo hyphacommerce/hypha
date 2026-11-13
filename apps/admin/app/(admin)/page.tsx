@@ -27,6 +27,7 @@ import {
   requireStaff,
   sessionClient,
 } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import { LOW_STOCK } from "@/lib/inventory";
 import { hasScope } from "@/lib/navigation";
 
@@ -404,7 +405,7 @@ function TilesSkeleton() {
 
 /** The latest orders, newest first, as on a customer's page. */
 async function RecentOrders() {
-  const [client, currencies] = await Promise.all([sessionClient(), loadCurrencies()]);
+  const [client, currencies, t] = await Promise.all([sessionClient(), loadCurrencies(), getT()]);
   const { data } = await client.GET("/admin/orders", { params: { query: { limit: RECENT } } });
   const orders = data?.items ?? [];
   return (
@@ -430,11 +431,11 @@ async function RecentOrders() {
                 </Text>
                 <HStack gap={1} wrap="wrap">
                   {o.cancelled_at ? (
-                    <CancelledBadge />
+                    <CancelledBadge t={t} />
                   ) : (
                     <>
-                      <PaymentBadge status={o.financial_status} />
-                      <FulfillmentBadge status={o.fulfillment_status} />
+                      <PaymentBadge status={o.financial_status} t={t} />
+                      <FulfillmentBadge status={o.fulfillment_status} t={t} />
                     </>
                   )}
                 </HStack>

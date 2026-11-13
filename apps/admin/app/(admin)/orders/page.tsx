@@ -105,7 +105,7 @@ async function OrderRows({ params }: { params: SearchParams }) {
 
   return (
     <OrdersTable
-      page={listPage(result, "/orders", params)}
+      page={await listPage(result, "/orders", params)}
       currencies={currencies}
       channels={Object.fromEntries(channelName)}
       countries={soldTo}

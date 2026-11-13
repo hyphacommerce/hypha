@@ -23,6 +23,32 @@ const generated = [
   "spores/*/element/*.js",
   // Astro's generated content types (apps/site).
   "**/.astro/**",
+  // The catalogs' index (`apps/admin/scripts/i18n-index.mjs`).
+  "apps/*/messages/*.generated.ts",
+];
+
+/**
+ * The admin's files whose words all come from its catalogs (`apps/admin/messages/`): in
+ * these, literal text in JSX is an error (`i18n/no-literal-text`). An area whose strings
+ * are extracted adds its folders here, one per line, sorted, so two areas finishing at
+ * once don't collide. Once every area is in, this is `apps/admin/app/**` and
+ * `apps/admin/components/**`.
+ */
+const adminTranslated = [
+  "apps/admin/app/(admin)/account/**",
+  "apps/admin/app/(admin)/admin-shell.tsx",
+  "apps/admin/app/(admin)/forbidden.tsx",
+  "apps/admin/app/(admin)/layout.tsx",
+  "apps/admin/app/(editor)/forbidden.tsx",
+  "apps/admin/app/(editor)/layout.tsx",
+  "apps/admin/app/*.tsx",
+  "apps/admin/app/forgot-password/**",
+  "apps/admin/app/invite/**",
+  "apps/admin/app/login/**",
+  "apps/admin/app/reset-password/**",
+  "apps/admin/components/*.tsx",
+  "apps/admin/components/app-extensions/**",
+  "apps/admin/components/resource-table/**",
 ];
 
 export default defineConfig({
@@ -68,6 +94,23 @@ export default defineConfig({
           "react/capitalized-calls": "off",
           // Images are the store's media (S3/R2, sized by the API), not `next/image`'s.
           "nextjs/no-img-element": "off",
+        },
+      },
+      {
+        // The admin's words come from its catalogs (`apps/admin/messages/`, through `t`):
+        // literal text in JSX would be English in every language. The rule is ours
+        // (`scripts/oxlint-i18n.mjs`: text between tags and in the props people read;
+        // punctuation and symbols pass), shared with the storefront. It sees JSX only: a
+        // sentence built in an object or an action isn't caught; the pseudo-language
+        // shows those.
+        files: adminTranslated,
+        plugins: ["react", "jsx-a11y", "nextjs"],
+        jsPlugins: ["./scripts/oxlint-i18n.mjs"],
+        rules: {
+          "i18n/no-literal-text": "error",
+          // A message's tags are given as functions (`t.rich(key, { link: (chunks, key) =>
+          // <a key={key}>…</a> })`): called while rendering, never mounted as components.
+          "react/no-unstable-nested-components": ["warn", { allowAsProps: true }],
         },
       },
       {

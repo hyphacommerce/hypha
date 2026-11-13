@@ -6,19 +6,21 @@ import { Suspense } from "react";
 import { PageHeader } from "@/components/page-header";
 import { CardSkeleton } from "@/components/skeletons";
 import { channelNames, loadPaymentMethods, requireStaff, sessionClient } from "@/lib/hypha";
-import { SETTINGS_CRUMB } from "@/lib/navigation";
+import { getT } from "@/lib/i18n";
+import { settingsCrumb } from "@/lib/navigation";
 import type { PaymentApp } from "@/lib/payments";
 
 import { PaymentMethodsCard } from "./methods";
 
 /** Settings → Payments: how shoppers can pay, in the order they see the methods at
  * checkout. The header renders at once; the methods stream in. */
-export default function PaymentsSettingsPage() {
+export default async function PaymentsSettingsPage() {
+  const t = await getT();
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={960}>
         <PageHeader
-          back={SETTINGS_CRUMB}
+          back={settingsCrumb(t)}
           title="Payments"
           description="How shoppers pay at checkout. With manual methods, like cash on delivery or a bank transfer, you collect the money yourself and mark the order paid."
         />

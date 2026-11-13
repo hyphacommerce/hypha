@@ -69,7 +69,7 @@ async function PriceListRows({ params }: { params: SearchParams }) {
   ]);
   return (
     <PriceListsTable
-      page={listPage(result, "/markets/price-lists", params)}
+      page={await listPage(result, "/markets/price-lists", params)}
       markets={Object.fromEntries((markets.data?.items ?? []).map((m) => [m.id, m.name]))}
       groups={Object.fromEntries((groups.data?.items ?? []).map((g) => [g.id, g.name]))}
     />

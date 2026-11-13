@@ -8,18 +8,20 @@ import { Suspense } from "react";
 import { PageHeader } from "@/components/page-header";
 import { FormSkeleton } from "@/components/skeletons";
 import { loadCountries, requireStore } from "@/lib/hypha";
-import { SETTINGS_CRUMB } from "@/lib/navigation";
+import { getT } from "@/lib/i18n";
+import { settingsCrumb } from "@/lib/navigation";
 
 import { SetupGuideCard } from "./setup-guide-card";
 import { StoreForm } from "./store-form";
 
 /** Settings → Store: the store's name and details. */
-export default function StoreSettingsPage() {
+export default async function StoreSettingsPage() {
+  const t = await getT();
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={640}>
         <PageHeader
-          back={SETTINGS_CRUMB}
+          back={settingsCrumb(t)}
           title="Store details"
           description="The store this deployment serves."
         />

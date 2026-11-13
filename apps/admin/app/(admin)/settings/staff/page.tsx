@@ -7,17 +7,19 @@ import { Suspense } from "react";
 import { PageHeader } from "@/components/page-header";
 import { TableSkeleton } from "@/components/skeletons";
 import { loaded, requireStaff, sessionClient } from "@/lib/hypha";
-import { SETTINGS_CRUMB } from "@/lib/navigation";
+import { getT } from "@/lib/i18n";
+import { settingsCrumb } from "@/lib/navigation";
 
 import { Staff } from "./staff";
 
 /** Settings → Staff: the header renders at once; the team, invites and roles stream in. */
-export default function StaffPage() {
+export default async function StaffPage() {
+  const t = await getT();
   return (
     <Section padding={6}>
       <VStack gap={5}>
         <PageHeader
-          back={SETTINGS_CRUMB}
+          back={settingsCrumb(t)}
           title="Staff and roles"
           description="Who can sign in, and what their roles allow."
         />

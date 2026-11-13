@@ -59,7 +59,7 @@ async function CustomerRows({ params, canLabel }: { params: SearchParams; canLab
   });
   return (
     <CustomersTable
-      page={listPage(result, "/customers", params)}
+      page={await listPage(result, "/customers", params)}
       fieldFilters={fieldFilters}
       labels={labels}
       groups={groups}

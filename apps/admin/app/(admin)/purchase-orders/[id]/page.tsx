@@ -7,6 +7,7 @@ import { type Crumb, PageHeader } from "@/components/page-header";
 import { DetailSkeleton } from "@/components/skeletons";
 import { PurchaseOrderStatusBadge, ReceiptStatusBadge } from "@/components/status";
 import { loaded, requireStaff, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import { hasScope } from "@/lib/navigation";
 import { poNumber } from "@/lib/purchasing";
 
@@ -38,11 +39,12 @@ export default async function PurchaseOrderPage({ params }: { params: Promise<{ 
 
 async function PurchaseOrderView({ id }: { id: string }) {
   const client = await sessionClient();
-  const [po, me, locations, receipts] = await Promise.all([
+  const [po, me, locations, receipts, t] = await Promise.all([
     client.GET("/admin/purchase-orders/{id}", { params: { path: { id } } }).then(loaded),
     requireStaff(),
     client.GET("/admin/locations"),
     client.GET("/admin/purchase-orders/{id}/receipts", { params: { path: { id } } }),
+    getT(),
   ]);
   const canWrite = hasScope(me.scopes, "purchasing:write");
   const canSend = canWrite && hasScope(me.scopes, "purchasing:send");
@@ -60,9 +62,9 @@ async function PurchaseOrderView({ id }: { id: string }) {
         back={BACK}
         badges={
           <HStack gap={2}>
-            <PurchaseOrderStatusBadge status={po.status} />
+            <PurchaseOrderStatusBadge status={po.status} t={t} />
             {po.status !== "draft" && po.status !== "cancelled" && (
-              <ReceiptStatusBadge status={po.receipt_status} />
+              <ReceiptStatusBadge status={po.receipt_status} t={t} />
             )}
           </HStack>
         }

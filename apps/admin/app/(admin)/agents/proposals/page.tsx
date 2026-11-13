@@ -59,7 +59,7 @@ async function ProposalRows({ params }: { params: SearchParams }) {
   ]);
   return (
     <ProposalsTable
-      page={listPage(result, "/agents/proposals", params)}
+      page={await listPage(result, "/agents/proposals", params)}
       agents={Object.fromEntries((agents.data?.items ?? []).map((a) => [a.id, a.name]))}
     />
   );

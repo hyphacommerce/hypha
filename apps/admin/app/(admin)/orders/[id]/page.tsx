@@ -31,7 +31,7 @@ import {
   PaymentStatusBadge,
 } from "@/components/status";
 import {
-  CANCEL_REASONS,
+  cancelReasonLabel,
   type Currencies,
   formatMoney,
   formatUnitCost,
@@ -46,6 +46,7 @@ import {
   sessionClient,
   staffNames,
 } from "@/lib/hypha";
+import { type T, getT } from "@/lib/i18n";
 import { type Extensions, loadExtensions } from "@/lib/app-extensions";
 import { definitionsOf } from "@/lib/custom-fields-server";
 import { canMarkPaid, providerLabel } from "@/lib/payments";
@@ -278,7 +279,7 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
 }
 
 async function Order({ id }: { id: string }) {
-  const client = await sessionClient();
+  const [client, t] = await Promise.all([sessionClient(), getT()]);
   // All at once; a missing order still goes to the 404 page (`loaded`). Shipments and
   // locations need their own scopes; without them the page shows the order alone. The
   // emails need `notifications:read` and `orders:read` (they name the buyer); without
@@ -352,10 +353,10 @@ async function Order({ id }: { id: string }) {
         back={BACK}
         badges={
           <HStack gap={1}>
-            {cancelled && <CancelledBadge />}
-            {order.address_review && <NeedsReviewBadge />}
-            <PaymentBadge status={order.financial_status} />
-            <FulfillmentBadge status={order.fulfillment_status} />
+            {cancelled && <CancelledBadge t={t} />}
+            {order.address_review && <NeedsReviewBadge t={t} />}
+            <PaymentBadge status={order.financial_status} t={t} />
+            <FulfillmentBadge status={order.fulfillment_status} t={t} />
           </HStack>
         }
         actions={
@@ -377,7 +378,7 @@ async function Order({ id }: { id: string }) {
         <Banner
           status="warning"
           title="Cancelled"
-          description={`${CANCEL_REASONS[order.cancel_reason ?? ""] ?? order.cancel_reason ?? "No reason given"}. Its stock was released.`}
+          description={`${order.cancel_reason ? cancelReasonLabel(t, order.cancel_reason) : "No reason given"}. Its stock was released.`}
         />
       )}
 
@@ -497,7 +498,7 @@ async function Order({ id }: { id: string }) {
             </VStack>
           </Card>
 
-          <PaymentCard order={order} currencies={currencies} extensions={extensions} />
+          <PaymentCard order={order} currencies={currencies} extensions={extensions} t={t} />
 
           {fulfillments.length > 0 && (
             <ShipmentsCard order={order} fulfillments={fulfillments} places={places} />
@@ -558,10 +559,10 @@ async function Order({ id }: { id: string }) {
                 <Text weight="bold">{formatMoney(order.total, currencies)}</Text>
               </MetadataListItem>
               <MetadataListItem label="Payment">
-                <PaymentBadge status={order.financial_status} />
+                <PaymentBadge status={order.financial_status} t={t} />
               </MetadataListItem>
               <MetadataListItem label="Fulfilment">
-                <FulfillmentBadge status={order.fulfillment_status} />
+                <FulfillmentBadge status={order.fulfillment_status} t={t} />
               </MetadataListItem>
               <MetadataListItem label="Items">
                 {order.lines.reduce((n, l) => n + l.quantity, 0)}
@@ -647,10 +648,12 @@ function PaymentCard({
   order,
   currencies,
   extensions,
+  t,
 }: {
   order: Order;
   currencies: Currencies;
   extensions: Extensions;
+  t: T;
 }) {
   return (
     <Card>
@@ -660,7 +663,7 @@ function PaymentCard({
             <Text type="display-3" as="h2">
               Payment
             </Text>
-            <PaymentBadge status={order.financial_status} />
+            <PaymentBadge status={order.financial_status} t={t} />
           </HStack>
         </HStack>
         {order.payments.length === 0 ? (
@@ -675,7 +678,7 @@ function PaymentCard({
                 <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
                   <HStack gap={2} vAlign="center">
                     <Text weight="medium">{payment.method_name ?? "Recorded by staff"}</Text>
-                    <PaymentStatusBadge status={payment.status} />
+                    <PaymentStatusBadge status={payment.status} t={t} />
                   </HStack>
                   <Text weight="medium">{formatMoney(payment.amount, currencies)}</Text>
                 </HStack>

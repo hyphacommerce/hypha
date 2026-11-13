@@ -50,5 +50,5 @@ async function SupplierRows({ params, canWrite }: { params: SearchParams; canWri
       },
     },
   });
-  return <SuppliersTable page={listPage(result, "/suppliers", params)} canWrite={canWrite} />;
+  return <SuppliersTable page={await listPage(result, "/suppliers", params)} canWrite={canWrite} />;
 }

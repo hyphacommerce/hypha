@@ -115,6 +115,9 @@ jobs:
       - run: pnpm --filter @hyphacommerce/storefront-elements test
       # The apps' translations: the translator, language matching, the catalog check.
       - run: pnpm --filter @hyphacommerce/i18n test
+      # The admin's catalogs: valid ICU, no key English lacks, every other language
+      # complete, and the generated index in step with the folders.
+      - run: pnpm --filter admin i18n:check
       # The published packages: built with tsdown, packed, installed into a temporary
       # project and imported (scripts/check-packages.mjs).
       - run: pnpm packages:check

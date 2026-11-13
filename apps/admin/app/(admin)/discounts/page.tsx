@@ -57,5 +57,5 @@ async function DiscountRows({ params, canWrite }: { params: SearchParams; canWri
       },
     },
   });
-  return <DiscountsTable page={listPage(result, "/discounts", params)} canWrite={canWrite} />;
+  return <DiscountsTable page={await listPage(result, "/discounts", params)} canWrite={canWrite} />;
 }

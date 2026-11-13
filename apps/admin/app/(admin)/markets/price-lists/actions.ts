@@ -7,7 +7,8 @@ import type { ApiError } from "@hyphacommerce/sdk/admin";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-import { describe, loadCurrencies, loadTimeZone, sessionClient } from "@/lib/hypha";
+import { describe, describeWith, loadCurrencies, loadTimeZone, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import {
   type ImportPreview,
   type ImportRow,
@@ -51,20 +52,22 @@ function refresh() {
 }
 
 /** A refused create or edit: on the field it's about, when it's about one. */
-function refusedSettings(error: { code: string; error: string }): Result & {
-  fieldErrors?: FormErrors;
-} {
+async function refusedSettings(error: { code: string; error: string }): Promise<
+  Result & {
+    fieldErrors?: FormErrors;
+  }
+> {
   switch (error.code) {
     case "price_list_name_taken":
-      return { fieldErrors: { name: describe(error) } };
+      return { fieldErrors: { name: await describe(error) } };
     case "ends_not_after_start":
-      return { fieldErrors: { endsAt: describe(error) } };
+      return { fieldErrors: { endsAt: await describe(error) } };
     case "customer_group_not_found":
     case "too_many_audience_groups":
     case "duplicate_audience_group":
-      return { fieldErrors: { groups: describe(error) } };
+      return { fieldErrors: { groups: await describe(error) } };
     default:
-      return { error: describe(error) };
+      return { error: await describe(error) };
   }
 }
 
@@ -108,7 +111,7 @@ export async function updatePriceList(
   const { data: list, error: readError } = await client.GET("/admin/price-lists/{id}", {
     params: { path: { id } },
   });
-  if (!list) return { error: readError ? describe(readError) : "The list couldn't be read." };
+  if (!list) return { error: readError ? await describe(readError) : "The list couldn't be read." };
   const request = updateRequest(form, list, await loadTimeZone());
   if ("errors" in request) return { fieldErrors: request.errors };
   if (Object.keys(request.body).length === 0) return {};
@@ -131,13 +134,13 @@ export async function deletePriceList(id: string): Promise<Result & { markets?: 
   const client = await sessionClient();
   const { error } = await client.DELETE("/admin/price-lists/{id}", { params: { path: { id } } });
   if (error) {
-    if (error.code !== "price_list_in_use") return { error: describe(error) };
+    if (error.code !== "price_list_in_use") return { error: await describe(error) };
     const catalogs = catalogsInUse(error.details);
     const markets = await client.GET("/admin/markets");
     const names = catalogs.map(
       (catalog) => markets.data?.items.find((m) => m.catalog === catalog)?.name ?? catalog,
     );
-    return { error: describe(error), markets: names };
+    return { error: await describe(error), markets: names };
   }
   refresh();
   redirect("/markets/price-lists");
@@ -150,7 +153,7 @@ export async function addToCatalog(list: string, catalog: string): Promise<Resul
     params: { path: { id: catalog } },
     body: { price_list: list },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }
@@ -161,7 +164,7 @@ export async function removeFromCatalog(list: string, catalog: string): Promise<
   const { error } = await client.DELETE("/admin/catalogs/{id}/price-lists/{price_list}", {
     params: { path: { id: catalog, price_list: list } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }
@@ -171,7 +174,7 @@ export async function removeFromCatalog(list: string, catalog: string): Promise<
  * an import (at most 1,000 to set and 1,000 to remove, so its dialog shows progress).
  */
 export async function saveFixedPrices(list: string, diff: PriceGridDiff): Promise<SaveResult> {
-  const client = await sessionClient();
+  const [client, t] = await Promise.all([sessionClient(), getT()]);
   const params = { path: { id: list } };
   const result = await writeDiff(diff, {
     put: (entries) =>
@@ -188,7 +191,7 @@ export async function saveFixedPrices(list: string, diff: PriceGridDiff): Promis
       }),
     remove: (variants) =>
       client.DELETE("/admin/price-lists/{id}/fixed-prices", { params, body: { variants } }),
-    describe,
+    describe: (error) => describeWith(t, error),
   });
   refresh();
   return result;
@@ -205,7 +208,7 @@ const STEP_BY_CATALOG = 5 * MAX_PRICES_PER_REQUEST;
 const TOO_LARGE = `That file is over ${MAX_IMPORT_BYTES / 1024 / 1024} MB. Split it into smaller files.`;
 
 /** An upload's refusals, said for an import. */
-function uploadMessage(error: ApiError): string {
+async function uploadMessage(error: ApiError): Promise<string> {
   switch (error.code) {
     case "media_not_configured":
       return "Imports go through media storage, and this store has none set up. Configure media storage, then import again.";
@@ -216,7 +219,7 @@ function uploadMessage(error: ApiError): string {
     case "upload_not_found":
       return "The uploaded file has expired. Import it again.";
     default:
-      return describe(error);
+      return await describe(error);
   }
 }
 
@@ -233,7 +236,7 @@ export async function startPriceImport(file: {
   const { data, error } = await client.POST("/admin/uploads", {
     body: { purpose: "price_import", filename: file.filename, byte_size: file.byte_size },
   });
-  if (error) return { error: uploadMessage(error) };
+  if (error) return { error: await uploadMessage(error) };
   return { id: data.id, upload: data.upload };
 }
 
@@ -258,9 +261,9 @@ async function readImport(
     }),
   ]);
   if (!read.data)
-    return { error: read.error ? describe(read.error) : "The list couldn't be read." };
+    return { error: read.error ? await describe(read.error) : "The list couldn't be read." };
   if (file.data === undefined) {
-    return { error: file.error ? uploadMessage(file.error) : "The file couldn't be read." };
+    return { error: file.error ? await uploadMessage(file.error) : "The file couldn't be read." };
   }
   return { list: read.data, text: file.data };
 }

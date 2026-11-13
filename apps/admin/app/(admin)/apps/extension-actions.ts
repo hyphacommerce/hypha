@@ -43,7 +43,7 @@ export async function approveConsent(id: string): Promise<ConsentResult> {
   const { data, error } = await client.POST("/admin/oauth/requests/{id}/approve", {
     params: { path: { id } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath("/apps");
   if (data.credentials) return { credentials: data.credentials };
   if (data.redirect_to) return { redirectTo: data.redirect_to };
@@ -56,7 +56,7 @@ export async function denyConsent(id: string): Promise<ConsentResult> {
   const { data, error } = await client.POST("/admin/oauth/requests/{id}/deny", {
     params: { path: { id } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath("/apps");
   return data.redirect_to ? { redirectTo: data.redirect_to } : { done: true };
 }
@@ -81,7 +81,7 @@ export async function createPrivateApp(manifestText: string): Promise<PrivateApp
   const { data, error } = await client.POST("/admin/apps/private", {
     body: { manifest },
   });
-  if (error) return { error: describe(error), problems: problemsOf(error.details) };
+  if (error) return { error: await describe(error), problems: problemsOf(error.details) };
   return { request: data.request.id };
 }
 
@@ -91,7 +91,7 @@ export async function appSessionToken(app: string): Promise<{ token?: string; er
   const { data, error } = await client.POST("/admin/app-extensions/{app}/session", {
     params: { path: { app } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   return { token: data.token };
 }
 
@@ -121,7 +121,7 @@ export async function runAppAction(
     params: { path: { app, id } },
     body: { context, ...(input ? { input } : {}) },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   let navigate: string | undefined;
   if (data.navigate) {
     navigate = appPagePath(await loadExtensions(), app, data.navigate) ?? undefined;
@@ -158,7 +158,7 @@ export async function runPaymentAction(
     default:
       return { error: `This admin can't run ${point}.` };
   }
-  if (result.error) return { error: describe(result.error) };
+  if (result.error) return { error: await describe(result.error) };
   revalidatePath(`/orders/${orderId}`);
   // A provider built into the API may answer that it's done already (Stripe's capture
   // `succeeded`): the payment has moved, so say so.

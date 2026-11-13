@@ -16,6 +16,7 @@ import { customerName, formatMoney } from "@/lib/format";
 import { loadExtensions } from "@/lib/app-extensions";
 import { definitionsOf } from "@/lib/custom-fields-server";
 import { loadCountries, loadCurrencies, loaded, requireStaff, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import { hasScope } from "@/lib/navigation";
 import type { AddressFormat } from "@/lib/address";
 import { wellKnownField, withoutWellKnown } from "@/lib/well-known-fields";
@@ -68,7 +69,7 @@ async function addressFormatsOf(countries: string[]): Promise<Record<string, Add
 
 async function Customer({ id }: { id: string }) {
   const client = await sessionClient();
-  const [customer, countries, currencies, extensions, definitions, fields, me, groups] =
+  const [customer, countries, currencies, extensions, definitions, fields, me, groups, t] =
     await Promise.all([
       client.GET("/admin/customers/{id}", { params: { path: { id } } }).then(loaded),
       loadCountries(),
@@ -80,6 +81,7 @@ async function Customer({ id }: { id: string }) {
       requireStaff(),
       // The store's groups, for the groups card.
       client.GET("/admin/customer-groups").then((r) => r.data?.items ?? []),
+      getT(),
     ]);
   // Their latest orders. Needs `orders:read`; without it the card says so.
   const recent = await client.GET("/admin/orders", {
@@ -169,11 +171,11 @@ async function Customer({ id }: { id: string }) {
                       </Text>
                       <HStack gap={1} wrap="wrap">
                         {o.cancelled_at ? (
-                          <CancelledBadge />
+                          <CancelledBadge t={t} />
                         ) : (
                           <>
-                            <PaymentBadge status={o.financial_status} />
-                            <FulfillmentBadge status={o.fulfillment_status} />
+                            <PaymentBadge status={o.financial_status} t={t} />
+                            <FulfillmentBadge status={o.fulfillment_status} t={t} />
                           </>
                         )}
                       </HStack>

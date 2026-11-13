@@ -167,7 +167,7 @@ async function Codes({ id, params }: { id: string; params: SearchParams }) {
   return (
     <CodesTable
       id={id}
-      page={listPage(result, `/discounts/${id}`, params)}
+      page={await listPage(result, `/discounts/${id}`, params)}
       canWrite={hasScope(me.scopes, "discounts:write")}
       batch={one(params, "batch")?.trim() || null}
     />
@@ -189,7 +189,7 @@ async function Usage({
   });
   return (
     <UsageTable
-      page={listPage(result, `/discounts/${id}`, params)}
+      page={await listPage(result, `/discounts/${id}`, params)}
       used={discount.used}
       totals={discount.discounted_total}
     />

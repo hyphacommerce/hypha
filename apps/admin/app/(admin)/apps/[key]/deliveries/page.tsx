@@ -22,6 +22,7 @@ import { Pager } from "@/components/pager";
 import { TableSkeleton } from "@/components/skeletons";
 
 import { loaded, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 
 import { RetryButton } from "./retry-button";
 
@@ -82,11 +83,12 @@ async function Deliveries({
   const path = `/apps/${key}/deliveries`;
 
   const client = await sessionClient();
-  const [app, result] = await Promise.all([
+  const [app, result, t] = await Promise.all([
     client.GET("/admin/apps/{key}", { params: { path: { key } } }).then(loaded),
     client.GET("/admin/apps/{key}/deliveries", {
       params: { path: { key }, query: { cursor, status } },
     }),
+    getT(),
   ]);
   // A hand-edited URL (an old or foreign cursor): start the list again.
   if (result.response.status === 400) redirect(path);
@@ -187,7 +189,13 @@ async function Deliveries({
         </Table>
       )}
 
-      <Pager path={path} query={{ status }} isFirstPage={!cursor} nextCursor={page.next_cursor} />
+      <Pager
+        path={path}
+        query={{ status }}
+        isFirstPage={!cursor}
+        nextCursor={page.next_cursor}
+        t={t}
+      />
     </>
   );
 }

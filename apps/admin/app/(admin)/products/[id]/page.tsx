@@ -23,6 +23,7 @@ import {
   requireStaff,
   sessionClient,
 } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 
 import type { Stock } from "../actions";
 import { MediaSection } from "./media-section";
@@ -71,6 +72,7 @@ async function ProductDetail({ id }: { id: string }) {
     variantDefinitions,
     fields,
     me,
+    t,
   ] = await Promise.all([
     client.GET("/admin/products/{id}", { params: { path: { id } } }).then(loaded),
     // Without `channels:read` the page shows no Publishing card.
@@ -90,6 +92,7 @@ async function ProductDetail({ id }: { id: string }) {
     definitionsOf("variant"),
     client.GET("/admin/products/{id}/custom-fields", { params: { path: { id } } }),
     requireStaff(),
+    getT(),
   ]);
   const stock = locations.data ? stockOf(product, inventory.data?.items ?? []) : undefined;
 
@@ -98,7 +101,7 @@ async function ProductDetail({ id }: { id: string }) {
       <PageHeader
         title={product.title}
         back={BACK}
-        badges={<ProductStatusBadge status={product.status} />}
+        badges={<ProductStatusBadge status={product.status} t={t} />}
         actions={<StatusActions id={product.id} title={product.title} status={product.status} />}
       />
 
@@ -174,7 +177,7 @@ async function ProductPrices({ product }: { product: Product }) {
       <Banner
         status="error"
         title="The product's prices couldn't be read"
-        description={prices.error ? describe(prices.error) : undefined}
+        description={prices.error ? await describe(prices.error) : undefined}
       />
     );
   }

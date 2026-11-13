@@ -42,7 +42,7 @@ export async function saveStore(input: {
       ...(input.currency ? { currency: input.currency } : {}),
     },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }
@@ -63,13 +63,13 @@ export async function addMarket(input: {
       prices_include_tax: input.pricesIncludeTax,
     },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   const { error: catalogError } = await client.POST("/admin/catalogs", {
     body: { market: market.id },
   });
   refresh();
   if (catalogError)
-    return { error: `The market was added, but not its catalog: ${describe(catalogError)}` };
+    return { error: `The market was added, but not its catalog: ${await describe(catalogError)}` };
   return {};
 }
 
@@ -90,7 +90,7 @@ export async function addShipping(input: {
   const { data: zone, error } = await client.POST("/admin/shipping-zones", {
     body: { name: input.name, countries: input.countries },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   const { error: optionError } = await client.POST("/admin/shipping-zones/{id}/options", {
     params: { path: { id: zone.id } },
     body: {
@@ -107,7 +107,7 @@ export async function addShipping(input: {
   });
   refresh();
   if (optionError) {
-    return { error: `The zone was added, but not its rate: ${describe(optionError)}` };
+    return { error: `The zone was added, but not its rate: ${await describe(optionError)}` };
   }
   return {};
 }
@@ -131,7 +131,7 @@ export async function addProduct(input: {
   const { data: market, error: marketError } = await client.GET("/admin/markets/{id}", {
     params: { path: { id: input.market } },
   });
-  if (marketError) return { error: describe(marketError) };
+  if (marketError) return { error: await describe(marketError) };
   const amount = parseMoney(input.price, market.currency, await loadCurrencies());
   if (amount === null) return { error: "Enter the price as a number, like 18 or 18.50." };
   const count = input.track ? Number(input.stock.trim() || Number.NaN) : null;
@@ -146,10 +146,10 @@ export async function addProduct(input: {
       price: { amount, currency: market.currency },
     },
   });
-  if (error) return { error: describe(error) };
-  const partly = (what: string, e: Parameters<typeof describe>[0]) => {
+  if (error) return { error: await describe(error) };
+  const partly = async (what: string, e: Parameters<typeof describe>[0]) => {
     refresh();
-    return { error: `“${input.title}” was created as a draft, but ${what}: ${describe(e)}` };
+    return { error: `“${input.title}” was created as a draft, but ${what}: ${await describe(e)}` };
   };
 
   if (market.catalog) {
@@ -202,7 +202,7 @@ export async function publish(channel: string, product: string): Promise<Result>
     params: { path: { id: channel } },
     body: { products: [product] },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }
@@ -213,7 +213,7 @@ export async function createKey(channel: string, name: string): Promise<KeyResul
   const { data, error } = await client.POST("/admin/api-keys", {
     body: { kind: "publishable", name, channel },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return { token: data.token };
 }
@@ -229,7 +229,7 @@ export async function finishSetup(): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.PATCH("/admin/store", { body: { setup_finished: true } });
   refresh();
-  return { error: error ? describe(error) : undefined };
+  return { error: error ? await describe(error) : undefined };
 }
 
 /** Shows the guide again, from the step it was left on. */
@@ -237,5 +237,5 @@ export async function reopenSetup(): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.PATCH("/admin/store", { body: { setup_finished: false } });
   refresh();
-  return { error: error ? describe(error) : undefined };
+  return { error: error ? await describe(error) : undefined };
 }

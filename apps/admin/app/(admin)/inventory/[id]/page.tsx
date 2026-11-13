@@ -158,7 +158,7 @@ async function History({ id, params }: { id: string; params: SearchParams }) {
         History
       </Text>
       <HistoryTable
-        page={listPage(result, `/inventory/${id}`, params)}
+        page={await listPage(result, `/inventory/${id}`, params)}
         locations={Object.fromEntries(locations)}
         showCost={hasScope(me.scopes, "purchasing:read")}
       />

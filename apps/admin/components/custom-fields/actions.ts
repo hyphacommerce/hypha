@@ -55,7 +55,7 @@ async function read(
 export async function loadCustomFields(owner: OwnerType, id: string): Promise<FieldsResult> {
   const client = await sessionClient();
   const { data, error } = await read(client, owner, id);
-  return error ? { error: describe(error) } : { fields: data };
+  return error ? { error: await describe(error) } : { fields: data };
 }
 
 /** Writes `patch` (a JSON Merge Patch of the values) to the owner's fields. */
@@ -87,7 +87,7 @@ export async function saveCustomFields(
   if (page) revalidatePath(page);
   if (result.error) {
     return {
-      error: describe(result.error),
+      error: await describe(result.error),
       problems: problemsOf(result.error.code, result.error.details),
     };
   }
