@@ -1422,7 +1422,11 @@ export interface components {
              *     (`field.custom.material`).
              */
             key: string;
-            /** @description The merchant's label, if they set one, in the response's language. */
+            /**
+             * @description The merchant's label, if they set one, in the response's language. Without one, an
+             *     option facet's is the option's name in the response's language where that differs
+             *     from the name as stored (as this page's results write it); `null` otherwise.
+             */
             label?: string | null;
             /** @description Most results first, then by value; at most 100. */
             values: components["schemas"]["FacetValueResponse"][];

@@ -192,7 +192,9 @@ pub struct FacetResponse {
     /// (values `true` and `false`), or `field.<namespace>.<key>` for a custom field
     /// (`field.custom.material`).
     key: String,
-    /// The merchant's label, if they set one, in the response's language.
+    /// The merchant's label, if they set one, in the response's language. Without one, an
+    /// option facet's is the option's name in the response's language where that differs
+    /// from the name as stored (as this page's results write it); `null` otherwise.
     label: Option<String>,
     /// Most results first, then by value; at most 100.
     values: Vec<FacetValueResponse>,
@@ -336,6 +338,25 @@ pub async fn storefront_search<S: Storage>(
     // Pages stop at `MAX_DEPTH`: past it, there is no next page to offer.
     let shown = u64::from(offset) + results.hits.len() as u64;
     let has_more = shown < results.total.min(u64::from(hypha_search_index::MAX_DEPTH));
+    // An option facet's heading where the merchant set none: the option's name as the
+    // results write it in this language, where it isn't the stored one (the least, where
+    // they differ).
+    let mut option_names: BTreeMap<String, String> = BTreeMap::new();
+    for hit in &results.hits {
+        let d = &hit.document;
+        for ((name, _), (label, _)) in d.options.iter().zip(&d.option_labels) {
+            if label != name {
+                option_names
+                    .entry(name.to_lowercase())
+                    .and_modify(|least| {
+                        if label < least {
+                            least.clone_from(label);
+                        }
+                    })
+                    .or_insert_with(|| label.clone());
+            }
+        }
+    }
     let items = results
         .hits
         .into_iter()
@@ -388,7 +409,13 @@ pub async fn storefront_search<S: Storage>(
                         &keys::search_facet::facet_label(&f.key),
                         found.labels.get(&f.key).map(String::as_str),
                     )
-                    .map(str::to_string);
+                    .map(str::to_string)
+                    .or_else(|| match &f.key {
+                        hypha_search_index::FacetKey::Option(name) => {
+                            option_names.get(name).cloned()
+                        }
+                        _ => None,
+                    });
                 FacetResponse {
                     label,
                     key: f.key.to_string(),

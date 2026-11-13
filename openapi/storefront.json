@@ -1580,7 +1580,7 @@
             "type": "string"
           },
           "label": {
-            "description": "The merchant's label, if they set one, in the response's language.",
+            "description": "The merchant's label, if they set one, in the response's language. Without one, an\noption facet's is the option's name in the response's language where that differs\nfrom the name as stored (as this page's results write it); `null` otherwise.",
             "type": [
               "string",
               "null"

@@ -668,8 +668,9 @@ async fn search_is_answered_in_the_language_asked_for() {
                 "values": [{"value": "Red", "label": "Rot", "count": 2}],
             },
             {
+                // No label of the merchant's: the option's own name, in German.
                 "key": "option.size",
-                "label": null,
+                "label": "Größe",
                 "values": [
                     {"value": "M", "label": null, "count": 1},
                     {"value": "S", "label": "Klein", "count": 1},
@@ -690,6 +691,8 @@ async fn search_is_answered_in_the_language_asked_for() {
         assert_eq!(found["items"][0]["title"], "Mug");
         assert_eq!(found["items"][0]["variant_title"], "S / Red");
         assert_eq!(found["facets"][0]["label"], "Colour");
+        // The option's name as stored: the key names it.
+        assert_eq!(found["facets"][1]["label"], Value::Null);
         assert_eq!(
             found["facets"][0]["values"],
             json!([{"value": "Red", "label": null, "count": 1}])
