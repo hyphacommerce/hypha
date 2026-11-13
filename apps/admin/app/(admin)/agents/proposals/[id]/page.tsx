@@ -6,12 +6,13 @@ import { Link } from "@astryxdesign/core/Link";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Section } from "@astryxdesign/core/Section";
 import { Text } from "@astryxdesign/core/Text";
-import { Suspense } from "react";
+import { type ReactNode, Suspense } from "react";
 
 import { JsonDisclosure, type PreviewState, PreviewView } from "@/components/agents/preview-view";
 import { DateTime } from "@/components/date-time";
 import { type Crumb, PageHeader } from "@/components/page-header";
 import { DetailSkeleton } from "@/components/skeletons";
+import { getFormat } from "@/lib/get-format";
 import { type Proposal, operationLabel, proposalStatus, readPreview, shortId } from "@/lib/agents";
 import {
   isMissingScope,
@@ -21,14 +22,19 @@ import {
   sessionClient,
   staffNames,
 } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
+import type { T } from "@/lib/messages";
 import { hasScope } from "@/lib/navigation";
 
 import { Decision } from "./decision";
 
-const BACK: Crumb[] = [
-  { label: "Agents", href: "/agents" },
-  { label: "Proposals", href: "/agents/proposals" },
-];
+/** The way back: the agents, then the proposals inbox. */
+function back(t: T): Crumb[] {
+  return [
+    { label: t("agents.list_title"), href: "/agents" },
+    { label: t("agents.proposals_title"), href: "/agents/proposals" },
+  ];
+}
 
 /**
  * One proposal: who proposed it and for whom, the write it keeps, and its preview as a
@@ -36,11 +42,11 @@ const BACK: Crumb[] = [
  * only). The way back renders at once; the proposal streams in.
  */
 export default async function ProposalPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+  const [{ id }, t] = await Promise.all([params, getT()]);
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={1280}>
-        <Suspense fallback={<DetailSkeleton back={BACK} />}>
+        <Suspense fallback={<DetailSkeleton back={back(t)} />}>
           <ProposalDetail id={id} />
         </Suspense>
       </VStack>
@@ -50,7 +56,9 @@ export default async function ProposalPage({ params }: { params: Promise<{ id: s
 
 async function ProposalDetail({ id }: { id: string }) {
   const client = await sessionClient();
-  const [proposal, me, people, locations] = await Promise.all([
+  const [t, format, proposal, me, people, locations] = await Promise.all([
+    getT(),
+    getFormat(),
     client.GET("/admin/agent-proposals/{id}", { params: { path: { id } } }).then(loaded),
     requireStaff(),
     staffNames(client),
@@ -65,7 +73,13 @@ async function ProposalDetail({ id }: { id: string }) {
     loaded(agentResult);
   }
   const person = agent?.user ? (people.get(agent.user) ?? agent.user) : undefined;
-  const status = proposalStatus(proposal.status);
+  const status = proposalStatus(t, proposal.status);
+  const agentLink = (chunks: ReactNode, key: number) => (
+    <Link key={key} href={`/agents/${proposal.agent}`}>
+      {chunks}
+    </Link>
+  );
+  const proposedAt = <DateTime key="time" value={proposal.created_at} short />;
   const preview = readPreview(proposal.preview);
   const names = Object.fromEntries(locations);
   const missing = proposal.scopes.filter((scope) => !hasScope(me.scopes, scope));
@@ -73,15 +87,22 @@ async function ProposalDetail({ id }: { id: string }) {
   return (
     <>
       <PageHeader
-        title={operationLabel(proposal.operation, proposal.summary)}
-        back={BACK}
+        title={operationLabel(t, proposal.operation, proposal.summary)}
+        back={back(t)}
         badges={<Badge label={status.label} variant={status.variant} />}
         description={
-          <>
-            Proposed by{" "}
-            <Link href={`/agents/${proposal.agent}`}>{agent?.name ?? shortId(proposal.agent)}</Link>
-            {person ? ` for ${person}` : ""}, <DateTime value={proposal.created_at} short />
-          </>
+          person
+            ? t.rich("agents.proposal_proposed_by_for", {
+                agent: agent?.name ?? shortId(proposal.agent),
+                link: agentLink,
+                person,
+                time: proposedAt,
+              })
+            : t.rich("agents.proposal_proposed_by", {
+                agent: agent?.name ?? shortId(proposal.agent),
+                link: agentLink,
+                time: proposedAt,
+              })
         }
       />
 
@@ -90,54 +111,66 @@ async function ProposalDetail({ id }: { id: string }) {
           {proposal.status === "pending" && proposal.refreshes > 0 && (
             <Banner
               status="warning"
-              title="The store changed since this was proposed. Here's what it would do now."
-              description={`Approving found the write would no longer do what was first previewed, so nothing was applied${proposal.refreshes > 1 ? ` (${proposal.refreshes} times so far)` : ""}. The preview below is the new version: approve it, or reject it.`}
+              title={t("agents.proposal_stale_title")}
+              description={t("agents.proposal_stale_description", { count: proposal.refreshes })}
             />
           )}
           {proposal.status === "pending" ? (
             <Decision id={proposal.id} refreshes={proposal.refreshes} missing={missing} />
           ) : (
-            <Outcome proposal={proposal} people={people} />
+            <Outcome t={t} proposal={proposal} people={people} />
           )}
           {proposal.status !== "pending" && (
             <Text type="display-3" as="h2">
-              {proposal.status === "applied" ? "As applied" : "As proposed"}
+              {proposal.status === "applied"
+                ? t("agents.proposal_as_applied")
+                : t("agents.proposal_as_proposed")}
             </Text>
           )}
           {preview ? (
-            <PreviewView preview={preview} names={names} state={previewState(proposal.status)} />
+            <PreviewView
+              t={t}
+              format={format}
+              preview={preview}
+              names={names}
+              state={previewState(proposal.status)}
+            />
           ) : (
-            <JsonDisclosure label="Preview" value={proposal.preview} isOpen />
+            <JsonDisclosure label={t("agents.proposal_preview")} value={proposal.preview} isOpen />
           )}
         </div>
         <div>
           <Card>
             <VStack gap={4}>
               <Text type="display-3" as="h2">
-                Proposal
+                {t("agents.proposal_card_title")}
               </Text>
               <MetadataList>
-                <MetadataListItem label="Operation">
+                <MetadataListItem label={t("agents.proposal_operation")}>
                   <Text type="code">{proposal.operation}</Text>
                 </MetadataListItem>
-                <MetadataListItem label="Agent">
+                <MetadataListItem label={t("agents.proposal_agent")}>
                   <Link href={`/agents/${proposal.agent}`}>
                     {agent?.name ?? shortId(proposal.agent)}
                   </Link>
                 </MetadataListItem>
-                {person && <MetadataListItem label="Acts for">{person}</MetadataListItem>}
-                <MetadataListItem label="Proposed">
+                {person && (
+                  <MetadataListItem label={t("agents.proposal_acts_for")}>
+                    {person}
+                  </MetadataListItem>
+                )}
+                <MetadataListItem label={t("agents.proposal_proposed")}>
                   <DateTime value={proposal.created_at} />
                 </MetadataListItem>
                 {proposal.status === "pending" && (
-                  <MetadataListItem label="Expires">
+                  <MetadataListItem label={t("agents.proposal_expires")}>
                     <DateTime value={proposal.expires_at} />
                   </MetadataListItem>
                 )}
-                <MetadataListItem label="Approving needs">
+                <MetadataListItem label={t("agents.proposal_approving_needs")}>
                   <HStack gap={1} wrap="wrap">
                     {proposal.scopes.length === 0 ? (
-                      <Text color="secondary">No scope</Text>
+                      <Text color="secondary">{t("agents.proposal_no_scope")}</Text>
                     ) : (
                       proposal.scopes.map((scope) => (
                         <Badge
@@ -156,21 +189,25 @@ async function ProposalDetail({ id }: { id: string }) {
             <VStack gap={3}>
               <VStack gap={1}>
                 <Text type="display-3" as="h2">
-                  Request
+                  {t("agents.proposal_request_title")}
                 </Text>
                 <Text type="supporting" color="secondary">
-                  What approving sends, as the agent made it.
+                  {t("agents.proposal_request_description")}
                 </Text>
               </VStack>
               {proposal.request && (
                 <JsonDisclosure
-                  label="Path and query"
+                  label={t("agents.proposal_request_path")}
                   value={{ ...proposal.request.params, ...proposal.request.query }}
                   isOpen
                 />
               )}
               {proposal.request?.body != null && (
-                <JsonDisclosure label="Body" value={proposal.request.body} isOpen />
+                <JsonDisclosure
+                  label={t("agents.proposal_request_body")}
+                  value={proposal.request.body}
+                  isOpen
+                />
               )}
             </VStack>
           </Card>
@@ -193,11 +230,24 @@ function previewState(status: Proposal["status"]): PreviewState {
 }
 
 /** How a decided proposal ended: applied, failed (stale or refused), rejected or expired. */
-function Outcome({ proposal, people }: { proposal: Proposal; people: Map<string, string> }) {
+function Outcome({
+  t,
+  proposal,
+  people,
+}: {
+  t: T;
+  proposal: Proposal;
+  people: Map<string, string>;
+}) {
   const decider = proposal.decided_by
     ? (people.get(proposal.decided_by) ?? shortId(proposal.decided_by))
     : undefined;
-  const when = proposal.decided_at ? <DateTime value={proposal.decided_at} short /> : null;
+  const when = proposal.decided_at ? (
+    <DateTime key="time" value={proposal.decided_at} short />
+  ) : null;
+  const decided = when && (
+    <Text color="secondary">{t.rich("agents.outcome_decided", { time: when })}</Text>
+  );
   // The write's answer: Hypha's error body for a failure (`code`, `error`, `details`).
   const body: Record<string, unknown> | undefined = proposal.response?.body;
   const code = typeof body?.code === "string" ? body.code : undefined;
@@ -210,11 +260,15 @@ function Outcome({ proposal, people }: { proposal: Proposal; people: Map<string,
           <VStack gap={3}>
             <Banner
               status="success"
-              title="Applied"
-              description={`Approved${decider ? ` by ${decider}` : ""}; the write did what was previewed.`}
+              title={t("agents.outcome_applied_title")}
+              description={
+                decider
+                  ? t("agents.outcome_applied_by", { person: decider })
+                  : t("agents.outcome_applied")
+              }
             />
-            {when && <Text color="secondary">Decided {when}</Text>}
-            {body && <JsonDisclosure label="What the write answered" value={body} />}
+            {decided}
+            {body && <JsonDisclosure label={t("agents.outcome_answer")} value={body} />}
           </VStack>
         </Card>
       );
@@ -224,15 +278,15 @@ function Outcome({ proposal, people }: { proposal: Proposal; people: Map<string,
           <VStack gap={3}>
             <Banner
               status="error"
-              title="Approved, but the write failed"
+              title={t("agents.outcome_failed_title")}
               description={
                 message
                   ? `${message}${code ? ` (${code})` : ""}`
-                  : "The write answered with an error; nothing changed."
+                  : t("agents.outcome_failed_description")
               }
             />
-            {when && <Text color="secondary">Decided {when}</Text>}
-            {body && <JsonDisclosure label="What the write answered" value={body} />}
+            {decided}
+            {body && <JsonDisclosure label={t("agents.outcome_answer")} value={body} />}
           </VStack>
         </Card>
       );
@@ -242,13 +296,17 @@ function Outcome({ proposal, people }: { proposal: Proposal; people: Map<string,
           <VStack gap={2}>
             <Banner
               status="info"
-              title="Rejected"
-              description={`${decider ? `By ${decider}. ` : ""}Nothing was applied.`}
+              title={t("agents.outcome_rejected_title")}
+              description={
+                decider
+                  ? t("agents.outcome_rejected_by", { person: decider })
+                  : t("agents.outcome_rejected")
+              }
             />
-            {when && <Text color="secondary">Decided {when}</Text>}
+            {decided}
             {proposal.note && (
               <VStack gap={1}>
-                <Text weight="medium">Note for the agent</Text>
+                <Text weight="medium">{t("agents.outcome_note")}</Text>
                 <Text>{proposal.note}</Text>
               </VStack>
             )}
@@ -259,19 +317,25 @@ function Outcome({ proposal, people }: { proposal: Proposal; people: Map<string,
       return (
         <Banner
           status="info"
-          title="Being applied"
-          description={`Approved${decider ? ` by ${decider}` : ""}; its write is running. Reload in a moment to see how it went.`}
+          title={t("agents.outcome_applying_title")}
+          description={
+            decider
+              ? t("agents.outcome_applying_by", { person: decider })
+              : t("agents.outcome_applying")
+          }
         />
       );
     case "expired":
       return (
         <Banner
           status="info"
-          title="Expired"
-          description="Nobody decided it in time, so nothing was applied. The agent can propose it again."
+          title={t("agents.outcome_expired_title")}
+          description={t("agents.outcome_expired_description")}
         />
       );
     default:
-      return <Banner status="info" title={`This proposal is ${proposal.status}.`} />;
+      return (
+        <Banner status="info" title={t("agents.outcome_other", { status: proposal.status })} />
+      );
   }
 }

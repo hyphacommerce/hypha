@@ -12,6 +12,9 @@ import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { useState, useTransition } from "react";
 
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
+
 import { type ConnectResult, approveConnection, denyConnection } from "../actions";
 import { type GrantDraft, type GrantProblem, grantOf } from "../grant";
 import { GrantFields } from "../grant-fields";
@@ -36,6 +39,8 @@ export function ConnectForm({
   cap: string;
   myScopes: readonly string[];
 }) {
+  const t = useT<"agents">();
+  const format = useFormat();
   const [name, setName] = useState(clientName);
   const [grant, setGrant] = useState<GrantDraft>(suggested);
   const [problem, setProblem] = useState<GrantProblem>();
@@ -62,7 +67,7 @@ export function ConnectForm({
   };
 
   if (leaving) {
-    return <Text color="secondary">Taking you back to {redirectHost}…</Text>;
+    return <Text color="secondary">{t("agents.connect_leaving", { host: redirectHost })}</Text>;
   }
 
   return (
@@ -70,13 +75,13 @@ export function ConnectForm({
       <Card>
         <VStack gap={3}>
           <TextInput
-            label="Name"
-            description="How the agent shows in the admin and the proposals inbox, so say where it runs."
+            label={t("common.name")}
+            description={t("agents.connect_name_description")}
             value={name}
             onChange={setName}
             status={
               !name.trim()
-                ? { type: "error", message: "The agent needs a name." }
+                ? { type: "error", message: t("agents.connect_name_required") }
                 : problem?.field === "name"
                   ? { type: "error", message: problem.error }
                   : undefined
@@ -84,12 +89,11 @@ export function ConnectForm({
           />
           {requested.length > 0 && (
             <Text type="supporting" color="secondary">
-              It asked for {requested.join(", ")}. That's only a hint: you choose below.
+              {t("agents.connect_requested", { scopes: format.list(requested, "unit") })}
             </Text>
           )}
           <Text type="supporting" color="secondary">
-            It never does more than your own role allows, and it stops if your account is
-            deactivated. Writes are proposals you approve unless you choose Apply.
+            {t("agents.connect_limits")}
           </Text>
         </VStack>
       </Card>
@@ -106,12 +110,11 @@ export function ConnectForm({
         <VStack gap={3}>
           {problem && <Banner status="error" title={problem.error} />}
           <Text color="secondary">
-            Connecting sends {clientName} back to {redirectHost} with access to this store as set
-            above. You can change or revoke it any time under Agents.
+            {t("agents.connect_summary", { client: clientName, host: redirectHost })}
           </Text>
           <HStack gap={2}>
             <Button
-              label="Connect"
+              label={t("agents.connect_button")}
               variant="primary"
               isLoading={isPending && answering === "connect"}
               isDisabled={!name.trim() || isPending}
@@ -120,7 +123,7 @@ export function ConnectForm({
               }
             />
             <Button
-              label="Cancel"
+              label={t("common.cancel")}
               variant="secondary"
               isLoading={isPending && answering === "cancel"}
               isDisabled={isPending}

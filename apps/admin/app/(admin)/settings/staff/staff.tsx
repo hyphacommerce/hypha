@@ -20,6 +20,8 @@ import { useState, useTransition } from "react";
 
 import { DateTime } from "@/components/date-time";
 import { ClientResourceTable, byText } from "@/components/resource-table/resource-table";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { inviteStaff, revokeInvite, saveRole, updateStaff } from "./actions";
 
@@ -63,28 +65,30 @@ export function Staff({
   const [managing, setManaging] = useState<User>();
   const [revoking, setRevoking] = useState<Invite>();
   const [editingRole, setEditingRole] = useState<Role | "new">();
+  const t = useT<"staff">();
+  const format = useFormat();
   const roleName = new Map(roles.map((r) => [r.id, r.name]));
   const memberCount = new Map<string, number>();
   for (const u of users) memberCount.set(u.role, (memberCount.get(u.role) ?? 0) + 1);
 
   const userColumns: TableColumn<User>[] = [
-    { key: "name", header: "Name" },
-    { key: "email", header: "Email" },
-    { key: "role", header: "Role", renderCell: (u) => roleName.get(u.role) ?? u.role },
+    { key: "name", header: t("common.name") },
+    { key: "email", header: t("common.email") },
+    { key: "role", header: t("common.role"), renderCell: (u) => roleName.get(u.role) ?? u.role },
     {
       key: "status",
-      header: "Status",
+      header: t("common.status"),
       width: pixel(110),
       renderCell: (u) => (
         <Badge
-          label={u.status === "active" ? "Active" : "Disabled"}
+          label={u.status === "active" ? t("common.active") : t("common.disabled")}
           variant={u.status === "active" ? "success" : "neutral"}
         />
       ),
     },
     {
       key: "created_at",
-      header: "Since",
+      header: t("staff.staff_since"),
       width: pixel(190),
       renderCell: (u) => <DateTime value={u.created_at} short />,
     },
@@ -95,24 +99,29 @@ export function Staff({
       align: "end",
       renderCell: (u) =>
         u.id === myId ? (
-          <Button label="You" size="sm" variant="ghost" href="/account" />
+          <Button label={t("staff.staff_you")} size="sm" variant="ghost" href="/account" />
         ) : (
           canInvite && (
-            <Button label="Manage" size="sm" variant="ghost" onClick={() => setManaging(u)} />
+            <Button
+              label={t("staff.staff_manage")}
+              size="sm"
+              variant="ghost"
+              onClick={() => setManaging(u)}
+            />
           )
         ),
     },
   ];
   const inviteColumns: TableColumn<Invite>[] = [
-    { key: "email", header: "Email" },
-    { key: "role", header: "Role", renderCell: (i) => roleName.get(i.role) ?? i.role },
+    { key: "email", header: t("common.email") },
+    { key: "role", header: t("common.role"), renderCell: (i) => roleName.get(i.role) ?? i.role },
     {
       key: "expires_at",
-      header: "Expires",
+      header: t("staff.invites_expires"),
       width: pixel(230),
       renderCell: (i) =>
         Date.parse(i.expires_at) < now ? (
-          <Badge label="Expired" variant="warning" />
+          <Badge label={t("staff.invites_expired")} variant="warning" />
         ) : (
           <DateTime value={i.expires_at} short />
         ),
@@ -126,12 +135,17 @@ export function Staff({
         canInvite && (
           <HStack gap={1} hAlign="end">
             <Button
-              label="Resend"
+              label={t("common.resend")}
               size="sm"
               variant="ghost"
               onClick={() => setInviting({ email: i.email, role: i.role })}
             />
-            <Button label="Revoke" size="sm" variant="ghost" onClick={() => setRevoking(i)} />
+            <Button
+              label={t("staff.invites_revoke")}
+              size="sm"
+              variant="ghost"
+              onClick={() => setRevoking(i)}
+            />
           </HStack>
         ),
     },
@@ -139,22 +153,27 @@ export function Staff({
   const roleColumns: TableColumn<Role>[] = [
     {
       key: "name",
-      header: "Role",
+      header: t("common.role"),
       renderCell: (r) => (
         <HStack gap={2} vAlign="center">
           <Text weight="medium">{r.name}</Text>
-          {r.owner && <Badge label="Every scope" variant="info" />}
+          {r.owner && <Badge label={t("staff.roles_every_scope")} variant="info" />}
         </HStack>
       ),
     },
     {
       key: "scopes",
-      header: "Scopes",
-      renderCell: (r) => (r.owner ? "All, including future ones" : r.scopes.join(", ") || "None"),
+      header: t("staff.roles_scopes"),
+      renderCell: (r) =>
+        r.owner
+          ? t("staff.roles_scopes_all")
+          : r.scopes.length > 0
+            ? format.list(r.scopes, "unit")
+            : t("common.none"),
     },
     {
       key: "members",
-      header: "Members",
+      header: t("staff.roles_members"),
       width: pixel(100),
       align: "end",
       renderCell: (r) => memberCount.get(r.id) ?? 0,
@@ -167,7 +186,12 @@ export function Staff({
       renderCell: (r) =>
         canInvite &&
         !r.owner && (
-          <Button label="Edit" size="sm" variant="ghost" onClick={() => setEditingRole(r)} />
+          <Button
+            label={t("common.edit")}
+            size="sm"
+            variant="ghost"
+            onClick={() => setEditingRole(r)}
+          />
         ),
     },
   ];
@@ -176,10 +200,10 @@ export function Staff({
     <VStack gap={8}>
       <VStack gap={4}>
         <HStack hAlign="between" vAlign="start" gap={3}>
-          <Heading title="Staff" description="Everyone who can sign in to this admin." />
+          <Heading title={t("staff.staff_title")} description={t("staff.staff_description")} />
           {canInvite && (
             <Button
-              label="Invite staff"
+              label={t("staff.invite_staff")}
               variant="primary"
               onClick={() => setInviting({ email: "" })}
             />
@@ -190,21 +214,18 @@ export function Staff({
           columns={userColumns}
           idKey="id"
           searchText={(u) => `${u.name} ${u.email}`}
-          searchLabel="Search staff"
+          searchLabel={t("staff.staff_search")}
           compare={{
             name: byText((u: User) => u.name),
             email: byText((u: User) => u.email),
             created_at: byText((u: User) => u.created_at),
           }}
-          empty={{ icon: <UsersIcon width={32} />, title: "No staff yet" }}
+          empty={{ icon: <UsersIcon width={32} />, title: t("staff.staff_empty") }}
         />
       </VStack>
 
       <VStack gap={4}>
-        <Heading
-          title="Pending invites"
-          description="An invite lasts a few days; resending it makes a new link and ends the old one."
-        />
+        <Heading title={t("staff.invites_title")} description={t("staff.invites_description")} />
         <ClientResourceTable<Invite>
           rows={invites}
           columns={inviteColumns}
@@ -213,18 +234,19 @@ export function Staff({
             email: byText((i: Invite) => i.email),
             expires_at: byText((i: Invite) => i.expires_at),
           }}
-          empty={{ icon: <EnvelopeIcon width={32} />, title: "No pending invites" }}
+          empty={{ icon: <EnvelopeIcon width={32} />, title: t("staff.invites_empty") }}
         />
       </VStack>
 
       <VStack gap={4}>
         <HStack hAlign="between" vAlign="start" gap={3}>
-          <Heading
-            title="Roles"
-            description="What each role may do. Nobody grants a scope they don't hold themselves."
-          />
+          <Heading title={t("staff.roles_title")} description={t("staff.roles_description")} />
           {canInvite && (
-            <Button label="New role" variant="secondary" onClick={() => setEditingRole("new")} />
+            <Button
+              label={t("staff.roles_new")}
+              variant="secondary"
+              onClick={() => setEditingRole("new")}
+            />
           )}
         </HStack>
         <ClientResourceTable<Role>
@@ -232,7 +254,7 @@ export function Staff({
           columns={roleColumns}
           idKey="id"
           compare={{ name: byText((r: Role) => r.name) }}
-          empty={{ icon: <ShieldCheckIcon width={32} />, title: "No roles" }}
+          empty={{ icon: <ShieldCheckIcon width={32} />, title: t("staff.roles_empty") }}
         />
       </VStack>
 
@@ -256,6 +278,7 @@ export function Staff({
 
 /** Asks before withdrawing an invite; its link stops working at once. */
 function RevokeInviteDialog({ invite, onClose }: { invite: Invite; onClose: () => void }) {
+  const t = useT<"staff">();
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
   const revoke = () =>
@@ -268,11 +291,9 @@ function RevokeInviteDialog({ invite, onClose }: { invite: Invite; onClose: () =
     <AlertDialog
       isOpen
       onOpenChange={(isOpen) => !isOpen && onClose()}
-      title={`Revoke the invite for ${invite.email}?`}
-      description={
-        error ?? "The link in their email stops working at once. You can invite them again later."
-      }
-      actionLabel="Revoke invite"
+      title={t("staff.revoke_dialog_title", { email: invite.email })}
+      description={error ?? t("staff.revoke_dialog_description")}
+      actionLabel={t("staff.revoke_dialog_action")}
       isActionLoading={isPending}
       onAction={revoke}
     />
@@ -289,6 +310,7 @@ function ManageDialog({
   roles: Role[];
   onClose: () => void;
 }) {
+  const t = useT<"staff">();
   const [role, setRole] = useState(user.role);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -308,22 +330,22 @@ function ManageDialog({
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
         <Selector
-          label="Role"
+          label={t("common.role")}
           options={roles.map((r) => ({ value: r.id, label: r.name }))}
           value={role}
           onChange={setRole}
         />
         <HStack gap={2} hAlign="between" wrap="wrap">
           <Button
-            label={isActive ? "Disable" : "Enable"}
+            label={isActive ? t("common.disable") : t("common.enable")}
             variant={isActive ? "destructive" : "secondary"}
             isDisabled={isPending}
             onClick={() => apply({ status: isActive ? "disabled" : "active" })}
           />
           <HStack gap={2}>
-            <Button label="Cancel" variant="ghost" onClick={onClose} />
+            <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
             <Button
-              label="Save role"
+              label={t("staff.manage_save_role")}
               variant="primary"
               isLoading={isPending}
               isDisabled={role === user.role}
@@ -332,7 +354,7 @@ function ManageDialog({
           </HStack>
         </HStack>
         <Text type="supporting" color="secondary">
-          Disabling signs them out everywhere and stops them signing in, until enabled again.
+          {t("staff.manage_disable_hint")}
         </Text>
       </VStack>
     </Dialog>
@@ -349,6 +371,7 @@ function RoleDialog({
   scopes: Scope[];
   onClose: () => void;
 }) {
+  const t = useT<"staff">();
   const [name, setName] = useState(role?.name ?? "");
   const [chosen, setChosen] = useState<string[]>(role?.scopes ?? []);
   const [error, setError] = useState<string>();
@@ -369,16 +392,25 @@ function RoleDialog({
   return (
     <Dialog isOpen onOpenChange={onOpenChange} width={520} purpose="form">
       <DialogHeader
-        title={role ? `Edit ${role.name}` : "New role"}
-        subtitle="Staff with the role may do what its scopes allow. A write scope includes its read."
+        title={
+          role
+            ? t("staff.role_dialog_edit_title", { name: role.name })
+            : t("staff.role_dialog_new_title")
+        }
+        subtitle={t("staff.role_dialog_subtitle")}
         onOpenChange={onOpenChange}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
-        <TextInput label="Name" placeholder="Fulfilment" value={name} onChange={setName} />
+        <TextInput
+          label={t("common.name")}
+          placeholder={t("staff.role_dialog_name_placeholder")}
+          value={name}
+          onChange={setName}
+        />
         <MultiSelector
-          label="Scopes"
-          description="Only scopes your own role has."
+          label={t("staff.role_dialog_scopes")}
+          description={t("staff.role_dialog_scopes_description")}
           options={options.map((s) => ({ value: s, label: s }))}
           value={chosen}
           onChange={setChosen}
@@ -387,9 +419,9 @@ function RoleDialog({
           triggerDisplay="count"
         />
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label={role ? "Save role" : "Create role"}
+            label={role ? t("staff.manage_save_role") : t("staff.role_dialog_create")}
             variant="primary"
             isLoading={isPending}
             isDisabled={!isComplete}
@@ -410,6 +442,7 @@ function InviteDialog({
   initial: { email: string; role?: string };
   onClose: () => void;
 }) {
+  const t = useT<"staff">();
   const [email, setEmail] = useState(initial.email);
   const [role, setRole] = useState(initial.role ?? roles.find((r) => !r.owner)?.id ?? roles[0]?.id);
   const [error, setError] = useState<string>();
@@ -429,28 +462,32 @@ function InviteDialog({
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={480} purpose="form">
       <DialogHeader
-        title={initial.email ? `Resend the invite to ${initial.email}` : "Invite staff"}
-        subtitle="They get an email with a link to set their name and password."
+        title={
+          initial.email
+            ? t("staff.invite_dialog_resend_title", { email: initial.email })
+            : t("staff.invite_dialog_title")
+        }
+        subtitle={t("staff.invite_dialog_subtitle")}
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
         {sent ? (
-          <Banner status="success" title={`Invite sent to ${email.trim()}.`} />
+          <Banner status="success" title={t("staff.invite_dialog_sent", { email: email.trim() })} />
         ) : (
           <>
             <TextInput
-              label="Email"
+              label={t("common.email")}
               type="email"
-              placeholder="name@company.com"
+              placeholder={t("staff.invite_dialog_email_placeholder")}
               value={email}
               onChange={setEmail}
               onEnter={submit}
               isReadOnly={Boolean(initial.email)}
             />
             <Selector
-              label="Role"
-              description="What they may do once they join."
+              label={t("common.role")}
+              description={t("staff.invite_dialog_role_description")}
               options={roles.map((r) => ({ value: r.id, label: r.name }))}
               value={role}
               onChange={setRole}
@@ -459,12 +496,14 @@ function InviteDialog({
         )}
         <HStack gap={2} hAlign="end">
           {sent ? (
-            <Button label="Done" variant="primary" onClick={onClose} />
+            <Button label={t("common.done")} variant="primary" onClick={onClose} />
           ) : (
             <>
-              <Button label="Cancel" variant="ghost" onClick={onClose} />
+              <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
               <Button
-                label={initial.email ? "Resend invite" : "Send invite"}
+                label={
+                  initial.email ? t("staff.invite_dialog_resend") : t("staff.invite_dialog_send")
+                }
                 variant="primary"
                 isLoading={isPending}
                 isDisabled={!isComplete}

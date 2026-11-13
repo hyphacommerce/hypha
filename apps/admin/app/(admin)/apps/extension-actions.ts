@@ -10,6 +10,7 @@ import { revalidatePath } from "next/cache";
 
 import { appPagePath, loadExtensions } from "@/lib/app-extensions";
 import { describe, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 
 /** A manifest problem, where and what (`details.errors` of `manifest_invalid`). */
 export type ManifestProblem = { path: string; message: string };
@@ -70,13 +71,16 @@ export type PrivateAppResult =
  * consent page, or what's wrong with it.
  */
 export async function createPrivateApp(manifestText: string): Promise<PrivateAppResult> {
+  const t = await getT();
   let manifest: unknown;
   try {
     manifest = JSON.parse(manifestText);
   } catch (e) {
-    return { error: `That isn't JSON: ${e instanceof Error ? e.message : String(e)}` };
+    return {
+      error: t("apps.private_not_json", { problem: e instanceof Error ? e.message : String(e) }),
+    };
   }
-  if (!isRecord(manifest)) return { error: "A manifest is a JSON object." };
+  if (!isRecord(manifest)) return { error: t("apps.private_not_object") };
   const client = await sessionClient();
   const { data, error } = await client.POST("/admin/apps/private", {
     body: { manifest },
@@ -140,7 +144,7 @@ export async function runPaymentAction(
   orderId: string,
   input?: Record<string, unknown>,
 ): Promise<ActionResult> {
-  const client = await sessionClient();
+  const [client, t] = await Promise.all([sessionClient(), getT()]);
   const params = { path: { id: paymentId } };
   let result;
   switch (point) {
@@ -156,7 +160,7 @@ export async function runPaymentAction(
       break;
     }
     default:
-      return { error: `This admin can't run ${point}.` };
+      return { error: t("apps.payment_action_unsupported", { point }) };
   }
   if (result.error) return { error: await describe(result.error) };
   revalidatePath(`/orders/${orderId}`);
@@ -165,8 +169,8 @@ export async function runPaymentAction(
   const { completed, payment } = result.data;
   return {
     message: completed
-      ? `Done: the payment is ${payment.status.replace("_", " ")}.`
-      : "Sent to the payment's app. The payment changes when it reports back.",
+      ? t("apps.payment_action_done", { status: payment.status })
+      : t("apps.payment_action_sent"),
     refresh: true,
   };
 }

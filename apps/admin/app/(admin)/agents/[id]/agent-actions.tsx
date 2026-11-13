@@ -7,6 +7,8 @@ import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Switch } from "@astryxdesign/core/Switch";
 import { useState, useTransition } from "react";
 
+import { useT } from "@/lib/use-t";
+
 import { revokeAgent, setAgentEnabled } from "../actions";
 
 /**
@@ -22,6 +24,7 @@ export function AgentActions({
   name: string;
   isEnabled: boolean;
 }) {
+  const t = useT<"agents">();
   const [isConfirming, setIsConfirming] = useState(false);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -37,19 +40,23 @@ export function AgentActions({
     <VStack gap={2} hAlign="end">
       <HStack gap={3} vAlign="center">
         <Switch
-          label="Enabled"
+          label={t("common.enabled")}
           value={isEnabled}
           changeAction={async (enabled) => setError((await setAgentEnabled(id, enabled)).error)}
         />
-        <Button label="Revoke" variant="destructive" onClick={() => setIsConfirming(true)} />
+        <Button
+          label={t("agents.revoke")}
+          variant="destructive"
+          onClick={() => setIsConfirming(true)}
+        />
       </HStack>
       {error && <Banner status="error" title={error} onDismiss={() => setError(undefined)} />}
       <AlertDialog
         isOpen={isConfirming}
         onOpenChange={setIsConfirming}
-        title={`Revoke ${name}?`}
-        description="Its credentials stop at once and for good, and its pending proposals can't be approved any more. To pause it instead, turn it off. This can't be undone."
-        actionLabel="Revoke agent"
+        title={t("agents.revoke_dialog_title", { name })}
+        description={t("agents.revoke_dialog_description")}
+        actionLabel={t("agents.revoke_dialog_action")}
         isActionLoading={isPending}
         onAction={revoke}
       />

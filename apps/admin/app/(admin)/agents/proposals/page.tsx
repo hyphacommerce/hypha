@@ -2,15 +2,14 @@ import { VStack } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
 import { Suspense } from "react";
 
-import { type Crumb, PageHeader } from "@/components/page-header";
+import { PageHeader } from "@/components/page-header";
 import { type SearchParams, one, oneOf } from "@/components/resource-table/params";
 import { listPage, pageQuery } from "@/components/resource-table/server";
 import { PROPOSAL_STATUSES } from "@/lib/agents";
 import { sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 
 import { ProposalsTable } from "./proposals-table";
-
-const BACK: Crumb = { label: "Agents", href: "/agents" };
 
 /**
  * The proposals inbox: what agents asked to write, waiting for a person. By default the
@@ -22,14 +21,14 @@ export default async function ProposalsPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const params = await searchParams;
+  const [params, t] = await Promise.all([searchParams, getT()]);
   return (
     <Section padding={6}>
       <VStack gap={5}>
         <PageHeader
-          title="Proposals"
-          back={BACK}
-          description="Changes agents want to make. Each shows exactly what it would do; nothing changes until someone approves it."
+          title={t("agents.proposals_title")}
+          back={{ label: t("agents.list_title"), href: "/agents" }}
+          description={t("agents.proposals_description")}
         />
         <Suspense fallback={<ProposalsTable />}>
           <ProposalRows params={params} />

@@ -37,8 +37,13 @@ const generated = [
 const adminTranslated = [
   "apps/admin/app/(admin)/account/**",
   "apps/admin/app/(admin)/admin-shell.tsx",
+  "apps/admin/app/(admin)/agents/**",
+  "apps/admin/app/(admin)/apps/**",
   "apps/admin/app/(admin)/forbidden.tsx",
   "apps/admin/app/(admin)/layout.tsx",
+  "apps/admin/app/(admin)/settings/api-keys/**",
+  "apps/admin/app/(admin)/settings/apps/**",
+  "apps/admin/app/(admin)/settings/staff/**",
   "apps/admin/app/(editor)/forbidden.tsx",
   "apps/admin/app/(editor)/layout.tsx",
   "apps/admin/app/*.tsx",
@@ -47,6 +52,7 @@ const adminTranslated = [
   "apps/admin/app/login/**",
   "apps/admin/app/reset-password/**",
   "apps/admin/components/*.tsx",
+  "apps/admin/components/agents/**",
   "apps/admin/components/app-extensions/**",
   "apps/admin/components/resource-table/**",
 ];

@@ -1,9 +1,16 @@
 // How the admin labels apps: how each got here, whether it runs, and which of its
-// scopes reach customers' personal data.
+// scopes reach customers' personal data. Shared by server and client components, so
+// each function that writes words takes the caller's translator.
 
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
+import { hasKey } from "./keys";
+import type { TFor } from "./messages";
+
 type App = AdminSchemas["AppResponse"];
+
+/** A translator with the apps' messages and the shared vocabulary. */
+type Translate = TFor<"apps" | "common">;
 
 export type AppState = {
   label: string;
@@ -17,57 +24,60 @@ export function isBuiltIn(app: Pick<App, "kind">): boolean {
 }
 
 /** Where an app stands: installed through OAuth, made by hand, built in, uninstalled, or off. */
-export function appState(app: App & { manifest?: { url: string } | null }): AppState {
+export function appState(t: Translate, app: App & { manifest?: { url: string } | null }): AppState {
   if (isBuiltIn(app) && app.missing) {
     return {
-      label: "Not built in",
+      label: t("apps.state_not_built_in"),
       variant: "warning",
-      description:
-        "Taken out of this API's build: its settings and data stay, and it does nothing until a build has it again.",
+      description: t("apps.state_not_built_in_description"),
     };
   }
   if (isBuiltIn(app)) {
     return app.enabled
       ? {
           // The "Built in" badge sits beside the name; the status says whether it runs.
-          label: "On",
+          label: t("common.on"),
           variant: "success",
-          description: "Built into this store's API by its operator.",
+          description: t("apps.state_built_in_on_description"),
         }
       : {
-          label: "Off",
+          label: t("common.off"),
           variant: "neutral",
-          description: "Built in, and turned off: it collects nothing and adds nothing.",
+          description: t("apps.state_built_in_off_description"),
         };
   }
   if (app.uninstalled_at) {
     return {
-      label: "Uninstalled",
+      label: t("apps.state_uninstalled"),
       variant: "warning",
-      description: "Its access ended; it only got the app.uninstalled event.",
+      description: t("apps.state_uninstalled_description", { event: "app.uninstalled" }),
     };
   }
   if (!app.enabled) {
     return {
-      label: "Off",
+      label: t("common.off"),
       variant: "neutral",
-      description: "It gets no webhooks and quotes no rates.",
+      description: t("apps.state_off_description"),
     };
   }
   if (app.installed && app.manifest?.url.startsWith("urn:hypha:private:")) {
     return {
-      label: "Private",
+      label: t("apps.state_private"),
       variant: "success",
-      description: "A private app: its manifest was uploaded to this store.",
+      description: t("apps.state_private_description"),
     };
   }
   if (app.installed) {
-    return { label: "Installed", variant: "success", description: "Installed through OAuth." };
+    return {
+      label: t("apps.state_installed"),
+      variant: "success",
+      description: t("apps.state_installed_description"),
+    };
   }
   return {
-    label: "Custom",
+    label: t("apps.state_custom"),
     variant: "success",
-    description: "Made by hand under Settings → Developers.",
+    description: t("apps.state_custom_description"),
   };
 }
 
@@ -76,77 +86,72 @@ export function isPersonalDataScope(scope: string): boolean {
   return scope.startsWith("customer_data:");
 }
 
-/** What a personal-data scope lets an app see, for people rather than code. */
-export function personalDataLabel(scope: string): string {
-  switch (scope) {
-    case "customer_data:name":
-      return "Customers' names";
-    case "customer_data:email":
-      return "Customers' email addresses";
-    case "customer_data:phone":
-      return "Customers' phone numbers";
-    case "customer_data:address":
-      return "Customers' addresses";
-    case "customer_data:profile":
-      return "Customers' personal custom fields";
-    default:
-      return scope;
-  }
+/**
+ * What a personal-data scope lets an app see, for people rather than code; a scope the
+ * admin has no words for shows as it is.
+ */
+export function personalDataLabel(t: TFor<"apps">, scope: string): string {
+  const key = `apps.personal_data_${scope.slice(scope.indexOf(":") + 1)}`;
+  return isPersonalDataScope(scope) && hasKey(t, key) ? t(key) : scope;
 }
 
-/** An area of scopes (`orders`), as people say it. */
-const AREAS: Record<string, string> = {
-  agents: "agents",
-  api_keys: "API keys",
-  apps: "apps",
-  carts: "carts",
-  catalogs: "catalogs and price lists",
-  categories: "categories",
-  channels: "sales channels",
-  checkout: "checkout",
-  checkout_rules: "checkout rules",
-  custom_fields: "custom fields",
-  customers: "customers",
-  fulfillments: "fulfilments",
-  inventory: "inventory",
-  keys: "API keys",
-  markets: "markets",
-  media: "media files",
-  notifications: "emails",
-  orders: "orders",
-  payments: "payments",
-  pricing: "prices",
-  products: "products",
-  purchasing: "purchasing",
-  search: "search",
-  shipping: "shipping",
-  staff: "staff",
-  stores: "store details",
-  tax: "taxes",
-  taxes: "taxes",
-  users: "staff",
-};
+/** Older names of areas, still met in operation IDs: each reads as the area it became. */
+const AREA_ALIASES: Record<string, string> = { keys: "api_keys", staff: "users", tax: "taxes" };
 
-/** An area's name for a heading: "Orders", "Sales channels". */
-export function areaLabel(area: string): string {
-  const name = AREAS[area] ?? area.replaceAll("_", " ");
-  return name.charAt(0).toUpperCase() + name.slice(1);
+function canonicalArea(area: string): string {
+  return AREA_ALIASES[area] ?? area;
 }
 
-/** What a scope lets an app do, in plain words: "See orders", "Change products". */
-export function scopeLabel(scope: string): string {
-  if (isPersonalDataScope(scope)) return personalDataLabel(scope);
-  if (scope === "purchasing:send") return "Email purchase orders to suppliers";
+/** An area the admin has no name for, from its identifier: "price_lists" → "price lists". */
+function areaWords(area: string): string {
+  return area.replaceAll("_", " ");
+}
+
+/** An area of scopes (`orders`) for a heading, as people say it: "Orders", "Sales channels". */
+export function areaLabel(t: TFor<"apps">, area: string): string {
+  const key = `apps.area_${canonicalArea(area)}`;
+  if (hasKey(t, key)) return t(key);
+  const words = areaWords(area);
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
+ * What a scope lets an app do, in plain words: "See orders", "See and change products".
+ * A scope the admin has no sentence for shows as it is.
+ */
+export function scopeLabel(t: TFor<"apps">, scope: string): string {
+  if (isPersonalDataScope(scope)) return personalDataLabel(t, scope);
   const [area = scope, action = ""] = scope.split(":");
-  const what = AREAS[area] ?? area.replaceAll("_", " ");
-  if (action === "read") return `See ${what}`;
-  if (action === "write") return `See and change ${what}`;
-  return `${action.charAt(0).toUpperCase()}${action.slice(1)} ${what}`;
+  const canonical = canonicalArea(area);
+  // The scopes that aren't a plain read or write of their area: `customers:erase`,
+  // `purchasing:send`, `checkout`.
+  const own = action ? `apps.scope_${canonical}_${action}` : `apps.scope_${canonical}`;
+  if (action === "read") {
+    const key = `apps.scope_read_${canonical}`;
+    return hasKey(t, key) ? t(key) : t("apps.scope_read_unknown", { area: areaWords(area) });
+  }
+  if (action === "write") {
+    const key = `apps.scope_write_${canonical}`;
+    return hasKey(t, key) ? t(key) : t("apps.scope_write_unknown", { area: areaWords(area) });
+  }
+  return hasKey(t, own) ? t(own) : scope;
 }
 
-/** Who did something, for a line of history: "a staff member", "the app itself", … */
-export function actorLabel(actor: AdminSchemas["EventActor"] | null | undefined): string {
-  switch (actor?.type) {
+type Actor = AdminSchemas["EventActor"] | null | undefined;
+
+/**
+ * Who did something, for a line of history: "a staff member", "the app itself", …
+ * @deprecated English only: pass the translator, `actorLabel(t, actor)`.
+ */
+export function actorLabel(actor: Actor): string;
+/** Who did something, for a line of history, in `t`'s language. */
+export function actorLabel(t: TFor<"apps">, actor: Actor): string;
+export function actorLabel(first: TFor<"apps"> | Actor, second?: Actor): string {
+  if (typeof first === "function") {
+    const key = `apps.actor_${second?.type ?? "unknown"}`;
+    return hasKey(first, key) ? first(key) : first("apps.actor_unknown");
+  }
+  switch (first?.type) {
     case "user":
       return "a staff member";
     case "agent":

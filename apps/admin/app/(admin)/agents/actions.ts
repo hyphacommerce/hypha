@@ -4,6 +4,7 @@ import type { AdminSchemas, ApiError } from "@hyphacommerce/sdk/admin";
 import { revalidatePath } from "next/cache";
 
 import { describe, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 
 export type Result = { error?: string };
 
@@ -114,10 +115,8 @@ export async function approveProposal(id: string, refreshes: number): Promise<Re
   revalidatePath(`/agents/proposals/${id}`);
   revalidatePath("/agents/proposals");
   if (error?.code === "proposal_changed") {
-    return {
-      error:
-        "This proposal changed since you opened it. Below is what it would do now: review it and approve again.",
-    };
+    const t = await getT();
+    return { error: t("agents.proposal_changed") };
   }
   if (error && error.code !== "preview_stale") return { error: await describe(error) };
   return {};
@@ -154,9 +153,8 @@ export async function approveConnection(
     body: { name, grant },
   });
   if (error?.code === "oauth_request_expired") {
-    return {
-      error: "This request expired: requests wait ten minutes. Connect again from the client.",
-    };
+    const t = await getT();
+    return { error: t("agents.connect_expired") };
   }
   if (error) return placed(error);
   revalidatePath("/agents");

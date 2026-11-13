@@ -15,13 +15,20 @@ import { DateTime } from "@/components/date-time";
 import { type Crumb, PageHeader } from "@/components/page-header";
 import { FormSkeleton } from "@/components/skeletons";
 import { areaLabel, personalDataLabel, scopeLabel } from "@/lib/apps";
+import { type Format, getFormat } from "@/lib/get-format";
 import { isMissingScope, requireStaff, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
+import { hasKey } from "@/lib/keys";
+import type { T } from "@/lib/messages";
 
 import { ConsentButtons } from "./consent-buttons";
 
 type Request = AdminSchemas["ConsentRequestResponse"];
 
-const BACK: Crumb = { label: "Apps", href: "/apps" };
+/** The way back to the list of apps. */
+function back(t: T): Crumb {
+  return { label: t("common.apps"), href: "/apps" };
+}
 
 /**
  * The consent page: where Hypha's `/oauth/authorize` sends staff (`?request=oareq_…`),
@@ -37,17 +44,21 @@ export default async function ConsentPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { request: id } = await searchParams;
+  const [{ request: id }, t] = await Promise.all([searchParams, getT()]);
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={760}>
         {typeof id !== "string" || !id.startsWith("oareq_") ? (
-          <Problem title="No request to answer" description={NO_REQUEST} />
+          <Problem
+            t={t}
+            title={t("apps.consent_no_request_title")}
+            description={t("apps.consent_no_request_description")}
+          />
         ) : (
           <Suspense
             fallback={
               <>
-                <PageHeader back={BACK} />
+                <PageHeader back={back(t)} />
                 <FormSkeleton cards={2} />
               </>
             }
@@ -61,89 +72,105 @@ export default async function ConsentPage({
 }
 
 async function ConsentRequest({ id }: { id: string }) {
-  const [client, me] = await Promise.all([sessionClient(), requireStaff()]);
+  const [client, me, t, format] = await Promise.all([
+    sessionClient(),
+    requireStaff(),
+    getT(),
+    getFormat(),
+  ]);
   const result = await client.GET("/admin/oauth/requests/{id}", { params: { path: { id } } });
   if (isMissingScope(result)) {
     return (
       <Problem
-        title="You can't answer this"
-        description="Your role doesn't include apps:read, so you can't see what the app asks for. Ask the store owner to approve it."
+        t={t}
+        title={t("apps.consent_cannot_answer_title")}
+        description={t("apps.consent_cannot_answer_description", { scope: "apps:read" })}
       />
     );
   }
   if (!result.data) {
-    return <Problem title="This request doesn't exist" description={NO_REQUEST} />;
+    return (
+      <Problem
+        t={t}
+        title={t("apps.consent_missing_title")}
+        description={t("apps.consent_no_request_description")}
+      />
+    );
   }
   const request = result.data;
   const missing = request.scopes.filter((s) => !me.scopes.includes(s));
   const canWrite = me.scopes.includes("apps:write");
   const blocked = !canWrite
-    ? "Your role doesn't include apps:write: only staff who manage apps can approve one."
+    ? t("apps.consent_blocked_no_write", { scope: "apps:write" })
     : missing.length > 0
-      ? `You can only grant what your own role has, and it lacks ${missing.join(", ")}. Ask someone whose role has them.`
+      ? t("apps.consent_blocked_missing_scopes", { scopes: format.list(missing, "unit") })
       : undefined;
+  const redirectHost = hostOf(request.redirect_uri);
+  const waitsUntil = <DateTime key="time" value={request.expires_at} short />;
 
   return (
     <>
       <PageHeader
         title={
           request.app.installed
-            ? `${request.app.name} asks for more`
-            : `Install ${request.app.name}`
+            ? t("apps.consent_title_more", { name: request.app.name })
+            : t("apps.consent_title_install", { name: request.app.name })
         }
-        back={BACK}
-        badges={<StatusBadge status={request.status} />}
+        back={back(t)}
+        badges={<StatusBadge t={t} status={request.status} />}
         description={
-          request.app.private ? (
-            "A private app: its manifest was uploaded to this store."
-          ) : (
-            <>
-              Asked <DateTime value={request.created_at} short />
-            </>
-          )
+          request.app.private
+            ? t("apps.state_private_description")
+            : t.rich("apps.consent_asked", {
+                time: <DateTime key="time" value={request.created_at} short />,
+              })
         }
       />
 
-      <AppIdentity request={request} />
+      <AppIdentity t={t} request={request} />
 
       {request.status === "expired" && (
         <Banner
           status="warning"
-          title="This request expired"
-          description="Requests wait ten minutes for an answer. Start the installation again from the app."
+          title={t("apps.consent_expired_title")}
+          description={t("apps.consent_expired_description")}
         />
       )}
       {(request.status === "approved" || request.status === "denied") && (
         <Banner
           status="info"
-          title={request.status === "approved" ? "Already approved" : "Already denied"}
-          description="Each request is answered once."
-          endContent={<Link href={`/apps/${request.app.key}`}>Open the app</Link>}
+          title={
+            request.status === "approved"
+              ? t("apps.consent_already_approved")
+              : t("apps.consent_already_denied")
+          }
+          description={t("apps.consent_answered_once")}
+          endContent={<Link href={`/apps/${request.app.key}`}>{t("apps.consent_open_app")}</Link>}
         />
       )}
 
-      {request.app.installed && <Changes changes={request.changes} />}
+      {request.app.installed && <Changes t={t} changes={request.changes} />}
 
       <Card>
         <VStack gap={4}>
           <Text type="display-3" as="h2">
-            What it may do
+            {t("apps.consent_may_do_title")}
           </Text>
           {request.groups.length === 0 ? (
-            <Text color="secondary">Nothing beyond receiving the events it subscribes to.</Text>
+            <Text color="secondary">{t("apps.consent_may_do_nothing")}</Text>
           ) : (
             request.groups.map((group) => (
               <VStack key={group.area} gap={1}>
-                <Text type="label">{areaLabel(group.area)}</Text>
+                <Text type="label">{areaLabel(t, group.area)}</Text>
                 <List>
                   {group.scopes.map((scope) => (
                     <ListItem
                       key={scope}
-                      label={scopeLabel(scope)}
+                      label={scopeLabel(t, scope)}
                       description={scope}
                       endContent={
                         request.app.installed && request.changes.added.includes(scope) ? (
-                          <Badge label="New" variant="info" />
+                          <Badge label={t("apps.consent_new")} variant="info" />
                         ) : undefined
                       }
                     />
@@ -158,41 +185,38 @@ async function ConsentRequest({ id }: { id: string }) {
       <Card>
         <VStack gap={3}>
           <Text type="display-3" as="h2">
-            Customers&apos; personal data
+            {t("apps.detail_personal_title")}
           </Text>
           {request.personal_data.length === 0 ? (
-            <Text color="secondary">
-              None: Hypha leaves names, emails, phone numbers and addresses out of everything this
-              app reads or receives.
-            </Text>
+            <Text color="secondary">{t("apps.consent_personal_none")}</Text>
           ) : (
             <>
-              <Text color="secondary">
-                The app will see these fields of your customers. It gives these reasons:
-              </Text>
+              <Text color="secondary">{t("apps.consent_personal_intro")}</Text>
               <List hasDividers>
                 {request.personal_data.map((item) => (
                   <ListItem
                     key={item.scope}
-                    label={personalDataLabel(item.scope)}
-                    description={`“${item.reason}”`}
+                    label={personalDataLabel(t, item.scope)}
+                    description={t("apps.consent_reason", { reason: item.reason })}
                     endContent={<Badge label={item.scope} variant="warning" />}
                   />
                 ))}
               </List>
               <Text type="supporting" color="secondary">
-                What the app receives is its own to keep: read its{" "}
-                <Link href={request.app.privacy_url} isExternalLink>
-                  privacy policy
-                </Link>
-                .
+                {t.rich("apps.consent_privacy_hint", {
+                  link: (chunks, key) => (
+                    <Link key={key} href={request.app.privacy_url} isExternalLink>
+                      {chunks}
+                    </Link>
+                  ),
+                })}
               </Text>
             </>
           )}
         </VStack>
       </Card>
 
-      <CustomFields request={request} />
+      <CustomFields t={t} format={format} request={request} />
 
       {/* Always here, so a private app's credentials stay shown once the page re-renders
           with the request approved. */}
@@ -205,13 +229,18 @@ async function ConsentRequest({ id }: { id: string }) {
         canDeny={canWrite}
         intro={
           blocked ? (
-            <Banner status="warning" title="You can't approve this" description={blocked} />
+            <Banner
+              status="warning"
+              title={t("apps.consent_cannot_approve_title")}
+              description={blocked}
+            />
           ) : (
             <Text color="secondary">
               {request.app.private
-                ? "Approving installs the app and shows its credentials once."
-                : `Approving sends you back to ${hostOf(request.redirect_uri)}.`}{" "}
-              The request waits until <DateTime value={request.expires_at} short />.
+                ? t.rich("apps.consent_intro_private", { time: waitsUntil })
+                : redirectHost
+                  ? t.rich("apps.consent_intro_redirect", { host: redirectHost, time: waitsUntil })
+                  : t.rich("apps.consent_intro_redirect_app", { time: waitsUntil })}
             </Text>
           )
         }
@@ -220,44 +249,42 @@ async function ConsentRequest({ id }: { id: string }) {
   );
 }
 
-const NO_REQUEST =
-  "The link may be old or mistyped. Start the installation again from the app, or upload a private app's manifest under Apps.";
-
-function hostOf(url: string): string {
+/** A URL's host, or `null` for one that isn't a URL (the page then says "the app"). */
+function hostOf(url: string): string | null {
   try {
     return new URL(url).host;
   } catch {
-    return "the app";
+    return null;
   }
 }
 
 /** Why there's nothing to answer, in place of the page's body. */
-function Problem({ title, description }: { title: string; description: string }) {
+function Problem({ t, title, description }: { t: T; title: string; description: string }) {
   return (
     <EmptyState
       icon={<ExclamationTriangleIcon width={32} />}
       title={title}
       description={description}
-      actions={<Link href="/apps">Back to apps</Link>}
+      actions={<Link href="/apps">{t("apps.consent_back_to_apps")}</Link>}
     />
   );
 }
 
-function StatusBadge({ status }: { status: Request["status"] }) {
+function StatusBadge({ t, status }: { t: T; status: Request["status"] }) {
   switch (status) {
     case "pending":
-      return <Badge label="Waiting for you" variant="info" />;
+      return <Badge label={t("apps.consent_status_pending")} variant="info" />;
     case "approved":
-      return <Badge label="Approved" variant="success" />;
+      return <Badge label={t("apps.consent_status_approved")} variant="success" />;
     case "denied":
-      return <Badge label="Denied" variant="error" />;
+      return <Badge label={t("apps.consent_status_denied")} variant="error" />;
     case "expired":
-      return <Badge label="Expired" variant="warning" />;
+      return <Badge label={t("apps.consent_status_expired")} variant="warning" />;
   }
 }
 
 /** Who the app is: its icon, name, publisher and site. */
-function AppIdentity({ request }: { request: Request }) {
+function AppIdentity({ t, request }: { t: T; request: Request }) {
   const { app } = request;
   return (
     <Card>
@@ -283,13 +310,15 @@ function AppIdentity({ request }: { request: Request }) {
             </Text>
           </HStack>
           <Text color="secondary">
-            {app.publisher ? `By ${app.publisher} · ` : ""}
+            {app.publisher
+              ? `${t("apps.consent_by_publisher", { publisher: app.publisher })} · `
+              : ""}
             <Link href={app.app_url} isExternalLink>
-              {hostOf(app.app_url)}
+              {hostOf(app.app_url) ?? t("apps.consent_the_app")}
             </Link>
             {" · "}
             <Link href={app.privacy_url} isExternalLink>
-              Privacy policy
+              {t("apps.consent_privacy_policy")}
             </Link>
           </Text>
           <Text type="supporting" color="secondary">
@@ -302,10 +331,12 @@ function AppIdentity({ request }: { request: Request }) {
 }
 
 function ChangeRow({
+  t,
   label,
   scopes,
   badge,
 }: {
+  t: T;
   label: string;
   scopes: string[];
   badge: ReactNode;
@@ -318,7 +349,7 @@ function ChangeRow({
           {scopes.map((scope) => (
             <HStack key={scope} gap={1} vAlign="center">
               {badge}
-              <Text>{scopeLabel(scope)}</Text>
+              <Text>{scopeLabel(t, scope)}</Text>
             </HStack>
           ))}
         </HStack>
@@ -327,28 +358,46 @@ function ChangeRow({
   );
 }
 
-const OWNER_LABELS: Record<string, string> = {
-  product: "Products",
-  variant: "Variants",
-  category: "Categories",
-  customer: "Customers",
-  order: "Orders",
-};
+/** What a field belongs to, as a heading ("Products"); an unknown kind shows as it is. */
+function ownerLabel(t: T, owner: string): string {
+  switch (owner) {
+    case "product":
+      return t("common.products");
+    case "variant":
+      return t("common.variants");
+    case "category":
+      return t("common.categories");
+    case "customer":
+      return t("common.customers");
+    case "order":
+      return t("common.orders");
+    default:
+      return owner;
+  }
+}
+
+/** The same within a sentence ("fields to products, variants"). */
+function ownerInSentence(t: T, owner: string): string {
+  const key = `apps.consent_fields_owner_${owner}`;
+  return hasKey(t, key) ? t(key) : owner;
+}
 
 type Field = Request["custom_fields"]["added"][number];
 
 /** One line per field: its name, where it lives and whether it's about a person. */
-function FieldItems({ fields, badge }: { fields: Field[]; badge?: ReactNode }) {
+function FieldItems({ t, fields, badge }: { t: T; fields: Field[]; badge?: ReactNode }) {
   return (
     <List>
       {fields.map((field) => (
         <ListItem
           key={`${field.owner_type}.${field.key}`}
           label={field.name}
-          description={`${OWNER_LABELS[field.owner_type] ?? field.owner_type} · ${field.key} · ${field.type}`}
+          description={`${ownerLabel(t, field.owner_type)} · ${field.key} · ${field.type}`}
           endContent={
             <HStack gap={1}>
-              {field.personal && <Badge label="Personal" variant="warning" />}
+              {field.personal && (
+                <Badge label={t("apps.consent_field_personal")} variant="warning" />
+              )}
               {badge}
             </HStack>
           }
@@ -362,43 +411,57 @@ function FieldItems({ fields, badge }: { fields: Field[]; badge?: ReactNode }) {
  * The custom fields the app keeps on the store's objects: which owners it adds fields
  * to, which are personal, and on an update which it removes.
  */
-function CustomFields({ request }: { request: Request }) {
+function CustomFields({ t, format, request }: { t: T; format: Format; request: Request }) {
   const { added, kept, removed, retyped } = request.custom_fields;
   if (added.length + kept.length + removed.length + retyped.length === 0) return null;
-  const owners = [...new Set(added.map((f) => OWNER_LABELS[f.owner_type] ?? f.owner_type))];
+  const owners = [...new Set(added.map((f) => ownerInSentence(t, f.owner_type)))];
   return (
     <Card>
       <VStack gap={3}>
         <Text type="display-3" as="h2">
-          Custom fields
+          {t("apps.consent_fields_title")}
         </Text>
         {owners.length > 0 && (
           <Text color="secondary">
-            The app adds fields to {owners.join(", ").toLowerCase()}, in its own namespace (
-            {request.app.key}).
+            {t("apps.consent_fields_added_to", {
+              owners: format.list(owners, "unit"),
+              namespace: request.app.key,
+            })}
           </Text>
         )}
         {retyped.length > 0 && (
           <Banner
             status="error"
-            title="This version can't be approved"
-            description={`It changes the type of ${retyped.map((f) => f.key).join(", ")}; a field's type can't change.`}
+            title={t("apps.consent_fields_retyped_title")}
+            description={t("apps.consent_fields_retyped_description", {
+              fields: format.list(
+                retyped.map((f) => f.key),
+                "unit",
+              ),
+            })}
           />
         )}
         {added.length > 0 && (
           <FieldItems
+            t={t}
             fields={added}
-            badge={request.app.installed ? <Badge label="New" variant="info" /> : undefined}
+            badge={
+              request.app.installed ? (
+                <Badge label={t("apps.consent_new")} variant="info" />
+              ) : undefined
+            }
           />
         )}
-        {request.app.installed && kept.length > 0 && <FieldItems fields={kept} />}
+        {request.app.installed && kept.length > 0 && <FieldItems t={t} fields={kept} />}
         {removed.length > 0 && (
           <VStack gap={1}>
-            <Text type="label">Removes fields</Text>
-            <Text color="secondary">
-              Approving deletes these fields and every value stored in them.
-            </Text>
-            <FieldItems fields={removed} badge={<Badge label="Removed" variant="error" />} />
+            <Text type="label">{t("apps.consent_fields_removes")}</Text>
+            <Text color="secondary">{t("apps.consent_fields_removes_description")}</Text>
+            <FieldItems
+              t={t}
+              fields={removed}
+              badge={<Badge label={t("apps.consent_fields_removed")} variant="error" />}
+            />
           </VStack>
         )}
       </VStack>
@@ -407,27 +470,32 @@ function CustomFields({ request }: { request: Request }) {
 }
 
 /** What approving changes compared with the app's current access. */
-function Changes({ changes }: { changes: Request["changes"] }) {
+function Changes({ t, changes }: { t: T; changes: Request["changes"] }) {
   return (
     <Card>
       <VStack gap={3}>
         <Text type="display-3" as="h2">
-          What changes
+          {t("apps.consent_changes_title")}
         </Text>
-        <Text color="secondary">
-          The app keeps its current access until you approve; denying leaves it as it is.
-        </Text>
+        <Text color="secondary">{t("apps.consent_changes_description")}</Text>
         <ChangeRow
-          label="Added"
+          t={t}
+          label={t("apps.consent_changes_added")}
           scopes={changes.added}
           badge={<Badge label="+" variant="info" />}
         />
         <ChangeRow
-          label="Removed"
+          t={t}
+          label={t("apps.consent_changes_removed")}
           scopes={changes.removed}
           badge={<Badge label="−" variant="warning" />}
         />
-        <ChangeRow label="Kept" scopes={changes.kept} badge={<Badge label="=" />} />
+        <ChangeRow
+          t={t}
+          label={t("apps.consent_changes_kept")}
+          scopes={changes.kept}
+          badge={<Badge label="=" />}
+        />
       </VStack>
     </Card>
   );

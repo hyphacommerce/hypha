@@ -24,8 +24,8 @@ export default async function ApiKeysPage({
       <VStack gap={5}>
         <PageHeader
           back={settingsCrumb(t)}
-          title="API keys"
-          description="Keys for your own systems (secret) and your storefronts (publishable)."
+          title={t("api_keys.page_title")}
+          description={t("api_keys.page_description")}
         />
         <Suspense fallback={<ApiKeys />}>
           <ApiKeyRows params={params} />

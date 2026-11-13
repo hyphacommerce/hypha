@@ -1,10 +1,17 @@
 // How the admin shows agents, their grants and what they propose: which scopes a grant
 // can name, labels for statuses and operations, and the preview a proposal carries, read
-// from the API's untyped JSON into typed values. Shared by server and client components.
+// from the API's untyped JSON into typed values. Shared by server and client components,
+// so each function that writes words takes the caller's translator.
 
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 import { areaLabel, personalDataLabel } from "./apps";
+import type { Format } from "./format";
+import { hasKey } from "./keys";
+import type { KeyIn, TFor } from "./messages";
+
+/** A translator with the agents' messages, the apps' (areas, scopes) and the vocabulary. */
+type Translate = TFor<"agents" | "apps" | "common">;
 
 export type Agent = AdminSchemas["AgentResponse"];
 export type Proposal = AdminSchemas["ProposalResponse"];
@@ -59,9 +66,9 @@ export const GRANT_AREAS: { area: string; canWrite: boolean }[] = [
 ];
 
 /** Write scopes an agent may only propose (a person approves every use), with their labels. */
-export const PROPOSE_ONLY: { scope: string; label: string }[] = [
-  { scope: "customers:erase", label: "Erase customers' personal data" },
-  { scope: "purchasing:send", label: "Email purchase orders to suppliers" },
+export const PROPOSE_ONLY: { scope: string; label: KeyIn<"agents"> }[] = [
+  { scope: "customers:erase", label: "agents.propose_only_customers_erase" },
+  { scope: "purchasing:send", label: "agents.propose_only_purchasing_send" },
 ];
 
 /** The personal data a grant may let an agent see; none by default. */
@@ -82,46 +89,54 @@ export type AgentSettings = AdminSchemas["AgentSettingsResponse"];
  * cap on what they write; `null` when grants decide.
  */
 export function capNotice(
+  t: TFor<"agents">,
   settings: Pick<AgentSettings, "enabled" | "writes">,
 ): { title: string; description: string } | null {
   if (!settings.enabled) {
     return {
-      title: "Agents are turned off on this deployment",
-      description:
-        "The operator set agents.enabled to false: no agent can connect or act, whatever its grant. Grants and proposals are kept for when they're turned on.",
+      title: t("agents.cap_disabled_title"),
+      description: t("agents.cap_disabled_description", {
+        setting: "agents.enabled",
+        value: "false",
+      }),
     };
   }
   if (settings.writes === "propose") {
     return {
-      title: "Agents only propose in this deployment",
-      description:
-        'The operator set agents.writes to "propose": every write an agent makes waits for a person to approve it, whatever its grant says.',
+      title: t("agents.cap_propose_title"),
+      description: t("agents.cap_propose_description", {
+        setting: "agents.writes",
+        value: "propose",
+      }),
     };
   }
   if (settings.writes === "off") {
     return {
-      title: "Agents only read in this deployment",
-      description:
-        'The operator set agents.writes to "off": agents can\'t write, preview or propose. Grants keep their write scopes for when the cap is lifted.',
+      title: t("agents.cap_off_title"),
+      description: t("agents.cap_off_description", { setting: "agents.writes", value: "off" }),
     };
   }
   return null;
 }
 
 /** An agent's state, for its badge. */
-export function agentState(agent: Agent): {
+export function agentState(
+  t: Translate,
+  agent: Agent,
+): {
   label: string;
   variant: "success" | "neutral" | "error";
 } {
-  if (agent.revoked_at) return { label: "Revoked", variant: "error" };
+  if (agent.revoked_at) return { label: t("agents.state_revoked"), variant: "error" };
   return agent.enabled
-    ? { label: "Enabled", variant: "success" }
-    : { label: "Disabled", variant: "neutral" };
+    ? { label: t("common.enabled"), variant: "success" }
+    : { label: t("common.disabled"), variant: "neutral" };
 }
 
-/** "Connected" (acts for a staff member) or "Autonomous" (its own key). */
-export function kindLabel(kind: string): string {
-  return kind === "connected" ? "Connected" : kind === "autonomous" ? "Autonomous" : kind;
+/** "Connected" (acts for a staff member) or "Autonomous" (its own key); another kind as it is. */
+export function kindLabel(t: TFor<"agents">, kind: string): string {
+  const key = `agents.kind_${kind}`;
+  return hasKey(t, key) ? t(key) : kind;
 }
 
 type Variant = "success" | "neutral" | "warning" | "info" | "error";
@@ -136,38 +151,40 @@ export const PROPOSAL_STATUSES = [
   "failed",
 ] as const;
 
-const PROPOSAL_STATUS: Record<string, { label: string; variant: Variant }> = {
-  pending: { label: "Waiting", variant: "warning" },
-  applying: { label: "Applying", variant: "info" },
-  applied: { label: "Applied", variant: "success" },
-  rejected: { label: "Rejected", variant: "neutral" },
-  expired: { label: "Expired", variant: "neutral" },
-  failed: { label: "Failed", variant: "error" },
+const PROPOSAL_VARIANT: Record<string, Variant> = {
+  pending: "warning",
+  applying: "info",
+  applied: "success",
+  rejected: "neutral",
+  expired: "neutral",
+  failed: "error",
 };
 
 /** A proposal's status; an unknown one shows as it is. */
-export function proposalStatus(status: string): { label: string; variant: Variant } {
-  return PROPOSAL_STATUS[status] ?? { label: status, variant: "neutral" };
+export function proposalStatus(
+  t: TFor<"agents">,
+  status: string,
+): { label: string; variant: Variant } {
+  const key = `agents.proposal_status_${status}`;
+  return {
+    label: hasKey(t, key) ? t(key) : status,
+    variant: PROPOSAL_VARIANT[status] ?? "neutral",
+  };
 }
 
-const MODES: Record<string, string> = {
-  read: "Read",
-  preview: "Preview",
-  propose: "Propose",
-  apply: "Apply",
-};
-
-/** A call's mode in the activity log. */
-export function modeLabel(mode: string): string {
-  return MODES[mode] ?? mode;
+/** A call's mode in the activity log; an unknown one shows as it is. */
+export function modeLabel(t: TFor<"agents">, mode: string): string {
+  const key = `agents.mode_${mode}`;
+  return hasKey(t, key) ? t(key) : mode;
 }
 
 /**
  * An operation in words: the first sentence of its summary from the API ("Changes a
- * product's title, handle…" stops at the first colon or full stop), else words from its
- * ID ("Products: update variant") for an operation this build no longer has.
+ * product's title, handle…" stops at the first colon or full stop; the API's own English),
+ * else words from its ID ("Products: update variant") for an operation this build no
+ * longer has.
  */
-export function operationLabel(operation: string, summary?: string | null): string {
+export function operationLabel(t: Translate, operation: string, summary?: string | null): string {
   const first = summary
     ?.split(/[.:](?:\s|$)/)[0]
     ?.replace(/\s+/g, " ")
@@ -175,7 +192,9 @@ export function operationLabel(operation: string, summary?: string | null): stri
   if (first) return first;
   const [, area = operation, action = ""] = operation.split(".");
   const words = action.replaceAll("_", " ");
-  return action ? `${areaLabel(area)}: ${words}` : areaLabel(area);
+  return action
+    ? t("agents.operation_in_area", { area: areaLabel(t, area), action: words })
+    : areaLabel(t, area);
 }
 
 /** Where a prefixed ID's record is in the admin, for the kinds that have a page. */
@@ -274,20 +293,23 @@ export function readPreview(value: unknown): Preview | null {
 }
 
 /** What blocked a preview, in words. */
-export function blockedLabel(blocked: NonNullable<Preview["blocked_by"]>): string {
+export function blockedLabel(
+  t: TFor<"agents">,
+  blocked: NonNullable<Preview["blocked_by"]>,
+): string {
   switch (blocked.kind) {
     case "extension_call":
-      return `It stops where it would call ${blocked.app} (${blocked.point}), which a preview can't do without the effect happening.`;
+      return t("agents.blocked_extension_call", { app: blocked.app, point: blocked.point });
     case "outbound_call":
-      return "It stops where it would call out to another service, which a preview can't do.";
+      return t("agents.blocked_outbound_call");
     case "media_storage":
-      return "It stops where it would touch the media storage, which a preview can't do.";
+      return t("agents.blocked_media_storage");
     case "media_upload":
-      return "It stops where it would hand out an upload link, which a preview can't do.";
+      return t("agents.blocked_media_upload");
     case "proposal":
-      return "It stops where it would apply another proposal.";
+      return t("agents.blocked_proposal");
     default:
-      return "It stops at an effect a preview can't run.";
+      return t("agents.blocked_unknown");
   }
 }
 
@@ -298,167 +320,176 @@ export type Part = string | { id: string };
 
 type Data = Record<string, unknown>;
 
-const id = (value: unknown): Part => ({ id: text(value) ?? "?" });
+const id = (value: unknown): { id: string } => ({ id: text(value) ?? "?" });
 
-function fields(data: Data): string {
-  const list = texts(data.fields).map((f) => f.replaceAll("_", " "));
-  return list.length ? list.join(", ") : "its details";
-}
+/** How many items a list in an event's data has. */
+const size = (value: unknown): number => (Array.isArray(value) ? value.length : 0);
 
-function count(value: unknown, one: string, many: string): string {
-  const n = Array.isArray(value) ? value.length : 0;
-  return `${n} ${n === 1 ? one : many}`;
-}
+/** An identifier as words: `partially_fulfilled` → "partially fulfilled". */
+const words = (value: unknown): string => (text(value) ?? "").replaceAll("_", " ");
 
 /**
  * A sentence for the common event types, as parts the page renders (IDs as links);
- * `null` for any other, which the page shows as its JSON.
+ * `null` for any other, which the page shows as its JSON. Field names, statuses and
+ * reasons are the API's identifiers, shown as they are.
  */
-export function eventSentence(type: string, data: Data): Part[] | null {
+export function eventSentence(
+  t: TFor<"agents">,
+  format: Format,
+  type: string,
+  data: Data,
+): Part[] | null {
+  const rich = (key: KeyIn<"agents">, values: Record<string, string | number | { id: string }>) =>
+    t.rich<{ id: string }>(key, values);
+  /** What changed, for a message's `{count}` and `{fields}`: none reads "its details". */
+  const changed = () => {
+    const list = texts(data.fields).map((f) => f.replaceAll("_", " "));
+    return { count: list.length, fields: format.list(list, "unit") };
+  };
   switch (type) {
     case "product.created":
-      return [
-        "Creates product ",
-        id(data.product),
-        ` (${text(data.handle) ?? ""}, ${text(data.status) ?? "draft"})`,
-      ];
+      return rich("agents.event_product_created", {
+        product: id(data.product),
+        handle: text(data.handle) ?? "",
+        status: text(data.status) ?? "draft",
+      });
     case "product.updated":
-      return ["Changes product ", id(data.product), `: ${fields(data)}`];
+      return rich("agents.event_product_updated", { product: id(data.product), ...changed() });
     case "product.deleted":
-      return [
-        "Deletes product ",
-        id(data.product),
-        ` with ${count(data.variants, "variant", "variants")}`,
-      ];
+      return rich("agents.event_product_deleted", {
+        product: id(data.product),
+        count: size(data.variants),
+      });
     case "product.variant_added":
-      return ["Adds variant ", id(data.variant), " to product ", id(data.product)];
+      return rich("agents.event_variant_added", {
+        variant: id(data.variant),
+        product: id(data.product),
+      });
     case "product.variant_updated":
-      return [
-        "Changes variant ",
-        id(data.variant),
-        " of product ",
-        id(data.product),
-        `: ${fields(data)}`,
-      ];
+      return rich("agents.event_variant_updated", {
+        variant: id(data.variant),
+        product: id(data.product),
+        ...changed(),
+      });
     case "product.variant_removed":
-      return ["Removes variant ", id(data.variant), " from product ", id(data.product)];
+      return rich("agents.event_variant_removed", {
+        variant: id(data.variant),
+        product: id(data.product),
+      });
     case "inventory_item.changed": {
       const levels = Array.isArray(data.available) ? data.available.filter(isRecord) : [];
-      const parts: Part[] = ["Stock of variant ", id(data.variant), " becomes "];
-      if (levels.length === 0) parts.push("nothing anywhere");
-      levels.forEach((level, i) => {
-        if (i > 0) parts.push(", ");
-        parts.push(`${typeof level.available === "number" ? level.available : "?"} available at `);
-        parts.push(id(level.location));
-      });
-      if (data.tracked === false) parts.push(" (not tracked)");
-      return parts;
+      const untracked = data.tracked === false;
+      if (levels.length === 0) {
+        return rich(
+          untracked ? "agents.event_stock_nothing_untracked" : "agents.event_stock_nothing",
+          { variant: id(data.variant) },
+        );
+      }
+      // The levels are a list of their own inside the sentence: `{levels}` marks its place.
+      const place = { id: "" };
+      const list = levels.flatMap((level, i): Part[] => [
+        ...(i > 0 ? [", "] : []),
+        ...rich("agents.event_stock_level", {
+          available: typeof level.available === "number" ? level.available : "?",
+          location: id(level.location),
+        }),
+      ]);
+      return rich(untracked ? "agents.event_stock_levels_untracked" : "agents.event_stock_levels", {
+        variant: id(data.variant),
+        levels: place,
+      }).flatMap((part) => (part === place ? list : [part]));
     }
     case "inventory_item.deleted":
-      return ["Stops tracking stock of variant ", id(data.variant)];
+      return rich("agents.event_stock_deleted", { variant: id(data.variant) });
     case "location.changed":
-      return ["Changes location ", id(data.location), `: ${fields(data)}`];
+      return rich("agents.event_location_changed", { location: id(data.location), ...changed() });
     case "price_list.prices_set":
-      return [
-        "Sets fixed prices for ",
-        count(data.variants, "variant", "variants"),
-        " in price list ",
-        id(data.price_list),
-      ];
+      return rich("agents.event_prices_set", {
+        count: size(data.variants),
+        price_list: id(data.price_list),
+      });
     case "price_list.prices_removed":
-      return [
-        "Removes fixed prices of ",
-        count(data.variants, "variant", "variants"),
-        " from price list ",
-        id(data.price_list),
-      ];
+      return rich("agents.event_prices_removed", {
+        count: size(data.variants),
+        price_list: id(data.price_list),
+      });
     case "price_list.created":
-      return ["Creates price list ", id(data.price_list)];
+      return rich("agents.event_price_list_created", { price_list: id(data.price_list) });
     case "price_list.changed":
-      return ["Changes price list ", id(data.price_list), `: ${fields(data)}`];
+      return rich("agents.event_price_list_changed", {
+        price_list: id(data.price_list),
+        ...changed(),
+      });
     case "catalog.products_added":
-      return [
-        "Adds ",
-        count(data.products, "product", "products"),
-        " to catalog ",
-        id(data.catalog),
-      ];
+      return rich("agents.event_catalog_products_added", {
+        count: size(data.products),
+        catalog: id(data.catalog),
+      });
     case "catalog.products_removed":
-      return [
-        "Removes ",
-        count(data.products, "product", "products"),
-        " from catalog ",
-        id(data.catalog),
-      ];
+      return rich("agents.event_catalog_products_removed", {
+        count: size(data.products),
+        catalog: id(data.catalog),
+      });
     case "price_list.deleted":
-      return ["Deletes price list ", id(data.price_list)];
+      return rich("agents.event_price_list_deleted", { price_list: id(data.price_list) });
     case "catalog.price_lists_added":
-      return [
-        "Adds ",
-        count(data.price_lists, "price list", "price lists"),
-        " to catalog ",
-        id(data.catalog),
-      ];
+      return rich("agents.event_catalog_price_lists_added", {
+        count: size(data.price_lists),
+        catalog: id(data.catalog),
+      });
     case "catalog.price_lists_removed":
-      return [
-        "Removes ",
-        count(data.price_lists, "price list", "price lists"),
-        " from catalog ",
-        id(data.catalog),
-      ];
+      return rich("agents.event_catalog_price_lists_removed", {
+        count: size(data.price_lists),
+        catalog: id(data.catalog),
+      });
     case "order.cancelled":
-      return [
-        "Cancels order ",
-        id(data.order),
-        ` (reason: ${text(data.reason) ?? "other"}${data.notify_customer === true ? "; emails the buyer" : ""})`,
-      ];
+      return rich(
+        data.notify_customer === true
+          ? "agents.event_order_cancelled_notify"
+          : "agents.event_order_cancelled",
+        { order: id(data.order), reason: text(data.reason) ?? "other" },
+      );
     case "order.paid":
-      return ["Marks order ", id(data.order), " paid"];
+      return rich("agents.event_order_paid", { order: id(data.order) });
     case "order.fulfillment_status_changed":
-      return [
-        "Order ",
-        id(data.order),
-        ` goes from ${(text(data.from) ?? "").replaceAll("_", " ")} to ${(text(data.to) ?? "").replaceAll("_", " ")}`,
-      ];
+      return rich("agents.event_order_fulfillment_status", {
+        order: id(data.order),
+        from: words(data.from),
+        to: words(data.to),
+      });
     case "fulfillment.created": {
       const lines = Array.isArray(data.lines) ? data.lines.filter(isRecord) : [];
       const units = lines.reduce(
-        (n, l) => n + (typeof l.quantity === "number" ? l.quantity : 0),
+        (n, line) => n + (typeof line.quantity === "number" ? line.quantity : 0),
         0,
       );
-      return [
-        "Ships ",
-        `${units} ${units === 1 ? "unit" : "units"} of order `,
-        id(data.order),
-        " from ",
-        id(data.location),
-        data.notify_customer === true ? " and emails the buyer" : "",
-      ];
+      return rich(
+        data.notify_customer === true
+          ? "agents.event_fulfillment_created_notify"
+          : "agents.event_fulfillment_created",
+        { count: units, order: id(data.order), location: id(data.location) },
+      );
     }
     case "fulfillment.updated":
-      return ["Changes the tracking of a shipment of order ", id(data.order)];
+      return rich("agents.event_fulfillment_updated", { order: id(data.order) });
     case "fulfillment.cancelled":
-      return ["Takes back a shipment of order ", id(data.order), "; its units return to stock"];
+      return rich("agents.event_fulfillment_cancelled", { order: id(data.order) });
     case "category.changed":
       return data.created === true
-        ? ["Creates category ", id(data.category)]
-        : ["Changes category ", id(data.category), `: ${fields(data)}`];
+        ? rich("agents.event_category_created", { category: id(data.category) })
+        : rich("agents.event_category_changed", { category: id(data.category), ...changed() });
     case "category.deleted":
-      return ["Deletes category ", id(data.category)];
+      return rich("agents.event_category_deleted", { category: id(data.category) });
     case "category.products_added":
-      return [
-        "Adds ",
-        count(data.products, "product", "products"),
-        " to category ",
-        id(data.category),
-      ];
+      return rich("agents.event_category_products_added", {
+        count: size(data.products),
+        category: id(data.category),
+      });
     case "category.products_removed":
-      return [
-        "Removes ",
-        count(data.products, "product", "products"),
-        " from category ",
-        id(data.category),
-      ];
+      return rich("agents.event_category_products_removed", {
+        count: size(data.products),
+        category: id(data.category),
+      });
     default:
       return null;
   }
