@@ -2,6 +2,8 @@
 // range, the sort and the page, so every state can be linked to and the back button
 // works. Shared by the server page and the client controls.
 
+import { withEnglish } from "@hyphacommerce/i18n";
+
 import type { KeyIn, TFor } from "./messages.ts";
 
 export type ListingParams = Record<string, string | string[] | undefined>;
@@ -146,6 +148,23 @@ export function onSaleOnly(state: ListingState): boolean {
 export function withOnSale(state: ListingState, on: boolean): ListingState {
   const filters = state.filters.filter((f) => !f.startsWith("on_sale:"));
   return changed(state, { filters: on ? [...filters, ON_SALE] : filters });
+}
+
+/**
+ * A facet's values in the order the shopper reads them: the API's (most results first,
+ * for every facet), values with as many results by what they show (`label ?? value`)
+ * in the page's language, numbers by their value (`5 ml` before `10 ml`). The API breaks
+ * those ties by the stored value, which a translated page doesn't show, so its order
+ * read as random there.
+ */
+export function sortFacetValues<V extends { value: string; label?: string | null; count: number }>(
+  values: readonly V[],
+  locale: string,
+): V[] {
+  const collator = new Intl.Collator(withEnglish(locale), { numeric: true });
+  return values.toSorted(
+    (a, b) => b.count - a.count || collator.compare(a.label ?? a.value, b.label ?? b.value),
+  );
 }
 
 /** `option.color` → "Color", `field.custom.skin_type` → "Skin type" (a custom field: its

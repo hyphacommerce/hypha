@@ -13,6 +13,7 @@ import {
   type ListingState,
   readListing,
   searchKey,
+  sortFacetValues,
   sortOf,
   toMinor,
 } from "./listing";
@@ -82,7 +83,8 @@ function major(amount: number, digits: number): string {
 }
 
 export async function readListingPage(input: {
-  /** For the message when the API refuses the listing. */
+  /** For the message when the API refuses the listing, and the order facet values are
+   * read in (`sortFacetValues`). */
   t: T;
   place: Place;
   digits: number;
@@ -120,7 +122,9 @@ export async function readListingPage(input: {
     state,
     items: data.items,
     total: data.total,
-    facets: data.facets.filter((f) => f.values.length > 0 && f.key !== "on_sale"),
+    facets: data.facets
+      .filter((f) => f.values.length > 0 && f.key !== "on_sale")
+      .map((f) => ({ ...f, values: sortFacetValues(f.values, input.t.locale) })),
     onSaleCount: data.facets
       .find((f) => f.key === "on_sale")
       ?.values.find((v) => v.value === "true")?.count,
