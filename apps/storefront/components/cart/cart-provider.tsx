@@ -91,7 +91,8 @@ export function CartProvider({
     let found: Cart | null | undefined = null;
     try {
       // No cart in this country (the flag cookie says so): nothing to read.
-      if (hasCartFlag(country)) found = await loadCart(country);
+      // Read for this page: a cart in another language is moved to the page's.
+      if (hasCartFlag(country)) found = await loadCart(locale);
     } catch {
       // The shop's server didn't answer: keep the cart shown (none, on the first read)
       // rather than the cart page's skeleton for good.
@@ -100,7 +101,7 @@ export function CartProvider({
     if (read !== reads.current) return;
     if (found !== undefined) setCart(found);
     setIsLoading(false);
-  }, [country]);
+  }, [country, locale]);
 
   useEffect(() => {
     // Only the browser knows the cart (the flag cookie, then the server), and a static

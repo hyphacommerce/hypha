@@ -13,7 +13,8 @@ import { CodeStates } from "@/components/discounts";
 import { lineImage } from "@/components/line-image";
 import { SummaryLine, Totals } from "@/components/totals";
 import { loadAccount } from "@/lib/account";
-import { api, countryOf, loadAddressFormat } from "@/lib/api";
+import { api, countryOf, loadAddressFormat, pageLocale } from "@/lib/api";
+import { readCart } from "@/lib/cart";
 import { Price } from "@/components/price";
 import { linePrice, readCartDiscounts, shippingPrice } from "@/lib/discounts";
 import { placeMessages } from "@/lib/cart-messages";
@@ -59,23 +60,40 @@ export default async function CheckoutPage({
   searchParams: Promise<{ payment?: string | string[] }>;
 }) {
   const folder = (await params).country;
-  const [country, t] = await Promise.all([countryOf(folder), pageT(folder)]);
+  const [country, place, t] = await Promise.all([
+    countryOf(folder),
+    pageLocale(folder),
+    pageT(folder),
+  ]);
   const code = country.country;
   const digits = country.minor_units;
   const id = await cartId(code);
   if (!id) redirect(link(folder, "/cart"));
   const client = api();
+  // The options and methods are named in the cart's language.
+  const offered = (init: { headers?: Record<string, string> } = {}) =>
+    Promise.all([
+      client.GET("/storefront/carts/{id}/shipping-options", { params: { path: { id } }, ...init }),
+      client.GET("/storefront/carts/{id}/payment-methods", { params: { path: { id } }, ...init }),
+    ]);
   // The options alongside the cart, not after it: they only count once the cart has an
   // address and something to ship, and otherwise the API refuses them (unused here).
-  const [{ data: cart }, options, payment, account, format] = await Promise.all([
-    client.GET("/storefront/carts/{id}", { params: { path: { id } } }),
-    client.GET("/storefront/carts/{id}/shipping-options", { params: { path: { id } } }),
-    client.GET("/storefront/carts/{id}/payment-methods", { params: { path: { id } } }),
+  const [read, alongside, account, format] = await Promise.all([
+    readCart(id, place),
+    offered(),
     // A signed-in shopper's address book and marketing choice fill the form.
     loadAccount(),
     // How the country lays out its addresses.
     loadAddressFormat(code),
   ]);
+  // The read moved the cart to the page's language: what came alongside was in the old.
+  // A render answers a GET it already sent from the first answer (fetch deduplication,
+  // keyed by URL and headers; a signal doesn't reach it through the client's `Request`),
+  // so the second read differs by a header.
+  const [options, payment] = read.moved
+    ? await offered({ headers: { "cache-control": "no-cache" } })
+    : alongside;
+  const cart = read.cart;
   if (!cart || cart.order || cart.lines.length === 0) redirect(link(folder, "/cart"));
 
   const discounts = readCartDiscounts(cart);

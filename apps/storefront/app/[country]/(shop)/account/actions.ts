@@ -88,7 +88,7 @@ export async function signOutEverywhere(locale: string) {
 
 export async function updateProfile(
   locale: string,
-  input: { first_name: string; last_name: string; phone: string },
+  input: { first_name: string; last_name: string; phone: string; language?: string },
 ): Promise<ActionResult> {
   const client = await signedIn(locale);
   const { error } = await client.PATCH("/storefront/account", {
@@ -96,6 +96,9 @@ export async function updateProfile(
       first_name: optional(input.first_name),
       last_name: optional(input.last_name),
       phone: optional(input.phone),
+      // Only when picked: absent keeps the one they have (perhaps from another country,
+      // which this page doesn't list). The API holds it to the store's languages.
+      ...(input.language ? { language: input.language } : {}),
     },
   });
   if (error) return refused(locale, error);

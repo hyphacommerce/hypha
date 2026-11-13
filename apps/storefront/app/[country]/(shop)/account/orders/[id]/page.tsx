@@ -7,8 +7,9 @@ import { notFound, redirect } from "next/navigation";
 import { AccountShell } from "@/components/account/account-shell";
 import { OrderDetails } from "@/components/order-details";
 import { accountApi } from "@/lib/account";
-import { countryOf, loadCountries } from "@/lib/api";
+import { countryOf, loadCountries, pageLocale } from "@/lib/api";
 import { pageT } from "@/lib/i18n";
+import { segmentFor } from "@/lib/routing";
 import { link } from "@/lib/site";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +30,11 @@ export default async function AccountOrderPage({
   params: Promise<{ country: string; id: string }>;
 }) {
   const { country: folder, id } = await params;
-  const [country, t] = await Promise.all([countryOf(folder), pageT(folder)]);
+  const [country, place, t] = await Promise.all([
+    countryOf(folder),
+    pageLocale(folder),
+    pageT(folder),
+  ]);
   const to = (path: string) => link(folder, path);
   const client = await accountApi();
   if (!client) redirect(to("/account"));
@@ -41,6 +46,10 @@ export default async function AccountOrderPage({
     if (response.status === 404) notFound();
     throw new Error(`order failed with ${response.status}`);
   }
+  // The order reads in its own language: the page goes where its words are in it too,
+  // in the shopper's country (the order's shows only its money).
+  const there = segmentFor(order.language, country, place.segment);
+  if (there) redirect(link(there, `/account/orders/${encodeURIComponent(id)}`));
   // The order's own country prices it; shown in the shopper's folder regardless.
   const countries = await loadCountries();
   const orderCountry = countries.find((c) => c.country === order.country) ?? country;

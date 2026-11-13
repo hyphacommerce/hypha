@@ -10,8 +10,9 @@ import { redirect } from "next/navigation";
 
 import { ReloadCart } from "@/components/cart/cart-provider";
 import { OrderDetails } from "@/components/order-details";
-import { api, countryOf } from "@/lib/api";
+import { api, countryOf, pageLocale } from "@/lib/api";
 import { pageT } from "@/lib/i18n";
+import { segmentFor } from "@/lib/routing";
 import { link, orderTokenCookie } from "@/lib/site";
 
 /** Per request: it reads the shopper's order with their token. */
@@ -41,7 +42,11 @@ export default async function OrderConfirmedPage({ params, searchParams }: Props
   if (typeof given === "string" && given) {
     redirect(`/order/${encodeURIComponent(id)}?token=${encodeURIComponent(given)}`);
   }
-  const [country, t] = await Promise.all([countryOf(folder), pageT(folder)]);
+  const [country, place, t] = await Promise.all([
+    countryOf(folder),
+    pageLocale(folder),
+    pageT(folder),
+  ]);
   const token = (await cookies()).get(orderTokenCookie(id))?.value;
   const order = token
     ? (
@@ -50,6 +55,10 @@ export default async function OrderConfirmedPage({ params, searchParams }: Props
         })
       ).data
     : undefined;
+  // The order reads in its own language whatever the URL says: the page goes where
+  // its words are in that language too.
+  const there = order && segmentFor(order.language, country, place.segment);
+  if (there) redirect(link(there, `/order/${encodeURIComponent(id)}/confirmed`));
 
   if (!order) {
     return (
