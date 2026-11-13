@@ -93,6 +93,7 @@ async fn a_products_translation_is_written_read_and_goes_outdated() {
         (&title["source"], &title["format"], &title["max_length"]),
         (&json!("mug"), &json!("text"), &json!(255))
     );
+    assert_eq!(title["min_length"], Value::Null);
     assert_eq!(title["translations"], json!({}));
     assert_eq!(
         (
