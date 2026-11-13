@@ -10,10 +10,19 @@ import { Text } from "@astryxdesign/core/Text";
 
 import { type DiscountDraft, classesOf, phaseOf } from "@/lib/discounts/draft";
 import { fromLocalInput } from "@/lib/price-lists";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { DiscountStatusBadge } from "./status-badge";
 
-const CLASS_LABELS = { product: "Products", order: "Order", shipping: "Shipping" } as const;
+const CLASS_LABELS = {
+  product: "common.products",
+  order: "common.order",
+  shipping: "common.shipping",
+} as const;
+
+/** How the store's own summary (the API's English) marks a draft. */
+const API_DRAFT = "Draft";
 
 export function SummaryPanel({
   draft,
@@ -37,6 +46,8 @@ export function SummaryPanel({
   /** "12 of 100 uses": a saved discount's count, from the API. */
   usage?: string;
 }) {
+  const t = useT<"discounts">();
+  const format = useFormat();
   const starts = draft.schedule.startsAt ? fromLocalInput(draft.schedule.startsAt, timeZone) : null;
   const ends = draft.schedule.endsAt ? fromLocalInput(draft.schedule.endsAt, timeZone) : null;
   const phase = phaseOf(draft.status, starts, ends, now);
@@ -48,25 +59,30 @@ export function SummaryPanel({
         <VStack gap={3}>
           <HStack gap={2} hAlign="between" vAlign="center">
             <Text type="display-3" as="h2">
-              Summary
+              {t("common.summary")}
             </Text>
             <DiscountStatusBadge phase={phase} />
           </HStack>
-          <Text weight="semibold">{draft.title.trim() || "Untitled discount"}</Text>
+          <Text weight="semibold">{draft.title.trim() || t("discounts.panel_untitled")}</Text>
           <Text color="secondary">
             {draft.method === "codes"
               ? draft.code.trim()
-                ? `Code ${draft.code.trim().toUpperCase()}`
-                : "Discount codes"
-              : "Automatic"}
+                ? t("discounts.panel_code", { code: draft.code.trim().toUpperCase() })
+                : t("discounts.method_codes")
+              : t("discounts.method_automatic")}
             {" · "}
-            {classes.map((c) => CLASS_LABELS[c]).join(", ") || "Nothing off yet"}
+            {classes.length > 0
+              ? format.list(
+                  classes.map((c) => t(CLASS_LABELS[c])),
+                  "unit",
+                )
+              : t("discounts.panel_nothing_off")}
           </Text>
           <div aria-live="polite" style={{ opacity: isRefreshing ? 0.6 : 1 }}>
             <VStack gap={1}>
               {(serverSummary ?? preview)
                 .split(" · ")
-                .filter((part) => part !== "Draft")
+                .filter((part) => part !== API_DRAFT && part !== t("common.draft"))
                 .map((part) => (
                   <Text key={part}>{part}</Text>
                 ))}
@@ -74,7 +90,7 @@ export function SummaryPanel({
           </div>
           {!serverSummary && (
             <Text type="supporting" color="secondary">
-              A preview: the saved discount reads in the store’s own words.
+              {t("discounts.panel_preview_note")}
             </Text>
           )}
           {usage && (

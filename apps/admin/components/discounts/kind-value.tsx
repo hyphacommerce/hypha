@@ -21,6 +21,7 @@ import {
   emptyValue,
 } from "@/lib/discounts/draft";
 import type { MarketOption } from "@/lib/discounts/validate";
+import { useT } from "@/lib/use-t";
 
 import { AmountsByMarket, type SectionProps, ValueFields, fieldStatus } from "./fields";
 
@@ -34,6 +35,7 @@ export function BuyXGetYValue({
   isReadOnly,
   markets,
 }: KindProps<BuyXGetYDraft>) {
+  const t = useT<"discounts">();
   const set = (change: Partial<BuyXGetYDraft>, paths: string[]) =>
     onChange({ ...draft, kind: { ...kind, ...change } }, paths);
   return (
@@ -41,15 +43,14 @@ export function BuyXGetYValue({
       <VStack gap={4}>
         <VStack gap={1}>
           <Text type="display-3" as="h2">
-            Value
+            {t("discounts.value_title")}
           </Text>
           <Text type="supporting" color="secondary">
-            Each time the cart has what&apos;s bought, it gets the cheapest units of what&apos;s got
-            for less: free, a percentage off or an amount off each.
+            {t("discounts.bxgy_hint")}
           </Text>
         </VStack>
         <SegmentedControl
-          label="Customer buys at least"
+          label={t("discounts.bxgy_buys_at_least")}
           value={kind.buy.type}
           onChange={(type) =>
             set({ buy: { ...kind.buy, type: type === "amount" ? "amount" : "quantity" } }, [
@@ -58,12 +59,12 @@ export function BuyXGetYValue({
           }
           isDisabled={isReadOnly}
         >
-          <SegmentedControlItem value="quantity" label="A number of items" />
-          <SegmentedControlItem value="amount" label="An amount spent" />
+          <SegmentedControlItem value="quantity" label={t("discounts.bxgy_buy_quantity")} />
+          <SegmentedControlItem value="amount" label={t("discounts.bxgy_buy_amount")} />
         </SegmentedControl>
         {kind.buy.type === "quantity" ? (
           <TextInput
-            label="Items bought"
+            label={t("discounts.bxgy_items_bought")}
             value={kind.buy.quantity}
             onChange={(quantity) => set({ buy: { ...kind.buy, quantity } }, ["kind.buy.quantity"])}
             isDisabled={isReadOnly}
@@ -72,7 +73,7 @@ export function BuyXGetYValue({
           />
         ) : (
           <AmountsByMarket
-            label="Spent on what's bought"
+            label={t("discounts.bxgy_spent")}
             amounts={kind.buy.amounts}
             markets={markets}
             path="kind.buy.amounts"
@@ -83,8 +84,8 @@ export function BuyXGetYValue({
         )}
         <Divider />
         <TextInput
-          label="Items they get"
-          description="The cheapest units of what's got that the cart holds."
+          label={t("discounts.bxgy_items_got")}
+          description={t("discounts.bxgy_items_got_hint")}
           value={kind.getQuantity}
           onChange={(getQuantity) => set({ getQuantity }, ["kind.getQuantity"])}
           isDisabled={isReadOnly}
@@ -102,9 +103,9 @@ export function BuyXGetYValue({
           hasFree
         />
         <TextInput
-          label="Uses per order"
+          label={t("discounts.bxgy_uses_per_order")}
           isOptional
-          description="How many times one order gets it. Blank: as often as the cart qualifies."
+          description={t("discounts.bxgy_uses_per_order_hint")}
           value={kind.usesPerOrder}
           onChange={(usesPerOrder) => set({ usesPerOrder }, ["kind.usesPerOrder"])}
           isDisabled={isReadOnly}
@@ -116,10 +117,6 @@ export function BuyXGetYValue({
   );
 }
 
-function tierLabel(i: number, count: number): string {
-  return count === 1 ? "Tier" : `Tier ${i + 1}`;
-}
-
 export function TieredValue({
   draft,
   kind,
@@ -128,10 +125,13 @@ export function TieredValue({
   isReadOnly,
   markets,
 }: KindProps<TieredDraft>) {
+  const t = useT<"discounts">();
   const set = (change: Partial<TieredDraft>, paths: string[]) =>
     onChange({ ...draft, kind: { ...kind, ...change } }, paths);
   const setTier = (i: number, tier: TierDraft, field: string) =>
-    set({ tiers: kind.tiers.map((t, j) => (j === i ? tier : t)) }, [`kind.tiers.${i}.${field}`]);
+    set({ tiers: kind.tiers.map((other, j) => (j === i ? tier : other)) }, [
+      `kind.tiers.${i}.${field}`,
+    ]);
   const addTier = () =>
     set(
       {
@@ -151,23 +151,22 @@ export function TieredValue({
       <VStack gap={4}>
         <VStack gap={1}>
           <Text type="display-3" as="h2">
-            Tiers
+            {t("discounts.tiers_title")}
           </Text>
           <Text type="supporting" color="secondary">
-            The highest tier the cart reaches applies to every item it counts. Each tier needs more
-            than the one before it.
+            {t("discounts.tiers_hint")}
           </Text>
         </VStack>
         <SegmentedControl
-          label="Counted by"
+          label={t("discounts.tiers_measure")}
           value={kind.measure}
           onChange={(measure) =>
             set({ measure: measure === "subtotal" ? "subtotal" : "quantity" }, ["kind.tiers"])
           }
           isDisabled={isReadOnly}
         >
-          <SegmentedControlItem value="quantity" label="Items in the cart" />
-          <SegmentedControlItem value="subtotal" label="Amount spent" />
+          <SegmentedControlItem value="quantity" label={t("discounts.tiers_measure_quantity")} />
+          <SegmentedControlItem value="subtotal" label={t("discounts.tiers_measure_subtotal")} />
         </SegmentedControl>
         {tiersError && <Banner status="error" title={tiersError} />}
         {kind.tiers.map((tier, i) => (
@@ -176,14 +175,23 @@ export function TieredValue({
           <VStack key={i} gap={3}>
             <Divider />
             <HStack gap={2} hAlign="between" vAlign="center">
-              <Text weight="semibold">{tierLabel(i, kind.tiers.length)}</Text>
+              <Text weight="semibold">
+                {kind.tiers.length === 1
+                  ? t("discounts.tier_single")
+                  : t("discounts.tier_numbered", { number: i + 1 })}
+              </Text>
               {!isReadOnly && kind.tiers.length > 1 && (
-                <Button label="Remove" variant="ghost" size="sm" onClick={() => removeTier(i)} />
+                <Button
+                  label={t("common.remove")}
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => removeTier(i)}
+                />
               )}
             </HStack>
             {kind.measure === "quantity" ? (
               <TextInput
-                label="From (items)"
+                label={t("discounts.tier_from_items")}
                 value={tier.quantity}
                 onChange={(quantity) => setTier(i, { ...tier, quantity }, "quantity")}
                 isDisabled={isReadOnly}
@@ -192,7 +200,7 @@ export function TieredValue({
               />
             ) : (
               <AmountsByMarket
-                label="From (spent)"
+                label={t("discounts.tier_from_spent")}
                 amounts={tier.amounts}
                 markets={markets}
                 path={`kind.tiers.${i}.amounts`}
@@ -215,7 +223,7 @@ export function TieredValue({
         {!isReadOnly && (
           <HStack>
             <Button
-              label="Add tier"
+              label={t("discounts.tier_add")}
               variant="secondary"
               onClick={addTier}
               isDisabled={kind.tiers.length >= MAX_TIERS}

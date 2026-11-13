@@ -6,7 +6,11 @@
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 import { type Currencies, moneyInput, parseMoney } from "./format";
+import type { KeyIn, TFor } from "./messages";
 import { hasScope } from "./navigation";
+
+/** The translator this module's labels and messages need. */
+export type FieldsT = TFor<"common" | "custom_fields">;
 
 export type Definition = AdminSchemas["CustomFieldDefinitionResponse"];
 export type Validations = AdminSchemas["CustomFieldValidations"];
@@ -27,16 +31,22 @@ export type OwnerType = "product" | "variant" | "category" | "customer" | "order
 
 export const OWNER_TYPES: {
   value: OwnerType;
-  label: string;
+  /** The message naming its records ("Products"). */
+  label: KeyIn<"common">;
   /** The owner's read and write scopes: values follow them. */
   read: string;
   write: string;
 }[] = [
-  { value: "product", label: "Products", read: "products:read", write: "products:write" },
-  { value: "variant", label: "Variants", read: "products:read", write: "products:write" },
-  { value: "category", label: "Categories", read: "products:read", write: "products:write" },
-  { value: "customer", label: "Customers", read: "customers:read", write: "customers:write" },
-  { value: "order", label: "Orders", read: "orders:read", write: "orders:write" },
+  { value: "product", label: "common.products", read: "products:read", write: "products:write" },
+  { value: "variant", label: "common.variants", read: "products:read", write: "products:write" },
+  { value: "category", label: "common.categories", read: "products:read", write: "products:write" },
+  {
+    value: "customer",
+    label: "common.customers",
+    read: "customers:read",
+    write: "customers:write",
+  },
+  { value: "order", label: "common.orders", read: "orders:read", write: "orders:write" },
 ];
 
 export function isOwnerType(value: string | undefined): value is OwnerType {
@@ -68,21 +78,23 @@ export type BaseType =
   | "reference"
   | "json";
 
-export const BASE_TYPES: { value: BaseType; label: string; description: string }[] = [
-  { value: "text", label: "Single line text", description: "Up to 255 characters." },
-  { value: "multiline_text", label: "Multi-line text", description: "Plain text, up to 16 KB." },
-  { value: "rich_text", label: "Rich text", description: "Formatted text (HTML)." },
-  { value: "integer", label: "Integer", description: "A whole number." },
-  { value: "decimal", label: "Decimal", description: "An exact number, like 12.50." },
-  { value: "boolean", label: "True or false", description: "A switch." },
-  { value: "date", label: "Date", description: "A day, like 2026-10-20." },
-  { value: "date_time", label: "Date and time", description: "A moment, stored in UTC." },
-  { value: "url", label: "URL", description: "A web, email or phone link." },
-  { value: "money", label: "Money", description: "An amount in a currency." },
-  { value: "measurement", label: "Measurement", description: "A weight, length or volume." },
-  { value: "choice", label: "Choice", description: "One of a fixed set of choices." },
-  { value: "reference", label: "Reference", description: "A product, category, customer…" },
-  { value: "json", label: "JSON", description: "Any JSON, for integrations." },
+/** The types in the order offered: `custom_fields.type_<type>` names each, with its
+ *  `…_description`. */
+export const BASE_TYPES: readonly BaseType[] = [
+  "text",
+  "multiline_text",
+  "rich_text",
+  "integer",
+  "decimal",
+  "boolean",
+  "date",
+  "date_time",
+  "url",
+  "money",
+  "measurement",
+  "choice",
+  "reference",
+  "json",
 ];
 
 /** Types that can't be listed. */
@@ -96,15 +108,14 @@ export function isListable(base: BaseType): boolean {
 export function parseType(type: string): { base: BaseType; isList: boolean } {
   const isList = type.startsWith("list.");
   const name = isList ? type.slice(5) : type;
-  const base = BASE_TYPES.find((t) => t.value === name)?.value ?? "json";
+  const base = BASE_TYPES.find((b) => b === name) ?? "json";
   return { base, isList };
 }
 
-/** "Single line text", "List of choices"… */
-export function typeLabel(type: string): string {
+/** "Single line text", "List: choice"… */
+export function typeLabel(t: FieldsT, type: string): string {
   const { base, isList } = parseType(type);
-  const label = BASE_TYPES.find((t) => t.value === base)?.label ?? type;
-  return isList ? `List: ${label.toLowerCase()}` : label;
+  return isList ? t(`custom_fields.list_type_${base}`) : t(`custom_fields.type_${base}`);
 }
 
 /** Which validations a type takes (`types.rs`' `allows`), lists adding their own. */
@@ -143,11 +154,7 @@ export function mayBeFilterable(type: string): boolean {
 
 export type Dimension = "weight" | "length" | "volume";
 
-export const DIMENSIONS: { value: Dimension; label: string }[] = [
-  { value: "weight", label: "Weight" },
-  { value: "length", label: "Length" },
-  { value: "volume", label: "Volume" },
-];
+export const DIMENSIONS: readonly Dimension[] = ["weight", "length", "volume"];
 
 export const UNITS: Record<Dimension, string[]> = {
   weight: ["g", "kg", "oz", "lb"],
@@ -169,22 +176,23 @@ export function scalarText(value: unknown): string {
     : "";
 }
 
+/** What a reference may point at, each with the message naming it. */
 export const REFERENCE_KINDS = [
-  { value: "product", label: "Product" },
-  { value: "variant", label: "Variant" },
-  { value: "category", label: "Category" },
-  { value: "customer", label: "Customer" },
-  { value: "asset", label: "Media file" },
-] as const;
+  { value: "product", label: "common.product" },
+  { value: "variant", label: "common.variant" },
+  { value: "category", label: "common.category" },
+  { value: "customer", label: "common.customer" },
+  { value: "asset", label: "custom_fields.reference_kind_asset" },
+] as const satisfies readonly { value: string; label: KeyIn<"common" | "custom_fields"> }[];
 
 export const URL_SCHEMES = ["https", "http", "mailto", "tel"];
 
 /** Who manages a definition: the merchant (`null`) or an app or spore by key. */
-export function managerLabel(definition: Definition): string | null {
+export function managerLabel(t: FieldsT, definition: Definition): string | null {
   const key = definition.managed_by;
   if (!key) return null;
-  if (key.startsWith("spore_")) return `Spore ${key.slice(6)}`;
-  if (key.startsWith("app_")) return `App ${key.slice(4)}`;
+  if (key.startsWith("spore_")) return t("custom_fields.manager_spore", { name: key.slice(6) });
+  if (key.startsWith("app_")) return t("custom_fields.manager_app", { name: key.slice(4) });
   return key;
 }
 
@@ -299,55 +307,66 @@ function parseItem(
   base: BaseType,
   text: string,
   currencies: Currencies,
+  t: FieldsT,
 ): Parsed {
-  const t = text.trim();
+  const typed = text.trim();
   switch (base) {
     case "integer": {
-      if (!/^-?\d+$/.test(t)) return { error: "Enter a whole number." };
-      const n = Number(t);
-      return Number.isSafeInteger(n) ? { value: n } : { error: "That number is too large." };
+      if (!/^-?\d+$/.test(typed)) return { error: t("custom_fields.value_integer") };
+      const n = Number(typed);
+      return Number.isSafeInteger(n) ? { value: n } : { error: t("custom_fields.value_too_large") };
     }
     case "decimal":
-      return /^-?\d+(\.\d+)?$/.test(t)
-        ? { value: t }
-        : { error: "Enter a number like 12.50 (a point for decimals)." };
+      return /^-?\d+(\.\d+)?$/.test(typed)
+        ? { value: typed }
+        : { error: t("custom_fields.value_decimal") };
     case "date":
-      return /^\d{4}-\d{2}-\d{2}$/.test(t)
-        ? { value: t }
-        : { error: "Enter a date like 2026-10-20." };
+      return /^\d{4}-\d{2}-\d{2}$/.test(typed)
+        ? { value: typed }
+        : { error: t("custom_fields.value_date") };
     case "date_time": {
-      const at = new Date(/[zZ]|[+-]\d\d:\d\d$/.test(t) ? t : `${t}Z`);
+      const at = new Date(/[zZ]|[+-]\d\d:\d\d$/.test(typed) ? typed : `${typed}Z`);
       return Number.isNaN(at.getTime())
-        ? { error: "Enter a date and time." }
+        ? { error: t("custom_fields.value_date_time") }
         : { value: at.toISOString().replace(".000Z", "Z") };
     }
     case "money": {
-      const match = /^(\S+)\s+([A-Za-z]{3})$/.exec(t);
-      if (!match) return { error: "Write each amount with its currency, like 12.50 EUR." };
+      const match = /^(\S+)\s+([A-Za-z]{3})$/.exec(typed);
+      if (!match) return { error: t("custom_fields.value_money_list") };
       const currency = match[2].toUpperCase();
-      if (currencies[currency] === undefined) return { error: `${currency} isn't a currency.` };
+      if (currencies[currency] === undefined) {
+        return { error: t("custom_fields.value_unknown_currency", { currency }) };
+      }
       const amount = parseMoney(match[1], currency, currencies);
       return amount === null
-        ? { error: `Enter the amount in ${currency} as a number, like 18.50.` }
+        ? { error: t("custom_fields.value_money", { currency }) }
         : { value: { amount, currency } };
     }
     case "measurement": {
-      const match = /^(-?\d+(?:\.\d+)?)\s*([a-z_]+)$/.exec(t);
+      const match = /^(-?\d+(?:\.\d+)?)\s*([a-z_]+)$/.exec(typed);
       const units = unitsOf(definition.validations.dimension);
       if (!match || !units.includes(match[2])) {
         return {
-          error: `Write each measurement with its unit (${units.join(", ")}), like 1.5 ${units[0]}.`,
+          error: t("custom_fields.value_measurement_list", {
+            // Unit codes, as they're typed.
+            units: units.join(", "),
+            unit: units[0],
+          }),
         };
       }
       return { value: { value: match[1], unit: match[2] } };
     }
     case "choice": {
       const choices = definition.validations.choices ?? [];
-      const found = choices.find((c) => c.key === t || c.label.toLowerCase() === t.toLowerCase());
-      return found ? { value: found.key } : { error: `"${t}" isn't one of the choices.` };
+      const found = choices.find(
+        (c) => c.key === typed || c.label.toLowerCase() === typed.toLowerCase(),
+      );
+      return found
+        ? { value: found.key }
+        : { error: t("custom_fields.value_not_a_choice", { value: typed }) };
     }
     default:
-      return { value: t };
+      return { value: typed };
   }
 }
 
@@ -355,7 +374,12 @@ function parseItem(
  * The JSON value an input stands for: `null` when it's empty (the field's value is then
  * removed), or what to fix. The API checks the field's own validations again.
  */
-export function valueOf(definition: Definition, input: FieldInput, currencies: Currencies): Parsed {
+export function valueOf(
+  definition: Definition,
+  input: FieldInput,
+  currencies: Currencies,
+  t: FieldsT,
+): Parsed {
   const { base } = parseType(definition.type);
   switch (input.kind) {
     case "boolean":
@@ -364,7 +388,7 @@ export function valueOf(definition: Definition, input: FieldInput, currencies: C
       const values: Json[] = [];
       for (const item of input.items) {
         if (item.trim() === "") continue;
-        const parsed = parseItem(definition, base, item, currencies);
+        const parsed = parseItem(definition, base, item, currencies, t);
         if ("error" in parsed) return parsed;
         values.push(parsed.value);
       }
@@ -374,7 +398,7 @@ export function valueOf(definition: Definition, input: FieldInput, currencies: C
       if (input.amount.trim() === "") return { value: null };
       const amount = parseMoney(input.amount, input.currency, currencies);
       if (amount === null) {
-        return { error: `Enter the amount in ${input.currency} as a number, like 18.50.` };
+        return { error: t("custom_fields.value_money", { currency: input.currency }) };
       }
       return { value: { amount, currency: input.currency } };
     }
@@ -382,7 +406,7 @@ export function valueOf(definition: Definition, input: FieldInput, currencies: C
       if (input.value.trim() === "") return { value: null };
       return /^-?\d+(\.\d+)?$/.test(input.value.trim())
         ? { value: { value: input.value.trim(), unit: input.unit } }
-        : { error: "Enter the measurement as a number, like 1.5." };
+        : { error: t("custom_fields.value_measurement") };
     }
     case "text": {
       if (base === "json") {
@@ -390,7 +414,7 @@ export function valueOf(definition: Definition, input: FieldInput, currencies: C
         try {
           return { value: JSON.parse(input.text) as Json };
         } catch {
-          return { error: "That isn't valid JSON." };
+          return { error: t("custom_fields.value_json") };
         }
       }
       // Text keeps what was typed (the API decides about blanks inside); empty removes.
@@ -398,7 +422,7 @@ export function valueOf(definition: Definition, input: FieldInput, currencies: C
       if (base === "text" || base === "multiline_text" || base === "rich_text") {
         return { value: input.text };
       }
-      return parseItem(definition, base, input.text, currencies);
+      return parseItem(definition, base, input.text, currencies, t);
     }
   }
 }
@@ -424,6 +448,7 @@ export function fieldsPatch(
   inputs: Record<string, FieldInput>,
   saved: FieldsResponse,
   currencies: Currencies,
+  t: FieldsT,
 ):
   | {
       patch: { custom_fields: Record<string, unknown>; if_versions: Record<string, number> } | null;
@@ -435,7 +460,7 @@ export function fieldsPatch(
   for (const definition of definitions) {
     const input = inputs[definition.field];
     if (!input) continue;
-    const parsed = valueOf(definition, input, currencies);
+    const parsed = valueOf(definition, input, currencies, t);
     if ("error" in parsed) {
       problems[definition.field] = parsed.error;
       continue;
@@ -455,11 +480,12 @@ export function fieldsChanged(
   inputs: Record<string, FieldInput>,
   saved: FieldsResponse,
   currencies: Currencies,
+  t: FieldsT,
 ): boolean {
   return definitions.some((definition) => {
     const input = inputs[definition.field];
     if (!input) return false;
-    const parsed = valueOf(definition, input, currencies);
+    const parsed = valueOf(definition, input, currencies, t);
     if ("error" in parsed) return true;
     return !same(parsed.value, (saved.custom_fields as Record<string, unknown>)[definition.field]);
   });
@@ -480,21 +506,32 @@ export function inputsOf(
 
 /**
  * The problems of a `422 custom_fields_invalid` by field key (`details`: `[{key, path,
- * code, message}]`), or of a `409 custom_field_stale` (`{key}`).
+ * code, message}]`), or of a `409 custom_field_stale` (`{key}`). The API's own messages
+ * are shown as they are; `t` says the admin's. Without one they're English: for callers
+ * that haven't a translator yet.
  */
-export function problemsOf(code: string | undefined, details: unknown): Record<string, string> {
+export function problemsOf(
+  code: string | undefined,
+  details: unknown,
+  t?: FieldsT,
+): Record<string, string> {
   const problems: Record<string, string> = {};
   if (code === "custom_fields_invalid" && Array.isArray(details)) {
     for (const item of details) {
       if (!isObject(item) || typeof item.key !== "string") continue;
-      const message = typeof item.message === "string" ? item.message : "isn't valid";
+      const message =
+        typeof item.message === "string"
+          ? `${item.message.charAt(0).toUpperCase()}${item.message.slice(1)}`
+          : (t?.("custom_fields.problem_not_valid") ?? "Isn't valid");
       const path = typeof item.path === "string" && item.path !== item.key ? `${item.path}: ` : "";
-      const text = `${path}${message.charAt(0).toUpperCase()}${message.slice(1)}`;
+      const text = `${path}${message}`;
       problems[item.key] = problems[item.key] ? `${problems[item.key]} ${text}` : text;
     }
   }
   if (code === "custom_field_stale" && isObject(details) && typeof details.key === "string") {
-    problems[details.key] = "Someone else changed this field meanwhile. Reload to see it.";
+    problems[details.key] =
+      t?.("custom_fields.problem_stale") ??
+      "Someone else changed this field meanwhile. Reload to see it.";
   }
   return problems;
 }

@@ -14,6 +14,7 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { useState } from "react";
 
 import { type ConditionsDraft, amountMarkets } from "@/lib/discounts/draft";
+import { useT } from "@/lib/use-t";
 
 import {
   AmountsByMarket,
@@ -50,6 +51,7 @@ export function ConditionsSection({
   /** Names of customers picked here, for the tokens and the summary. */
   onNames: (names: Record<string, string>) => void;
 }) {
+  const t = useT<"discounts">();
   const [isPicking, setIsPicking] = useState(false);
   const c = draft.conditions;
   const set = (change: Partial<ConditionsDraft>, field: string) =>
@@ -62,18 +64,17 @@ export function ConditionsSection({
       <VStack gap={4}>
         <VStack gap={1}>
           <Text type="display-3" as="h2">
-            Conditions
+            {t("discounts.conditions_title")}
           </Text>
           <Text type="supporting" color="secondary">
-            Leave a list empty for no limit. Every condition that&apos;s set must hold; within a
-            list, any one value is enough.
+            {t("discounts.conditions_hint")}
           </Text>
         </VStack>
 
         <MultiSelector
-          label="Markets"
-          description="Amounts are typed for these markets only."
-          placeholder="Every market"
+          label={t("common.markets")}
+          description={t("discounts.conditions_markets_hint")}
+          placeholder={t("discounts.conditions_markets_placeholder")}
           options={withUnknown(markets, c.markets)}
           value={c.markets}
           onChange={(chosen) => set({ markets: chosen }, "markets")}
@@ -83,8 +84,8 @@ export function ConditionsSection({
           width="100%"
         />
         <MultiSelector
-          label="Sales channels"
-          placeholder="Every channel"
+          label={t("discounts.conditions_channels")}
+          placeholder={t("discounts.conditions_channels_placeholder")}
           options={withUnknown(options.channels, c.channels)}
           value={c.channels}
           onChange={(chosen) => set({ channels: chosen }, "channels")}
@@ -94,9 +95,9 @@ export function ConditionsSection({
         />
         {groups.length > 0 && (
           <MultiSelector
-            label="Customer groups"
-            description="Only signed-in customers in one of them."
-            placeholder="Everyone"
+            label={t("discounts.conditions_groups")}
+            description={t("discounts.conditions_groups_hint")}
+            placeholder={t("discounts.conditions_groups_placeholder")}
             options={groups}
             value={c.customerGroups}
             onChange={(chosen) => set({ customerGroups: chosen }, "customerGroups")}
@@ -107,10 +108,10 @@ export function ConditionsSection({
           />
         )}
         <VStack gap={2} hAlign="start">
-          <Text weight="medium">Customers</Text>
+          <Text weight="medium">{t("common.customers")}</Text>
           {c.customers.length === 0 && (
             <Text type="supporting" color="secondary">
-              Anyone. Name customers to make it only theirs.
+              {t("discounts.conditions_customers_anyone")}
             </Text>
           )}
           <FieldError message={errors["conditions.customers"]} />
@@ -125,7 +126,7 @@ export function ConditionsSection({
           />
           {!isReadOnly && (
             <Button
-              label="Choose customers"
+              label={t("discounts.conditions_choose_customers")}
               variant="secondary"
               onClick={() => setIsPicking(true)}
             />
@@ -133,7 +134,7 @@ export function ConditionsSection({
           {isPicking && (
             <SearchPicker
               source="customers"
-              title="Customers it's for"
+              title={t("discounts.conditions_customers_picker")}
               chosen={c.customers}
               onConfirm={(picked) => {
                 onNames(Object.fromEntries(picked.map((p) => [p.id, p.label])));
@@ -145,7 +146,7 @@ export function ConditionsSection({
           )}
         </VStack>
         <Switch
-          label="Signed-in customers only"
+          label={t("discounts.conditions_signed_in")}
           value={c.signedIn}
           onChange={(signedIn) => set({ signedIn }, "signedIn")}
           isDisabled={isReadOnly}
@@ -153,16 +154,16 @@ export function ConditionsSection({
 
         <Divider />
         <Switch
-          label="Minimum subtotal"
-          description="Of the items it applies to, after product discounts."
+          label={t("discounts.conditions_min_subtotal")}
+          description={t("discounts.conditions_min_subtotal_hint")}
           value={c.minSubtotal.enabled}
           onChange={(enabled) => set({ minSubtotal: { ...c.minSubtotal, enabled } }, "minSubtotal")}
           isDisabled={isReadOnly}
         />
         {c.minSubtotal.enabled && (
           <AmountsByMarket
-            label="At least"
-            placeholder="No minimum"
+            label={t("discounts.conditions_at_least")}
+            placeholder={t("discounts.conditions_no_minimum")}
             amounts={c.minSubtotal.amounts}
             markets={amountMarkets(c, options.markets)}
             path="conditions.minSubtotal.amounts"
@@ -174,15 +175,15 @@ export function ConditionsSection({
           />
         )}
         <Switch
-          label="Minimum quantity"
-          description="Of the items it applies to."
+          label={t("discounts.conditions_min_quantity")}
+          description={t("discounts.conditions_min_quantity_hint")}
           value={c.minQuantity.enabled}
           onChange={(enabled) => set({ minQuantity: { ...c.minQuantity, enabled } }, "minQuantity")}
           isDisabled={isReadOnly}
         />
         {c.minQuantity.enabled && (
           <TextInput
-            label="At least"
+            label={t("discounts.conditions_at_least_quantity")}
             value={c.minQuantity.quantity}
             onChange={(quantity) =>
               set({ minQuantity: { ...c.minQuantity, quantity } }, "minQuantity.quantity")

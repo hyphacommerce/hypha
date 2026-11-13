@@ -12,6 +12,7 @@ import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { useEffect, useState, useTransition } from "react";
 
 import { type Definition, type FieldsResponse, isWritable } from "@/lib/custom-fields";
+import { useT } from "@/lib/use-t";
 
 import { loadCustomFields } from "./actions";
 import { useCustomFields } from "./custom-fields-card";
@@ -30,14 +31,15 @@ export function VariantFieldsCell({
   definitions: Definition[];
   scopes: readonly string[] | null;
 }) {
+  const t = useT<"custom_fields">();
   const [isOpen, setIsOpen] = useState(false);
   return (
     <>
       <Button
-        label="Fields"
+        label={t("custom_fields.variant_button")}
         size="sm"
         variant="ghost"
-        tooltip={`Custom fields of ${title}`}
+        tooltip={t("custom_fields.variant_tooltip", { title })}
         onClick={() => setIsOpen(true)}
       />
       {isOpen && (
@@ -69,6 +71,7 @@ function VariantFieldsDialog({
   scopes: readonly string[] | null;
   onClose: () => void;
 }) {
+  const t = useT<"custom_fields">();
   const [fields, setFields] = useState<FieldsResponse>();
   const [error, setError] = useState<string>();
   const [, startLoading] = useTransition();
@@ -84,8 +87,8 @@ function VariantFieldsDialog({
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={560} purpose="form">
       <DialogHeader
-        title={`Custom fields of ${title}`}
-        subtitle="Saved at once, apart from the product's other changes."
+        title={t("custom_fields.variant_dialog_title", { title })}
+        subtitle={t("custom_fields.variant_dialog_subtitle")}
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       {/* Many fields scroll on short screens; a flex item keeps its content's height
@@ -126,6 +129,7 @@ function VariantFieldsForm({
   fields: FieldsResponse;
   onClose: () => void;
 }) {
+  const t = useT<"custom_fields">();
   const state = useCustomFields({
     ownerType: "variant",
     ownerId: variantId,
@@ -146,10 +150,10 @@ function VariantFieldsForm({
         redacted={state.saved.redacted ?? undefined}
       />
       <HStack gap={2} hAlign="end">
-        <Button label="Cancel" variant="ghost" onClick={onClose} />
+        <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
         {definitions.some(writable) && (
           <Button
-            label="Save fields"
+            label={t("custom_fields.variant_save")}
             variant="primary"
             isLoading={state.isPending}
             isDisabled={!state.isDirty}

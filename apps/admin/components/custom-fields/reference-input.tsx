@@ -11,6 +11,7 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { useEffect, useState, useTransition } from "react";
 
 import { ProductPicker } from "@/components/product-picker";
+import { useT } from "@/lib/use-t";
 
 import { categoryOptions, lookupReference } from "./actions";
 
@@ -50,6 +51,7 @@ export function ReferenceInput({
   isDisabled?: boolean;
   error?: string;
 }) {
+  const t = useT<"custom_fields">();
   const [isPicking, setIsPicking] = useState(false);
   const [named, setNamed] = useState<{ id: string; label?: string; error?: string }>();
   const [isLooking, startLooking] = useTransition();
@@ -69,7 +71,7 @@ export function ReferenceInput({
         label={label}
         description={description}
         isOptional
-        placeholder="No category"
+        placeholder={t("custom_fields.reference_no_category")}
         options={categories}
         value={value || null}
         hasClear
@@ -98,17 +100,26 @@ export function ReferenceInput({
           onEnter={id ? lookUp : undefined}
         />
         {kind === "product" && !isDisabled && (
-          <Button label="Pick" variant="secondary" onClick={() => setIsPicking(true)} />
+          <Button
+            label={t("custom_fields.reference_pick")}
+            variant="secondary"
+            onClick={() => setIsPicking(true)}
+          />
         )}
         {id !== "" && (
-          <Button label="Look up" variant="ghost" isLoading={isLooking} onClick={lookUp} />
+          <Button
+            label={t("custom_fields.reference_look_up")}
+            variant="ghost"
+            isLoading={isLooking}
+            onClick={lookUp}
+          />
         )}
       </HStack>
       {isPicking && (
         <ProductPicker
-          title={`Pick a product for ${label}`}
+          title={t("custom_fields.reference_pick_title", { field: label })}
           mode="single"
-          confirmLabel={() => "Use this product"}
+          confirmLabel={() => t("custom_fields.reference_use_product")}
           onConfirm={async ([product]) => {
             if (product) {
               onChange(product.id);
@@ -131,14 +142,15 @@ export function ReferenceListPicker({
   kind: string;
   onPick: (ids: string[]) => void;
 }) {
+  const t = useT<"custom_fields">();
   const [isPicking, setIsPicking] = useState(false);
   const categories = useCategories(kind === "category");
   if (kind === "category") {
     return categories ? (
       <Selector
-        label="Add a category"
+        label={t("custom_fields.reference_add_category")}
         isLabelHidden
-        placeholder="Add a category"
+        placeholder={t("custom_fields.reference_add_category")}
         options={categories}
         hasSearch
         size="sm"
@@ -151,7 +163,7 @@ export function ReferenceListPicker({
     <>
       <HStack>
         <Button
-          label="Pick products"
+          label={t("custom_fields.reference_pick_products")}
           size="sm"
           variant="secondary"
           onClick={() => setIsPicking(true)}
@@ -159,7 +171,7 @@ export function ReferenceListPicker({
       </HStack>
       {isPicking && (
         <ProductPicker
-          title="Pick products"
+          title={t("custom_fields.reference_pick_products_title")}
           onConfirm={async (products) => {
             onPick(products.map((p) => p.id));
             setIsPicking(false);

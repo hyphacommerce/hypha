@@ -7,11 +7,10 @@ import { type SearchParams, one } from "@/components/resource-table/params";
 import { FormSkeleton } from "@/components/skeletons";
 import { templateOf } from "@/lib/discounts/templates";
 import { sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 
 import { loadLive, loadOptions } from "../data";
 import { NewDiscount } from "../discount-editor";
-
-const BACK = [{ label: "Discounts", href: "/discounts" }];
 
 /**
  * A new discount: a template (`?template=` picks one), then the form. The header
@@ -22,14 +21,14 @@ export default async function NewDiscountPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const params = await searchParams;
+  const [params, t] = await Promise.all([searchParams, getT()]);
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={1320}>
         <PageHeader
-          title="Create discount"
-          description="Start from what it does; every setting can be changed in the form."
-          back={BACK}
+          title={t("discounts.new_title")}
+          description={t("discounts.new_description")}
+          back={[{ label: t("discounts.title"), href: "/discounts" }]}
         />
         <Suspense fallback={<FormSkeleton cards={4} />}>
           <Form template={one(params, "template")} />

@@ -26,6 +26,7 @@ import {
   segments,
   withDiscountMarkets,
 } from "./wire.ts";
+import { t } from "./testing.ts";
 
 const ctx: CheckContext = {
   markets: [
@@ -34,6 +35,7 @@ const ctx: CheckContext = {
   ],
   currencies: { EUR: 2, JPY: 0 },
   timeZone: "Europe/Dublin",
+  t,
 };
 
 const eur = (amount: number) => ({ amount, currency: "EUR" });
@@ -811,6 +813,7 @@ test("invalid_discount's problems land on their fields, the rest on the form", (
       },
     },
     d,
+    t,
   );
   assert.deepEqual(problems, [
     { path: "kind.order.value.percent", message: "1 to 10000 basis points." },
@@ -830,6 +833,7 @@ test("a market an amount names is the amount's field", () => {
         details: { path: "conditions[0].amounts", market: "mkt_x" },
       },
       d,
+      t,
     ).map((p) => p.path),
     ["conditions.minSubtotal.amounts.mkt_x"],
   );
@@ -840,13 +844,14 @@ test("a taken code is the code's field, naming it", () => {
     refusalProblems(
       { code: "discount_code_taken", message: "", details: { code: "WELCOME10" } },
       draft(),
+      t,
     ),
     [{ path: "code", message: "Another discount has the code WELCOME10." }],
   );
 });
 
 test("anything else is the whole form's, in the person's words", () => {
-  assert.deepEqual(refusalProblems({ code: "missing_scope", message: "You can't." }, draft()), [
+  assert.deepEqual(refusalProblems({ code: "missing_scope", message: "You can't." }, draft(), t), [
     { path: "", message: "You can't." },
   ]);
 });
