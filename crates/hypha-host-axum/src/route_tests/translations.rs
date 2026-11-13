@@ -636,10 +636,22 @@ async fn a_definition_shoppers_never_read_has_nothing_to_translate() {
         "/admin/translations/custom_field_definition/{}",
         definition["id"].as_str().unwrap()
     );
-    // Staff-only: the admin shows its source, so nothing of it is translated.
+    // Staff-only: the admin shows its source, so nothing of it is translated, and the
+    // worklist has nothing of it to do.
     let (status, view) = send(&app, "GET", &path, None).await;
     assert_eq!(status, StatusCode::OK, "{view}");
     assert!(keys(&view).is_empty(), "{view}");
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    let id = definition["id"].as_str().unwrap();
+    let to_do = async || {
+        let page = worklist(
+            &app,
+            "kind=custom_field_definition&language=de&state=missing",
+        )
+        .await;
+        ids(&page).iter().map(|i| i.to_string()).collect::<Vec<_>>()
+    };
+    assert_eq!(to_do().await, Vec::<String>::new());
 
     // Shown on the storefront, it has its fields.
     let (status, body) = send(
@@ -653,6 +665,20 @@ async fn a_definition_shoppers_never_read_has_nothing_to_translate() {
     let (status, view) = send(&app, "GET", &path, None).await;
     assert_eq!(status, StatusCode::OK, "{view}");
     assert_eq!(keys(&view), ["name", "description"]);
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    assert_eq!(to_do().await, [id]);
+
+    // Staff-only again, it leaves the worklist.
+    let (status, body) = send(
+        &app,
+        "PATCH",
+        &uri,
+        Some(r#"{"access":{"admin":"read_write","storefront":"none"}}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    assert_eq!(to_do().await, Vec::<String>::new());
 }
 
 #[tokio::test]
