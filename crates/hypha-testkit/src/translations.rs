@@ -276,6 +276,11 @@ impl TranslationSourceRepo for InMemoryTranslations {
         self.queue(&resources).await
     }
 
+    async fn pending(&self, kinds: &[ResourceKind]) -> Result<u64, RepoError> {
+        let queue = self.queue.lock().unwrap();
+        Ok(queue.keys().filter(|r| kinds.contains(&r.kind)).count() as u64)
+    }
+
     async fn queued(&self, limit: u32) -> Result<Vec<QueuedSource>, RepoError> {
         let mut queued: Vec<QueuedSource> = self
             .queue

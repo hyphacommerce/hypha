@@ -684,6 +684,22 @@ impl<C: PgConnection> TranslationSourceRepo for PgStore<C> {
         Ok(())
     }
 
+    async fn pending(&self, kinds: &[ResourceKind]) -> Result<u64, RepoError> {
+        let kinds: Vec<&str> = kinds.iter().map(|k| k.as_str()).collect();
+        let mut conn = self.conn().await;
+        // Counted from the key's index, which leads with the kind.
+        let row = conn
+            .db()
+            .query_typed_one(
+                "SELECT count(*) AS n FROM translation_source_queue
+                 WHERE resource_kind = ANY($1::text[])",
+                &[(&kinds, Type::TEXT_ARRAY)],
+            )
+            .await
+            .map_err(repo_error)?;
+        total(&row, "n")
+    }
+
     async fn queued(&self, limit: u32) -> Result<Vec<QueuedSource>, RepoError> {
         let limit = i64::from(limit);
         let mut conn = self.conn().await;

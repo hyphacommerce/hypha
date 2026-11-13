@@ -644,6 +644,10 @@ pub struct TranslationProgressResponse {
     default_language: Language,
     /// Each of the store's other languages, published or not, in the store's order.
     languages: Vec<LanguageProgressResponse>,
+    /// Resources of the kinds counted whose text is yet to be read: until it's 0 the
+    /// totals are short of the store's text (after an upgrade, while the job counts every
+    /// resource once). 0 when everything is counted.
+    pending: u64,
 }
 
 #[derive(Deserialize, utoipa::IntoParams)]
@@ -683,7 +687,9 @@ pub async fn progress<S: Storage>(
     let counted = translation_progress(&ctx, &ports, kind, &languages.others).await?;
     Ok(Json(TranslationProgressResponse {
         default_language: languages.default,
+        pending: counted.pending,
         languages: counted
+            .languages
             .into_iter()
             .map(|p| LanguageProgressResponse {
                 missing: p.missing(),

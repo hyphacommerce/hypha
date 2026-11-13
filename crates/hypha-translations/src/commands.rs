@@ -13,7 +13,7 @@ use crate::{
     },
     source::Source,
     translation::{FieldInput, Translation},
-    worklist::{LanguageProgress, TranslationState, WorkItem, WorklistFilter, source_digests},
+    worklist::{TranslationProgress, TranslationState, WorkItem, WorklistFilter, source_digests},
 };
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -124,15 +124,20 @@ pub async fn translation_worklist<S: HasTranslations>(
 }
 
 /// How far each of `languages` covers the text of the kinds the caller may read (`kind`
-/// alone, or every kind whose resources they read), in fields.
+/// alone, or every kind whose resources they read), in fields, and how many of those
+/// kinds' resources are yet to be counted.
 pub async fn translation_progress<S: HasTranslations>(
     ctx: &Ctx,
     ports: &S,
     kind: Option<ResourceKind>,
     languages: &[Language],
-) -> Result<Vec<LanguageProgress>, CommandError> {
+) -> Result<TranslationProgress, CommandError> {
     let kinds = readable_kinds(ctx, kind)?;
-    Ok(ports.translations().progress(&kinds, languages).await?)
+    let repo = ports.translations();
+    Ok(TranslationProgress {
+        languages: repo.progress(&kinds, languages).await?,
+        pending: repo.pending(&kinds).await?,
+    })
 }
 
 /// Writes `resource`'s digests from `source`, the resource as the host read it now
