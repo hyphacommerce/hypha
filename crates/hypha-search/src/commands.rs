@@ -200,7 +200,8 @@ pub async fn search<
     };
     let mut results = index.search(&query).await?;
     // Found nothing: the market may have no documents in the language yet. Asked only
-    // then, so a search that finds something is one round trip.
+    // then, so a search that finds something is one round trip; an engine searching an
+    // index of its own (a search app) says it has them.
     if results.total == 0
         && !others.is_empty()
         && !index.has_documents(market.id(), &query.language).await?

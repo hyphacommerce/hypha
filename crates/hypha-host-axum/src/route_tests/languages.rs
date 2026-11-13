@@ -719,3 +719,44 @@ async fn a_store_with_one_language_searches_as_it_did() {
     let (_, status) = send(&app, "GET", "/admin/search/status", None).await;
     assert_eq!(status["documents"], 1, "{status}");
 }
+
+#[tokio::test]
+async fn a_search_app_is_asked_in_the_language_asked_for_before_its_documents_are_built() {
+    let app = app().await;
+    languages(&app, &[("de", true)]).await;
+    let (mug, _) = sized_mug(&app).await;
+    translate(&app, "product", &mug, "de", &[("title", "Tasse")]).await;
+    super::settle_search(&app).await;
+    // Croatia offers German from now on: the built-in index has no German documents yet,
+    // but the app keeps an index of its own.
+    market_offers(&app, &["en", "de"]).await;
+    let (base, answers, saw) = fake_app(&[(
+        "/search",
+        200,
+        json!({"hits": [{"product": mug}], "total": 1}),
+    )])
+    .await;
+    app_answering(&app, "app_find", &base, &[("search.query", "/search")]).await;
+    let patch = r#"{"search_app":"app_find"}"#;
+    let (status, json) = send(&app, "PATCH", "/admin/search/settings", Some(patch)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let pk = publishable(&app).await;
+    let search = "/storefront/search?country=HR&language=de&q=tasse";
+
+    let (language, found) = read_ok(&app, &pk, search).await;
+    assert_eq!(language, "de");
+    assert_eq!(found["items"][0]["title"], "Tasse", "{found}");
+    // The app finding nothing is its answer: no other language is searched.
+    answers.lock().unwrap().insert(
+        "/search".to_string(),
+        (200, json!({"hits": [], "total": 0})),
+    );
+    let (language, found) = read_ok(&app, &pk, search).await;
+    assert_eq!((language.as_str(), &found["total"]), ("de", &json!(0)));
+    let saw = saw.lock().unwrap();
+    let sent: Vec<&Value> = saw
+        .iter()
+        .map(|(_, _, _, body)| &body["language"])
+        .collect();
+    assert_eq!(sent, [&json!("de"), &json!("de")]);
+}

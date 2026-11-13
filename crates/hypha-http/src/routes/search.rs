@@ -273,6 +273,7 @@ pub async fn storefront_search<S: Storage>(
         endpoints: state.app_endpoints(&ports),
         caller: state.extensions(),
         env: &state.env,
+        answered: Default::default(),
     };
     // The language a product read in the same market would answer in, then the market's
     // others, for while it has no documents yet.
