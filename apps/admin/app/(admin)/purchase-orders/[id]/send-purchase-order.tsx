@@ -13,7 +13,9 @@ import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { useState, useTransition } from "react";
 
+import type { TFor } from "@/lib/messages";
 import { type PurchaseOrder, poNumber } from "@/lib/purchasing";
+import { useT } from "@/lib/use-t";
 
 import { sendPurchaseOrder } from "../actions";
 
@@ -32,18 +34,19 @@ function addresses(text: string): string[] {
  * "Send to supplier" for one never sent (a draft is ordered too), "Send again" for one
  * sent as it is, "Send updated PO" once it was edited past the revision sent.
  */
-function sendLabel(po: PurchaseOrder): string {
-  if (po.status === "draft" || po.sent_revision == null) return "Send to supplier";
-  return po.revision > po.sent_revision ? "Send updated PO" : "Send again";
+function sendLabel(t: TFor<"purchasing">, po: PurchaseOrder): string {
+  if (po.status === "draft" || po.sent_revision == null) return t("purchasing.send_to_supplier");
+  return po.revision > po.sent_revision ? t("purchasing.send_updated") : t("purchasing.send_again");
 }
 
 export function SendButton({ po, contacts }: { po: PurchaseOrder; contacts: Recipient[] }) {
+  const t = useT<"purchasing">();
   const [isOpen, setIsOpen] = useState(false);
   if (po.status !== "draft" && po.status !== "ordered") return null;
   return (
     <>
       <Button
-        label={sendLabel(po)}
+        label={sendLabel(t, po)}
         variant={po.status === "draft" ? "primary" : "secondary"}
         onClick={() => setIsOpen(true)}
       />
@@ -61,6 +64,7 @@ function SendDialog({
   contacts: Recipient[];
   onClose: () => void;
 }) {
+  const t = useT<"purchasing">();
   const primary = contacts.find((c) => c.primary) ?? contacts[0];
   const [to, setTo] = useState(primary?.email ?? "");
   const [copied, setCopied] = useState<string[]>([]);
@@ -85,25 +89,23 @@ function SendDialog({
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={560} purpose="form">
       <DialogHeader
-        title={`Send ${poNumber(po.number)}`}
+        title={t("purchasing.send_dialog_title", { number: poNumber(po.number) })}
         subtitle={
           po.status === "draft"
-            ? "It's marked as ordered and emailed to the supplier."
+            ? t("purchasing.send_subtitle_draft")
             : po.sent_revision == null
-              ? "The order is emailed to the supplier as it is now."
+              ? t("purchasing.send_subtitle_first")
               : po.revision > po.sent_revision
-                ? `Revision ${po.revision} is emailed: what the order says now.`
-                : "The order is emailed again as it is now."
+                ? t("purchasing.send_subtitle_revision", { revision: po.revision })
+                : t("purchasing.send_subtitle_again")
         }
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
         <TextInput
-          label="To"
-          description={
-            primary ? undefined : "The supplier has no contact with an email: type an address."
-          }
+          label={t("purchasing.send_to")}
+          description={primary ? undefined : t("purchasing.send_to_no_contact")}
           value={to}
           onChange={setTo}
           isRequired
@@ -111,7 +113,7 @@ function SendDialog({
         {others.length > 0 && (
           <VStack gap={1}>
             <Text type="supporting" color="secondary">
-              Copy in
+              {t("purchasing.send_copy_in")}
             </Text>
             {others.map((c) => (
               <CheckboxInput
@@ -126,22 +128,22 @@ function SendDialog({
           </VStack>
         )}
         <TextInput
-          label="Also copy"
-          description="Other addresses, separated by commas."
+          label={t("purchasing.send_also_copy")}
+          description={t("purchasing.send_also_copy_description")}
           value={extra}
           onChange={setExtra}
         />
         <TextArea
-          label="Message"
-          description="Shown above the order in this email."
+          label={t("purchasing.send_message")}
+          description={t("purchasing.send_message_description")}
           value={message}
           onChange={setMessage}
           maxLength={2000}
         />
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label="Send"
+            label={t("common.send")}
             variant="primary"
             isLoading={isPending}
             isDisabled={recipients.length === 0}

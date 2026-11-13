@@ -11,6 +11,7 @@ import { useState, useTransition } from "react";
 
 import { useCurrencies } from "@/components/currencies";
 import { parseUnitCost, unitCostInput } from "@/lib/format";
+import { useT } from "@/lib/use-t";
 
 import { setUnitCost } from "../actions";
 
@@ -28,6 +29,7 @@ export function SetCost({
   /** The store's base currency. */
   currency: string;
 }) {
+  const t = useT<"inventory">();
   const currencies = useCurrencies();
   const initial = cost ? unitCostInput(cost, currencies) : "";
   const [isOpen, setIsOpen] = useState(false);
@@ -59,28 +61,28 @@ export function SetCost({
   return (
     <>
       <Button
-        label={cost ? "Change cost" : "Set cost"}
+        label={cost ? t("inventory.cost_change") : t("inventory.cost_set")}
         variant="secondary"
         onClick={() => setIsOpen(true)}
       />
       <Dialog isOpen={isOpen} onOpenChange={(open) => !open && close()} width={440} purpose="form">
         <DialogHeader
-          title="Unit cost"
-          subtitle="What one unit cost you. Receiving a purchase order updates it as goods arrive."
+          title={t("inventory.unit_cost")}
+          subtitle={t("inventory.cost_dialog_subtitle")}
           onOpenChange={(open) => !open && close()}
         />
         <VStack gap={4} padding={4}>
           {error && <Banner status="error" title={error} />}
           <TextInput
-            label={`Cost per unit (${currency})`}
-            description="Up to 4 decimals past the cent: 0.0035 for a part bought by the thousand. Blank clears it."
+            label={t("inventory.cost_per_unit", { currency })}
+            description={t("inventory.cost_per_unit_description")}
             value={amount}
             onChange={setAmount}
-            status={isValid ? undefined : { type: "error", message: "An amount like 4.125" }}
+            status={isValid ? undefined : { type: "error", message: t("inventory.cost_invalid") }}
             width={200}
           />
           <TextArea
-            label="Note"
+            label={t("common.note")}
             isOptional
             maxLength={500}
             rows={2}
@@ -88,9 +90,9 @@ export function SetCost({
             onChange={setNote}
           />
           <HStack gap={2} hAlign="end">
-            <Button label="Cancel" variant="ghost" onClick={close} />
+            <Button label={t("common.cancel")} variant="ghost" onClick={close} />
             <Button
-              label="Save"
+              label={t("common.save")}
               variant="primary"
               isLoading={isPending}
               isDisabled={!isValid}

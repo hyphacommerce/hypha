@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { describe, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 
 export type Result = { error?: string };
 
@@ -14,7 +15,10 @@ export async function createPurchaseOrder(
 ): Promise<Result> {
   const client = await sessionClient();
   const { data, error } = await client.POST("/admin/purchase-orders", { body: input });
-  if (!data) return { error: error ? await describe(error) : "Couldn't write the purchase order." };
+  if (!data) {
+    const t = await getT();
+    return { error: error ? await describe(error) : t("purchasing.create_failed") };
+  }
   revalidatePath("/purchase-orders");
   redirect(`/purchase-orders/${data.id}`);
 }
@@ -115,7 +119,10 @@ export async function receivePurchaseOrder(
       note: input.note.trim() || null,
     },
   });
-  if (!data) return { error: error ? await describe(error) : "Couldn't record the receipt." };
+  if (!data) {
+    const t = await getT();
+    return { error: error ? await describe(error) : t("purchasing.receive_failed") };
+  }
   revalidatePath(`/purchase-orders/${id}`);
   revalidatePath("/purchase-orders");
   return { newItems: data.new_items };

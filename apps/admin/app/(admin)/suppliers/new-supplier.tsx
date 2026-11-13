@@ -11,6 +11,8 @@ import { useState, useTransition } from "react";
 import { useCurrencies } from "@/components/currencies";
 import { currencyCodes } from "@/lib/format";
 import { currencyOptions } from "@/lib/regions";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { createSupplier } from "./actions";
 
@@ -19,6 +21,8 @@ import { createSupplier } from "./actions";
  * (contacts, terms, catalogue).
  */
 export function NewSupplier({ currency: storeCurrency }: { currency: string | null }) {
+  const t = useT<"suppliers">();
+  const format = useFormat();
   const currencies = useCurrencies();
   const [isOpen, setIsOpen] = useState(false);
   const [name, setName] = useState("");
@@ -41,29 +45,38 @@ export function NewSupplier({ currency: storeCurrency }: { currency: string | nu
   };
   return (
     <>
-      <Button label="Add supplier" variant="primary" onClick={() => setIsOpen(true)} />
+      <Button
+        label={t("suppliers.add_supplier")}
+        variant="primary"
+        onClick={() => setIsOpen(true)}
+      />
       <Dialog isOpen={isOpen} onOpenChange={(open) => !open && close()} width={440} purpose="form">
         <DialogHeader
-          title="Add supplier"
-          subtitle="Contacts, payment terms and what they sell come next, on its page."
+          title={t("suppliers.add_supplier")}
+          subtitle={t("suppliers.new_subtitle")}
           onOpenChange={(open) => !open && close()}
         />
         <VStack gap={4} padding={4}>
           {error && <Banner status="error" title={error} />}
-          <TextInput label="Name" value={name} onChange={setName} placeholder="Spore Labs" />
+          <TextInput
+            label={t("common.name")}
+            value={name}
+            onChange={setName}
+            placeholder={t("suppliers.new_name_placeholder")}
+          />
           <Selector
-            label="Currency"
-            description="What they invoice in: their purchase orders and prices default to it."
-            options={currencyOptions(currencyCodes(currencies))}
+            label={t("common.currency")}
+            description={t("suppliers.new_currency_description")}
+            options={currencyOptions(currencyCodes(currencies), format.locale)}
             value={currency || undefined}
             onChange={setCurrency}
-            placeholder="Choose a currency"
+            placeholder={t("suppliers.choose_currency")}
             hasSearch
           />
           <HStack gap={2} hAlign="end">
-            <Button label="Cancel" variant="ghost" onClick={close} />
+            <Button label={t("common.cancel")} variant="ghost" onClick={close} />
             <Button
-              label="Add supplier"
+              label={t("suppliers.add_supplier")}
               variant="primary"
               isLoading={isPending}
               isDisabled={!canSave}

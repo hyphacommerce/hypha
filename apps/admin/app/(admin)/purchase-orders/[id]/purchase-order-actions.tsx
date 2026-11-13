@@ -7,35 +7,18 @@ import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { useState, useTransition } from "react";
 
 import { type PurchaseOrder, poNumber } from "@/lib/purchasing";
+import { useT } from "@/lib/use-t";
 
 import { deletePurchaseOrder, movePurchaseOrder } from "../actions";
 
 type Confirm = "close" | "cancel" | "delete";
-
-const CONFIRMS: Record<Confirm, { title: string; description: string; action: string }> = {
-  close: {
-    title: "Close this purchase order?",
-    description:
-      "What hasn't arrived is cancelled: nothing more is expected. Received goods stay received, and carry the extra costs between them.",
-    action: "Close",
-  },
-  cancel: {
-    title: "Cancel this purchase order?",
-    description: "Nothing arrived on it: the supplier owes nothing, and it can't be ordered again.",
-    action: "Cancel order",
-  },
-  delete: {
-    title: "Delete this draft?",
-    description: "It was never ordered, so it's removed for good.",
-    action: "Delete",
-  },
-};
 
 /**
  * What can happen to a purchase order next, by its status: a draft is ordered, cancelled
  * or deleted; an ordered one closed or (with nothing received) cancelled.
  */
 export function PurchaseOrderActions({ po }: { po: PurchaseOrder }) {
+  const t = useT<"purchasing">();
   const [confirm, setConfirm] = useState<Confirm>();
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -49,10 +32,14 @@ export function PurchaseOrderActions({ po }: { po: PurchaseOrder }) {
   const buttons =
     po.status === "draft" ? (
       <>
-        <Button label="Delete" variant="ghost" onClick={() => setConfirm("delete")} />
-        <Button label="Cancel" variant="secondary" onClick={() => setConfirm("cancel")} />
+        <Button label={t("common.delete")} variant="ghost" onClick={() => setConfirm("delete")} />
         <Button
-          label="Mark as ordered"
+          label={t("purchasing.action_cancel")}
+          variant="secondary"
+          onClick={() => setConfirm("cancel")}
+        />
+        <Button
+          label={t("purchasing.action_mark_ordered")}
           variant="primary"
           isLoading={isPending && !confirm}
           onClick={() => run(() => movePurchaseOrder(po.id, "order"))}
@@ -61,13 +48,26 @@ export function PurchaseOrderActions({ po }: { po: PurchaseOrder }) {
     ) : po.status === "ordered" ? (
       <>
         {!arrived && (
-          <Button label="Cancel" variant="secondary" onClick={() => setConfirm("cancel")} />
+          <Button
+            label={t("purchasing.action_cancel")}
+            variant="secondary"
+            onClick={() => setConfirm("cancel")}
+          />
         )}
-        <Button label="Close" variant="secondary" onClick={() => setConfirm("close")} />
+        <Button
+          label={t("purchasing.action_close")}
+          variant="secondary"
+          onClick={() => setConfirm("close")}
+        />
       </>
     ) : null;
   if (!buttons) return null;
-  const text = confirm && CONFIRMS[confirm];
+  const number = poNumber(po.number);
+  const actions = {
+    close: t("purchasing.action_close"),
+    cancel: t("purchasing.confirm_cancel_action"),
+    delete: t("common.delete"),
+  };
   return (
     <VStack gap={2}>
       {error && <Banner status="error" title={error} />}
@@ -77,9 +77,9 @@ export function PurchaseOrderActions({ po }: { po: PurchaseOrder }) {
       <AlertDialog
         isOpen={confirm !== undefined}
         onOpenChange={(open) => !open && setConfirm(undefined)}
-        title={text ? text.title : ""}
-        description={text ? `${poNumber(po.number)}: ${text.description}` : ""}
-        actionLabel={text?.action ?? ""}
+        title={confirm ? t(`purchasing.confirm_${confirm}_title`) : ""}
+        description={confirm ? t(`purchasing.confirm_${confirm}_description`, { number }) : ""}
+        actionLabel={confirm ? actions[confirm] : ""}
         isActionLoading={isPending}
         onAction={() =>
           run(() =>

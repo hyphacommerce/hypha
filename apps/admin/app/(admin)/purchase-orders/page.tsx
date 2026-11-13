@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import { type SearchParams, one } from "@/components/resource-table/params";
 import { listPage, pageQuery } from "@/components/resource-table/server";
 import { locationNames, requireStaff, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import { hasScope } from "@/lib/navigation";
 
 import { NewPurchaseOrder } from "./new-purchase-order";
@@ -29,14 +30,14 @@ export default async function PurchaseOrdersPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const [params, me] = await Promise.all([searchParams, requireStaff()]);
+  const [params, me, t] = await Promise.all([searchParams, requireStaff(), getT()]);
   const canWrite = hasScope(me.scopes, "purchasing:write");
   return (
     <Section padding={6}>
       <VStack gap={5}>
         <PageHeader
-          title="Purchase orders"
-          description="What you order from your suppliers, where it goes, and what has arrived."
+          title={t("purchasing.list_title")}
+          description={t("purchasing.list_description")}
           actions={canWrite && <NewPurchaseOrder />}
         />
         <Suspense fallback={<PurchaseOrdersTable canWrite={canWrite} />}>

@@ -5,45 +5,31 @@ import { Text } from "@astryxdesign/core/Text";
 import { Suspense } from "react";
 
 import { DetailSkeleton } from "@/components/skeletons";
-import { formatMoney, formatUnitCost } from "@/lib/format";
-import { loadCurrencies, loadStore, loaded, sessionClient } from "@/lib/hypha";
-import { poNumber, termsLabel } from "@/lib/purchasing";
+import { getFormat } from "@/lib/get-format";
+import { loadStore, loaded, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
+import { costKindLabel, poNumber, termsLabel } from "@/lib/purchasing";
 
 import { PrintButton } from "./print-button";
 
-const KINDS: Record<string, string> = {
-  shipping: "Shipping",
-  duties: "Duties",
-  fees: "Fees",
-  other: "Other",
-};
-
-/** A day as the order means it: dates are chosen as days, at noon UTC. */
-function day(rfc3339: string | null | undefined): string | null {
-  if (!rfc3339) return null;
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(rfc3339));
-}
-
 /**
  * A purchase order as a document to print or save as a PDF: what the supplier gets by
- * email, in the order's currency, with where the goods go.
+ * email, in the order's currency, with where the goods go. It's written in the staff
+ * member's language, like the rest of the admin.
  */
 export default async function PrintPurchaseOrderPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const { id } = await params;
+  const [{ id }, t] = await Promise.all([params, getT()]);
   return (
     <Section padding={6}>
       <Suspense
         fallback={
-          <DetailSkeleton back={[{ label: "Purchase order", href: `/purchase-orders/${id}` }]} />
+          <DetailSkeleton
+            back={[{ label: t("purchasing.print_back_label"), href: `/purchase-orders/${id}` }]}
+          />
         }
       >
         <PrintView id={id} />
@@ -54,10 +40,11 @@ export default async function PrintPurchaseOrderPage({
 
 async function PrintView({ id }: { id: string }) {
   const client = await sessionClient();
-  const [po, store, currencies] = await Promise.all([
+  const [po, store, t, format] = await Promise.all([
     client.GET("/admin/purchase-orders/{id}", { params: { path: { id } } }).then(loaded),
     loadStore(),
-    loadCurrencies(),
+    getT(),
+    getFormat(),
   ]);
   const [supplier, location] = await Promise.all([
     client.GET("/admin/suppliers/{id}", { params: { path: { id: po.supplier } } }),
@@ -67,42 +54,58 @@ async function PrintView({ id }: { id: string }) {
   ]);
   const address = location?.data?.address;
   const costs = po.costs.filter((c) => c.amount.currency === po.currency);
+  const terms = po.payment_terms;
   return (
     <VStack gap={5} maxWidth={860} className="po-print">
       <HStack gap={2} className="no-print">
-        <Button label="Back" variant="ghost" href={`/purchase-orders/${po.id}`} />
+        <Button label={t("common.back")} variant="ghost" href={`/purchase-orders/${po.id}`} />
         <PrintButton />
       </HStack>
       <HStack hAlign="between" vAlign="start" gap={4} wrap="wrap">
         <VStack gap={1}>
           <Text type="display-2" as="h1">
-            Purchase order {poNumber(po.number)}
+            {t("purchasing.print_title", { number: poNumber(po.number) })}
           </Text>
-          {po.revision > 0 && <Text color="secondary">Revision {po.revision}</Text>}
+          {po.revision > 0 && (
+            <Text color="secondary">
+              {t("purchasing.print_revision", { revision: po.revision })}
+            </Text>
+          )}
           <Text>{store?.name}</Text>
           {store?.contact_email && <Text color="secondary">{store.contact_email}</Text>}
         </VStack>
         <VStack gap={1}>
-          {po.ordered_at && <Text>Ordered {day(po.ordered_at)}</Text>}
-          {po.expected_at && <Text>Expected by {day(po.expected_at)}</Text>}
-          {po.supplier_reference && <Text>Your reference {po.supplier_reference}</Text>}
-          {po.payment_terms && (
+          {/* Dates are chosen as days, at noon UTC: read as calendar dates. */}
+          {po.ordered_at && (
+            <Text>{t("purchasing.print_ordered", { date: format.date(po.ordered_at) })}</Text>
+          )}
+          {po.expected_at && (
+            <Text>{t("purchasing.print_expected", { date: format.date(po.expected_at) })}</Text>
+          )}
+          {po.supplier_reference && (
+            <Text>{t("purchasing.print_reference", { reference: po.supplier_reference })}</Text>
+          )}
+          {terms && (
             <Text>
-              Payment terms: {termsLabel(po.payment_terms)}
-              {po.payment_terms.note ? ` (${po.payment_terms.note})` : ""}
+              {terms.note
+                ? t("purchasing.print_terms_note", {
+                    terms: termsLabel(t, terms),
+                    note: terms.note,
+                  })
+                : t("purchasing.print_terms", { terms: termsLabel(t, terms) })}
             </Text>
           )}
         </VStack>
       </HStack>
       <HStack gap={8} vAlign="start" wrap="wrap">
         <VStack gap={1}>
-          <Text weight="semibold">Supplier</Text>
+          <Text weight="semibold">{t("common.supplier")}</Text>
           <Text>{po.supplier_name ?? supplier.data?.name}</Text>
           {supplier.data?.tax_number && <Text color="secondary">{supplier.data.tax_number}</Text>}
         </VStack>
         {location?.data && (
           <VStack gap={1}>
-            <Text weight="semibold">Ship to</Text>
+            <Text weight="semibold">{t("purchasing.print_ship_to")}</Text>
             <Text>{location.data.name}</Text>
             {address && (
               <>
@@ -124,12 +127,12 @@ async function PrintView({ id }: { id: string }) {
       <table>
         <thead>
           <tr>
-            <th>Item</th>
-            <th>Your code</th>
-            <th>Our SKU</th>
-            <th className="amount">Quantity</th>
-            <th className="amount">Unit cost</th>
-            <th className="amount">Total</th>
+            <th>{t("purchasing.print_item")}</th>
+            <th>{t("purchasing.print_your_code")}</th>
+            <th>{t("purchasing.print_our_sku")}</th>
+            <th className="amount">{t("common.quantity")}</th>
+            <th className="amount">{t("purchasing.unit_cost")}</th>
+            <th className="amount">{t("common.total")}</th>
           </tr>
         </thead>
         <tbody>
@@ -141,30 +144,39 @@ async function PrintView({ id }: { id: string }) {
               </td>
               <td>{line.supplier_sku ?? ""}</td>
               <td>{line.sku ?? ""}</td>
-              <td className="amount">{line.quantity - line.cancelled}</td>
-              <td className="amount">{formatUnitCost(line.unit_cost, currencies)}</td>
-              <td className="amount">{formatMoney(line.total, currencies)}</td>
+              <td className="amount">{format.number(line.quantity - line.cancelled)}</td>
+              <td className="amount">{format.unitCost(line.unit_cost)}</td>
+              <td className="amount">{format.money(line.total)}</td>
             </tr>
           ))}
         </tbody>
       </table>
       <VStack gap={1} hAlign="end">
-        <Text>Subtotal {formatMoney(po.subtotal, currencies)}</Text>
+        <Text>{t("purchasing.print_subtotal", { amount: format.money(po.subtotal) })}</Text>
         {costs.map((cost, i) => (
           // Cost rows have no ID; their order is the order's.
           // oxlint-disable-next-line react/no-array-index-key -- rows are only ever shown in order
           <Text key={i}>
-            {KINDS[cost.kind] ?? cost.kind}
-            {cost.description ? ` (${cost.description})` : ""}{" "}
-            {formatMoney(cost.amount, currencies)}
+            {cost.description
+              ? t("purchasing.print_cost_described", {
+                  kind: costKindLabel(t, cost.kind),
+                  description: cost.description,
+                  amount: format.money(cost.amount),
+                })
+              : t("purchasing.print_cost", {
+                  kind: costKindLabel(t, cost.kind),
+                  amount: format.money(cost.amount),
+                })}
           </Text>
         ))}
-        {po.tax && <Text>Tax {formatMoney(po.tax, currencies)}</Text>}
-        <Text weight="semibold">Total {formatMoney(po.total, currencies)}</Text>
+        {po.tax && <Text>{t("purchasing.print_tax", { amount: format.money(po.tax) })}</Text>}
+        <Text weight="semibold">
+          {t("purchasing.print_total", { amount: format.money(po.total) })}
+        </Text>
       </VStack>
       {po.note_to_supplier && (
         <VStack gap={1}>
-          <Text weight="semibold">Notes</Text>
+          <Text weight="semibold">{t("common.notes")}</Text>
           <Text>{po.note_to_supplier}</Text>
         </VStack>
       )}
