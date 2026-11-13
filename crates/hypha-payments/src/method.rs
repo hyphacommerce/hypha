@@ -1,8 +1,12 @@
 use hypha_core::{
-    ChannelId, MarketId, PaymentMethodId, Stamped, Stamps, Version, Versioned, required_text,
+    ChannelId, MarketId, PaymentMethodId, PendingEvent, Recorded, Recorder, Stamped, Stamps,
+    Subject, Version, Versioned, required_text,
 };
 
-use crate::{PaymentError, ProviderKey};
+use crate::{
+    PaymentError, ProviderKey,
+    events::{PAYMENT_METHOD, PaymentMethodDeleted},
+};
 
 /// How shoppers can pay: a provider (`manual` for cash on delivery or a bank transfer), the
 /// name shoppers see, the instructions shown after checkout, and where it's offered.
@@ -28,6 +32,14 @@ pub struct PaymentMethod {
     position: u32,
     /// The provider's own settings (none for `manual`).
     settings: serde_json::Value,
+    /// Only its deletion is recorded: nothing follows a method's other changes.
+    events: Recorder,
+}
+
+impl Recorded for PaymentMethod {
+    fn take_events(&mut self) -> Vec<PendingEvent> {
+        self.events.take()
+    }
 }
 
 impl Versioned for PaymentMethod {
@@ -226,7 +238,17 @@ impl PaymentMethod {
             enabled: s.enabled,
             position: s.position,
             settings: s.settings,
+            events: Recorder::default(),
         })
+    }
+
+    /// Records that the method is being deleted; the repository's `delete` writes it.
+    pub fn delete(&mut self) {
+        let event = PaymentMethodDeleted {
+            payment_method: self.id,
+        };
+        self.events
+            .record(Subject::new(PAYMENT_METHOD, self.id.as_uuid()), &event);
     }
 }
 
@@ -310,6 +332,16 @@ mod tests {
         assert!(m.offered_in(market(1), channel(2)));
         m.set_enabled(false);
         assert!(!m.offered_in(market(1), channel(2)));
+    }
+
+    #[test]
+    fn a_deleted_method_records_its_deletion_alone() {
+        let mut m = PaymentMethod::new(new()).unwrap();
+        m.set_enabled(false);
+        assert!(m.take_events().is_empty(), "other changes record nothing");
+        m.delete();
+        let types: Vec<&str> = m.take_events().iter().map(|e| e.event_type).collect();
+        assert_eq!(types, ["payment_method.deleted"]);
     }
 
     #[test]

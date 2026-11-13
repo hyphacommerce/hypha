@@ -541,7 +541,17 @@ async fn every_kind_has_its_fields() {
         ["facets.vendor.label", "facets.option.size.label"]
     );
 
-    // Deleting what no event names takes its translations along.
+    // A second option, removed from its zone on its own below.
+    let express = json!({
+        "name": "Express", "code": "express",
+        "rate": {"type": "builtin", "basis": "subtotal", "tables": [
+            {"currency": "EUR", "tiers": [{"amount": 990}]}
+        ]},
+    });
+    let zone = created(&format!("{zone_path}/options"), express).await;
+    let express = zone["options"][1]["id"].as_str().unwrap().to_string();
+    translated("shipping_option", &express, "name", "Express").await;
+
     let listed = async || {
         let (_, page) = send(&app, "GET", "/admin/translations?limit=100", None).await;
         page["items"]
@@ -560,32 +570,34 @@ async fn every_kind_has_its_fields() {
             "payment_method",
             "search_facet",
             "shipping_option",
-            "store"
-        ]
-    );
-    let (status, _) = send(
-        &app,
-        "DELETE",
-        &format!("/admin/payment-methods/{}", id(&method)),
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-    let (status, _) = send(&app, "DELETE", &zone_path, None).await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-    assert_eq!(
-        listed().await,
-        [
-            "category",
-            "checkout_rule",
-            "custom_field_definition",
-            "search_facet",
+            "shipping_option",
             "store"
         ]
     );
 
-    // And what an event names goes when the event is delivered.
+    // What's deleted takes its translations along once its event is delivered: an
+    // option removed from its zone, a zone with its options, a payment method, …
+    let (status, body) = send(
+        &app,
+        "DELETE",
+        &format!("{zone_path}/options/{express}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    assert_eq!(
+        listed()
+            .await
+            .iter()
+            .filter(|k| *k == "shipping_option")
+            .count(),
+        1,
+        "the removed option's went"
+    );
     for uri in [
+        format!("/admin/payment-methods/{}", id(&method)),
+        zone_path.clone(),
         format!("/admin/categories/{}", id(&category)),
         format!("/admin/checkout-rules/{}", id(&rule)),
         format!("/admin/custom-field-definitions/{}", id(&definition)),

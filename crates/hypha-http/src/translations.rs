@@ -239,34 +239,6 @@ pub(crate) async fn source<S: Storage>(
     })
 }
 
-/// Removes the translations of resources that are gone, for the kinds no event names
-/// when they go (shipping options, payment methods): the route that deleted them calls
-/// this with the same ports, after the delete committed.
-///
-/// Best effort: the delete stands, so its answer doesn't change when this fails; the
-/// failure is logged and the translations stay behind, unread (nothing lists a gone
-/// resource's). A deleted event for these kinds, followed by a handler like other
-/// kinds', would retry it; it's owed.
-pub(crate) async fn forget<P: HasTranslations>(
-    ports: &P,
-    kind: ResourceKind,
-    ids: impl IntoIterator<Item = uuid::Uuid>,
-) {
-    let resources: Vec<ResourceRef> = ids
-        .into_iter()
-        .map(|id| ResourceRef::new(kind, id))
-        .collect();
-    if let Err(error) = ports.translations().delete_resources(&resources).await {
-        let ids: Vec<String> = resources.iter().map(ResourceRef::id_string).collect();
-        tracing::warn!(
-            %error,
-            %kind,
-            ?ids,
-            "a deleted resource's translations weren't removed"
-        );
-    }
-}
-
 /// Removes the translations into languages the store no longer lists, and the email
 /// templates the merchant saved for them. A language is
 /// taken off the list by a write of the store, which may be on another connection than

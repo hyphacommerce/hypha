@@ -5,6 +5,18 @@ use hypha_core::{CartId, Event, Money, OrderId, PaymentId, PaymentMethodId};
 use serde::Serialize;
 
 pub const PAYMENT: &str = "payment";
+pub const PAYMENT_METHOD: &str = "payment_method";
+
+/// `payment_method.deleted`. The method's other changes record no event.
+#[derive(Debug, Serialize)]
+pub struct PaymentMethodDeleted {
+    pub payment_method: PaymentMethodId,
+}
+
+impl Event for PaymentMethodDeleted {
+    const TYPE: &'static str = "payment_method.deleted";
+    const VERSION: u16 = 1;
+}
 
 /// `payment.created`: checkout started collecting `amount` for a cart (an online method,
 /// before the order) or an order (a manual method), or staff recorded money on an order

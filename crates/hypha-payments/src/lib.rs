@@ -23,8 +23,8 @@ pub use commands::{
 };
 pub use error::PaymentError;
 pub use events::{
-    PaymentAuthorized, PaymentCreated, PaymentFailed, PaymentPaid, PaymentProcessing,
-    PaymentRefunded, PaymentVoided,
+    PaymentAuthorized, PaymentCreated, PaymentFailed, PaymentMethodDeleted, PaymentPaid,
+    PaymentProcessing, PaymentRefunded, PaymentVoided,
 };
 pub use method::{NewPaymentMethod, PaymentMethod, PaymentMethodSnapshot};
 pub use payment::{
