@@ -187,6 +187,10 @@ pub trait TranslationSourceRepo {
     /// Takes `done` off the queue, each only if it wasn't queued again since it was read
     /// (its `mark` is the same).
     async fn unqueue(&self, done: &[QueuedSource]) -> Result<(), RepoError>;
+    /// Gives those of `resources` that are queued a later mark, leaving the rest
+    /// unqueued: a writer that read one of them since the queue's reader did tells it its
+    /// read may be older than this one's, so it reads again instead of unqueueing.
+    async fn touch_queued(&self, resources: &[ResourceRef]) -> Result<(), RepoError>;
 }
 
 pub trait HasTranslations {

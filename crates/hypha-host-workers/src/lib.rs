@@ -622,6 +622,16 @@ mod worker_main {
                         .await,
                     );
                 }
+                // What dispatch's handlers queued for the translation worklist (a custom
+                // field definition's change queues a kind); what's left marks a tick.
+                if jobs.translation_sources.enabled {
+                    run = run.and(
+                        steps("translation sources", &state, Some(deadline), || {
+                            jobs::translation_sources(&state)
+                        })
+                        .await,
+                    );
+                }
                 // The emails the dispatch run's mailer (or a resend) queued.
                 if jobs.send_notifications.enabled {
                     run = run.and(

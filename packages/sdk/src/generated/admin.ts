@@ -4134,11 +4134,14 @@ export interface paths {
         /**
          * The store's translations, or what's left to translate. Without `state`: the
          *     translations there are, by kind name, then resource, then language, each with its
-         *     state. With `state` (and `language`, `400 invalid_query` without it): the worklist,
-         *     every resource with source text whose translation into `language` is `missing` (some
-         *     field untranslated, or no translation at all), `outdated` (every field translated,
-         *     some from a source text that changed since) or `complete`, in the catalog's order of
-         *     kinds, then by ID. Counts are in fields, and only fields with source text count.
+         *     state (a resource not yet read for the worklist is read for it). With `state` (and
+         *     `language`: `400 invalid_query` without it, `422 translation_into_default_language`
+         *     or `422 language_not_listed` for one that isn't another on the store's list): the
+         *     worklist, every resource with source text whose translation into `language` is
+         *     `missing` (some field untranslated, or no translation at all), `outdated` (every
+         *     field translated, some from a source text that changed since) or `complete`, in the
+         *     catalog's order of kinds, then by ID. Counts are in fields, and only fields with
+         *     source text count.
          */
         get: operations["admin.translations.list"];
         put?: never;

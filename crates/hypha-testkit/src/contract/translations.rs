@@ -408,6 +408,17 @@ async fn queue<S: HasTranslations>(ports: &S) {
     repo.unqueue(&left).await.unwrap();
     assert_eq!(repo.queued(10).await, Ok(vec![]));
 
+    // Touched while queued: it stays queued, at the back; one not queued stays off it.
+    repo.queue(&[product(1)]).await.unwrap();
+    let read = repo.queued(10).await.unwrap();
+    repo.touch_queued(&[product(1), product(2)]).await.unwrap();
+    repo.unqueue(&read).await.unwrap();
+    assert_eq!(resources(&repo.queued(10).await.unwrap()), [product(1)]);
+    let read = repo.queued(10).await.unwrap();
+    repo.unqueue(&read).await.unwrap();
+    repo.touch_queued(&[]).await.unwrap();
+    assert_eq!(repo.queued(10).await, Ok(vec![]));
+
     // Every resource of a kind that has digests.
     repo.replace_sources(product(1), &product_sources())
         .await

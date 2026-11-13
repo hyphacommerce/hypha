@@ -56304,7 +56304,7 @@
             "bearer": []
           }
         ],
-        "summary": "The store's translations, or what's left to translate. Without `state`: the\ntranslations there are, by kind name, then resource, then language, each with its\nstate. With `state` (and `language`, `400 invalid_query` without it): the worklist,\nevery resource with source text whose translation into `language` is `missing` (some\nfield untranslated, or no translation at all), `outdated` (every field translated,\nsome from a source text that changed since) or `complete`, in the catalog's order of\nkinds, then by ID. Counts are in fields, and only fields with source text count.",
+        "summary": "The store's translations, or what's left to translate. Without `state`: the\ntranslations there are, by kind name, then resource, then language, each with its\nstate (a resource not yet read for the worklist is read for it). With `state` (and\n`language`: `400 invalid_query` without it, `422 translation_into_default_language`\nor `422 language_not_listed` for one that isn't another on the store's list): the\nworklist, every resource with source text whose translation into `language` is\n`missing` (some field untranslated, or no translation at all), `outdated` (every\nfield translated, some from a source text that changed since) or `complete`, in the\ncatalog's order of kinds, then by ID. Counts are in fields, and only fields with\nsource text count.",
         "tags": [
           "translations"
         ],

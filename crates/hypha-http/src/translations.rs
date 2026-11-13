@@ -672,7 +672,7 @@ impl TranslationSourceSync {
         &self,
         ports: &P,
         event: &StoredEvent,
-    ) -> Result<(Vec<ResourceRef>, Option<ResourceKind>), String> {
+    ) -> Result<Targets, String> {
         let named = |kind: ResourceKind, field: &str| {
             event.data[field]
                 .as_str()
@@ -686,17 +686,26 @@ impl TranslationSourceSync {
             let whole = (*kind == ResourceKind::CustomFieldDefinition)
                 .then(|| owners_reached(event))
                 .flatten();
-            return Ok((vec![resource], whole));
+            return Ok(Targets {
+                reread: vec![resource],
+                whole,
+                ..Targets::default()
+            });
         }
+        let reread = |resources| Targets {
+            reread: resources,
+            ..Targets::default()
+        };
         Ok(match event_type {
-            ASSET_UPDATED | ASSET_DELETED => (vec![named(ResourceKind::Asset, "asset")?], None),
+            ASSET_UPDATED | ASSET_DELETED => reread(vec![named(ResourceKind::Asset, "asset")?]),
             ZONE_CHANGED => {
                 let zone: ShippingZoneId = event.data["shipping_zone"]
                     .as_str()
                     .and_then(|id| id.parse().ok())
                     .ok_or_else(|| format!("event {} names no shipping zone", event.id))?;
-                // A zone deleted since has its options' own deletions.
-                let options = ports
+                // The zone holds its options: read once, not once per option. A zone
+                // deleted since has its options' own deletions.
+                let known = ports
                     .shipping_zones()
                     .get(zone)
                     .await
@@ -705,20 +714,38 @@ impl TranslationSourceSync {
                         zone.options()
                             .iter()
                             .map(|o| {
-                                ResourceRef::new(ResourceKind::ShippingOption, o.id().as_uuid())
+                                (
+                                    ResourceRef::new(
+                                        ResourceKind::ShippingOption,
+                                        o.id().as_uuid(),
+                                    ),
+                                    shipping_option_source(o),
+                                )
                             })
                             .collect()
                     })
                     .unwrap_or_default();
-                (options, None)
+                Targets {
+                    known,
+                    ..Targets::default()
+                }
             }
             STORE_UPDATED | NOTIFICATION_SETTINGS_UPDATED => {
-                (vec![store(ResourceKind::Store)], None)
+                reread(vec![store(ResourceKind::Store)])
             }
-            SEARCH_SETTINGS_CHANGED => (vec![store(ResourceKind::SearchFacet)], None),
-            _ => (Vec::new(), None),
+            SEARCH_SETTINGS_CHANGED => reread(vec![store(ResourceKind::SearchFacet)]),
+            _ => Targets::default(),
         })
     }
+}
+
+/// What an event has the handler write: resources to read again, resources already read
+/// (a zone's options, with their zone), and a kind to queue whole.
+#[derive(Default)]
+struct Targets {
+    reread: Vec<ResourceRef>,
+    known: Vec<(ResourceRef, Source)>,
+    whole: Option<ResourceKind>,
 }
 
 /// The kind whose every resource a definition's event reaches: a product's, variant's or
@@ -756,13 +783,29 @@ impl<P: SourcePorts + StoreRepo + HasTranslations> EventHandler<P> for Translati
     }
 
     async fn handle(&self, ports: &P, event: &StoredEvent) -> Result<(), String> {
-        let (resources, whole) = self.targets(ports, event).await?;
-        for resource in resources {
+        let fail = |e: RepoError| e.to_string();
+        let targets = self.targets(ports, event).await?;
+        let mut written = Vec::new();
+        for resource in targets.reread {
             sync_source(ports, ports, self.store, resource)
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(fail)?;
+            written.push(resource);
         }
-        if let Some(kind) = whole {
+        for (resource, source) in &targets.known {
+            sync_sources(ports, *resource, Some(source))
+                .await
+                .map_err(fail)?;
+            written.push(*resource);
+        }
+        // The job may be reading one of these from an older copy: queued, it reads it
+        // again rather than unqueue what it wrote over this.
+        ports
+            .translations()
+            .touch_queued(&written)
+            .await
+            .map_err(fail)?;
+        if let Some(kind) = targets.whole {
             ports
                 .translations()
                 .queue_kind(kind)

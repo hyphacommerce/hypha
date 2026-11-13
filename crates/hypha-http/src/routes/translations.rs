@@ -11,7 +11,8 @@ use hypha_translations::{
     FieldCounts, FieldInput, FieldRule, HasTranslations, InvalidWorkPosition, ResourceKind,
     ResourceRef, SourceDigest, StoreLanguages, Translation, TranslationKey, TranslationSourceRepo,
     TranslationState, WorkPosition, delete_translation, get_translations, list_translations,
-    put_translation, require_read, require_write, translation_progress, translation_worklist,
+    put_translation, require_read, require_write, source_digests, translation_progress,
+    translation_worklist,
 };
 use serde::{Deserialize, Serialize};
 
@@ -501,11 +502,14 @@ impl std::str::FromStr for ListAfter {
 
 /// The store's translations, or what's left to translate. Without `state`: the
 /// translations there are, by kind name, then resource, then language, each with its
-/// state. With `state` (and `language`, `400 invalid_query` without it): the worklist,
-/// every resource with source text whose translation into `language` is `missing` (some
-/// field untranslated, or no translation at all), `outdated` (every field translated,
-/// some from a source text that changed since) or `complete`, in the catalog's order of
-/// kinds, then by ID. Counts are in fields, and only fields with source text count.
+/// state (a resource not yet read for the worklist is read for it). With `state` (and
+/// `language`: `400 invalid_query` without it, `422 translation_into_default_language`
+/// or `422 language_not_listed` for one that isn't another on the store's list): the
+/// worklist, every resource with source text whose translation into `language` is
+/// `missing` (some field untranslated, or no translation at all), `outdated` (every
+/// field translated, some from a source text that changed since) or `complete`, in the
+/// catalog's order of kinds, then by ID. Counts are in fields, and only fields with
+/// source text count.
 #[utoipa::path(
     get,
     path = "/admin/translations",
@@ -543,6 +547,14 @@ pub async fn list<S: Storage>(
         let language = language.ok_or_else(|| {
             ApiError::invalid_query("`state` needs `language`: the language it's the state in")
         })?;
+        // Anything else would be all missing: there's nothing to translate into it.
+        let store_languages = languages(&state, &ports).await?;
+        if language == store_languages.default {
+            return Err(hypha_translations::CommandError::DefaultLanguage(language).into());
+        }
+        if !store_languages.others.contains(&language) {
+            return Err(hypha_translations::CommandError::LanguageNotListed(language).into());
+        }
         let after = match page.after {
             None => None,
             Some(ListAfter::Work(position)) => Some(position.0),
@@ -584,6 +596,17 @@ pub async fn list<S: Storage>(
     let mut sources: BTreeMap<ResourceRef, Vec<SourceDigest>> = BTreeMap::new();
     for (resource, digest) in ports.translations().sources(&resources).await? {
         sources.entry(resource).or_default().push(digest);
+    }
+    // A resource without digests may not have been read for the worklist yet (after an
+    // upgrade, or a read that failed): read it now, so its state isn't a guess.
+    let unread: Vec<ResourceRef> = resources
+        .into_iter()
+        .filter(|r| !sources.contains_key(r))
+        .collect();
+    for resource in unread {
+        if let Some(loaded) = source(&state, &ports, resource).await? {
+            sources.insert(resource, source_digests(&loaded.source));
+        }
     }
     Ok(Json(PageResponse::new(
         found,

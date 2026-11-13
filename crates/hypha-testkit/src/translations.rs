@@ -301,4 +301,14 @@ impl TranslationSourceRepo for InMemoryTranslations {
         }
         Ok(())
     }
+
+    async fn touch_queued(&self, resources: &[ResourceRef]) -> Result<(), RepoError> {
+        let mut queue = self.queue.lock().unwrap();
+        for resource in resources {
+            if queue.contains_key(resource) {
+                queue.insert(*resource, self.mark());
+            }
+        }
+        Ok(())
+    }
 }

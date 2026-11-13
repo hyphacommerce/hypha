@@ -997,6 +997,16 @@ async fn the_worklist_lists_each_resource_by_its_state_in_a_language() {
     for (query, status, expected) in [
         ("state=missing", StatusCode::BAD_REQUEST, "invalid_query"),
         (
+            "language=en&state=missing",
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "translation_into_default_language",
+        ),
+        (
+            "language=es&state=missing",
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "language_not_listed",
+        ),
+        (
             "language=de&state=done",
             StatusCode::BAD_REQUEST,
             "invalid_query",
@@ -1203,6 +1213,16 @@ async fn resources_queued_as_a_whole_are_read_again_by_the_job() {
     let missing =
         async || ids(&worklist(&app, "kind=product&language=de&state=missing").await).len();
     assert_eq!(missing().await, 0);
+    // The plain list reads a resource without digests yet itself: its state isn't a
+    // guess.
+    let path = format!("/admin/translations/product/{mug}");
+    let (status, _) = translate(&app, &path, "fr", &fields(&[("title", "X")])).await;
+    assert_eq!(status, StatusCode::OK);
+    let listed = worklist(&app, "kind=product&language=fr").await;
+    assert_eq!(
+        (&listed["items"][0]["state"], &listed["items"][0]["total"]),
+        (&json!("complete"), &json!(1))
+    );
     let uuid = mug.trim_start_matches("prod_");
     sql(
         &app,

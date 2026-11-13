@@ -728,4 +728,23 @@ impl<C: PgConnection> TranslationSourceRepo for PgStore<C> {
             .map_err(repo_error)?;
         Ok(())
     }
+
+    async fn touch_queued(&self, resources: &[ResourceRef]) -> Result<(), RepoError> {
+        if resources.is_empty() {
+            return Ok(());
+        }
+        let kinds: Vec<&str> = resources.iter().map(|r| r.kind.as_str()).collect();
+        let ids: Vec<Uuid> = resources.iter().map(|r| r.id).collect();
+        let mut conn = self.conn().await;
+        conn.db()
+            .query_typed(
+                "UPDATE translation_source_queue SET mark = nextval('translation_source_marks')
+                 WHERE (resource_kind, resource_id) IN
+                           (SELECT k, i FROM unnest($1::text[], $2::uuid[]) AS r (k, i))",
+                &[(&kinds, Type::TEXT_ARRAY), (&ids, Type::UUID_ARRAY)],
+            )
+            .await
+            .map_err(repo_error)?;
+        Ok(())
+    }
 }
