@@ -1063,7 +1063,8 @@ fn a_cart_lists_the_methods_offered_to_it_by_position() {
         &(ManualProvider,),
         cart,
     ))
-    .unwrap();
+    .unwrap()
+    .methods;
     let ids: Vec<PaymentMethodId> = listed.iter().map(PaymentMethod::id).collect();
     assert_eq!(ids, [cod, bank_transfer()]);
 }
@@ -1135,7 +1136,8 @@ fn listing_a_carts_methods_asks_each_provider_once() {
         &providers,
         cart,
     ))
-    .unwrap();
+    .unwrap()
+    .methods;
     let ids: Vec<PaymentMethodId> = listed.iter().map(PaymentMethod::id).collect();
     assert_eq!(ids, [cod, bank_transfer(), other]);
     assert_eq!(providers.asked.borrow().as_slice(), [ProviderKey::manual()]);
@@ -2343,7 +2345,13 @@ fn a_carts_messages_carry_its_addresss_format_warnings() {
     let cart = cart_with_address(&world);
     let priced = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();
     assert_eq!(
-        block_on(cart_messages(&world.ports, &WarnsOfHouseNumbers, &priced)).unwrap(),
+        block_on(cart_messages(
+            &world.ports,
+            &WarnsOfHouseNumbers,
+            &languages(),
+            &priced
+        ))
+        .unwrap(),
         vec![Message::format_warning(&house_number_missing())]
     );
 }
@@ -2354,7 +2362,13 @@ fn a_cart_without_an_address_has_no_messages() {
     let cart = world.cart();
     let priced = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();
     assert_eq!(
-        block_on(cart_messages(&world.ports, &WarnsOfHouseNumbers, &priced)).unwrap(),
+        block_on(cart_messages(
+            &world.ports,
+            &WarnsOfHouseNumbers,
+            &languages(),
+            &priced
+        ))
+        .unwrap(),
         Vec::new()
     );
 }
@@ -2366,7 +2380,13 @@ fn a_checked_out_cart_has_no_messages() {
     world.checkout(cart).unwrap();
     let priced = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();
     assert_eq!(
-        block_on(cart_messages(&world.ports, &WarnsOfHouseNumbers, &priced)).unwrap(),
+        block_on(cart_messages(
+            &world.ports,
+            &WarnsOfHouseNumbers,
+            &languages(),
+            &priced
+        ))
+        .unwrap(),
         Vec::new()
     );
 }
@@ -2478,7 +2498,7 @@ fn a_rules_warning_shows_on_the_cart_and_lets_checkout_go_on() {
     );
     let priced = block_on(view_cart(&Ctx::system(), &world.ports, cart)).unwrap();
     assert_eq!(
-        block_on(cart_messages(&world.ports, &Formats, &priced)).unwrap(),
+        block_on(cart_messages(&world.ports, &Formats, &languages(), &priced)).unwrap(),
         vec![rule_message(
             &rule,
             Severity::Warning,
@@ -2569,7 +2589,7 @@ fn a_rule_about_a_category_reads_the_lines_categories_with_their_ancestors() {
         .position(|l| l.product == pid("cup"))
         .unwrap();
     assert_eq!(
-        block_on(cart_messages(&world.ports, &Formats, &priced)).unwrap(),
+        block_on(cart_messages(&world.ports, &Formats, &languages(), &priced)).unwrap(),
         vec![rule_message(
             &rule,
             Severity::Warning,
@@ -2607,6 +2627,7 @@ impl hypha_checkout::CheckoutValidators for OneApp {
     async fn validators(
         &self,
         cart: &hypha_cart::PricedCart,
+        _language: Option<&hypha_core::Language>,
     ) -> Result<Vec<hypha_checkout::Validator<()>>, hypha_core::RepoError> {
         Ok(vec![hypha_checkout::Validator {
             app: validating_app(),
@@ -2672,6 +2693,7 @@ fn validate(world: &World, cart: CartId, app: &OneApp, step: hypha_core::Validat
             formats: Formats,
             validators: app,
         },
+        &languages(),
         &world.clock,
         &mut priced,
         step,
@@ -2757,7 +2779,7 @@ fn a_kept_answer_shows_on_the_cart() {
         validators: &app,
     };
     assert_eq!(
-        block_on(cart_messages(&world.ports, &checks, &priced)).unwrap(),
+        block_on(cart_messages(&world.ports, &checks, &languages(), &priced)).unwrap(),
         vec![app_says(Severity::Warning)]
     );
 }

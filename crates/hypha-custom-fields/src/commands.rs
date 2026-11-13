@@ -865,9 +865,23 @@ pub struct OwnerFields {
 impl OwnerFields {
     /// `{"custom.material": "wool", …}`.
     pub fn to_json(&self) -> serde_json::Map<String, Value> {
+        self.to_json_with(|_| None)
+    }
+
+    /// `to_json`, with each value `shown` answers for its entry in place of the stored
+    /// one (a translation).
+    pub fn to_json_with(
+        &self,
+        shown: impl Fn(&FieldEntry) -> Option<Value>,
+    ) -> serde_json::Map<String, Value> {
         self.entries
             .iter()
-            .map(|e| (e.key().to_string(), e.value.to_json()))
+            .map(|e| {
+                (
+                    e.key().to_string(),
+                    shown(e).unwrap_or_else(|| e.value.to_json()),
+                )
+            })
             .collect()
     }
 
@@ -973,9 +987,19 @@ pub struct FieldsRead {
 impl FieldsRead {
     /// `owner`'s values as `{"custom.material": "wool", …}`; empty for one without any.
     pub fn json_of(&self, owner: Uuid) -> serde_json::Map<String, Value> {
+        self.json_with(owner, |_| None)
+    }
+
+    /// `json_of`, with `shown`'s value for an entry in place of the stored one
+    /// (`OwnerFields::to_json_with`).
+    pub fn json_with(
+        &self,
+        owner: Uuid,
+        shown: impl Fn(&FieldEntry) -> Option<Value>,
+    ) -> serde_json::Map<String, Value> {
         self.owners
             .get(&owner)
-            .map(OwnerFields::to_json)
+            .map(|fields| fields.to_json_with(shown))
             .unwrap_or_default()
     }
 }

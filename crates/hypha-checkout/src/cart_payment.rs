@@ -1,7 +1,7 @@
 //! Starting a cart's payment before its order: an online method's money is committed first,
 //! and checkout places the order once it is.
 
-use hypha_cart::{CartReading, CartRepo};
+use hypha_cart::{CartReading, CartRepo, ContentLanguages};
 use hypha_core::{Attempts, CartId, Clock, Ctx, IdGenerator, Money, PaymentId, RepoError, Scope};
 use hypha_payments::{
     NewPayment, NextAction, Payment, PaymentError, PaymentProviders, PaymentRepo, PaymentStatus,
@@ -10,7 +10,7 @@ use hypha_payments::{
 use hypha_shipping::RateProvider;
 
 use crate::commands::{Ready, ready, refuse_errors};
-use crate::language::{ContentLanguages, Localizer};
+use crate::language::Localizer;
 use crate::messages::CartChecks;
 use crate::start::{Payer, refresh, start};
 use crate::{CheckoutPorts, CommandError};
@@ -129,6 +129,7 @@ async fn start_once<
         rates,
         providers,
         checks,
+        &input.languages,
         input.cart,
         input.expected_total,
         &mut renewed,

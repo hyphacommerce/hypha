@@ -43,8 +43,8 @@ pub use address::{
 pub use app_key::{AppKey, AppKeyError, AppKind, AppPoints};
 pub use callback_url::{CallbackUrl, CallbackUrlError};
 pub use checks::{
-    AppCheck, Message, MessageCode, MessageError, MessagePath, MessageSource, Severity,
-    ValidationStep,
+    AppCheck, Message, MessageCode, MessageError, MessageParams, MessagePath, MessageSource,
+    Severity, ValidationStep,
 };
 pub use country::{CountryCode, CountryError};
 pub use ctx::{Actor, AuthError, Ctx};
@@ -74,7 +74,7 @@ pub use ids::{
     ShippingZoneId, StoreId, SupplierId, TaxClassId, TaxRegionId, TransferId, UploadId, UserId,
     VariantId,
 };
-pub use language::{Language, LanguageError, offered_languages};
+pub use language::{Language, LanguageError};
 pub use money::{
     BasisPoints, Currency, CurrencyError, ExchangeRate, Money, MoneyError, Price, TaxRate, UnitCost,
 };

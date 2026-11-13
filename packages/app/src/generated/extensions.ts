@@ -746,6 +746,7 @@ export interface components {
             filters?: components["schemas"]["SearchFilter"][];
             /** @description What one hit stands for. */
             group: components["schemas"]["SearchGroup"];
+            language?: components["schemas"]["Language"] | null;
             /** Format: int32 */
             limit: number;
             /** @description The shopper's market: what's sold to them, at its prices. */

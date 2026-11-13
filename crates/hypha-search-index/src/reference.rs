@@ -3,16 +3,18 @@
 //! engine with a ranking of its own (Meilisearch) will need an allowance for relevance
 //! order and facet counts.
 //!
-//! 1. **Match:** the market's documents whose terms contain every query term as a
-//!    prefix (`terms::matches_all`), within the price bounds, availability and every
-//!    filter (values of one key OR, keys AND; `on_sale` is one such key).
+//! 1. **Match:** the market's documents in the query's language whose terms contain
+//!    every query term as a prefix (`terms::matches_all`), within the price bounds,
+//!    availability and every filter (values of one key OR, keys AND; `on_sale` is one
+//!    such key).
 //! 2. **Group:** by the query's group key; a group's representative is its first
 //!    document by the sort (lowest price for `PriceAsc`, highest for `PriceDesc`,
 //!    best score for `Relevance`), then by `position`.
 //! 3. **Order** groups by their representative: the sort's key, then newest product
 //!    (created, then product ID, descending), then listing key and position.
 //! 4. **Facets** count groups per value, ignoring the facet's own filter (so choosing
-//!    "Red" still shows "Blue"); the price range ignores the price bounds.
+//!    "Red" still shows "Blue"), each value labelled with the least label (byte order)
+//!    of the documents counted; the price range ignores the price bounds.
 
 use std::{
     cmp::Ordering,
@@ -57,7 +59,8 @@ pub fn group_key(document: &SearchDocument, group: Group) -> String {
 
 /// The option names (lowercased) of `market`'s documents, those published to `channel`
 /// if there is one: most documents first, then by name. What `SearchIndex::option_names`
-/// returns, and so the default facets.
+/// returns, and so the default facets. Names are as stored, so every language counts:
+/// each has the same documents, which orders names as one language would.
 pub fn option_names(
     documents: &[SearchDocument],
     market: MarketId,
@@ -82,7 +85,7 @@ pub fn option_names(
 pub fn search(documents: &[SearchDocument], query: &SearchQuery) -> SearchResults {
     let in_market: Vec<&SearchDocument> = documents
         .iter()
-        .filter(|d| d.market == query.market)
+        .filter(|d| d.market == query.market && d.language == query.language)
         .filter(|d| query.channel.is_none_or(|c| d.channels.contains(&c)))
         .filter(|d| query.category.is_none_or(|c| d.categories.contains(&c)))
         .filter(|d| query.terms.is_empty() || terms::matches_all(&query.terms, &d.terms().all()))
@@ -145,26 +148,31 @@ pub fn search(documents: &[SearchDocument], query: &SearchQuery) -> SearchResult
         .iter()
         .map(|key| {
             let key_text = key.to_string();
-            let mut counts: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+            // Per value: its groups, and the least label of the documents counted.
+            let mut counts: BTreeMap<String, (BTreeSet<String>, String)> = BTreeMap::new();
             for doc in in_market
                 .iter()
                 .copied()
                 .filter(in_price)
                 .filter(|d| passes(d, Some(key)))
             {
-                for (k, value) in doc.facet_values() {
+                for (k, value, label) in doc.labelled_facet_values() {
                     if k == key_text {
-                        counts
+                        let (groups, least) = counts
                             .entry(value)
-                            .or_default()
-                            .insert(group_key(doc, query.group));
+                            .or_insert_with(|| (BTreeSet::new(), label.clone()));
+                        groups.insert(group_key(doc, query.group));
+                        if label < *least {
+                            *least = label;
+                        }
                     }
                 }
             }
             let mut values: Vec<FacetValue> = counts
                 .into_iter()
-                .map(|(value, groups)| FacetValue {
+                .map(|(value, (groups, label))| FacetValue {
                     value,
+                    label,
                     count: groups.len() as u64,
                 })
                 .collect();
@@ -233,7 +241,7 @@ fn between_groups(a: &SearchDocument, b: &SearchDocument, sort: Sort, q: &[Strin
 
 #[cfg(test)]
 mod tests {
-    use hypha_core::{Currency, Money, ProductId, Timestamp, VariantId};
+    use hypha_core::{Currency, Language, Money, ProductId, Timestamp, VariantId};
     use uuid::Uuid;
 
     use super::*;
@@ -241,11 +249,16 @@ mod tests {
 
     const MATERIAL: &str = "custom.material";
 
+    fn english() -> Language {
+        Language::new("en").unwrap()
+    }
+
     fn doc(product: u128, variant: u128, fields: &[(&str, &str)]) -> SearchDocument {
         let price = Money::new(1000, Currency::EUR).unwrap();
         let product = ProductId::from_uuid(Uuid::from_u128(product));
         SearchDocument {
             market: MarketId::from_uuid(Uuid::from_u128(1)),
+            language: english(),
             product,
             variant: VariantId::from_uuid(Uuid::from_u128(variant)),
             listing: product.to_string(),
@@ -260,6 +273,7 @@ mod tests {
             tags: vec![],
             sku: None,
             options: vec![],
+            option_labels: vec![],
             fields: fields
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -279,6 +293,7 @@ mod tests {
     fn query(filters: Vec<Filter>, facets: Vec<FacetKey>) -> SearchQuery {
         SearchQuery {
             market: MarketId::from_uuid(Uuid::from_u128(1)),
+            language: english(),
             channel: None,
             category: None,
             terms: vec![],

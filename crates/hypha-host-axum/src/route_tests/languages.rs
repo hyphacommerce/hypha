@@ -598,3 +598,194 @@ async fn the_stores_description_is_read_in_the_language_asked_for() {
         (StatusCode::BAD_REQUEST, "invalid_query")
     );
 }
+
+#[tokio::test]
+async fn search_is_answered_in_the_language_asked_for() {
+    let app = app().await;
+    languages(&app, &[("de", true), ("fr", false)]).await;
+    let (mug, [size, small, red]) = sized_mug(&app).await;
+    market_offers(&app, &["en", "de"]).await;
+    translate(
+        &app,
+        "product",
+        &mug,
+        "de",
+        &[
+            ("title", "Tasse"),
+            (&size, "Größe"),
+            (&small, "Klein"),
+            (&red, "Rot"),
+        ],
+    )
+    .await;
+    let (status, settings) = send(
+        &app,
+        "PATCH",
+        "/admin/search/settings",
+        Some(r#"{"facets":[{"key":"option.color","label":"Colour"},{"key":"option.size"}]}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{settings}");
+    let (_, store) = send(&app, "GET", "/admin/store", None).await;
+    let store = store["id"].as_str().unwrap();
+    translate(
+        &app,
+        "search_facet",
+        store,
+        "de",
+        &[("facets.option.color.label", "Farbe")],
+    )
+    .await;
+    super::settle_search(&app).await;
+    let pk = publishable(&app).await;
+    let search = "/storefront/search?country=HR&sort=price_asc";
+
+    // German words find the German documents; their text and facet labels are German,
+    // filters and facet values as stored.
+    let (language, found) = read_ok(
+        &app,
+        &pk,
+        &format!("{search}&language=de&q=tasse&filter=option.color:Red&group=variant"),
+    )
+    .await;
+    assert_eq!(language, "de");
+    assert_eq!(found["total"], 2, "{found}");
+    let hit = &found["items"][0];
+    assert_eq!(
+        (&hit["title"], &hit["variant_title"], &hit["options"]),
+        (
+            &json!("Tasse"),
+            &json!("Klein / Rot"),
+            &json!([{"name": "Größe", "value": "Klein"}, {"name": "Color", "value": "Rot"}])
+        )
+    );
+    assert_eq!(
+        found["facets"],
+        json!([
+            {
+                "key": "option.color",
+                "label": "Farbe",
+                "values": [{"value": "Red", "label": "Rot", "count": 2}],
+            },
+            {
+                // No label of the merchant's: the option's own name, in German.
+                "key": "option.size",
+                "label": "Größe",
+                "values": [
+                    {"value": "M", "label": null, "count": 1},
+                    {"value": "S", "label": "Klein", "count": 1},
+                ],
+            },
+        ])
+    );
+    // A label isn't a filter value, and English words aren't German ones.
+    for query in ["filter=option.color:Rot", "q=mug"] {
+        let (_, found) = read_ok(&app, &pk, &format!("{search}&language=de&{query}")).await;
+        assert_eq!(found["total"], 0, "{query}");
+    }
+
+    // A language the store hasn't published, and none: the market's default, as before.
+    for query in ["&language=fr", ""] {
+        let (language, found) = read_ok(&app, &pk, &format!("{search}&q=mug{query}")).await;
+        assert_eq!(language, "en", "{query:?}");
+        assert_eq!(found["items"][0]["title"], "Mug");
+        assert_eq!(found["items"][0]["variant_title"], "S / Red");
+        assert_eq!(found["facets"][0]["label"], "Colour");
+        // The option's name as stored: the key names it.
+        assert_eq!(found["facets"][1]["label"], Value::Null);
+        assert_eq!(
+            found["facets"][0]["values"],
+            json!([{"value": "Red", "label": null, "count": 1}])
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_store_with_one_language_searches_as_it_did() {
+    let app = app().await;
+    market_selling_a_mug(&app).await;
+    super::settle_search(&app).await;
+    let pk = publishable(&app).await;
+    // German isn't the store's: its own language answers, one document per variant.
+    let (language, found) = read_ok(
+        &app,
+        &pk,
+        "/storefront/search?country=HR&q=mug&language=de&group=variant",
+    )
+    .await;
+    assert_eq!(language, "en");
+    assert_eq!(found["total"], 1);
+    assert_eq!(found["items"][0]["title"], "Mug");
+    let (_, status) = send(&app, "GET", "/admin/search/status", None).await;
+    assert_eq!(status["documents"], 1, "{status}");
+}
+
+#[tokio::test]
+async fn a_search_app_is_asked_in_the_language_asked_for_before_its_documents_are_built() {
+    let app = app().await;
+    languages(&app, &[("de", true)]).await;
+    let (mug, _) = sized_mug(&app).await;
+    translate(&app, "product", &mug, "de", &[("title", "Tasse")]).await;
+    super::settle_search(&app).await;
+    // Croatia offers German from now on: the built-in index has no German documents yet,
+    // but the app keeps an index of its own.
+    market_offers(&app, &["en", "de"]).await;
+    let (base, answers, saw) = fake_app(&[(
+        "/search",
+        200,
+        json!({"hits": [{"product": mug}], "total": 1}),
+    )])
+    .await;
+    app_answering(&app, "app_find", &base, &[("search.query", "/search")]).await;
+    let patch = r#"{"search_app":"app_find"}"#;
+    let (status, json) = send(&app, "PATCH", "/admin/search/settings", Some(patch)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let pk = publishable(&app).await;
+    let search = "/storefront/search?country=HR&language=de&q=tasse";
+
+    let (language, found) = read_ok(&app, &pk, search).await;
+    assert_eq!(language, "de");
+    assert_eq!(found["items"][0]["title"], "Tasse", "{found}");
+    // The app finding nothing is its answer: no other language is searched.
+    answers.lock().unwrap().insert(
+        "/search".to_string(),
+        (200, json!({"hits": [], "total": 0})),
+    );
+    let (language, found) = read_ok(&app, &pk, search).await;
+    assert_eq!((language.as_str(), &found["total"]), ("de", &json!(0)));
+    let saw = saw.lock().unwrap();
+    let sent: Vec<&Value> = saw
+        .iter()
+        .map(|(_, _, _, body)| &body["language"])
+        .collect();
+    assert_eq!(sent, [&json!("de"), &json!("de")]);
+}
+
+#[tokio::test]
+async fn a_searchs_following_pages_search_the_language_its_first_did() {
+    let app = app().await;
+    languages(&app, &[("de", true)]).await;
+    let (mug, _) = sized_mug(&app).await;
+    translate(&app, "product", &mug, "de", &[("title", "Tasse")]).await;
+    super::settle_search(&app).await;
+    // German is offered, its documents not built yet: the first page falls back.
+    market_offers(&app, &["en", "de"]).await;
+    let pk = publishable(&app).await;
+    let search = "/storefront/search?country=HR&language=de&group=variant&limit=1";
+    let (language, first) = read_ok(&app, &pk, search).await;
+    assert_eq!((language.as_str(), &first["total"]), ("en", &json!(2)));
+    let cursor = first["next_cursor"].as_str().unwrap().to_string();
+
+    // German's documents are built meanwhile; the next page still reads English.
+    super::settle_search(&app).await;
+    let (language, second) = read_ok(&app, &pk, &format!("{search}&cursor={cursor}")).await;
+    assert_eq!(language, "en");
+    assert_eq!(second["items"][0]["title"], "Mug");
+    assert_ne!(second["items"][0]["variant"], first["items"][0]["variant"]);
+    // A new search reads German.
+    let (language, again) = read_ok(&app, &pk, search).await;
+    assert_eq!(
+        (language.as_str(), &again["items"][0]["title"]),
+        ("de", &json!("Tasse"))
+    );
+}

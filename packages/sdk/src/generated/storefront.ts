@@ -803,11 +803,11 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Searches the products the shopper's market sells, priced and stocked there; without `q`,
-         *     the market's product listing. Pages go at most 1,000 results deep. With a search app set
-         *     (`search_app` in the settings), the app chooses and orders the results (`search.query`)
-         *     and Hypha shows its own prices and stock for them; `price` is then `null`. When the app
-         *     fails, the built-in engine answers.
+         * Searches the products the shopper's market sells, priced and stocked there, in the
+         *     language asked for; without `q`, the market's product listing. Pages go at most 1,000
+         *     results deep. With a search app set (`search_app` in the settings), the app chooses and
+         *     orders the results (`search.query`) and Hypha shows its own prices and stock for them;
+         *     `price` is then `null`. When the app fails, the built-in engine answers.
          */
         get: operations["storefront.search.storefront_search"];
         put?: never;
@@ -915,7 +915,15 @@ export interface components {
             country: components["schemas"]["CountryCode"];
             /** @description Whether the first line is expected to hold a house number. */
             house_number_required: boolean;
-            /** @description Each field's label, by field ("State", "ZIP code"). English for now. */
+            /**
+             * @description Each label's key, by field, for the same fields as `labels` (`province: "state"`,
+             *     `postal_code: "zip_code"`): what a form in another language translates the label
+             *     by. `null` for a label outside the set, which is then shown as `labels` has it.
+             */
+            label_keys: {
+                [key: string]: components["schemas"]["LabelKeyOrNull"];
+            };
+            /** @description Each field's label, by field ("State", "ZIP code"), in English. */
             labels: {
                 [key: string]: string;
             };
@@ -1068,8 +1076,12 @@ export interface components {
              *     error codes; a checkout rule's is the merchant's, a validation app's the app's.
              */
             code: string;
-            /** @description Plain text for the shopper. */
+            /**
+             * @description Plain text for the shopper, in English when the message is built in: a client
+             *     showing another language words it from `code` and `params`.
+             */
             message: string;
+            params?: components["schemas"]["MessageParamsDto"] | null;
             /**
              * @description An RFC 9535 JSONPath into this response, from a closed set: `$` (the cart),
              *     `$.email`, `$.shipping_address`, `$.shipping_address.<field>`,
@@ -1422,7 +1434,11 @@ export interface components {
              *     (`field.custom.material`).
              */
             key: string;
-            /** @description The merchant's label, if they set one. */
+            /**
+             * @description The merchant's label, if they set one, in the response's language. Without one, an
+             *     option facet's is the option's name in the response's language where that differs
+             *     from the name as stored (as this page's results write it); `null` otherwise.
+             */
             label?: string | null;
             /** @description Most results first, then by value; at most 100. */
             values: components["schemas"]["FacetValueResponse"][];
@@ -1434,13 +1450,15 @@ export interface components {
              */
             count: number;
             /**
-             * @description What to show for it: a `choice` field's label, "Yes" or "No" for a `boolean` field;
-             *     `null` for every other facet, whose value is its own label.
+             * @description What to show for it: a `choice` field's label and an option value's, in the
+             *     response's language, where they differ from `value`; "Yes" or "No" for a `boolean`
+             *     field; `null` otherwise, the value being its own label.
              */
             label?: string | null;
             /**
-             * @description As `filter` takes it: a `choice` field's value is its key, a `boolean` field's
-             *     `true` or `false`.
+             * @description As `filter` takes it, as stored in every language: a `choice` field's value is its
+             *     key, a `boolean` field's `true` or `false`, an option's value its label in the
+             *     store's own language.
              */
             value: string;
         };
@@ -1471,6 +1489,15 @@ export interface components {
              */
             unavailable: components["schemas"]["UnavailableOptionResponse"][];
         };
+        /**
+         * @description What a field's label says, by meaning: a closed set for a client to translate labels
+         *     by, the English `labels` being one rendering of it. Values are added, never renamed.
+         *
+         *     Known values: `first_name`, `last_name`, `company`, `address1`, `address2`, `street_and_house_number`, `full_address`, `additional_address`, `city`, `city_town`, `city_ward_town_village`, `ward`, `district`, `suburb`, `area`, `region`, `province`, `state`, `state_territory`, `county`, `prefecture`, `emirate`, `governorate`, `department`, `postal_code`, `postcode`, `zip_code`, `pin_code`, `phone`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        LabelKeyDto: string;
+        LabelKeyOrNull: components["schemas"]["LabelKeyDto"] | null;
         /**
          * @description A BCP 47 language tag: a language, then optionally a script, region and variants (`en`, `en-GB`, `sr-Latn`). Responses show it in canonical case.
          * @example en-GB
@@ -1527,6 +1554,13 @@ export interface components {
         };
         LoginCodeRequest: {
             email: string;
+            /**
+             * @description The language the shopper reads the storefront in (a BCP 47 tag), out of the store's
+             *     default and published languages: one it doesn't offer is tried without its region,
+             *     then counts as none asked; never an error. The code's email is written in it when
+             *     the customer has no language of their own, and a customer created now keeps it.
+             */
+            language?: string | null;
         };
         LoginCodeResponse: {
             /**
@@ -1540,6 +1574,38 @@ export interface components {
          * @example mkt_0190f1a2b3c47d8e9f00112233445566
          */
         MarketId: string;
+        /**
+         * @description What a client needs to word a built-in cart message or an address problem from its
+         *     `code` in the shopper's language, rather than show the English `message`. Absent where
+         *     there's nothing to say: a checkout rule's or a validation app's message (worded by
+         *     whoever wrote it), a built-in one that needs no data, a message stored before params.
+         *     Fields are added, never renamed. By code:
+         *
+         *     - `required`, `unknown_region`: `field`.
+         *     - `too_long`: `field`, `max`.
+         *     - `invalid_format`: `field`, and `example` where the country gives one.
+         *     - `region_mismatch`: `field` (`postal_code`), `region` (the code the address names) and
+         *       `region_name`.
+         *     - `house_number_missing`: `field` (`line1`).
+         *     - `apartment_missing`: `field` (`line2`).
+         *     - `address_corrections_suggested`, `address_ambiguous`, `address_undeliverable`,
+         *       `validation_unavailable`: none (a suggested address is the cart's
+         *       `shipping_address_check.suggested`).
+         *
+         *     A field's label in the country's words is the address format's `label_keys`, but for
+         *     `country`, which forms show apart from the address's own fields.
+         */
+        MessageParamsDto: {
+            /** @example 90210 */
+            example?: string | null;
+            field?: components["schemas"]["AddressFieldDto"] | null;
+            /** Format: int32 */
+            max?: number | null;
+            /** @example NY */
+            region?: string | null;
+            /** @example New York */
+            region_name?: string | null;
+        };
         /**
          * @description Who said it: the address's format, the store's verification app, one of the merchant's
          *     checkout rules, or a validation app.
@@ -1857,7 +1923,8 @@ export interface components {
          *     format (`GET …/address-formats/{country}`): its required fields, the postal code's
          *     shape, the region (a name, alternate name or code, stored as the code where the
          *     country lists regions). Every problem comes back at once as `422 invalid_address`
-         *     with `details.problems: [{field, code, message}]`.
+         *     with `details.problems: [{field, code, message, params}]` (`params` as a cart
+         *     message's).
          */
         PostalAddressRequest: {
             city: string;
@@ -1995,6 +2062,7 @@ export interface components {
             code: string;
             field: components["schemas"]["AddressFieldDto"];
             message: string;
+            params?: components["schemas"]["MessageParamsDto"] | null;
         };
         /**
          * @description One result: a listing, a product or a variant (the request's `group`), shown by
@@ -2037,6 +2105,10 @@ export interface components {
             variant_title?: string | null;
             vendor?: string | null;
         };
+        /**
+         * @description An option of the variant shown, in the response's language. (Filters take the value
+         *     as stored: the `option.<name>` facet's `value`.)
+         */
         SearchOption: {
             name: string;
             value: string;
@@ -6725,9 +6797,19 @@ export interface operations {
                 country: string;
                 /**
                  * @description Words to find in titles, vendors, types, tags, SKUs, option values and
-                 *     descriptions; each must start a word. Absent lists every product.
+                 *     descriptions, as `language` writes them; each must start a word. Absent lists
+                 *     every product.
                  */
                 q?: string;
+                /**
+                 * @description The language to search and answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
+                 *     `country`'s market offers (`/storefront/countries`): one it doesn't offer is tried
+                 *     without its region (`de` for `de-AT`), and without it, or with one still not
+                 *     offered, the market's default answers. `Content-Language` names the one served.
+                 *     Filters and facet values stay as stored in every language; facets label them in
+                 *     this one.
+                 */
+                language?: string;
                 /**
                  * @description Repeatable `key:value`, key `option.<name>` (any case), `vendor`,
                  *     `product_type`, `tag`, `on_sale` (`true`: only what's shown with a compare-at
@@ -6759,6 +6841,8 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    /** @description The language the response is in. */
+                    "Content-Language"?: string;
                     [name: string]: unknown;
                 };
                 content: {

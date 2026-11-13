@@ -286,6 +286,27 @@ async fn an_order_is_read_in_its_language_by_the_buyer_and_in_the_stores_by_staf
     let customer = admin["customer"].as_str().unwrap();
     let (_, buyer) = send(&app, "GET", &format!("/admin/customers/{customer}"), None).await;
     assert_eq!(buyer["language"], "de");
+
+    // The store stops publishing German: the checked-out cart is still its order's
+    // German copies, and says so.
+    let (_, markets) = send(&app, "GET", "/admin/markets", None).await;
+    let market = markets["items"][0]["id"].as_str().unwrap();
+    let body = json!({"languages": ["en"]}).to_string();
+    let path = format!("/admin/markets/{market}");
+    let (status, json) = send(&app, "PATCH", &path, Some(&body)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let body = json!({"languages": [{"language": "de", "published": false}]}).to_string();
+    let (status, store) = send(&app, "PATCH", "/admin/store", Some(&body)).await;
+    assert_eq!(status, StatusCode::OK, "{store}");
+    let (status, language, cart) = storefront(&app, &pk, "GET", &cart_path, None).await;
+    assert_eq!(status, StatusCode::OK, "{cart}");
+    assert_eq!(language.as_deref(), Some("de"));
+    assert_eq!(cart["lines"][0]["product_title"], "Tasse");
+    // Its payment methods answer in the language the cart does.
+    let path = format!("{cart_path}/payment-methods");
+    let (status, language, json) = storefront(&app, &pk, "GET", &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(language.as_deref(), Some("de"), "as the cart reads");
 }
 
 #[tokio::test]

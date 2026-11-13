@@ -21,8 +21,8 @@ use hypha_tax::{HasTaxClasses, HasTaxRegions, TaxClassRepo, TaxContext, TaxRegio
 use thiserror::Error;
 
 use crate::{
-    Cart, CartError, CartRepo, HasCarts, LineError, LineStatus, PricedCart, Publication,
-    SelectedShipping, ShippingContext, StageCarts, StoredQuote, check_stock,
+    Cart, CartError, CartRepo, ContentLanguages, HasCarts, LineError, LineStatus, PricedCart,
+    Publication, SelectedShipping, ShippingContext, StageCarts, StoredQuote, check_stock,
     price_cart_with_shipping, price_line, shipping_after_discounts,
 };
 use hypha_channels::{ChannelRepo, HasChannels};
@@ -951,27 +951,48 @@ pub struct GroupOffers {
     pub after_discounts: Vec<Option<Money>>,
 }
 
+/// What `shipping_offers` answers: each group's offers, and the cart they were priced
+/// for, so a caller needn't read it again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShippingOffers {
+    /// The cart at current prices (`get_cart`'s, its market's languages included).
+    pub cart: PricedCart,
+    pub groups: Vec<GroupOffers>,
+}
+
 /// Every option the cart's zone offers its groups, priced: built-in rates computed,
-/// providers asked (each once, all at once). A provider that fails leaves its options out
-/// with the reason; it never fails the call.
+/// providers asked (each once, all at once) in the language the cart is read in
+/// (`languages`, the store's). A provider that fails leaves its options out with the
+/// reason; it never fails the call.
 pub async fn shipping_offers<S: HasCarts + PricingPorts, P: RateProvider>(
     ctx: &Ctx,
     ports: &S,
     rates: &P,
+    languages: &ContentLanguages,
     id: CartId,
-) -> Result<Vec<GroupOffers>, CommandError> {
+) -> Result<ShippingOffers, CommandError> {
     ctx.require(Scope::CartsRead)?;
     let cart = load_cart(ctx, ports, id).await?;
     let reading = read_cart(ports, &cart).await?;
-    group_offers(&cart, &reading, rates).await
+    let groups = group_offers(&cart, &reading, rates, languages).await?;
+    Ok(ShippingOffers {
+        cart: reading.priced,
+        groups,
+    })
 }
 
 /// Picks `option` for `group`, if the cart is offered it now. A provider's price is stored
-/// with the choice, as quoted.
+/// with the choice, as quoted. Providers are asked as `shipping_offers` asks them.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a command's ports, clock and plain inputs, as its siblings take them; a struct \
+              would only bundle them for this one"
+)]
 pub async fn select_shipping<S: HasCarts + PricingPorts, P: RateProvider>(
     ctx: &Ctx,
     ports: &S,
     rates: &P,
+    languages: &ContentLanguages,
     clock: &impl Clock,
     id: CartId,
     group: ShippingGroupId,
@@ -983,7 +1004,7 @@ pub async fn select_shipping<S: HasCarts + PricingPorts, P: RateProvider>(
         return Err(CommandError::ShippingGroupNotFound(group));
     }
     let reading = read_cart(ports, &cart).await?;
-    let offered = group_offers(&cart, &reading, rates).await?;
+    let offered = group_offers(&cart, &reading, rates, languages).await?;
     let outcome = offered
         .iter()
         .flat_map(|g| &g.offers)
@@ -1017,10 +1038,12 @@ pub async fn select_shipping<S: HasCarts + PricingPorts, P: RateProvider>(
 }
 
 /// The offers of each group of a priced cart. Needs an address and a zone for it.
+/// Providers are told the language the cart is read in (`ContentLanguages::told`).
 pub async fn group_offers<P: RateProvider, R: PromotionReading>(
     cart: &Cart,
     reading: &CartReading<R>,
     rates: &P,
+    languages: &ContentLanguages,
 ) -> Result<Vec<GroupOffers>, CommandError> {
     let groups = &reading.priced.shipping_groups;
     if groups.is_empty() {
@@ -1078,7 +1101,7 @@ pub async fn group_offers<P: RateProvider, R: PromotionReading>(
             destination: destination.clone(),
             items,
             subtotal,
-            language: reading.priced.spoken_language(),
+            language: languages.told(&reading.priced),
         };
         let offered = offers(zone, rates, &request).await;
         let after_discounts = offered

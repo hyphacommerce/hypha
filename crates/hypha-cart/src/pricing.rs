@@ -185,16 +185,6 @@ pub struct PricedCart {
 }
 
 impl PricedCart {
-    /// The language the cart is in as far as the cart and its market say: the one it
-    /// was given while the market still lists it (or its language without the region),
-    /// else the market's default (`Language::pick`); `None` when the market lists none
-    /// (the store's default language). What apps asked about the cart are told. A market
-    /// lists only languages the store publishes (the store refuses to unpublish one in
-    /// use), so this is the language its responses are in.
-    pub fn spoken_language(&self) -> Option<Language> {
-        Language::pick(self.language.as_ref(), &self.market_languages)
-    }
-
     /// Checkout should refuse a cart unless this is true.
     pub fn is_fully_available(&self) -> bool {
         self.lines.iter().all(PricedLine::is_available)
@@ -1082,20 +1072,6 @@ mod tests {
             details.variant_title_with(|_| Some("Mittel")),
             Some("M".to_string())
         );
-    }
-
-    #[test]
-    fn a_cart_speaks_its_own_language_else_its_markets_default() {
-        let lang = |tag: &str| hypha_core::Language::new(tag).unwrap();
-        let mut priced = price_cart(&cart(&[]), &[], &pricing(&[]), &no_tax(), &no_stock());
-        assert_eq!(priced.spoken_language(), None);
-        priced.market_languages = vec![lang("de"), lang("en")];
-        assert_eq!(priced.spoken_language(), Some(lang("de")));
-        priced.language = Some(lang("en"));
-        assert_eq!(priced.spoken_language(), Some(lang("en")));
-        // A choice the market stopped offering falls back to its default.
-        priced.language = Some(lang("fr"));
-        assert_eq!(priced.spoken_language(), Some(lang("de")));
     }
 
     #[test]

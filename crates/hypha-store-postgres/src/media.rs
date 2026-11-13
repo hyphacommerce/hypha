@@ -157,14 +157,25 @@ impl<C: PgConnection> AssetRepo for PgStore<C> {
 
     async fn insert(&self, asset: &mut Asset) -> Result<(), RepoError> {
         let s = asset.snapshot();
-        in_transaction!(self, |tx| insert_asset(tx, &s).await)?;
+        let events = asset.take_events();
+        let stamp = self.event_stamp();
+        in_transaction!(self, |tx| {
+            insert_asset(tx, &s).await?;
+            insert_events(tx, &events, Some(Version::NEW.next()), stamp).await
+        })?;
         asset.set_version(Version::NEW.next());
         Ok(())
     }
 
     async fn update(&self, asset: &mut Asset) -> Result<(), RepoError> {
         let s = asset.snapshot();
-        let version = in_transaction!(self, |tx| update_asset(tx, &s).await)?;
+        let events = asset.take_events();
+        let stamp = self.event_stamp();
+        let version = in_transaction!(self, |tx| {
+            let version = update_asset(tx, &s).await?;
+            insert_events(tx, &events, Some(version), stamp).await?;
+            Ok(version)
+        })?;
         asset.set_version(version);
         Ok(())
     }

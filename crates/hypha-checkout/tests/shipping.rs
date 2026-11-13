@@ -35,6 +35,11 @@ use hypha_testkit::{FixedClock, InMemoryPorts, SequentialIds};
 use pollster::block_on;
 use uuid::Uuid;
 
+/// A store in English alone.
+fn languages() -> hypha_cart::ContentLanguages {
+    hypha_cart::ContentLanguages::only(hypha_core::Language::new("en").unwrap())
+}
+
 fn hr() -> CountryCode {
     CountryCode::new("HR").unwrap()
 }
@@ -242,6 +247,7 @@ impl World {
             &Ctx::system(),
             &self.ports,
             &self.dhl,
+            &languages(),
             &self.clock,
             cart,
             group,

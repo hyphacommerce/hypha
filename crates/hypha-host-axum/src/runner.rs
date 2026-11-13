@@ -48,6 +48,7 @@ impl Jobs {
 pub(crate) struct Wake {
     pub dispatch: Arc<Notify>,
     pub search_sync: Arc<Notify>,
+    pub translation_sources: Arc<Notify>,
     pub send_notifications: Arc<Notify>,
 }
 
@@ -83,6 +84,7 @@ pub(crate) fn start<D: Deployment>(
     if jobs.dispatch.enabled {
         let s = Arc::clone(&state);
         let search = Arc::clone(&wake.search_sync);
+        let sources = Arc::clone(&wake.translation_sources);
         tasks.push(every(
             &stopped,
             Timer {
@@ -94,13 +96,16 @@ pub(crate) fn start<D: Deployment>(
             move || {
                 let s = Arc::clone(&s);
                 let search = Arc::clone(&search);
+                let sources = Arc::clone(&sources);
                 async move {
                     // Expanded for the concrete deployment (`host!`): its handlers' futures
                     // are only provably `Send` there.
                     let ran = D::dispatch(s).await;
-                    // Its handlers may have marked products for search.
+                    // Its handlers may have marked products for search, or queued
+                    // resources for the translation worklist.
                     if matches!(ran, Ok(r) if !r.idle) {
                         search.notify_one();
+                        sources.notify_one();
                     }
                     ran
                 }
@@ -136,6 +141,26 @@ pub(crate) fn start<D: Deployment>(
             move || {
                 let s = Arc::clone(&s);
                 async move { jobs::search_sync(&s).await }
+            },
+        ));
+    }
+
+    // Reading the resources queued for the translation worklist again (every minute by
+    // default, less often while there's nothing, and at once after the dispatcher ran
+    // handlers, which may have queued a kind's).
+    if jobs.translation_sources.enabled {
+        let s = Arc::clone(&state);
+        tasks.push(every(
+            &stopped,
+            Timer {
+                name: "translation_sources",
+                interval: jobs.translation_sources.interval,
+                idle,
+                wake: Some(Arc::clone(&wake.translation_sources)),
+            },
+            move || {
+                let s = Arc::clone(&s);
+                async move { jobs::translation_sources(&s).await }
             },
         ));
     }

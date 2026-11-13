@@ -46,14 +46,29 @@ pick_creds() {
 
 # step NAME STATUS CODE_OR_DASH CURL_ARGS...
 # Runs curl, checks the status and (unless "-") the "code" field. Leaves the body in $BODY.
+# A step that doesn't expect a 429 and gets one waits out its `retry_after_secs` (at most
+# MAX_RATE_WAIT seconds) and sends once more: the script runs every step from one address,
+# so a busy section can use up a per-address allowance (cart creation's, say) that a
+# shopper never would. Steps that test a limit expect the 429 and aren't retried.
+MAX_RATE_WAIT=10
 step() {
     local name=$1 want_status=$2 want_code=$3
     shift 3
-    local out status
+    local out status wait
     pick_creds "$@"
     out=$(curl -s -w '\n%{http_code}' ${CREDS[@]+"${CREDS[@]}"} "$@")
     status=${out##*$'\n'}
     BODY=${out%$'\n'*}
+    if [[ $status == 429 && $want_status != 429 ]]; then
+        wait=$(sed -nE 's/.*"retry_after_secs":([0-9]+).*/\1/p' <<<"$BODY")
+        wait=${wait:-1}
+        ((wait > MAX_RATE_WAIT)) && wait=$MAX_RATE_WAIT
+        echo "wait $name: rate limited, retrying in ${wait}s"
+        sleep "$wait"
+        out=$(curl -s -w '\n%{http_code}' ${CREDS[@]+"${CREDS[@]}"} "$@")
+        status=${out##*$'\n'}
+        BODY=${out%$'\n'*}
+    fi
     if [[ $status != "$want_status" ]]; then
         echo "FAIL $name: expected HTTP $want_status, got $status: $BODY"
         FAILED=$((FAILED + 1))
@@ -313,7 +328,7 @@ MUG=$(id)
 MUG_VAR=$(variant)
 step "the mug's translatable fields" 200 - "$BASE/admin/translations/product/$MUG"
 contains "what it can be translated from and into" '"default_language":"en","languages":["de","fr"]'
-contains "the title's source text" '"key":"title","format":"text","max_length":255,"source":"Mug"'
+contains "the title's source text" '"key":"title","format":"text","max_length":255,"min_length":null,"source":"Mug"'
 step "nothing to translate in an empty description" 422 invalid_translation \
     -X PUT "$BASE/admin/translations/product/$MUG/de" -H "$JSON" -d '{"fields":{"description":{"value":"<p>Eine Tasse.</p>"}}}'
 contains "says why" '"code":"source_empty","key":"description"'
@@ -323,6 +338,17 @@ contains "the title, trimmed" '"de":{"value":"Tasse","source_digest":"'
 contains "up to date" '"language":"de","translated":1,"outdated":0'
 step "into an unpublished language too" 200 - -X PUT "$BASE/admin/translations/product/$MUG/fr" -H "$JSON" \
     -d '{"fields":{"title":{"value":"Tasse"}}}'
+step "a patch changes the fields it names" 200 - -X PATCH "$BASE/admin/translations/product/$MUG/de" -H "$JSON" \
+    -d '{"fields":{"title":{"value":"Becher"}}}'
+contains "the title changed" '"de":{"value":"Becher","source_digest":"'
+step "a patch checks the source's digest" 422 invalid_translation -X PATCH "$BASE/admin/translations/product/$MUG/de" \
+    -H "$JSON" -d '{"fields":{"title":{"value":"Tasse","source_digest":"0000000000000000000000000000000000000000000000000000000000000000"}}}'
+contains "says the source changed" '"code":"source_changed","key":"title"'
+step "null removes a field" 200 - -X PATCH "$BASE/admin/translations/product/$MUG/fr" -H "$JSON" -d '{"fields":{"title":null}}'
+contains "French went with its last field" '"translations":[{"language":"de",'
+step "a patch creates a translation" 200 - -X PATCH "$BASE/admin/translations/product/$MUG/fr" -H "$JSON" \
+    -d '{"fields":{"title":{"value":"Tasse"}}}'
+contains "French again" '"language":"fr","translated":1'
 step "never into the default language" 422 translation_into_default_language -X PUT "$BASE/admin/translations/product/$MUG/en" \
     -H "$JSON" -d '{"fields":{"title":{"value":"Mug"}}}'
 step "nor into a language the store doesn't list" 422 language_not_listed -X PUT "$BASE/admin/translations/product/$MUG/es" \
@@ -332,7 +358,15 @@ step "a field a product doesn't have" 422 invalid_translation -X PUT "$BASE/admi
 contains "says which" '"code":"unknown_field"'
 step "a kind that has no translations" 404 unknown_resource_kind "$BASE/admin/translations/variant/$MUG"
 step "what's translated into German" 200 - "$BASE/admin/translations?kind=product&language=de"
-contains "the mug's title" "{\"resource\":{\"kind\":\"product\",\"id\":\"$MUG\"},\"language\":\"de\",\"fields\":[\"title\"]"
+contains "the mug's translation" "{\"resource\":{\"kind\":\"product\",\"id\":\"$MUG\"},\"language\":\"de\",\"state\":"
+contains "its title" '"fields":["title"]'
+wait_for "the mug is complete in German" "$BASE/admin/translations?kind=product&language=de&state=complete" "\"id\":\"$MUG\""
+contains "every field with text translated" '"state":"complete","total":1,"missing":0,"outdated":0'
+step "nothing of it is missing in German" 200 - "$BASE/admin/translations?kind=product&language=de&state=missing"
+lacks "the mug isn't listed" "\"id\":\"$MUG\""
+step "the worklist is in a language" 400 invalid_query "$BASE/admin/translations?state=missing"
+step "each language's progress" 200 - "$BASE/admin/translations/progress?kind=product"
+contains "German covers the mug" '"language":"de","total":1,"translated":1,"outdated":0,"missing":0,"inherited":0'
 step "the default language is fixed while anything is translated" 409 default_language_in_use -X PATCH "$BASE/admin/store" \
     -H "$JSON" -d '{"default_language":"es"}'
 step "remove the German translation" 204 - -X DELETE "$BASE/admin/translations/product/$MUG/de"
@@ -737,6 +771,12 @@ in_language "English, the market's first" en "$BASE/storefront/products/by-handl
 in_language "as without a language" en "$BASE/storefront/products/$MUG?country=HR"
 in_language "the categories take it too" de "$BASE/storefront/categories?language=de"
 in_language "and the country, for its market's default" en "$BASE/storefront/categories?country=HR"
+wait_for "search in German finds the mug by its German title" \
+    "$BASE/storefront/search?country=HR&language=de&q=tasse" '"title":"Tasse"'
+in_language "search names its language" de "$BASE/storefront/search?country=HR&language=de&q=tasse"
+step "search in a language the store hasn't published" 200 - "$BASE/storefront/search?country=HR&language=fr&q=mug"
+contains "answers in the market's default" '"title":"Mug"'
+in_language "named in Content-Language" en "$BASE/storefront/search?country=HR&language=fr&q=mug"
 step "a cart in German" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR","language":"de"}'
 contains "keeps the language" '"language":"de"'
 LANG_CART=$(id)
@@ -759,6 +799,7 @@ contains "in the market's languages" '"languages":["en","de"]'
 step "the US address form" 200 - "$BASE/storefront/address-formats/US"
 contains "city, state and ZIP code on one row" '["city","province","postal_code"]'
 contains "its labels" '"postal_code":"ZIP code","province":"State"'
+contains "and their keys, to translate them by" '"postal_code":"zip_code","province":"state"'
 contains "states to choose from" '{"code":"CA","name":"California"}'
 contains "a ZIP code is required" '"postal_code":"required","postal_code_example":"90210"'
 step "cached for five minutes" 200 - -i "$BASE/storefront/address-formats/US"
@@ -1104,7 +1145,7 @@ DE_GROUP=$(shgrp)
 step "its email" 200 - -X PUT "$DE/email" -H "$JSON" -d '{"email":"lukas@example.de"}'
 step "a German address without a house number" 200 - -X PUT "$DE/shipping-address" -H "$JSON" \
     -d '{"address":{"last_name":"Weber","line1":"Torstraße","city":"Berlin","postal_code":"10119","country":"DE"}}'
-contains "warns under the first line" '"messages":[{"severity":"warning","code":"house_number_missing","path":"$.shipping_address.line1","message":"Add a house number","source":{"type":"format"}}]'
+contains "warns under the first line" '"messages":[{"severity":"warning","code":"house_number_missing","path":"$.shipping_address.line1","message":"Add a house number","source":{"type":"format"},"params":{"field":"line1"}}]'
 step "read again" 200 - "$DE"
 contains "the warning is worked out on every read" '"code":"house_number_missing"'
 step "ship it standard" 200 - -X PUT "$DE/shipping/$DE_GROUP" -H "$JSON" -d "{\"option\":\"$STANDARD\"}"
@@ -2183,6 +2224,20 @@ step "the storefront sees fields given to it" 200 - "$BASE/storefront/products/$
 contains "brass" '"custom.material":"brass"'
 step "and their definitions, to name them" 200 - "$BASE/storefront/custom-field-definitions?owner_type=product"
 contains "by name" '"field":"custom.material","name":"Material"'
+step "the lamp's translatable fields" 200 - "$BASE/admin/translations/product/$LAMP"
+contains "its material" "\"key\":\"custom_fields.$MATERIAL_FIELD.value\",\"format\":\"text\",\"max_length\":255,\"min_length\":null,\"source\":\"brass\""
+contains "named by its definition" "\"custom_field\":{\"definition\":\"$MATERIAL_FIELD\",\"key\":\"custom.material\",\"name\":\"Material\",\"type\":\"text\""
+step "a text value is one line" 422 invalid_translation -X PUT "$BASE/admin/translations/product/$LAMP/de" -H "$JSON" \
+    -d "{\"fields\":{\"custom_fields.$MATERIAL_FIELD.value\":{\"value\":\"Mes\\nsing\"}}}"
+contains "says why" '"code":"not_single_line"'
+step "the lamp's material in German" 200 - -X PUT "$BASE/admin/translations/product/$LAMP/de" -H "$JSON" \
+    -d "{\"fields\":{\"custom_fields.$MATERIAL_FIELD.value\":{\"value\":\"Messing\"}}}"
+step "the storefront reads it in German" 200 - "$BASE/storefront/products/$LAMP?language=de"
+contains "translated" '"custom.material":"Messing"'
+step "and as stored in English" 200 - "$BASE/storefront/products/$LAMP"
+contains "brass" '"custom.material":"brass"'
+step "a customer's values are never translated" 404 unknown_resource_kind "$BASE/admin/translations/customer/$CUSTOMER"
+step "remove the lamp's German" 204 - -X DELETE "$BASE/admin/translations/product/$LAMP/de"
 step "the lamp's variant fields" 200 - "$BASE/admin/variants/$LAMP_VARIANT/custom-fields"
 step "Home's banner" 200 - -X PATCH "$BASE/admin/categories/$HOME_CAT/custom-fields" -H "$JSON" \
     -d '{"custom_fields":{"custom.banner":"Make it cosy"}}'
@@ -2307,6 +2362,11 @@ contains "the layout first" '"items":[{"key":"layout"'
 step "one template" 200 - "$BASE/admin/notification-templates/order_shipped"
 contains "with its variables" '"variables":{'
 step "an unknown template" 404 template_unknown "$BASE/admin/notification-templates/nope"
+step "a template in the store's default language" 200 - \
+    "$BASE/admin/notification-templates/order_shipped?language=en"
+contains "is the default language's" '"language":null'
+step "a template in a language the store doesn't have" 422 language_not_listed \
+    "$BASE/admin/notification-templates/order_shipped?language=ja"
 TEMPLATES="$BASE/admin/notification-templates/order_shipped"
 BROKEN='{"subject":"Shipped","html":"{% extends \"layout\" %}{% block content %}{{ order.nope }}{% endblock %}"}'
 GOOD='{"subject":"Shipped: {{ order.number }}","html":"{% extends \"layout\" %}{% block content %}<p>{{ order.number }}</p>{% endblock %}"}'
@@ -2837,15 +2897,17 @@ step "same email in another case" 409 customer_exists -X POST "$BASE/admin/custo
 step "invalid customer email" 422 invalid_email -X POST "$BASE/admin/customers" -H "$JSON" -d '{"email":"ana"}'
 step "address without a city" 422 invalid_address -X POST "$BASE/admin/customers/$CUSTOMER/addresses" \
     -H "$JSON" -d '{"last_name":"Horvat","line1":"Ilica 1","city":" ","country":"HR"}'
-contains "every problem by field" '"problems":[{"code":"required","field":"city","message":"Enter a city"},{"code":"required","field":"postal_code","message":"Enter a postal code"}]'
+contains "every problem by field" '"problems":[{"code":"required","field":"city","message":"Enter a city","params":{"field":"city"}},{"code":"required","field":"postal_code","message":"Enter a postal code","params":{"field":"postal_code"}}]'
 step "a state and ZIP code that don't fit" 422 invalid_address -X POST \
     "$BASE/admin/customers/$CUSTOMER/addresses" -H "$JSON" \
     -d '{"last_name":"Horvat","line1":"1 Main St","city":"Springfield","province":"Kalifornia","postal_code":"1","country":"US"}'
 contains "the state unknown" '"code":"unknown_region","field":"province"'
 contains "the ZIP code in the wrong shape" '"code":"invalid_format","field":"postal_code","message":"Enter a valid ZIP code, like 90210"'
+contains "with the example to word it by" '"params":{"example":"90210","field":"postal_code"}'
 step "a ZIP code of another state" 422 invalid_address -X POST "$BASE/admin/customers/$CUSTOMER/addresses" \
     -H "$JSON" -d '{"last_name":"Horvat","line1":"1 Main St","city":"New York","province":"NY","postal_code":"94043","country":"US"}'
 contains "doesn't match" '"code":"region_mismatch","field":"postal_code"'
+contains "naming the state it gave" '"params":{"field":"postal_code","region":"NY","region_name":"New York"}'
 step "unknown customer" 404 customer_not_found "$BASE/admin/customers/cus_00000000000000000000000000000063"
 step "remove unknown address" 404 address_not_found -X DELETE \
     "$BASE/admin/customers/$CUSTOMER/addresses/addr_00000000000000000000000000000063"
@@ -2980,6 +3042,14 @@ step "rename myself, no users:write needed" 200 - -X PATCH "$BASE/admin/me" -H "
     -d '{"name":"Owner Two"}'
 contains "the new name" '"name":"Owner Two"'
 step "and back" 200 - -X PATCH "$BASE/admin/me" -H "$JSON" -d '{"name":"Owner"}'
+step "read the admin in Serbian, any tag" 200 - -X PATCH "$BASE/admin/me" -H "$JSON" \
+    -d '{"language":"sr-latn"}'
+contains "my language, in canonical case" '"language":"sr-Latn"'
+step "a language that isn't a tag" 422 invalid_language -X PATCH "$BASE/admin/me" -H "$JSON" \
+    -d '{"language":"Serbian please"}'
+step "back to the browser's languages" 200 - -X PATCH "$BASE/admin/me" -H "$JSON" \
+    -d '{"language":null}'
+contains "no language kept" '"language":null'
 step "sign in on a second device" 200 - -X POST "$BASE/admin/auth/login" -H "$JSON" \
     -H "user-agent: E2E second device" \
     -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"$OWNER_PASSWORD\"}"
@@ -3020,6 +3090,10 @@ step "ask for a sign-in code" 202 - -X POST "$BASE/storefront/auth/code" -H "$JS
 contains "always says sent" '"sent":true'
 step "whatever the address" 202 - -X POST "$BASE/storefront/auth/code" -H "$JSON" \
     -d '{"email":"not an address"}'
+step "asked for in the storefront's language" 202 - -X POST "$BASE/storefront/auth/code" -H "$JSON" \
+    -d '{"email":"lena@example.de","language":"de-AT"}'
+step "in one the store doesn't publish" 202 - -X POST "$BASE/storefront/auth/code" -H "$JSON" \
+    -d '{"email":"luc@example.fr","language":"fr"}'
 step "a made-up code" 401 invalid_code -X POST "$BASE/storefront/auth/login" -H "$JSON" \
     -d '{"email":"nobody@example.com","code":"000000"}'
 step "signing out needs a session" 401 account_required -X POST "$BASE/storefront/account/logout"
@@ -3087,6 +3161,12 @@ AUTH=()
 step "owner logs in again" 200 - -X POST "$BASE/admin/auth/login" -H "$JSON" \
     -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"$OWNER_PASSWORD\"}"
 AUTH=(-H "authorization: Bearer $(token)")
+step "the customer who asked for a code in German" 200 - "$BASE/admin/customers?q=lena"
+step "reads German" 200 - "$BASE/admin/customers/$(sed -E 's/.*"items":\[\{"id":"([^"]+)".*/\1/' <<<"$BODY")"
+contains "the language without its region, as the store publishes it" '"language":"de"'
+step "the one who asked in French" 200 - "$BASE/admin/customers?q=luc"
+step "reads the store's default, as it changes" 200 - "$BASE/admin/customers/$(sed -E 's/.*"items":\[\{"id":"([^"]+)".*/\1/' <<<"$BODY")"
+contains "keeping no language: never an error" '"language":null'
 step "create an autonomous agent" 201 - -X POST "$BASE/admin/agents" -H "$JSON" \
     -d '{"name":"Restocker","grant":{"read":["orders:read"],"write":{"inventory:write":"apply","products:write":"propose"}}}'
 contains "its key is shown once" '"key":"hypha_ak_'

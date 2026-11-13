@@ -1,9 +1,9 @@
 use axum::{Json, extract::State, http::StatusCode, response::Response};
 use hypha_cart::{
-    AddLine, CreateCart, GroupOffers, LineStatus, PricedCart, PricedShippingGroup, PricingPorts,
-    SetLineQuantity, add_discount_code, add_line, create_cart, remove_cart_line,
-    remove_discount_code, select_shipping, set_cart_customer, set_cart_email, set_cart_language,
-    set_line_quantity, set_shipping_address, shipping_offers,
+    AddLine, CartStatus, ContentLanguages, CreateCart, GroupOffers, LineStatus, PricedCart,
+    PricedShippingGroup, PricingPorts, SetLineQuantity, add_discount_code, add_line, create_cart,
+    remove_cart_line, remove_discount_code, select_shipping, set_cart_customer, set_cart_email,
+    set_cart_language, set_line_quantity, set_shipping_address, shipping_offers,
 };
 use hypha_checkout::CartChecks;
 use hypha_checkout_rules::HasCheckoutRules;
@@ -15,13 +15,16 @@ use hypha_core::{
 use hypha_customers::{HasCustomers, get_customer};
 use hypha_markets::{HasMarkets, MarketRepo};
 use hypha_media::{AssetRepo, HasAssets};
+use hypha_orders::{HasOrders, OrderRepo};
 use hypha_shipping::OfferOutcome;
 use hypha_tax::TaxLine;
 use hypha_translations::{HasTranslations, Overlay, ResourceKind, ResourceRef, fields as keys};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    address::{PostalAddressRequest, PostalAddressResponse, ShippingAddressCheckResponse},
+    address::{
+        MessageParamsDto, PostalAddressRequest, PostalAddressResponse, ShippingAddressCheckResponse,
+    },
     discounts::{DiscountClassDto, DiscountTargetDto, DiscountValueDto},
     payments::CartPaymentMethodResponse,
     products::ProductMediaResponse,
@@ -165,9 +168,12 @@ pub struct CartMessageResponse {
     /// the message by that field; one a client doesn't place goes at the top.
     #[schema(example = "$.shipping_address.line1")]
     path: String,
-    /// Plain text for the shopper.
+    /// Plain text for the shopper, in English when the message is built in: a client
+    /// showing another language words it from `code` and `params`.
     message: String,
     source: MessageSourceDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    params: Option<MessageParamsDto>,
 }
 
 /// Whether a message stops checkout: `error` does, `warning` never.
@@ -204,6 +210,7 @@ impl From<&Message> for CartMessageResponse {
             code: m.code().to_string(),
             path: m.path().to_string(),
             message: m.message().to_string(),
+            params: MessageParamsDto::of(m.params()),
             source: match m.source() {
                 MessageSource::Format => MessageSourceDto::Format,
                 MessageSource::Verification => MessageSourceDto::Verification,
@@ -641,6 +648,7 @@ pub async fn cart_response<P: HasAssets + PricingPorts + HasCheckoutRules + HasT
     cart: &PricedCart,
     ports: &P,
     checks: &impl CartChecks,
+    languages: &ContentLanguages,
     media: Option<&Media>,
     served: Option<&ServedLanguage>,
 ) -> Result<CartResponse, ApiError> {
@@ -651,7 +659,7 @@ pub async fn cart_response<P: HasAssets + PricingPorts + HasCheckoutRules + HasT
         .filter(|_| cart.shipping_address.is_some())
         .map(ShippingAddressCheckResponse::new)
         .transpose()?;
-    let messages = hypha_checkout::cart_messages(ports, checks, cart).await?;
+    let messages = hypha_checkout::cart_messages(ports, checks, languages, cart).await?;
     let image = |l: &hypha_cart::PricedLine| l.details.as_ref().and_then(|d| d.image);
     let ids: Vec<AssetId> = cart.lines.iter().filter_map(image).collect();
     let media = media.filter(|_| !ids.is_empty());
@@ -796,9 +804,17 @@ async fn cart_answer<S: Storage>(
     checks: &impl CartChecks,
     store: &hypha_stores::Store,
 ) -> Result<(ServedLanguage, CartResponse), ApiError> {
+    let languages = crate::language::content_languages(store);
     let served = ServedLanguage::of_cart(cart, store);
-    let response =
-        cart_response(cart, ports, checks, state.media.as_deref(), Some(&served)).await?;
+    let response = cart_response(
+        cart,
+        ports,
+        checks,
+        &languages,
+        state.media.as_deref(),
+        Some(&served),
+    )
+    .await?;
     Ok((served, response))
 }
 
@@ -1015,11 +1031,13 @@ pub async fn set_customer<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
     let priced = set_cart_customer(&ctx, &ports, id, req.customer).await?;
+    let store = super::stores::store_as_system(&state, &ports).await?;
     // The admin's: as stored, in the store's language.
     let cart = cart_response(
         &priced,
         &ports,
         &state.cart_checks(&ports),
+        &crate::language::content_languages(&store),
         state.media.as_deref(),
         None,
     )
@@ -1123,16 +1141,19 @@ pub async fn set_address<S: Storage>(
     )
     .await?;
     let checks = state.cart_checks(&ports);
+    let store = super::stores::store_as_system(&state, &ports).await?;
     hypha_checkout::validate_cart(
         &ctx,
         &ports,
         &checks,
+        &crate::language::content_languages(&store),
         &state.clock,
         &mut priced,
         hypha_core::ValidationStep::Address,
     )
     .await?;
-    storefront_cart(&state, &ports, &priced, &checks).await
+    let (served, response) = cart_answer(&state, &ports, &priced, &checks, &store).await?;
+    Ok(served.respond(response))
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -1227,10 +1248,16 @@ pub async fn shipping_options<S: Storage>(
     let (ports, ctx) = caller.authenticate(&state).await?;
     rate_limit::enforce(&state.limiter, Rule::ShippingQuotesCart, &id.to_string()).await?;
     let rates = state.cart_rates(&ports, id);
-    let groups = shipping_offers(&ctx, &ports, &rates, id).await?;
-    let served = served_for(&state, &ports, &ctx, id).await?;
+    let store = super::stores::store_as_system(&state, &ports).await?;
+    let languages = crate::language::content_languages(&store);
+    let offers = shipping_offers(&ctx, &ports, &rates, &languages, id).await?;
+    // Priced for the offers: its market's languages are read already.
+    let served = match offers.cart.order {
+        None => ServedLanguage::of_cart(&offers.cart, &store),
+        Some(order) => served_checked_out(&ports, order, &store).await?,
+    };
     let mut response = ShippingOptionsResponse {
-        groups: groups.iter().map(Into::into).collect(),
+        groups: offers.groups.iter().map(Into::into).collect(),
     };
     if !served.is_source() {
         let mut options: Vec<ResourceRef> = Vec::new();
@@ -1322,18 +1349,65 @@ pub(crate) async fn shopper_error<S: Storage>(
 }
 
 /// The language the cart `id` reads in now, for a read about it that isn't the cart
-/// itself (its shipping options, its payment methods): the cart and its market read.
+/// itself (a refusal's messages): see `served_in_store`.
 async fn served_for<S: Storage>(
     state: &crate::state::AppState<S>,
     ports: &S::Ports<'_>,
     ctx: &hypha_core::Ctx,
     id: CartId,
 ) -> Result<ServedLanguage, ApiError> {
-    let cart = hypha_cart::find_cart(ctx, ports, id).await?;
-    let market = ports.markets().get(cart.market()).await?;
     let store = super::stores::store_as_system(state, ports).await?;
-    let asked = cart.language().map(Language::as_str);
-    Ok(ServedLanguage::of(asked, &store, market.as_ref()))
+    let cart = hypha_cart::find_cart(ctx, ports, id).await?;
+    served_in_store(ports, &cart, &store).await
+}
+
+/// The language `cart` reads in now, for a read about it that isn't the cart itself (its
+/// payment methods): what the cart's own response would say (`ServedLanguage::of_cart`)
+/// without pricing it. An open cart: its choice held to its market's languages (none read
+/// for a store serving only its default). A checked-out one: its order's language, as
+/// written, whatever the store publishes since.
+async fn served_in_store<P: HasMarkets + HasOrders>(
+    ports: &P,
+    cart: &hypha_cart::Cart,
+    store: &hypha_stores::Store,
+) -> Result<ServedLanguage, ApiError> {
+    match cart.status() {
+        CartStatus::Completed { order } => served_checked_out(ports, order, store).await,
+        CartStatus::Open if one_language(store) => Ok(ServedLanguage::of_order(None, store)),
+        CartStatus::Open => {
+            let market_languages: Vec<Language> = ports
+                .markets()
+                .get(cart.market())
+                .await?
+                .map(|m| m.languages().to_vec())
+                .unwrap_or_default();
+            Ok(ServedLanguage::of_cart_choice(
+                cart.language(),
+                &market_languages,
+                store,
+            ))
+        }
+    }
+}
+
+/// `served_in_store` for a checked-out cart: its order's language, as `of_cart` reads a
+/// checked-out cart (its order's copies are written in it, whatever the store publishes
+/// since); an order from before languages reads as the store's default.
+async fn served_checked_out<P: HasOrders>(
+    ports: &P,
+    order: OrderId,
+    store: &hypha_stores::Store,
+) -> Result<ServedLanguage, ApiError> {
+    let order = ports.orders().get(order).await?;
+    Ok(ServedLanguage::of_order(
+        order.as_ref().and_then(|o| o.language()),
+        store,
+    ))
+}
+
+/// Whether `store` serves its default language alone: every cart reads in it then.
+fn one_language(store: &hypha_stores::Store) -> bool {
+    store.published_languages().next().is_none()
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -1363,19 +1437,32 @@ pub async fn select<S: Storage>(
     rate_limit::enforce(&state.limiter, Rule::ShippingQuotesCart, &id.to_string()).await?;
     let req = body.parse()?;
     let rates = state.cart_rates(&ports, id);
-    let mut priced =
-        select_shipping(&ctx, &ports, &rates, &state.clock, id, group, req.option).await?;
+    let store = super::stores::store_as_system(&state, &ports).await?;
+    let languages = crate::language::content_languages(&store);
+    let mut priced = select_shipping(
+        &ctx,
+        &ports,
+        &rates,
+        &languages,
+        &state.clock,
+        id,
+        group,
+        req.option,
+    )
+    .await?;
     let checks = state.cart_checks(&ports);
     hypha_checkout::validate_cart(
         &ctx,
         &ports,
         &checks,
+        &languages,
         &state.clock,
         &mut priced,
         hypha_core::ValidationStep::Shipping,
     )
     .await?;
-    storefront_cart(&state, &ports, &priced, &checks).await
+    let (served, response) = cart_answer(&state, &ports, &priced, &checks, &store).await?;
+    Ok(served.respond(response))
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -1399,8 +1486,10 @@ pub async fn payment_methods<S: Storage>(
 ) -> Result<Localized<CartPaymentMethodsResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let providers = state.payments(&ports);
-    let methods = hypha_checkout::cart_payment_methods(&ctx, &ports, &providers, id).await?;
-    let served = served_for(&state, &ports, &ctx, id).await?;
+    let offered = hypha_checkout::cart_payment_methods(&ctx, &ports, &providers, id).await?;
+    let store = super::stores::store_as_system(&state, &ports).await?;
+    let served = served_in_store(&ports, &offered.cart, &store).await?;
+    let methods = offered.methods;
     let resources: Vec<ResourceRef> = methods
         .iter()
         .map(|m| ResourceRef::new(ResourceKind::PaymentMethod, m.id().as_uuid()))

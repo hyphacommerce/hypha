@@ -47,6 +47,34 @@ pub mod custom_field_definition {
     }
 }
 
+/// Custom field values, as fields of their owner's translation: a product's and a
+/// category's own, and a variant's in its product's. Only a value of text a shopper reads
+/// is translatable (the host decides which); a definition is named by its ID, which a
+/// definition made again with the same key doesn't reuse.
+pub mod custom_field {
+    use hypha_core::{CustomFieldDefinitionId, VariantId};
+
+    pub(crate) const CUSTOM_FIELDS: &str = "custom_fields";
+    pub(crate) const VARIANT_CUSTOM_FIELDS: &str = "variant_custom_fields";
+    pub(crate) const VALUE: &str = "value";
+
+    /// `custom_fields.<cfdef_…>.value`: the owner's own value (a product's, a
+    /// category's).
+    pub fn value(definition: CustomFieldDefinitionId) -> String {
+        super::child(CUSTOM_FIELDS, definition, VALUE)
+    }
+
+    /// `variant_custom_fields.<var_…>.<cfdef_…>.value`: a variant's value, in its
+    /// product's translation.
+    pub fn variant_value(variant: VariantId, definition: CustomFieldDefinitionId) -> String {
+        super::child(
+            VARIANT_CUSTOM_FIELDS,
+            format_args!("{variant}.{definition}"),
+            VALUE,
+        )
+    }
+}
+
 pub mod shipping_option {
     pub const NAME: &str = "name";
 }
@@ -89,7 +117,7 @@ pub mod search_facet {
 
 #[cfg(test)]
 mod tests {
-    use hypha_core::{OptionId, OptionValueId};
+    use hypha_core::{CustomFieldDefinitionId, OptionId, OptionValueId, VariantId};
     use uuid::Uuid;
 
     use super::*;
@@ -108,8 +136,23 @@ mod tests {
                 K::Product,
                 product::option_value_label(OptionValueId::from_uuid(id)),
             ),
+            (
+                K::Product,
+                custom_field::value(CustomFieldDefinitionId::from_uuid(id)),
+            ),
+            (
+                K::Product,
+                custom_field::variant_value(
+                    VariantId::from_uuid(id),
+                    CustomFieldDefinitionId::from_uuid(id),
+                ),
+            ),
             (K::Category, category::NAME.into()),
             (K::Category, category::DESCRIPTION.into()),
+            (
+                K::Category,
+                custom_field::value(CustomFieldDefinitionId::from_uuid(id)),
+            ),
             (
                 K::CustomFieldDefinition,
                 custom_field_definition::NAME.into(),
@@ -154,5 +197,26 @@ mod tests {
             search_facet::facet_label("option.color"),
             "facets.option.color.label"
         );
+    }
+
+    #[test]
+    fn a_variants_value_names_the_variant_and_the_definition() {
+        let variant = VariantId::from_uuid(Uuid::from_u128(1));
+        let definition = CustomFieldDefinitionId::from_uuid(Uuid::from_u128(2));
+        let key = custom_field::variant_value(variant, definition);
+        assert_eq!(
+            key,
+            format!("variant_custom_fields.{variant}.{definition}.value")
+        );
+        let (spec, child) = K::Product.field(&key).unwrap();
+        assert_eq!(spec.collection, Some("variant_custom_fields"));
+        assert_eq!(child, Some(format!("{variant}.{definition}").as_str()));
+        // A product's own value isn't read as a variant's, nor the other way round.
+        let own = custom_field::value(definition);
+        assert_eq!(
+            K::Product.field(&own).unwrap().0.collection,
+            Some("custom_fields")
+        );
+        assert_eq!(K::Category.field(&key), None);
     }
 }

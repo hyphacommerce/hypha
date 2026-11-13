@@ -10,7 +10,7 @@ use hypha_auth::{
 use hypha_cart::{Cart, CartRepo, HasCarts, StageCarts};
 use hypha_core::{
     Actor, AuthError, CartId, ChannelId, Clock, Ctx, CustomerId, Email, ErrorCode, HasBatch,
-    IdentityId, Notifier, NotifyError, RepoError, Scope, Timestamp,
+    IdentityId, Language, Notifier, NotifyError, RepoError, Scope, Timestamp,
 };
 use hypha_customers::{Customer, CustomerRepo, HasCustomers, find_or_create_customer};
 use thiserror::Error;
@@ -25,10 +25,17 @@ pub enum CustomerEmail {
         to: Email,
         code: String,
         expires_at: Timestamp,
+        /// The customer's language, which the email is written in; `None`: the store's
+        /// default.
+        language: Option<Language>,
     },
     /// The person asked from their account for their data to be erased: when it runs, so
     /// they can still cancel.
-    ErasureRequested { to: Email, due_at: Timestamp },
+    ErasureRequested {
+        to: Email,
+        due_at: Timestamp,
+        language: Option<Language>,
+    },
 }
 
 /// The non-storage ports: auth's, the account settings and the sender.
@@ -158,11 +165,14 @@ fn creator() -> Ctx {
 /// Emails a sign-in code to `email`, creating the customer and their identity if there are
 /// none. Does nothing for an address that isn't one, a placeholder (an erased customer's),
 /// or while the latest code is younger than `login_code_resend_after`: the route answers
-/// the same in every case, so nobody can probe for accounts.
+/// the same in every case, so nobody can probe for accounts. `language` is the one the
+/// shopper reads the storefront in, held to the store's by the caller: a customer created
+/// now reads it, and the email is written in it when the customer has no language yet.
 pub async fn request_login_code<S: AccountPorts>(
     ports: &S,
     env: &impl AccountEnv,
     email: &str,
+    language: Option<&Language>,
 ) -> Result<(), CommandError> {
     let Ok(email) = Email::new(email) else {
         return Ok(());
@@ -172,7 +182,7 @@ pub async fn request_login_code<S: AccountPorts>(
     }
     let settings = *env.account_settings();
     for _ in 0..ROUNDS {
-        let Some(mut identity) = find_identity(ports, env, &email).await? else {
+        let Some(mut identity) = find_identity(ports, env, &email, language).await? else {
             continue;
         };
         let now = env.now();
@@ -189,10 +199,22 @@ pub async fn request_login_code<S: AccountPorts>(
             Err(RepoError::StaleVersion) => continue,
             Err(e) => return Err(e.into()),
         }
+        // Written in the customer's language (their latest checkout's or their profile's),
+        // else the one the shopper is reading the storefront in.
+        let known = match identity.principal() {
+            Principal::Customer(id) => ports
+                .customers()
+                .get(id)
+                .await?
+                .and_then(|c| c.language().cloned()),
+            _ => None,
+        };
+        let language = known.or_else(|| language.cloned());
         env.notify(CustomerEmail::LoginCode {
             to: email,
             code,
             expires_at,
+            language,
         })
         .await?;
         return Ok(());
@@ -201,13 +223,14 @@ pub async fn request_login_code<S: AccountPorts>(
 }
 
 /// The identity signing in with `email`, made if there's none: the customer with that
-/// email (created when there's none), then their identity (created, or its code email
+/// email (created when there's none, reading `language`), then their identity (created, or its code email
 /// moved to `email` when the customer's address changed since). `None` when a race
 /// created either first: the caller looks again.
 async fn find_identity<S: AccountPorts>(
     ports: &S,
     env: &impl AccountEnv,
     email: &Email,
+    language: Option<&Language>,
 ) -> Result<Option<Identity>, CommandError> {
     if let Some(found) = ports
         .identities()
@@ -246,7 +269,8 @@ async fn find_identity<S: AccountPorts>(
             }
         };
     }
-    let customer = find_or_create_customer(&creator(), ports.customers(), env, email).await?;
+    let customer =
+        find_or_create_customer(&creator(), ports.customers(), env, email, language).await?;
     let principal = Principal::Customer(customer.id());
     match ports.identities().get_by_principal(principal).await? {
         Some(mut existing) => {

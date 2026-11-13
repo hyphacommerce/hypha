@@ -1,39 +1,11 @@
 //! The language an order is placed in and what it copies in it: a cart's names as the
 //! buyer read them, beside the store's own that staff read.
 
-use hypha_cart::{PricedCart, PricedLine, promotions::Application};
-use hypha_core::{Language, RepoError, ShippingOptionId, offered_languages};
+use hypha_cart::{ContentLanguages, PricedCart, PricedLine, promotions::Application};
+use hypha_core::{Language, RepoError, ShippingOptionId};
 use hypha_orders::{LocalizedDiscount, LocalizedLine, LocalizedShipping};
 use hypha_payments::{LocalizedPayment, PaymentMethod};
 use hypha_translations::{HasTranslations, Overlay, ResourceKind, ResourceRef, fields};
-
-/// The store's content languages, as plain values from the host: what checkout resolves
-/// a cart's language against.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ContentLanguages {
-    /// The store's default: what content is written in.
-    pub source: Language,
-    /// What shoppers may be served: the default, then the published others.
-    pub servable: Vec<Language>,
-}
-
-impl ContentLanguages {
-    /// A store with its default language only.
-    pub fn only(source: Language) -> Self {
-        Self {
-            servable: vec![source.clone()],
-            source,
-        }
-    }
-
-    /// The language `cart` is read in: the one it was given, held to what its market
-    /// offers out of the store's (`Language::pick`), else the store's default. A choice
-    /// the market or store stopped offering falls back rather than fails.
-    pub fn of(&self, cart: &PricedCart) -> Language {
-        let offered = offered_languages(&cart.market_languages, &self.servable);
-        Language::pick(cart.language.as_ref(), &offered).unwrap_or_else(|| self.source.clone())
-    }
-}
 
 /// What checkout copies in the buyer's language: the translations of a cart's products,
 /// shipping options, discounts and payment method, read in one go. Copies are made only
@@ -175,84 +147,4 @@ fn discount(applied: &Application) -> ResourceRef {
 
 fn payment_method(method: &PaymentMethod) -> ResourceRef {
     ResourceRef::new(ResourceKind::PaymentMethod, method.id().as_uuid())
-}
-
-#[cfg(test)]
-mod tests {
-    use hypha_cart::PricedCart;
-    use hypha_core::{CartId, ChannelId, CountryCode, Currency, MarketId, Money};
-    use uuid::Uuid;
-
-    use super::*;
-
-    fn lang(tag: &str) -> Language {
-        Language::new(tag).unwrap()
-    }
-
-    fn cart(language: Option<&str>, market: &[&str]) -> PricedCart {
-        let eur = Money::zero(Currency::EUR);
-        PricedCart {
-            id: CartId::from_uuid(Uuid::from_u128(1)),
-            market: MarketId::from_uuid(Uuid::from_u128(2)),
-            currency: Currency::EUR,
-            country: CountryCode::new("AT").unwrap(),
-            channel: ChannelId::from_uuid(Uuid::from_u128(3)),
-            email: None,
-            customer: None,
-            order: None,
-            lines: Vec::new(),
-            taxes_included: true,
-            subtotal: eur,
-            shipping_address: None,
-            address_check: None,
-            app_checks: Vec::new(),
-            shipping_groups: Vec::new(),
-            shipping_total: eur,
-            discounts: Vec::new(),
-            discount_total: eur,
-            discount_codes: Vec::new(),
-            tax_total: eur,
-            total: eur,
-            payment_method: None,
-            marketing_opt_in: false,
-            language: language.map(lang),
-            market_languages: market.iter().map(|t| lang(t)).collect(),
-        }
-    }
-
-    fn store() -> ContentLanguages {
-        ContentLanguages {
-            source: lang("en"),
-            servable: vec![lang("en"), lang("de")],
-        }
-    }
-
-    #[test]
-    fn a_cart_is_placed_in_its_language_when_its_market_offers_it() {
-        assert_eq!(store().of(&cart(Some("de"), &["en", "de"])), lang("de"));
-    }
-
-    #[test]
-    fn a_cart_without_one_is_placed_in_its_markets_default() {
-        assert_eq!(store().of(&cart(None, &["de", "en"])), lang("de"));
-    }
-
-    #[test]
-    fn a_language_no_longer_offered_falls_back_to_the_markets_default() {
-        // The market dropped `de` since the cart chose it.
-        assert_eq!(store().of(&cart(Some("de"), &["en"])), lang("en"));
-        // The store stopped publishing `fr`, which the market still lists.
-        assert_eq!(store().of(&cart(Some("fr"), &["fr", "en"])), lang("en"));
-    }
-
-    #[test]
-    fn a_regional_choice_falls_back_to_its_language() {
-        assert_eq!(store().of(&cart(Some("de-AT"), &["en", "de"])), lang("de"));
-    }
-
-    #[test]
-    fn a_store_with_one_language_places_every_cart_in_it() {
-        let only = ContentLanguages::only(lang("en"));
-        assert_eq!(only.of(&cart(Some("de"), &["de"])), lang("en"));
-    }
 }

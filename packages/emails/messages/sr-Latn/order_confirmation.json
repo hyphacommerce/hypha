@@ -1,0 +1,8 @@
+{
+  "subject": "Porudžbina {number} je potvrđena",
+  "preheader": "Hvala vam na porudžbini. Evo šta ste poručili i šta sledi.",
+  "heading": "Hvala vam na porudžbini",
+  "received": "Primili smo vašu porudžbinu {number} i pripremamo je. Pisaćemo vam ponovo kada bude poslata.",
+  "placed": "Datum porudžbine: {date}",
+  "text_placed": "Porudžbina {number}, datum: {date}"
+}

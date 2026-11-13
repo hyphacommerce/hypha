@@ -11,13 +11,13 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@types/node": "26.6.5",
+    "@types/node": "26.6.6",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "jiti": "2.7.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "react-email": "6.11.2",
+    "react-email": "6.11.6",
     "typescript": "5.9.3"
   }
 }

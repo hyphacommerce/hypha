@@ -544,6 +544,21 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "cart_order_language",
             sql: include_str!("../migrations/0104_cart_order_language.sql"),
         },
+        Migration {
+            version: 105,
+            name: "search_languages",
+            sql: include_str!("../migrations/0105_search_languages.sql"),
+        },
+        Migration {
+            version: 106,
+            name: "user_language",
+            sql: include_str!("../migrations/0106_user_language.sql"),
+        },
+        Migration {
+            version: 107,
+            name: "translation_sources",
+            sql: include_str!("../migrations/0107_translation_sources.sql"),
+        },
     ],
 };
 

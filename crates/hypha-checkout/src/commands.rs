@@ -1,7 +1,7 @@
 use hypha_cart::{
-    Cart, CartError, CartPorts, CartReading, CartRepo, CartStatus, LineStatus, PricedCart,
-    PricedLine, PromotionReading, ReadingOf, SelectedShipping, ShippingProblem, StageCarts,
-    StoredQuote, group_offers,
+    Cart, CartError, CartPorts, CartReading, CartRepo, CartStatus, ContentLanguages, LineStatus,
+    PricedCart, PricedLine, PromotionReading, ReadingOf, SelectedShipping, ShippingProblem,
+    StageCarts, StoredQuote, group_offers,
     promotions::{Application, Class, CodeOutcome, Share},
     read_cart,
 };
@@ -34,7 +34,7 @@ use hypha_tax::{TaxLine, TaxSource};
 use hypha_translations::HasTranslations;
 use thiserror::Error;
 
-use crate::language::{ContentLanguages, Localizer};
+use crate::language::Localizer;
 pub(crate) use crate::messages::refuse_errors;
 use crate::messages::{CartChecks, cart_messages};
 use crate::start::{Payer, refresh, release, restart, start};
@@ -586,6 +586,7 @@ pub(crate) async fn ready<
     rates: &P,
     payments: &Q,
     checks: &K,
+    languages: &ContentLanguages,
     id: CartId,
     expected_total: Option<Money>,
     renewed: &mut Option<Renewal>,
@@ -621,6 +622,7 @@ pub(crate) async fn ready<
     let mut reading = renew_expired_quote(
         ports,
         rates,
+        languages,
         clock,
         &mut cart,
         reading,
@@ -642,6 +644,7 @@ pub(crate) async fn ready<
     // kept at once, so a refused checkout or a retry doesn't ask again for the same cart.
     if let Some(fresh) = refreshed_checks(
         checks.validators(),
+        languages,
         clock,
         &reading.priced,
         ValidationStep::Checkout,
@@ -653,7 +656,7 @@ pub(crate) async fn ready<
         ports.carts().update(&mut cart).await?;
         reading.priced.app_checks = fresh;
     }
-    let messages = cart_messages(ports, checks, &reading.priced).await?;
+    let messages = cart_messages(ports, checks, languages, &reading.priced).await?;
     Ok(Ready {
         cart,
         reading,
@@ -745,6 +748,7 @@ async fn attempt<
         rates,
         payments,
         checks,
+        &input.languages,
         input.cart,
         input.expected_total,
         renewed,
@@ -1058,9 +1062,15 @@ pub(crate) struct Renewal {
 /// quote replaces the old on the cart, and a changed price fails with `total_changed` when
 /// the buyer confirmed a total, after storing the new quote, so the client shows the new
 /// total and retries with it.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "checkout's ports, providers and languages beside the cart it is renewing and \
+              what its retry loop carries between attempts"
+)]
 async fn renew_expired_quote<S: CheckoutPorts, C: Clock, P: RateProvider>(
     ports: &S,
     rates: &P,
+    languages: &ContentLanguages,
     clock: &C,
     cart: &mut Cart,
     reading: CartReading<ReadingOf<S>>,
@@ -1081,7 +1091,7 @@ async fn renew_expired_quote<S: CheckoutPorts, C: Clock, P: RateProvider>(
     let version = cart.version();
     let selection = match carried.take().filter(|r| r.version == version) {
         Some(earlier) => earlier.selection,
-        None => match ask_again(cart, &reading, rates, &choice, now).await? {
+        None => match ask_again(cart, &reading, rates, languages, &choice, now).await? {
             Some(selection) => selection,
             // The option is built-in now: its price follows the cart without a quote.
             None => return Ok(reading),
@@ -1114,12 +1124,13 @@ async fn ask_again<P: RateProvider, R: PromotionReading>(
     cart: &Cart,
     reading: &CartReading<R>,
     rates: &P,
+    languages: &ContentLanguages,
     choice: &SelectedShipping,
     now: hypha_core::Timestamp,
 ) -> Result<Option<SelectedShipping>, CommandError> {
     let unavailable =
         || CommandError::ShippingUnavailable(ShippingProblem::OptionUnavailable(choice.option));
-    let offers = match group_offers(cart, reading, rates).await {
+    let offers = match group_offers(cart, reading, rates, languages).await {
         Ok(offers) => offers,
         // No zone serves the country any more: to the buyer, the option is gone.
         Err(hypha_cart::CommandError::NoShippingToCountry(_)) => return Err(unavailable()),
