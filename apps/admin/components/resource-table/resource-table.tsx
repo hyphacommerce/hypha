@@ -686,7 +686,7 @@ function Pages({
 type CompareText = (a: string, b: string) => number;
 
 /** How a sortable column compares two rows; `compareText` is the staff member's language's. */
-type RowCompare<T> = (a: T, b: T, compareText?: CompareText) => number;
+type RowCompare<T> = (a: T, b: T, compareText: CompareText) => number;
 
 /**
  * Compares rows by the text `pick` reads, for `ClientResourceTable`'s `compare`: in the
@@ -695,7 +695,7 @@ type RowCompare<T> = (a: T, b: T, compareText?: CompareText) => number;
 export function byText<T>(pick: (row: T) => string): RowCompare<T> {
   return (a, b, compareText) => {
     const [x, y] = [pick(a), pick(b)];
-    return compareText ? compareText(x, y) : x.localeCompare(y);
+    return compareText(x, y);
   };
 }
 
