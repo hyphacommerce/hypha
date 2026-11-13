@@ -24,8 +24,9 @@ use crate::{
 #[into_params(parameter_in = Query)]
 pub struct LanguageParams {
     /// The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
-    /// `country`'s market offers (`/storefront/countries`): without it, or with one the
-    /// market doesn't offer, the market's default answers. Without `country`, out of the
+    /// `country`'s market offers (`/storefront/countries`): one it doesn't offer is
+    /// tried without its region (`de` for `de-AT`), and without it, or with one still
+    /// not offered, the market's default answers. Without `country`, out of the
     /// store's default and the languages it has published, the store's default
     /// otherwise. `Content-Language` names the one served. Text without a translation
     /// stays in the store's default language.
@@ -52,6 +53,7 @@ impl ServedLanguage {
     ///
     /// - what `asked` names, in the API's spelling, when it's offered: by the market, or
     ///   without one by the store (its default and its published languages);
+    /// - else that language without its region (`de` for `de-AT`), when that's offered;
     /// - otherwise (nothing asked, a tag that doesn't parse, a language not offered or
     ///   not published) the market's default, or without a market the store's.
     ///
@@ -75,7 +77,12 @@ impl ServedLanguage {
     ) -> Self {
         let language = asked
             .and_then(|tag| Language::new(tag).ok())
-            .filter(|language| offered.contains(language))
+            .and_then(|asked| {
+                if offered.contains(&asked) {
+                    return Some(asked);
+                }
+                asked.without_region().filter(|l| offered.contains(l))
+            })
             .or_else(|| offered.first().cloned())
             .unwrap_or_else(|| source.clone());
         Self {
@@ -240,11 +247,40 @@ mod tests {
     }
 
     #[test]
-    fn a_regional_tag_is_not_resolved_to_its_language() {
-        // Falling back from `de-AT` to `de` is each field's, within the language
-        // served: asking for a tag that isn't offered gets the default, not a guess.
+    fn a_regional_tag_not_offered_gets_its_language_when_that_is() {
+        let served = in_market(Some("de-AT"), &["en", "de"]);
+        assert_eq!(served.language(), &lang("de"));
+        assert!(!served.is_source());
+        let script = ServedLanguage::resolve(
+            Some("sr-Latn-RS"),
+            &lang("en"),
+            langs(&["en", "sr-Latn"]),
+            &langs(&["en", "sr-Latn"]),
+        );
+        assert_eq!(script.language(), &lang("sr-Latn"));
+    }
+
+    #[test]
+    fn an_offered_regional_tag_wins_over_its_language() {
         assert_eq!(
-            in_market(Some("de-AT"), &["en", "de"]).language(),
+            in_market(Some("de-AT"), &["en", "de", "de-AT"]).language(),
+            &lang("de-AT")
+        );
+    }
+
+    #[test]
+    fn a_regional_tag_whose_language_is_not_offered_gets_the_default() {
+        // `de` is published by the store, but this market offers neither.
+        assert_eq!(
+            in_market(Some("de-AT"), &["en", "fr"]).language(),
+            &lang("en")
+        );
+    }
+
+    #[test]
+    fn a_language_is_not_resolved_to_one_of_its_regions() {
+        assert_eq!(
+            in_market(Some("de"), &["en", "de-AT"]).language(),
             &lang("en")
         );
     }

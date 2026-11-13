@@ -948,8 +948,9 @@ pub struct ProductCountryParams {
     /// variants. Without it, the product comes without prices.
     country: Option<String>,
     /// The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
-    /// `country`'s market offers (`/storefront/countries`): without it, or with one the
-    /// market doesn't offer, the market's default answers. Without `country`, out of the
+    /// `country`'s market offers (`/storefront/countries`): one it doesn't offer is
+    /// tried without its region (`de` for `de-AT`), and without it, or with one still
+    /// not offered, the market's default answers. Without `country`, out of the
     /// store's default and the languages it has published, the store's default
     /// otherwise. `Content-Language` names the one served. Text without a translation
     /// stays in the store's default language.
