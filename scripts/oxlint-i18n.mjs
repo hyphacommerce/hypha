@@ -3,19 +3,37 @@
 // language. Enabled per app in the root `vite.config.ts`.
 //
 // It reports text between tags (`<p>Hello</p>`, `<p>{"Hello"}</p>`, a template literal's
-// own words) and the props people read: `label`, `title`, `description`, `placeholder`,
-// `alt` and `aria-label`. Text without a letter (punctuation, symbols, numbers) passes:
-// no language translates " · ".
+// own words) and the props people read (`READ_PROPS`: HTML's, Astryx's and the apps' own).
+// Text without a letter (punctuation, symbols, numbers) passes: no language translates
+// " · ".
 
-/** The props whose value a person reads or hears. */
+/** The props whose value a person reads or hears, on elements and on components. */
 const READ_PROPS = new Set([
-  "label",
-  "title",
-  "description",
-  "placeholder",
+  // HTML and ARIA.
   "alt",
-  "aria-label",
   "aria-description",
+  "aria-label",
+  "placeholder",
+  "title",
+  // Astryx's components and the apps' own.
+  "actionLabel",
+  "addLabel",
+  "alreadyInLabel",
+  "cancelLabel",
+  "caption",
+  "confirmLabel",
+  "description",
+  "disabledMessage",
+  "emptyBootstrapText",
+  "heading",
+  "helperText",
+  "label",
+  "note",
+  "noun",
+  "searchLabel",
+  "submitLabel",
+  "subtitle",
+  "tooltip",
 ]);
 
 const LETTER = /\p{L}/u;
