@@ -100,8 +100,7 @@ pub fn translatable_value(definition: &CustomFieldDefinition) -> bool {
         );
     owner
         && text
-        && definition.access().storefront == StorefrontAccess::Read
-        && !definition.private()
+        && read_by_shoppers(definition)
         && definition.validations().pattern().is_none()
         && (*definition.namespace() == Namespace::Custom
             || definition.access().admin == AdminAccess::ReadWrite)
@@ -322,8 +321,20 @@ pub fn category_source(category: &Category, values: &[ValueText]) -> Loaded {
     }
 }
 
-/// A definition's name and description, and each choice's label by the choice's key.
+/// Whether shoppers ever read `definition`: storefronts see it (`access.storefront:
+/// read`) and it isn't an app's private one. Only then is anything of it translated; staff
+/// read its source text in the admin.
+pub fn read_by_shoppers(definition: &CustomFieldDefinition) -> bool {
+    definition.access().storefront == StorefrontAccess::Read && !definition.private()
+}
+
+/// A definition's name and description, and each choice's label by the choice's key,
+/// while shoppers read it (`read_by_shoppers`); none otherwise, so a staff-only field has
+/// nothing to translate and its stored translations go with the next write.
 pub fn definition_source(definition: &CustomFieldDefinition) -> Source {
+    if !read_by_shoppers(definition) {
+        return Source::new(Vec::new());
+    }
     let mut fields = vec![
         SourceField::new(
             fields::custom_field_definition::NAME,
