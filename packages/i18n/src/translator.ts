@@ -2,6 +2,8 @@
 
 import { IntlMessageFormat } from "intl-messageformat";
 
+import { withEnglish } from "./languages.ts";
+
 /** A catalog: full keys (`cart.items_count`) to ICU MessageFormat strings. */
 export type Messages = Readonly<Record<string, string>>;
 
@@ -78,7 +80,7 @@ export function createTranslator<Keys extends string = string>(
   const locale = options.locale ?? language;
   // A runtime without the locale's data would use its own default, which differs
   // between a server and a browser: English data is everywhere, so both agree.
-  const locales = [locale, "en"];
+  const locales = withEnglish(locale);
   const catalog: Readonly<Record<string, string | undefined>> = messages;
   const fallbackCatalog: Readonly<Record<string, string | undefined>> = fallback ?? {};
   const compiled = new Map<string, IntlMessageFormat | null>();

@@ -22,29 +22,42 @@ export interface I18nProviderProps {
   children?: ReactNode;
 }
 
-const I18nContext = createContext<Translator | null>(null);
+interface Provided {
+  translator: Translator;
+  language: string;
+  messages: Messages;
+}
 
-/** Gives the components under it their translator. */
+const I18nContext = createContext<Provided | null>(null);
+
+/**
+ * Gives the components under it their translator. A provider inside another of the same
+ * language adds its messages to the outer one's (its own win), so a nested layout hands
+ * over only the namespaces its routes add.
+ */
 export function I18nProvider(props: I18nProviderProps): ReactNode {
-  const { language, messages, fallback, locale, onMissing, children } = props;
-  const translator = useMemo(
-    () =>
-      createTranslator(language, messages, {
-        fallback,
-        locale,
-        onMissing,
-        // A message that can't be formatted shows its key: it mustn't take the page down.
-        onError: (error, key) => console.error(`i18n: ${key} (${language})`, error),
-      }),
-    [language, messages, fallback, locale, onMissing],
-  );
-  return createElement(I18nContext, { value: translator }, children);
+  const { language, fallback, locale, onMissing, children } = props;
+  const outer = useContext(I18nContext);
+  const inherited = outer?.language === language ? outer.messages : undefined;
+  const own = props.messages;
+  const provided = useMemo((): Provided => {
+    const messages = inherited ? { ...inherited, ...own } : own;
+    const translator = createTranslator(language, messages, {
+      fallback,
+      locale,
+      onMissing,
+      // A message that can't be formatted shows its key: it mustn't take the page down.
+      onError: (error, key) => console.error(`i18n: ${key} (${language})`, error),
+    });
+    return { translator, language, messages };
+  }, [language, inherited, own, fallback, locale, onMissing]);
+  return createElement(I18nContext, { value: provided }, children);
 }
 
 function useTranslator(): Translator {
-  const translator = useContext(I18nContext);
-  if (!translator) throw new Error("useT and useLanguage need an <I18nProvider> above them");
-  return translator;
+  const provided = useContext(I18nContext);
+  if (!provided) throw new Error("useT and useLanguage need an <I18nProvider> above them");
+  return provided.translator;
 }
 
 /**

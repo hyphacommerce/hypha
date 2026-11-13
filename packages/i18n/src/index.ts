@@ -15,7 +15,14 @@ export {
   type Values,
   createTranslator,
 } from "./translator.ts";
-export { type KeysOf, type MessagesOf, type Namespaces, mergeCatalogs } from "./catalogs.ts";
+export {
+  type KeysOf,
+  type MessagesOf,
+  type NamespaceKeys,
+  type Namespaces,
+  mergeCatalogs,
+  pickNamespaces,
+} from "./catalogs.ts";
 export {
   type Direction,
   type LocaleSegment,
@@ -26,5 +33,7 @@ export {
   matchLanguage,
   parseAcceptLanguage,
   parseLocaleSegment,
+  withEnglish,
 } from "./languages.ts";
 export { pseudo, pseudoMessage } from "./pseudo.ts";
+export { serbianLatin, toSerbianLatin } from "./serbian.ts";
