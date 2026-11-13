@@ -296,7 +296,8 @@ async fn overlay_falls_back<S: HasTranslations>(ports: &S) {
     stored(ports, product(3), "fr", "Bol").await;
 
     let resources = [product(1), product(2), product(3)];
-    let austrian = Overlay::load(ports, &lang("de-AT"), &resources)
+    let all = [lang("de"), lang("de-AT"), lang("fr")];
+    let austrian = Overlay::load(ports, &lang("de-AT"), &all, &resources)
         .await
         .unwrap();
     // The exact language first, field by field; then the language without its region.
@@ -311,20 +312,28 @@ async fn overlay_falls_back<S: HasTranslations>(ports: &S) {
     assert_eq!(austrian.text(product(3), "title"), None);
     assert_eq!(austrian.text(product(9), "title"), None);
 
-    // Shoppers aren't served a fallback that isn't among the languages they may get.
-    let unpublished = Overlay::load_within(ports, &lang("de-AT"), &[lang("de-AT")], &resources)
+    // A fallback that may not be served isn't: `de-AT` published, `de` not.
+    let published = [lang("de-AT")];
+    let shopper = Overlay::load(ports, &lang("de-AT"), &published, &resources)
         .await
         .unwrap();
-    assert_eq!(unpublished.text(product(1), "title"), Some("Häferl"));
-    assert_eq!(unpublished.text(product(2), "title"), None);
-    let published = [lang("de-AT"), lang("de")];
-    let served = Overlay::load_within(ports, &lang("de-AT"), &published, &resources)
+    assert_eq!(shopper.text(product(1), "title"), Some("Häferl"));
+    assert_eq!(shopper.text(product(1), "options.opt_1.name"), None);
+    assert_eq!(shopper.text(product(2), "title"), None);
+    // Nor is the language asked for, when it may not be served; its fallback still is.
+    let only_german = Overlay::load(ports, &lang("de-AT"), &[lang("de")], &resources)
         .await
         .unwrap();
-    assert_eq!(served.text(product(2), "title"), Some("Teller"));
+    assert_eq!(only_german.text(product(1), "title"), Some("Tasse"));
+    let nothing = Overlay::load(ports, &lang("de-AT"), &[], &resources)
+        .await
+        .unwrap();
+    assert_eq!(nothing.text(product(1), "title"), None);
 
     // A language never falls forward to a region's wording.
-    let german = Overlay::load(ports, &lang("de"), &resources).await.unwrap();
+    let german = Overlay::load(ports, &lang("de"), &all, &resources)
+        .await
+        .unwrap();
     assert_eq!(german.text(product(1), "title"), Some("Tasse"));
     assert_eq!(Overlay::none().text(product(1), "title"), None);
 }
