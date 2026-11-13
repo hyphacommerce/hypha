@@ -951,6 +951,15 @@ pub struct GroupOffers {
     pub after_discounts: Vec<Option<Money>>,
 }
 
+/// What `shipping_offers` answers: each group's offers, and the cart they were priced
+/// for, so a caller needn't read it again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShippingOffers {
+    /// The cart at current prices (`get_cart`'s, its market's languages included).
+    pub cart: PricedCart,
+    pub groups: Vec<GroupOffers>,
+}
+
 /// Every option the cart's zone offers its groups, priced: built-in rates computed,
 /// providers asked (each once, all at once) in the language the cart is read in
 /// (`languages`, the store's). A provider that fails leaves its options out with the
@@ -961,11 +970,15 @@ pub async fn shipping_offers<S: HasCarts + PricingPorts, P: RateProvider>(
     rates: &P,
     languages: &ContentLanguages,
     id: CartId,
-) -> Result<Vec<GroupOffers>, CommandError> {
+) -> Result<ShippingOffers, CommandError> {
     ctx.require(Scope::CartsRead)?;
     let cart = load_cart(ctx, ports, id).await?;
     let reading = read_cart(ports, &cart).await?;
-    group_offers(&cart, &reading, rates, languages).await
+    let groups = group_offers(&cart, &reading, rates, languages).await?;
+    Ok(ShippingOffers {
+        cart: reading.priced,
+        groups,
+    })
 }
 
 /// Picks `option` for `group`, if the cart is offered it now. A provider's price is stored
