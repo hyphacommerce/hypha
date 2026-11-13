@@ -2273,8 +2273,9 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Changes the caller's own name. Needs no scope: everyone may name themselves
-         *     (changing someone else is `PATCH /admin/users/{id}`, with `users:write`).
+         * Changes the caller's own name or language. Needs no scope: everyone may name
+         *     themselves and pick their language (changing someone else is
+         *     `PATCH /admin/users/{id}`, with `users:write`).
          */
         patch: operations["admin.me.update"];
         trace?: never;
@@ -10665,6 +10666,12 @@ export interface components {
         };
         /** @description JSON Merge Patch on the caller's own profile: only the fields sent change. */
         UpdateMeRequest: {
+            /**
+             * @description The language to read the admin in (a BCP 47 tag, `invalid_language` otherwise),
+             *     or `null` to go by the browser's languages. Any tag: the admin matches it against
+             *     its own translations, so it needn't be one of the store's languages.
+             */
+            language?: string | null;
             name?: string;
         };
         /**
@@ -10968,6 +10975,7 @@ export interface components {
             created_at: string;
             email: components["schemas"]["Email"];
             id: components["schemas"]["UserId"];
+            language?: components["schemas"]["Language"] | null;
             name: string;
             role: components["schemas"]["RoleId"];
             status: string;
