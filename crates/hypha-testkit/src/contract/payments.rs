@@ -52,6 +52,8 @@ pub async fn payment_method_delete<S: HasPaymentMethods + HasPayments + HasOutbo
     open_payments_keep_their_method(&make().await).await;
     scenario("payment method: a delete writes its event; a refused or stale one writes none");
     a_delete_writes_its_event(&make().await).await;
+    scenario("payment method: an insert and an update write theirs, with the version");
+    writes_write_their_events(&make().await).await;
 }
 
 /// Runs the batch scenarios for payments: a payment and its order commit together, with
@@ -459,6 +461,9 @@ async fn a_delete_writes_its_event<S: HasPaymentMethods + HasPayments + HasOutbo
     ports.payment_methods().insert(&mut held).await.unwrap();
     let mut p = payment(1, 1, 2);
     ports.payments().insert(&mut p).await.unwrap();
+    let mut stale = m.clone();
+    m.set_enabled(false);
+    ports.payment_methods().update(&mut m).await.unwrap();
     let before = events(ports).await.len();
 
     let mut refused = held.clone();
@@ -467,9 +472,6 @@ async fn a_delete_writes_its_event<S: HasPaymentMethods + HasPayments + HasOutbo
         ports.payment_methods().delete(&mut refused).await,
         Err(RepoError::Reference(keys::OPEN_PAYMENT_METHOD))
     );
-    let mut stale = m.clone();
-    m.set_enabled(false);
-    ports.payment_methods().update(&mut m).await.unwrap();
     stale.delete();
     assert_eq!(
         ports.payment_methods().delete(&mut stale).await,
@@ -488,6 +490,30 @@ async fn a_delete_writes_its_event<S: HasPaymentMethods + HasPayments + HasOutbo
     assert_eq!(deleted[0].subject_kind, "payment_method");
     assert_eq!(deleted[0].subject_id, m.id().as_uuid());
     assert_eq!(deleted[0].data["payment_method"], m.id().to_string());
+}
+
+/// An insert writes `payment_method.created` and an update `payment_method.updated` naming
+/// the fields set, each with the method's version.
+async fn writes_write_their_events<S: HasPaymentMethods + HasOutbox>(ports: &S) {
+    let mut m = method(1, 0);
+    ports.payment_methods().insert(&mut m).await.unwrap();
+    m.rename("Cash").unwrap();
+    m.set_position(3);
+    ports.payment_methods().update(&mut m).await.unwrap();
+    let written = events(ports).await;
+    assert_eq!(
+        types(&written),
+        ["payment_method.created", "payment_method.updated"]
+    );
+    assert_eq!(written[0].subject_version, Some(Version::new(1)));
+    assert_eq!(written[1].subject_version, Some(Version::new(2)));
+    assert_eq!(
+        written[1].data["fields"],
+        serde_json::json!(["name", "position"])
+    );
+    assert_eq!(written[1].data["payment_method"], m.id().to_string());
+    // The stored copy carries none of them.
+    assert_eq!(ports.payment_methods().get(m.id()).await, Ok(Some(m)));
 }
 
 async fn events<S: HasOutbox>(ports: &S) -> Vec<StoredEvent> {

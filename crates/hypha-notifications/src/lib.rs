@@ -45,5 +45,8 @@ pub use repo::{
 };
 pub use sender::{EmailSender, Mailbox, OutgoingEmail, SendError, Sent};
 pub use sending::{LONGEST_SEND, SEND_TIMEOUT, SendSettings};
-pub use settings::{Colour, NotificationSettings, NotificationSettingsSnapshot, OrderUrl};
+pub use settings::{
+    Colour, NOTIFICATION_SETTINGS, NotificationSettings, NotificationSettingsSnapshot,
+    NotificationSettingsUpdated, OrderUrl,
+};
 pub use template::{NewTemplate, Template, TemplateSnapshot, TemplateSources};

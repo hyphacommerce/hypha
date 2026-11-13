@@ -2273,8 +2273,9 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Changes the caller's own name. Needs no scope: everyone may name themselves
-         *     (changing someone else is `PATCH /admin/users/{id}`, with `users:write`).
+         * Changes the caller's own name or language. Needs no scope: everyone may name
+         *     themselves and pick their language (changing someone else is
+         *     `PATCH /admin/users/{id}`, with `users:write`).
          */
         patch: operations["admin.me.update"];
         trace?: never;
@@ -4131,11 +4132,40 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * The store's translations, by kind, then resource, then language: what has been
-         *     translated. What's missing or outdated is each resource's to say (`GET
-         *     /admin/translations/{kind}/{id}`).
+         * The store's translations, or what's left to translate. Without `state`: the
+         *     translations there are, by kind name, then resource, then language, each with its
+         *     state (a resource not yet read for the worklist is read for it). With `state` (and
+         *     `language`: `400 invalid_query` without it, `422 translation_into_default_language`
+         *     or `422 language_not_listed` for one that isn't another on the store's list): the
+         *     worklist, every resource with source text whose translation into `language` is
+         *     `missing` (some field untranslated, or no translation at all), `outdated` (every
+         *     field translated, some from a source text that changed since) or `complete`, in the
+         *     catalog's order of kinds, then by ID. Counts are in fields, and only fields with
+         *     source text count.
          */
         get: operations["admin.translations.list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/translations/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * How far each of the store's languages covers its text: every field with source text
+         *     of the kinds the caller may read, counted as translated (outdated among them) or
+         *     missing. What Settings → Languages shows; the resources behind the numbers are
+         *     `GET /admin/translations?language=&state=`.
+         */
+        get: operations["admin.translations.progress"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4178,7 +4208,7 @@ export interface paths {
         get?: never;
         /**
          * Sets a resource's translation into one of the store's other languages, replacing the
-         *     fields it had. Answers the resource's translations as they are then. Beside
+         *     fields it had: a field left out is removed (to change a few, PATCH them). Answers the resource's translations as they are then. Beside
          *     `translations:write` it takes the resource's own read scope.
          */
         put: operations["admin.translations.put"];
@@ -4187,7 +4217,14 @@ export interface paths {
         delete: operations["admin.translations.remove"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Changes some fields of a resource's translation into one of the store's other
+         *     languages, keeping the rest: what to send when translating a field or a few, since
+         *     a PUT replaces the whole language. Creates the translation when there's none, and
+         *     deletes it when no field is left. Answers the resource's translations as they are
+         *     then. Beside `translations:write` it takes the resource's own read scope.
+         */
+        patch: operations["admin.translations.patch"];
         trace?: never;
     };
     "/admin/uploads": {
@@ -6935,6 +6972,7 @@ export interface components {
          * @enum {string}
          */
         FieldStatus: string;
+        FieldTranslationPatch: components["schemas"]["FieldTranslationRequest"] | null;
         /** @description One field of a translation being written. */
         FieldTranslationRequest: {
             /**
@@ -7243,6 +7281,41 @@ export interface components {
          * @example en-GB
          */
         Language: string;
+        /**
+         * @description How far one language's translations cover the store's text, in fields with source
+         *     text: `translated` + `missing` = `total`, `outdated` are among `translated` and
+         *     `inherited` among `missing`.
+         */
+        LanguageProgressResponse: {
+            /**
+             * Format: int64
+             * @description Of those missing, the ones shoppers still read in the language without its
+             *     region (`de` for `de-AT`), as storefronts fall back to it: the base language's
+             *     translation when it's another of the store's languages (published or not), or
+             *     the source when it's the default (then every missing field is inherited). 0 for
+             *     a language without a region. `missing` − `inherited` are the fields a regional
+             *     language's shoppers read in the default language.
+             */
+            inherited: number;
+            language: components["schemas"]["Language"];
+            /**
+             * Format: int64
+             * @description Without a translation in exactly this language.
+             */
+            missing: number;
+            /**
+             * Format: int64
+             * @description Translated from a source text that has changed since.
+             */
+            outdated: number;
+            /** Format: int64 */
+            total: number;
+            /**
+             * Format: int64
+             * @description Translated, outdated or not.
+             */
+            translated: number;
+        };
         LevelResponse: {
             /**
              * Format: int64
@@ -8030,6 +8103,16 @@ export interface components {
         PasswordResetRequest: {
             email: string;
         };
+        PatchTranslationRequest: {
+            /**
+             * @description The fields to change, by key (JSON Merge Patch): a field given an object is set,
+             *     by the same rules as a PUT's (blank removes it); `null` removes it; a field left
+             *     out keeps its translation.
+             */
+            fields: {
+                [key: string]: components["schemas"]["FieldTranslationPatch"];
+            };
+        };
         /**
          * @description The provider took the action. Unless it said it's done already (`completed`), nothing
          *     has moved yet: the payment changes when the provider reports what happened
@@ -8353,8 +8436,9 @@ export interface components {
             html: string;
             /**
              * @description The language the sources are written for (a BCP 47 tag, one of the store's):
-             *     rendered in that language's layout, its money and dates written its way. Absent:
-             *     the store's default.
+             *     rendered as that language's emails send, in its layout, with money and dates
+             *     written the way of the template's `sources_language` (a language still sending
+             *     another's sources keeps their formats). Absent: the store's default.
              */
             language?: string | null;
             order?: components["schemas"]["OrderId"] | null;
@@ -8896,7 +8980,8 @@ export interface components {
         PutTranslationRequest: {
             /**
              * @description Every translated field of this language, by key. A field left out is removed, so
-             *     send the whole language; no fields at all deletes the translation.
+             *     send the whole language (a PATCH changes only the fields it names); no fields at
+             *     all deletes the translation.
              */
             fields: {
                 [key: string]: components["schemas"]["FieldTranslationRequest"];
@@ -10328,20 +10413,38 @@ export interface components {
         };
         /** @description One translatable field of a resource: its source text and its translations. */
         TranslatableFieldResponse: {
+            custom_field?: components["schemas"]["TranslatedValue"] | null;
             /**
              * @description SHA-256 of `source`, in hex: send it back as a field's `source_digest` to say
              *     which text was translated.
              */
             digest: string;
-            /** @description `text` (plain, trimmed) or `html` (sanitised like a description). */
+            /**
+             * @description `text` (plain, trimmed) or `html` (sanitised like a description). A custom field
+             *     value's follows its definition's type: `text` for `text` (one line) and
+             *     `multiline_text`, `html` for `rich_text`.
+             */
             format: string;
             /**
              * @description `title`, or a child's field by the child's ID: `options.<opt_…>.name`,
-             *     `option_values.<optval_…>.label`, `choices.<key>.label`, `facets.<key>.label`.
+             *     `option_values.<optval_…>.label`, `choices.<key>.label`, `facets.<key>.label`,
+             *     a custom field value's `custom_fields.<cfdef_…>.value` (a product's or a
+             *     category's) or `variant_custom_fields.<var_…>.<cfdef_…>.value` (a variant's, in
+             *     its product's).
              */
             key: string;
-            /** @description The longest translation: characters for `text`, bytes of HTML for `html`. */
+            /**
+             * @description The longest translation: characters for `text`, bytes of HTML for `html`. A
+             *     custom field value's is its definition's `max_length` in characters, else its
+             *     type's cap (255 characters for `text`, 16 KiB for the others).
+             */
             max_length: number;
+            /**
+             * @description The shortest translation, in characters (of the sanitised HTML, for `html`): a
+             *     custom field value's definition's `min_length`. `null` when there is none, as
+             *     for every field that isn't a custom field value.
+             */
+            min_length?: number | null;
             /** @description The text in the store's default language; empty when the resource has none. */
             source: string;
             /** @description By language tag; a language without a translation of this field is absent. */
@@ -10359,6 +10462,38 @@ export interface components {
              */
             kind: string;
         };
+        /**
+         * @description The custom field value a translatable field is, for an editor to label it: its
+         *     definition, and the variant whose value it is (in a product's translation).
+         */
+        TranslatedValue: {
+            definition: components["schemas"]["CustomFieldDefinitionId"];
+            /** @description The field's key, `custom.material`. */
+            key: string;
+            /** @description The definition's name, in the store's default language. */
+            name: string;
+            /** @description `text`, `multiline_text` or `rich_text`. */
+            type: string;
+            variant?: components["schemas"]["VariantId"] | null;
+            /**
+             * @description That variant's title as stored ("M / Blue"); `null` for the resource's own value
+             *     and a variant without options.
+             */
+            variant_title?: string | null;
+        };
+        TranslationProgressResponse: {
+            /** @description The language the source text is in. */
+            default_language: components["schemas"]["Language"];
+            /** @description Each of the store's other languages, published or not, in the store's order. */
+            languages: components["schemas"]["LanguageProgressResponse"][];
+            /**
+             * Format: int64
+             * @description Resources of the kinds counted whose text is yet to be read: until it's 0 the
+             *     totals are short of the store's text (after an upgrade, while the job counts every
+             *     resource once). 0 when everything is counted.
+             */
+            pending: number;
+        };
         /** @description One language's translation of a resource, as a whole. */
         TranslationStateResponse: {
             /** @description RFC 3339. */
@@ -10370,6 +10505,15 @@ export interface components {
             translated: number;
             updated_at: string;
         };
+        /**
+         * @description Where a resource stands in a language: `missing` while any field with source text
+         *     has no translation in it, else `outdated` while any translates a source text that has
+         *     changed since, else `complete`.
+         *
+         *     Known values: `missing`, `outdated`, `complete`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        TranslationStatus: string;
         /** @description A page of a list, newest first. */
         TranslationSummaryPage: {
             /** @description Whether there are more after these. */
@@ -10378,15 +10522,50 @@ export interface components {
             /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
             next_cursor?: string | null;
         };
-        /** @description A translation in a list: which resource, which language, which fields. */
+        /**
+         * @description A resource's translation into one language in a list: which resource, which
+         *     language, how it covers the resource's fields with source text, which fields it has.
+         */
         TranslationSummaryResponse: {
-            /** @description RFC 3339. */
-            created_at: string;
-            /** @description The keys it translates. Read the resource's translations for the text. */
+            /** @description RFC 3339; `null` when the resource has no translation into `language` yet. */
+            created_at?: string | null;
+            /**
+             * @description The keys it translates (a key whose option, value, choice or facet is gone
+             *     included, until the translation is next written); empty when it has none yet.
+             */
             fields: string[];
+            /**
+             * Format: int32
+             * @description Of those missing, the ones shoppers still read in the language without its
+             *     region (`de` for `de-AT`), as storefronts fall back to it: the base language's
+             *     translation when it's another of the store's languages, or the source when it's
+             *     the default (then every missing field is inherited). 0 for a language without a
+             *     region. `missing` − `inherited` are the fields a regional language's shoppers read
+             *     in the default language.
+             */
+            inherited: number;
             language: components["schemas"]["Language"];
+            /**
+             * Format: int32
+             * @description Of those, the ones without a translation in exactly `language`. For a regional
+             *     language (`de-AT`) some of them may be `inherited`.
+             */
+            missing: number;
+            /**
+             * Format: int32
+             * @description Of those translated, the ones whose source text changed since.
+             */
+            outdated: number;
             resource: components["schemas"]["TranslatedResourceResponse"];
-            updated_at: string;
+            state: components["schemas"]["TranslationStatus"];
+            /**
+             * Format: int32
+             * @description The resource's fields with source text: a field it leaves empty has nothing to
+             *     translate and isn't counted. 0 until the resource was first read for the
+             *     worklist (in the background, after an upgrade).
+             */
+            total: number;
+            updated_at?: string | null;
         };
         /** @description A resource's translatable fields with every language's translation. */
         TranslationsResponse: {
@@ -10633,6 +10812,12 @@ export interface components {
         };
         /** @description JSON Merge Patch on the caller's own profile: only the fields sent change. */
         UpdateMeRequest: {
+            /**
+             * @description The language to read the admin in (a BCP 47 tag, `invalid_language` otherwise),
+             *     or `null` to go by the browser's languages. Any tag: the admin matches it against
+             *     its own translations, so it needn't be one of the store's languages.
+             */
+            language?: string | null;
             name?: string;
         };
         /**
@@ -10936,6 +11121,7 @@ export interface components {
             created_at: string;
             email: components["schemas"]["Email"];
             id: components["schemas"]["UserId"];
+            language?: components["schemas"]["Language"] | null;
             name: string;
             role: components["schemas"]["RoleId"];
             status: string;
@@ -38691,12 +38877,21 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Only translations of this kind of resource (and its read scope is needed);
-                 *     without it, of every kind the caller may read.
+                 * @description Only resources of this kind (and its read scope is needed); without it, of every
+                 *     kind the caller may read.
                  */
                 kind?: string;
-                /** @description Only translations into this language. */
+                /** @description Only translations into this language. Required with `state`. */
                 language?: string;
+                /**
+                 * @description `missing`, `outdated` or `complete`: the worklist. Lists every resource with
+                 *     source text in that state in `language`, whether it has a translation yet or not,
+                 *     by kind in the catalog's order (`product`, `category`, `custom_field_definition`,
+                 *     `shipping_option`, `payment_method`, `discount`, `checkout_rule`, `asset`,
+                 *     `store`, `search_facet`), then by ID. Without it, the translations there are, by
+                 *     kind name, then resource, then language.
+                 */
+                state?: string;
                 /** @description The previous page's `next_cursor`; absent for the first page. */
                 cursor?: string;
                 /** @description Items per page, 1 to 100 (default 50). */
@@ -38746,6 +38941,68 @@ export interface operations {
             };
             /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.translations.progress": {
+        parameters: {
+            query?: {
+                /**
+                 * @description Only this kind of resource (and its read scope is needed); without it, every kind
+                 *     the caller may read.
+                 */
+                kind?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranslationProgressResponse"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -39049,6 +39306,132 @@ export interface operations {
                 };
             };
             /** @description A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.translations.patch": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path: {
+                /**
+                 * @description The kind of resource.
+                 * @example product
+                 */
+                kind: string;
+                /**
+                 * @description The resource's ID; the store's for `store` and `search_facet`.
+                 * @example prod_00000000000000000000000000000000
+                 */
+                id: string;
+                /**
+                 * @description A language on the store's list, published or not; never its default.
+                 * @example de
+                 */
+                language: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchTranslationRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranslationsResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
             422: {
                 headers: {
                     [name: string]: unknown;
