@@ -188,6 +188,8 @@ label's translation.
 - A key for a child that no longer exists (a removed option value) is refused on write
   and ignored on read.
 - An empty value removes the field: the source shows again.
+- A field the resource leaves empty can't be translated (`source_empty`): a translation
+  replaces text the resource has.
 
 ### 3.3 Outdated
 
@@ -217,16 +219,23 @@ label's translation.
   instead (§5).
 - **Resolution,** in the API:
   1. No `language`: the market's default (so today's clients see no change).
-  2. A language the market doesn't offer or the store hasn't published: the market's
-     default. Never an error, so a stale link still renders.
+  2. A language the market doesn't offer or the store hasn't published: the same tag
+     without its region when that is offered (`de-AT` finds `de`), else the market's
+     default. Never an error, so a stale link still renders. A tag that doesn't parse
+     counts as none.
   3. Per field: the exact tag, then the tag without its region, then the source. An
      unpublished language is never served, as a fallback either: with `de-AT` published
      and `de` not, a `de-AT` read skips `de`.
 - **Answer:** the same DTOs. `Content-Language` names the language resolved in step 1
   or 2 (not whether each field had a translation).
-- **Where it's applied:** the host loads the overlays for the resources in a response
-  (`Overlay::load(ports, language, &[ResourceRef])`) in the same round trip as the
-  resources, and DTO builders ask `overlay.text(resource, key)` before the source.
+- **Where it's applied:** the host loads one overlay for the resources in a response
+  (`Overlay::load(ports, language, servable, &[ResourceRef])`), one read after the
+  resources (their IDs aren't known before), none for the store's default language,
+  and DTO builders ask `overlay.text(resource, key)` before the source.
+- **Reads without a market** (categories, custom field definitions, the store) take an
+  optional `country` and then follow that country's market, so a page's navigation is
+  in the same language as its product. Without it they choose among the store's
+  default and published languages, defaulting to the store's.
 - **Admin surface:** reads answer the source language, always. Translations are read
   and written through:
   - `GET /admin/translations/{kind}/{id}`: every field's source, digest and each
