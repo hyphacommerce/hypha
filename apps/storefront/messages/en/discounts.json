@@ -24,5 +24,12 @@
   "not_applicable": "{code} doesn't apply to this cart right now",
   "sign_in": "Sign in to use {code}",
   "not_for_account": "{code} isn't available for your account",
-  "not_here": "{code} can't be used here"
+  "not_here": "{code} can't be used here",
+  "sentence_order_percent": "{percent} off your order",
+  "sentence_order_amount": "{amount} off your order",
+  "sentence_shipping_free": "Free shipping",
+  "sentence_shipping_free_up_to": "Free shipping up to {cap}",
+  "sentence_shipping_percent": "{percent} off shipping",
+  "sentence_shipping_percent_up_to": "{percent} off shipping, up to {cap}",
+  "sentence_shipping_amount": "{amount} off shipping"
 }

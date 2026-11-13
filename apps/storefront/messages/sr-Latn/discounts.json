@@ -24,5 +24,12 @@
   "not_applicable": "{code} trenutno ne važi za ovu korpu",
   "sign_in": "Prijavite se da biste iskoristili {code}",
   "not_for_account": "{code} nije dostupan za vaš nalog",
-  "not_here": "{code} se ovde ne može koristiti"
+  "not_here": "{code} se ovde ne može koristiti",
+  "sentence_order_percent": "{percent} popusta na porudžbinu",
+  "sentence_order_amount": "{amount} popusta na porudžbinu",
+  "sentence_shipping_free": "Besplatna dostava",
+  "sentence_shipping_free_up_to": "Besplatna dostava do {cap}",
+  "sentence_shipping_percent": "{percent} popusta na dostavu",
+  "sentence_shipping_percent_up_to": "{percent} popusta na dostavu, najviše {cap}",
+  "sentence_shipping_amount": "{amount} popusta na dostavu"
 }

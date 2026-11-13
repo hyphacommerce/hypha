@@ -7,6 +7,7 @@
 
 import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 
+import { translated } from "./catalog-languages.ts";
 import type { TFor } from "./messages.ts";
 import { type Money, formatMoney } from "./money.ts";
 import { lineCompareAt } from "./prices.ts";
@@ -37,13 +38,17 @@ export type CodeState =
 /** A code on the cart (normalised, as the API keeps it) and its state. */
 export type CartCode = { code: string } & CodeState;
 
-/** One discount applied: its title and summary for the buyer, and what it took off. */
+/** One discount applied: its title and summary for the buyer, what it took off, and the
+ * reward it gave (the API's value and target), to word it in other languages. */
 export type Application = {
   index: number;
   discount: string;
   code: string | null;
   title: string;
+  /** The API's sentence, in English. */
   summary: string;
+  value: Schemas["DiscountValueDto"];
+  target: Schemas["DiscountTargetDto"];
   amount: Money;
 };
 
@@ -72,7 +77,8 @@ export type Discounts = {
   shipments: Record<string, Shipment>;
 };
 
-/** A product's live automatic discount, shown as a badge, never as a price. */
+/** A product's live automatic discount, shown as a badge, never as a price. `summary` is
+ * the API's sentence, in English. */
 export type Promotion = { title: string; summary: string };
 
 export const NO_DISCOUNTS: Discounts = {
@@ -92,7 +98,7 @@ type Share = Schemas["DiscountShareResponse"];
 type CodeResponse = Schemas["CartDiscountCodeResponse"];
 type AppliedResponse = Pick<
   Schemas["CartDiscountResponse"],
-  "discount" | "code" | "title" | "summary" | "amount"
+  "discount" | "code" | "title" | "summary" | "value" | "target" | "amount"
 >;
 
 /** What reading a cart needs of it: a priced line has `subtotal` (before discounts),
@@ -168,6 +174,8 @@ function applications(discounts: readonly AppliedResponse[]): Application[] {
     code: a.code ?? null,
     title: a.title,
     summary: a.summary,
+    value: a.value,
+    target: a.target,
     amount: a.amount,
   }));
 }
@@ -401,6 +409,83 @@ function notEligible(t: TFor<"discounts">, code: string, condition: string): str
     default:
       return t("discounts.not_applicable", { code });
   }
+}
+
+/** Whether a page in `language` reads the English catalog: the API's sentences (a
+ * discount's `summary`) are English, so only such a page shows them as they are. */
+function readsEnglish(language: string): boolean {
+  return translated(language) === undefined;
+}
+
+/** The one amount `amounts` (by market) has in `currency`, or `null` when there's none
+ * or its markets differ: the sentence then says nothing it can't be sure of. */
+function amountIn(amounts: Readonly<Record<string, Money>>, currency: string): Money | null {
+  const found = new Set(
+    Object.values(amounts)
+      .filter((m) => m.currency === currency)
+      .map((m) => m.amount),
+  );
+  const [only] = found;
+  return found.size === 1 && only !== undefined ? { amount: only, currency } : null;
+}
+
+/**
+ * What an applied discount gave, as a sentence in the page's language: the API's
+ * `summary` on an English page, else one built from its reward where that reads simply
+ * (off the order, off shipping), else `null`, leaving its title to say it. A reward on
+ * items is never worded: a "buy X get Y" or a tier reads as a plain percentage off them.
+ */
+export function discountSentence(
+  t: TFor<"discounts">,
+  a: Pick<Application, "summary" | "value" | "target" | "amount">,
+  digits: number,
+): string | null {
+  if (readsEnglish(t.language)) return a.summary === "" ? null : a.summary;
+  const currency = a.amount.currency;
+  const money = (m: Money) => formatMoney(m, digits, t.locale);
+  const { value, target } = a;
+  const percent =
+    value.type === "percent"
+      ? new Intl.NumberFormat(t.locale, { style: "percent", maximumFractionDigits: 2 }).format(
+          value.basis_points / 10_000,
+        )
+      : null;
+  const amount = value.type === "amount" ? amountIn(value.amounts, currency) : null;
+  switch (target.type) {
+    case "subtotal":
+      if (percent) return t("discounts.sentence_order_percent", { percent });
+      if (amount) return t("discounts.sentence_order_amount", { amount: money(amount) });
+      return null;
+    case "shipping": {
+      const max = target.max_amount;
+      const cap = max ? amountIn(max, currency) : null;
+      if (max && !cap) return null;
+      if (value.type === "percent" && value.basis_points >= 10_000) {
+        return cap
+          ? t("discounts.sentence_shipping_free_up_to", { cap: money(cap) })
+          : t("discounts.sentence_shipping_free");
+      }
+      if (percent) {
+        return cap
+          ? t("discounts.sentence_shipping_percent_up_to", { percent, cap: money(cap) })
+          : t("discounts.sentence_shipping_percent", { percent });
+      }
+      if (amount) return t("discounts.sentence_shipping_amount", { amount: money(amount) });
+      return null;
+    }
+    default:
+      return null;
+  }
+}
+
+/** The promotions whose summary a product shows under its price: those with one, on an
+ * English page; none elsewhere, where the badges (titles the API translated) say it and
+ * a promotion carries no data to word it with. */
+export function summarisedPromotions(
+  t: TFor<"discounts">,
+  promotions: readonly Promotion[],
+): Promotion[] {
+  return readsEnglish(t.language) ? promotions.filter((p) => p.summary) : [];
 }
 
 /** The badges a product shows for its promotions: each title once, at most `max`. */

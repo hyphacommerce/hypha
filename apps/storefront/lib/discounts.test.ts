@@ -9,6 +9,7 @@ import {
   type CartFields,
   NO_DISCOUNTS,
   codeMessage,
+  discountSentence,
   discountedTotals,
   linePrice,
   lineView,
@@ -20,12 +21,17 @@ import {
   readPromotions,
   shippingPrice,
   subtotalRows,
+  summarisedPromotions,
   typedCode,
 } from "./discounts.ts";
-import { en } from "./messages.ts";
+import type { Money } from "./money.ts";
+import { en, loadMessages } from "./messages.ts";
 
 /** English, formatted for `en`: what the expected strings are written in. */
 const t = createTranslator("en", en);
+const sr = createTranslator("sr-Latn", await loadMessages("sr-Latn"), { fallback: en });
+/** A page in a language without a catalog: it reads English. */
+const de = createTranslator("de", en);
 
 const eur = (amount: number) => ({ amount, currency: "EUR" });
 const welcome: Application = {
@@ -34,6 +40,8 @@ const welcome: Application = {
   code: "WELCOME10",
   title: "Welcome offer",
   summary: "10% off everything",
+  value: { type: "percent", basis_points: 1000 },
+  target: { type: "items", items: { type: "all" } },
   amount: eur(240),
 };
 const freeShipping: Application = {
@@ -42,6 +50,8 @@ const freeShipping: Application = {
   code: null,
   title: "Free shipping over €50",
   summary: "Free shipping on orders over €50",
+  value: { type: "percent", basis_points: 10_000 },
+  target: { type: "shipping", max_amount: null },
   amount: eur(500),
 };
 const message = (code: CartCode, applied: Application[] = []) =>
@@ -356,6 +366,75 @@ test("promotion badges list each title once, at most two", () => {
   });
   assert.deepEqual(promotionBadges(promos), ["Buy 2, get 1 free", "Volume discount"]);
   assert.deepEqual(readPromotions({}), []);
+});
+
+test("an English page shows a discount's summary as the API wrote it", () => {
+  assert.equal(discountSentence(t, welcome, 2), "10% off everything");
+  assert.equal(discountSentence(t, freeShipping, 2), "Free shipping on orders over €50");
+  assert.equal(discountSentence(de, welcome, 2), "10% off everything");
+  assert.equal(discountSentence(t, { ...welcome, summary: "" }, 2), null);
+});
+
+test("another language never shows the API's English summary", () => {
+  // A reward on items isn't worded: its title says it.
+  assert.equal(discountSentence(sr, welcome, 2), null);
+  assert.equal(discountSentence(sr, freeShipping, 2), "Besplatna dostava");
+});
+
+/** A sentence with its no-break spaces (Serbian money: "5,00 €") written as spaces. */
+const plain = (sentence: string | null) => sentence?.replace(/\s/g, " ") ?? null;
+
+/** A Serbian sentence for a reward off the order. */
+const order = (value: Application["value"]) =>
+  plain(discountSentence(sr, { ...welcome, value, target: { type: "subtotal" } }, 2));
+
+/** A Serbian sentence for a reward off shipping, capped at `max_amount`. */
+const shipping = (value: Application["value"], max_amount?: Record<string, Money> | null) =>
+  plain(discountSentence(sr, { ...welcome, value, target: { type: "shipping", max_amount } }, 2));
+
+test("off the order or shipping is worded in the page's language", () => {
+  assert.equal(order({ type: "percent", basis_points: 1250 }), "12,5% popusta na porudžbinu");
+  assert.equal(
+    order({
+      type: "amount",
+      amounts: { mkt_1: eur(500), mkt_2: { amount: 600, currency: "USD" } },
+    }),
+    "5,00 € popusta na porudžbinu",
+  );
+  // Two markets in the cart's currency with different amounts: it can't say which.
+  assert.equal(order({ type: "amount", amounts: { mkt_1: eur(500), mkt_2: eur(700) } }), null);
+  assert.equal(order({ type: "fixed_price", amounts: { mkt_1: eur(500) } }), null);
+  assert.equal(
+    shipping({ type: "percent", basis_points: 10_000 }, { mkt_1: eur(1000) }),
+    "Besplatna dostava do 10,00 €",
+  );
+  assert.equal(shipping({ type: "percent", basis_points: 5000 }), "50% popusta na dostavu");
+  assert.equal(
+    shipping({ type: "percent", basis_points: 5000 }, { mkt_1: eur(1000) }),
+    "50% popusta na dostavu, najviše 10,00 €",
+  );
+  assert.equal(
+    shipping({ type: "amount", amounts: { mkt_1: eur(300) } }),
+    "3,00 € popusta na dostavu",
+  );
+  // A cap in another currency only: the sentence would leave it out.
+  assert.equal(
+    shipping(
+      { type: "percent", basis_points: 10_000 },
+      { mkt_2: { amount: 900, currency: "USD" } },
+    ),
+    null,
+  );
+});
+
+test("a product's promotion summaries show on an English page only", () => {
+  const promos = [
+    { title: "Buy 2, get 1 free", summary: "Buy 2 of Grow kits, get 1 free" },
+    { title: "Volume", summary: "" },
+  ];
+  assert.deepEqual(summarisedPromotions(t, promos), [promos[0]]);
+  assert.deepEqual(summarisedPromotions(de, promos), [promos[0]]);
+  assert.deepEqual(summarisedPromotions(sr, promos), []);
 });
 
 test("a typed code is trimmed; a blank one isn't sent", () => {
