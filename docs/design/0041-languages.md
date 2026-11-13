@@ -214,10 +214,10 @@ label's translation.
 - Events `translation.updated` (resource, language, field keys) and
   `translation.deleted`, routed to apps with `translations:read`.
 - A `TranslationCleanup` handler removes a deleted resource's translations (there's no
-  foreign key from a generic table). Payment methods and shipping options record no
-  `deleted` event yet, so their delete routes remove the translations themselves.
-- A language taken off the store's list loses its translations (a handler on
-  `store.updated`). The admin confirms before it sends that change.
+  foreign key from a generic table), including `payment_method.deleted` and
+  `shipping_option.deleted`, which were added for it.
+- A language taken off the store's list loses its translations and its email templates
+  (a handler on `store.updated`). The admin confirms before it sends that change.
 - The storefront's webhook subscribes to both and expires the resource's cache tags.
 
 ## 4. Reading (ML5, ML6)
@@ -305,11 +305,14 @@ label's translation.
 - A rule's message is content: translated through `checkout_rule` overlays.
 - A validation app's message is the app's: it's told the language.
 - Built-in messages (format and verification) gain `params` (`{field, example,
-  region}`), enough for a client to build the sentence from `code`. `message` stays, in
+  region, region_name, max}`), enough for a client to build the sentence from `code`.
+  A field's label goes into such a sentence as the catalog writes it (quoted where the
+  language needs it); apps never change its case. `message` stays, in
   English, for clients that don't.
-- Address forms answer label **keys** beside the English labels (`postal_code:
-  "zip_code"`, `province: "prefecture"`): a closed set of about 40, translated in the
-  storefront's catalog.
+- Address forms answer `label_keys` beside the English labels (`postal_code:
+  "zip_code"`, `province: "prefecture"`): a closed set of 29, translated in each app's
+  catalog; `null` for a label outside it, shown as the API wrote it. Address forms take
+  no `language`.
 - Region names stay as generated (the country's own names, mostly). Localised region
   names are in `worldwide`; taking them is §13's.
 
@@ -318,7 +321,11 @@ label's translation.
 - **Template lookup** for an order in `de-AT`: the merchant's `(key, de-AT)`, their
   `(key, de)`, the build's default for `de`, then the default-language chain as today.
 - **Defaults per language:** `packages/emails` builds its React Email templates into
-  Jinja once per catalog language, from the same ICU catalogs as the apps.
+  Jinja once per catalog language, from its own ICU catalogs in the apps' layout
+  (`messages/<language>/<namespace>.json`), checked the same way.
+- **Stored templates:** a merchant's template in the store's default language stays the
+  `(key, '')` row; other languages are `(key, <tag>)`. So the default language can't
+  change while templates in other languages exist (`default_language_in_use`).
 - **Context:** line titles and names come from the order's `localized` copies.
   `order.language` and `dir` are added. Variable names don't change.
 - **Formats:** `format_money` and `TimeValue` take the language. The data is a
@@ -457,8 +464,8 @@ is about 150 lines and has no framework in it (Q4).
 
 ## 12. API, events and migrations (summary)
 
-- Storefront: `language` on product, category, search, store, custom field definition,
-  payment method and address format reads; `language` on cart create and
+- Storefront: `language` on product, category, search, store and custom field
+  definition reads (payment methods and shipping options follow the cart's language); `language` on cart create and
   `PUT /storefront/carts/{id}/language`; `languages` on countries.
 - Admin: the translation routes (§4), store and market `languages`, `users.language`,
   `language` on orders and customers.
@@ -481,7 +488,8 @@ is about 150 lines and has no framework in it (Q4).
 - **Localised region and country names from the API** (worldwide and CLDR have them).
 - **Right-to-left:** an audit of both apps' CSS for logical properties. Astryx's
   components already follow `dir`.
-- **Search:** stemming per language, CJK segmentation.
+- **Search:** stemming per language, CJK segmentation, and translated custom field
+  text in search terms (custom fields only feed facets today).
 - **API-side catalogs** for built-in messages, if UCP agents need sentences rather
   than codes.
 - **Translated email subjects per market,** store names per language.
