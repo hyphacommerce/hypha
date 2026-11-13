@@ -4132,11 +4132,37 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * The store's translations, by kind, then resource, then language: what has been
-         *     translated. What's missing or outdated is each resource's to say (`GET
-         *     /admin/translations/{kind}/{id}`).
+         * The store's translations, or what's left to translate. Without `state`: the
+         *     translations there are, by kind name, then resource, then language, each with its
+         *     state. With `state` (and `language`, `400 invalid_query` without it): the worklist,
+         *     every resource with source text whose translation into `language` is `missing` (some
+         *     field untranslated, or no translation at all), `outdated` (every field translated,
+         *     some from a source text that changed since) or `complete`, in the catalog's order of
+         *     kinds, then by ID. Counts are in fields, and only fields with source text count.
          */
         get: operations["admin.translations.list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/translations/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * How far each of the store's languages covers its text: every field with source text
+         *     of the kinds the caller may read, counted as translated (outdated among them) or
+         *     missing. What Settings → Languages shows; the resources behind the numbers are
+         *     `GET /admin/translations?language=&state=`.
+         */
+        get: operations["admin.translations.progress"];
         put?: never;
         post?: never;
         delete?: never;
@@ -7244,6 +7270,30 @@ export interface components {
          * @example en-GB
          */
         Language: string;
+        /**
+         * @description How far one language's translations cover the store's text, in fields with source
+         *     text: `translated` + `missing` = `total`, and `outdated` are among `translated`.
+         */
+        LanguageProgressResponse: {
+            language: components["schemas"]["Language"];
+            /**
+             * Format: int64
+             * @description Without a translation.
+             */
+            missing: number;
+            /**
+             * Format: int64
+             * @description Translated from a source text that has changed since.
+             */
+            outdated: number;
+            /** Format: int64 */
+            total: number;
+            /**
+             * Format: int64
+             * @description Translated, outdated or not.
+             */
+            translated: number;
+        };
         LevelResponse: {
             /**
              * Format: int64
@@ -10397,6 +10447,12 @@ export interface components {
              */
             variant_title?: string | null;
         };
+        TranslationProgressResponse: {
+            /** @description The language the source text is in. */
+            default_language: components["schemas"]["Language"];
+            /** @description Each of the store's other languages, published or not, in the store's order. */
+            languages: components["schemas"]["LanguageProgressResponse"][];
+        };
         /** @description One language's translation of a resource, as a whole. */
         TranslationStateResponse: {
             /** @description RFC 3339. */
@@ -10408,6 +10464,15 @@ export interface components {
             translated: number;
             updated_at: string;
         };
+        /**
+         * @description Where a resource stands in a language: `missing` while any field with source text
+         *     has no translation in it, else `outdated` while any translates a source text that has
+         *     changed since, else `complete`.
+         *
+         *     Known values: `missing`, `outdated`, `complete`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        TranslationStatus: string;
         /** @description A page of a list, newest first. */
         TranslationSummaryPage: {
             /** @description Whether there are more after these. */
@@ -10416,15 +10481,39 @@ export interface components {
             /** @description Pass as `cursor` for the next page; `null` on the last page. Opaque: don't parse it. */
             next_cursor?: string | null;
         };
-        /** @description A translation in a list: which resource, which language, which fields. */
+        /**
+         * @description A resource's translation into one language in a list: which resource, which
+         *     language, how it covers the resource's fields with source text, which fields it has.
+         */
         TranslationSummaryResponse: {
-            /** @description RFC 3339. */
-            created_at: string;
-            /** @description The keys it translates. Read the resource's translations for the text. */
+            /** @description RFC 3339; `null` when the resource has no translation into `language` yet. */
+            created_at?: string | null;
+            /**
+             * @description The keys it translates (a key whose option, value, choice or facet is gone
+             *     included, until the translation is next written); empty when it has none yet.
+             */
             fields: string[];
             language: components["schemas"]["Language"];
+            /**
+             * Format: int32
+             * @description Of those, the ones without a translation in `language`.
+             */
+            missing: number;
+            /**
+             * Format: int32
+             * @description Of those translated, the ones whose source text changed since.
+             */
+            outdated: number;
             resource: components["schemas"]["TranslatedResourceResponse"];
-            updated_at: string;
+            state: components["schemas"]["TranslationStatus"];
+            /**
+             * Format: int32
+             * @description The resource's fields with source text: a field it leaves empty has nothing to
+             *     translate and isn't counted. 0 until the resource was first read for the
+             *     worklist (in the background, after an upgrade).
+             */
+            total: number;
+            updated_at?: string | null;
         };
         /** @description A resource's translatable fields with every language's translation. */
         TranslationsResponse: {
@@ -38736,12 +38825,21 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Only translations of this kind of resource (and its read scope is needed);
-                 *     without it, of every kind the caller may read.
+                 * @description Only resources of this kind (and its read scope is needed); without it, of every
+                 *     kind the caller may read.
                  */
                 kind?: string;
-                /** @description Only translations into this language. */
+                /** @description Only translations into this language. Required with `state`. */
                 language?: string;
+                /**
+                 * @description `missing`, `outdated` or `complete`: the worklist. Lists every resource with
+                 *     source text in that state in `language`, whether it has a translation yet or not,
+                 *     by kind in the catalog's order (`product`, `category`, `custom_field_definition`,
+                 *     `shipping_option`, `payment_method`, `discount`, `checkout_rule`, `asset`,
+                 *     `store`, `search_facet`), then by ID. Without it, the translations there are, by
+                 *     kind name, then resource, then language.
+                 */
+                state?: string;
                 /** @description The previous page's `next_cursor`; absent for the first page. */
                 cursor?: string;
                 /** @description Items per page, 1 to 100 (default 50). */
@@ -38791,6 +38889,68 @@ export interface operations {
             };
             /** @description A `limit` outside 1 to 100 (`invalid_limit`). */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.translations.progress": {
+        parameters: {
+            query?: {
+                /**
+                 * @description Only this kind of resource (and its read scope is needed); without it, every kind
+                 *     the caller may read.
+                 */
+                kind?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranslationProgressResponse"];
+                };
+            };
+            /** @description An unknown or malformed query parameter (`invalid_query`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

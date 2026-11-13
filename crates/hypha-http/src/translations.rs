@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 
 use hypha_core::{
     AssetId, CategoryId, CheckoutRuleId, CustomFieldDefinitionId, DiscountId, EventHandler,
-    Language, PaymentMethodId, ProductId, RepoError, ShippingOptionId, StoreId, StoredEvent,
-    VariantId,
+    Language, PaymentMethodId, ProductId, RepoError, ShippingOptionId, ShippingZoneId, StoreId,
+    StoredEvent, VariantId,
 };
 use hypha_custom_fields::{
     AdminAccess, BaseType, CustomFieldDefinition, DefinitionRepo, FieldKey, FieldsRead,
@@ -31,7 +31,7 @@ use hypha_shipping::{HasShippingZones, ShippingOption, ShippingZoneRepo};
 use hypha_stores::{Store, StoreRepo};
 use hypha_translations::{
     FieldRule, HasTranslations, ResourceKind, ResourceRef, Source, SourceField, TranslationRepo,
-    ValueFormat, ValueRule, fields, source_digest,
+    TranslationSourceRepo, ValueFormat, ValueRule, fields, source_digest, sync_sources,
 };
 use serde_json::{Map, Value};
 use uuid::Uuid;
@@ -406,14 +406,48 @@ pub fn search_facet_source(settings: Option<&SearchSettings>) -> Source {
     )
 }
 
-/// `resource` as it is now, `None` when there's no such resource. Reads through the
-/// repositories, not the domains' commands: the caller checked the scopes
-/// (`hypha_translations::require_read`) before asking.
-pub(crate) async fn source<S: Storage>(
-    state: &AppState<S>,
-    ports: &S::Ports<'_>,
+/// What reading a resource's source takes: every kind's repositories.
+pub trait SourcePorts:
+    HasProducts
+    + HasCategories
+    + HasCustomFieldDefinitions
+    + HasCustomFieldValues
+    + HasShippingZones
+    + HasPaymentMethods
+    + HasDiscounts
+    + HasCheckoutRules
+    + HasAssets
+    + HasNotificationSettings
+    + HasSearchSettings
+{
+}
+
+impl<T> SourcePorts for T where
+    T: HasProducts
+        + HasCategories
+        + HasCustomFieldDefinitions
+        + HasCustomFieldValues
+        + HasShippingZones
+        + HasPaymentMethods
+        + HasDiscounts
+        + HasCheckoutRules
+        + HasAssets
+        + HasNotificationSettings
+        + HasSearchSettings
+{
+}
+
+/// `resource` as it is now, `None` when there's no such resource: the one reading of each
+/// kind, which the translation routes, the worklist's handler and its job all use, so the
+/// digests they keep are the editor's. Reads through the repositories, not the domains'
+/// commands: callers checked the scopes (`hypha_translations::require_read`) or are the
+/// system. `stores` holds the store (`store`), whose kinds are one per store.
+pub async fn load_source<P: SourcePorts>(
+    ports: &P,
+    stores: &impl StoreRepo,
+    store: StoreId,
     resource: ResourceRef,
-) -> Result<Option<Loaded>, ApiError> {
+) -> Result<Option<Loaded>, RepoError> {
     let id = resource.id;
     Ok(match resource.kind {
         ResourceKind::Product => match ports.products().get(ProductId::from_uuid(id)).await? {
@@ -471,17 +505,272 @@ pub(crate) async fn source<S: Storage>(
             .as_ref()
             .map(|a| asset_source(a).into()),
         // One per store, named by the store's ID.
-        ResourceKind::Store if id == state.store.as_uuid() => {
-            let notifications = ports.notification_settings().get().await?;
-            let store = crate::routes::stores::store_as_system(state, ports).await?;
-            Some(store_source(&store, notifications.as_ref()).into())
+        ResourceKind::Store if id == store.as_uuid() => {
+            match StoreRepo::get(stores, store).await? {
+                Some(found) => {
+                    let notifications = ports.notification_settings().get().await?;
+                    Some(store_source(&found, notifications.as_ref()).into())
+                }
+                None => None,
+            }
         }
-        ResourceKind::SearchFacet if id == state.store.as_uuid() => {
+        ResourceKind::SearchFacet if id == store.as_uuid() => {
             let settings = ports.search_settings().get().await?;
             Some(search_facet_source(settings.as_ref()).into())
         }
         ResourceKind::Store | ResourceKind::SearchFacet => None,
     })
+}
+
+/// `load_source` for a request's (or a job's) ports, with the store read through the
+/// host's directory.
+pub(crate) async fn source<S: Storage>(
+    state: &AppState<S>,
+    ports: &S::Ports<'_>,
+    resource: ResourceRef,
+) -> Result<Option<Loaded>, ApiError> {
+    Ok(match state.storage.directory_in(ports) {
+        Some(directory) => load_source(ports, directory, state.store, resource).await?,
+        None => {
+            let directory = state.storage.directory().await?;
+            load_source(ports, &directory, state.store, resource).await?
+        }
+    })
+}
+
+/// Reads `resource` again and writes its digests for the worklist (none when it's gone).
+pub async fn sync_source<P: SourcePorts + HasTranslations>(
+    ports: &P,
+    stores: &impl StoreRepo,
+    store: StoreId,
+    resource: ResourceRef,
+) -> Result<(), RepoError> {
+    let loaded = load_source(ports, stores, store, resource).await?;
+    sync_sources(ports, resource, loaded.as_ref().map(|l| &l.source)).await
+}
+
+/// The events about one resource's translatable text: its type, the kind, and the
+/// payload's field holding its ID. A deletion is among them: the resource read again is
+/// gone, and its digests go.
+const RESOURCE_EVENTS: [(&str, ResourceKind, &str); 23] = [
+    ("product.created", ResourceKind::Product, "product"),
+    ("product.updated", ResourceKind::Product, "product"),
+    ("product.variant_added", ResourceKind::Product, "product"),
+    ("product.variant_updated", ResourceKind::Product, "product"),
+    ("product.variant_removed", ResourceKind::Product, "product"),
+    (
+        "product.custom_fields_updated",
+        ResourceKind::Product,
+        "product",
+    ),
+    ("product.deleted", ResourceKind::Product, "product"),
+    ("category.changed", ResourceKind::Category, "category"),
+    (
+        "category.custom_fields_updated",
+        ResourceKind::Category,
+        "category",
+    ),
+    ("category.deleted", ResourceKind::Category, "category"),
+    (
+        "custom_field_definition.created",
+        ResourceKind::CustomFieldDefinition,
+        "definition",
+    ),
+    (
+        "custom_field_definition.updated",
+        ResourceKind::CustomFieldDefinition,
+        "definition",
+    ),
+    (
+        "custom_field_definition.deleted",
+        ResourceKind::CustomFieldDefinition,
+        "definition",
+    ),
+    (
+        "shipping_option.deleted",
+        ResourceKind::ShippingOption,
+        "shipping_option",
+    ),
+    (
+        "payment_method.created",
+        ResourceKind::PaymentMethod,
+        "payment_method",
+    ),
+    (
+        "payment_method.updated",
+        ResourceKind::PaymentMethod,
+        "payment_method",
+    ),
+    (
+        "payment_method.deleted",
+        ResourceKind::PaymentMethod,
+        "payment_method",
+    ),
+    ("discount.created", ResourceKind::Discount, "discount"),
+    ("discount.updated", ResourceKind::Discount, "discount"),
+    ("discount.deleted", ResourceKind::Discount, "discount"),
+    (
+        "checkout_rule.created",
+        ResourceKind::CheckoutRule,
+        "checkout_rule",
+    ),
+    (
+        "checkout_rule.updated",
+        ResourceKind::CheckoutRule,
+        "checkout_rule",
+    ),
+    (
+        "checkout_rule.deleted",
+        ResourceKind::CheckoutRule,
+        "checkout_rule",
+    ),
+];
+
+/// The other events it follows: assets' (whose alt is their text), a zone's (its options
+/// are its children), and the store's kinds, which are one per store.
+const ASSET_UPDATED: &str = "asset.updated";
+const ASSET_DELETED: &str = "asset.deleted";
+const ZONE_CHANGED: &str = "shipping_zone.changed";
+const STORE_UPDATED: &str = "store.updated";
+const NOTIFICATION_SETTINGS_UPDATED: &str = "notification_settings.updated";
+const SEARCH_SETTINGS_CHANGED: &str = "search_settings.changed";
+const OTHER_EVENTS: [&str; 6] = [
+    ASSET_UPDATED,
+    ASSET_DELETED,
+    ZONE_CHANGED,
+    STORE_UPDATED,
+    NOTIFICATION_SETTINGS_UPDATED,
+    SEARCH_SETTINGS_CHANGED,
+];
+
+/// What about a custom field definition decides whether its values are translated
+/// (`translatable_value`): a change to one reaches every value it has.
+const TRANSLATABILITY: [&str; 3] = ["access", "private", "validations"];
+
+/// Keeps the worklist's digests (`translation_sources`) in step with the resources: on
+/// every event that may change a resource's translatable text, it reads that resource
+/// again (`sync_source`, the same reading as the translation editor's) and writes its
+/// digests, or removes them when it's gone. Here rather than in the leaf, which can't see
+/// the resources. Idempotent and order-blind: what's written is the resource as it is
+/// when the delivery runs, so a retry or a late delivery writes the same. A custom field
+/// definition whose values' translatability may have changed (deleted, or its access,
+/// privacy or validations changed) queues every product or category for the
+/// `translation_sources` job, which reads them again in batches.
+#[derive(Debug, Clone, Copy)]
+pub struct TranslationSourceSync {
+    store: StoreId,
+}
+
+impl TranslationSourceSync {
+    /// For the store `store`: the resource of its one-per-store kinds.
+    pub fn new(store: StoreId) -> Self {
+        Self { store }
+    }
+
+    /// The resources `event` is about, and the kind it reaches as a whole, if any.
+    async fn targets<P: SourcePorts>(
+        &self,
+        ports: &P,
+        event: &StoredEvent,
+    ) -> Result<(Vec<ResourceRef>, Option<ResourceKind>), String> {
+        let named = |kind: ResourceKind, field: &str| {
+            event.data[field]
+                .as_str()
+                .and_then(|id| ResourceRef::parse(kind, id).ok())
+                .ok_or_else(|| format!("event {} names no {kind}", event.id))
+        };
+        let store = |kind| ResourceRef::new(kind, self.store.as_uuid());
+        let event_type = event.event_type.as_str();
+        if let Some((_, kind, field)) = RESOURCE_EVENTS.iter().find(|(t, _, _)| *t == event_type) {
+            let resource = named(*kind, field)?;
+            let whole = (*kind == ResourceKind::CustomFieldDefinition)
+                .then(|| owners_reached(event))
+                .flatten();
+            return Ok((vec![resource], whole));
+        }
+        Ok(match event_type {
+            ASSET_UPDATED | ASSET_DELETED => (vec![named(ResourceKind::Asset, "asset")?], None),
+            ZONE_CHANGED => {
+                let zone: ShippingZoneId = event.data["shipping_zone"]
+                    .as_str()
+                    .and_then(|id| id.parse().ok())
+                    .ok_or_else(|| format!("event {} names no shipping zone", event.id))?;
+                // A zone deleted since has its options' own deletions.
+                let options = ports
+                    .shipping_zones()
+                    .get(zone)
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .map(|zone| {
+                        zone.options()
+                            .iter()
+                            .map(|o| {
+                                ResourceRef::new(ResourceKind::ShippingOption, o.id().as_uuid())
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                (options, None)
+            }
+            STORE_UPDATED | NOTIFICATION_SETTINGS_UPDATED => {
+                (vec![store(ResourceKind::Store)], None)
+            }
+            SEARCH_SETTINGS_CHANGED => (vec![store(ResourceKind::SearchFacet)], None),
+            _ => (Vec::new(), None),
+        })
+    }
+}
+
+/// The kind whose every resource a definition's event reaches: a product's, variant's or
+/// category's definition deleted, or changed in what makes its values translatable.
+fn owners_reached(event: &StoredEvent) -> Option<ResourceKind> {
+    let reaches = match event.event_type.as_str() {
+        "custom_field_definition.deleted" => true,
+        "custom_field_definition.updated" => {
+            event.data["fields"].as_array().is_some_and(|fields| {
+                fields
+                    .iter()
+                    .any(|f| TRANSLATABILITY.iter().any(|t| f == t))
+            })
+        }
+        _ => false,
+    };
+    if !reaches {
+        return None;
+    }
+    match event.data["owner_type"].as_str()? {
+        "product" | "variant" => Some(ResourceKind::Product),
+        "category" => Some(ResourceKind::Category),
+        _ => None,
+    }
+}
+
+impl<P: SourcePorts + StoreRepo + HasTranslations> EventHandler<P> for TranslationSourceSync {
+    fn name(&self) -> &'static str {
+        "translation_source_sync"
+    }
+
+    fn wants(&self, event_type: &str) -> bool {
+        RESOURCE_EVENTS.iter().any(|(t, _, _)| *t == event_type)
+            || OTHER_EVENTS.contains(&event_type)
+    }
+
+    async fn handle(&self, ports: &P, event: &StoredEvent) -> Result<(), String> {
+        let (resources, whole) = self.targets(ports, event).await?;
+        for resource in resources {
+            sync_source(ports, ports, self.store, resource)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        if let Some(kind) = whole {
+            ports
+                .translations()
+                .queue_kind(kind)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
 }
 
 /// Removes the translations into languages the store no longer lists, and the email
