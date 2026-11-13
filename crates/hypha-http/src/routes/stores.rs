@@ -232,11 +232,13 @@ pub async fn update<S: Storage>(
     };
     // Every translation is one from the default language, which fixes it; checked like
     // the currency, before the write.
-    // Only translations into the languages the store keeps count: the others go with
-    // their language (and may still be there, waiting for that cleanup).
-    let has_translations = match req.default_language {
-        Some(_) => {
-            let kept: Vec<Language> = match &req.languages {
+    // Translations into a language the request removes from the store altogether don't
+    // count: they go with it (and may still be there, waiting for that cleanup). Those
+    // into the new default do: the cleanup keeps only listed languages, so a swap of the
+    // default with a listed language would delete every translation into it.
+    let has_translations = match &req.default_language {
+        Some(default) => {
+            let mut remaining: Vec<Language> = match &req.languages {
                 Some(languages) => languages
                     .iter()
                     .filter_map(|l| Language::new(&l.language).ok())
@@ -248,7 +250,9 @@ pub async fn update<S: Storage>(
                     .map(|l| l.language.clone())
                     .collect(),
             };
-            ports.translations().any_in(&kept).await?
+            // An invalid tag is refused by the command.
+            remaining.extend(Language::new(default).ok());
+            ports.translations().any_in(&remaining).await?
         }
         None => false,
     };
