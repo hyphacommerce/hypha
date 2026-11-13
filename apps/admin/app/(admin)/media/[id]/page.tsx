@@ -10,10 +10,12 @@ import { Suspense } from "react";
 import { DateTime } from "@/components/date-time";
 import { type Crumb, PageHeader } from "@/components/page-header";
 import { DetailSkeleton } from "@/components/skeletons";
+import { TranslateButton } from "@/components/translate-button";
 import { getFormat } from "@/lib/get-format";
 import { loaded, sessionClient } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
 import type { T } from "@/lib/messages";
+import { offersTranslate } from "@/lib/translations-server";
 
 import { AssetForm } from "./asset-form";
 import { DeleteAsset } from "./delete-asset";
@@ -87,12 +89,20 @@ async function Asset({ id, back }: { id: string; back: Crumb }) {
     ),
   );
 
+  // Alt text is what an asset translates, and only an image has it.
+  const canTranslate = asset.kind === "image" && (await offersTranslate("asset"));
+
   return (
     <>
       <PageHeader
         title={asset.title ?? asset.filename}
         back={back}
-        actions={<DeleteAsset id={asset.id} />}
+        actions={
+          <>
+            {canTranslate && <TranslateButton t={t} kind="asset" id={asset.id} />}
+            <DeleteAsset id={asset.id} />
+          </>
+        }
       />
       <HStack gap={5} vAlign="start" wrap="wrap">
         <Card padding={4}>

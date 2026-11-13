@@ -1,0 +1,9 @@
+{
+  "subject": "Vaš kod za prijavu: {shop}",
+  "preheader": "Unesite ovaj kod za prijavu u prodavnicu {shop}.",
+  "heading": "Vaš kod za prijavu",
+  "enter": "Unesite ovaj kod za prijavu u prodavnicu {shop}. Kod važi {minutes} min.",
+  "sign_in": "Prijavi se",
+  "one_click": "Ili se prijavite jednim klikom: {link}",
+  "ignore": "Ako niste tražili kod, zanemarite ovaj imejl: bez koda niko ne može da se prijavi."
+}

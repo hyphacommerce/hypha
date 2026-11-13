@@ -5,13 +5,13 @@
 use std::collections::HashSet;
 
 use hypha_core::{
-    CountryCode, PendingEvent, Recorded, Recorder, ShippingOptionId, ShippingZoneId, Stamped,
-    Stamps, Subject, TaxClassId, Version, Versioned, required_text,
+    CountryCode, Event, PendingEvent, Recorded, Recorder, ShippingOptionId, ShippingZoneId,
+    Stamped, Stamps, Subject, TaxClassId, Version, Versioned, required_text,
 };
 
 use crate::{
     BuiltinRate, DeliveryEstimate, ProviderKey, ShippingError,
-    events::{SHIPPING_ZONE, ShippingZoneChanged, ShippingZoneDeleted},
+    events::{SHIPPING_ZONE, ShippingOptionDeleted, ShippingZoneChanged, ShippingZoneDeleted},
 };
 
 /// How an option's price is found.
@@ -191,14 +191,29 @@ impl ShippingZone {
         self.events.record_once(self.subject(), &event);
     }
 
-    /// Records that the zone is being deleted; the repository's `delete` writes it.
+    fn option_deleted(&mut self, option: ShippingOptionId) {
+        let event = ShippingOptionDeleted {
+            shipping_option: option,
+            shipping_zone: self.id,
+        };
+        self.events.record(self.subject(), &event);
+    }
+
+    /// Records that the zone is being deleted, its options with it; the repository's
+    /// `delete` writes them.
     pub fn delete(&mut self) {
         let event = ShippingZoneDeleted {
             shipping_zone: self.id,
         };
-        // Whatever else changed is moot now.
-        self.events.take();
+        // Whatever else changed is moot now, but for options already removed: their
+        // deletion is what their translations are cleaned up by.
+        self.events
+            .retain(|e| e.event_type == ShippingOptionDeleted::TYPE);
         self.events.record(self.subject(), &event);
+        let options: Vec<ShippingOptionId> = self.options.iter().map(|o| o.id).collect();
+        for option in options {
+            self.option_deleted(option);
+        }
     }
 
     pub fn rename(&mut self, name: &str) -> Result<(), ShippingError> {
@@ -290,6 +305,7 @@ impl ShippingZone {
         let index = self.index_of(id)?;
         self.options.remove(index);
         self.changed();
+        self.option_deleted(id);
         Ok(())
     }
 
@@ -579,5 +595,45 @@ mod tests {
         restored.rename("Europe").unwrap();
         restored.delete();
         assert_eq!(types(restored.take_events()), ["shipping_zone.deleted"]);
+    }
+
+    fn deleted_options(events: &[PendingEvent]) -> Vec<String> {
+        events
+            .iter()
+            .filter(|e| e.event_type == "shipping_option.deleted")
+            .filter_map(|e| e.data["shipping_option"].as_str().map(str::to_string))
+            .collect()
+    }
+
+    #[test]
+    fn a_removed_option_records_its_deletion_on_the_zone() {
+        let mut z = zone();
+        z.add_option(option(1, "standard")).unwrap();
+        z.add_option(option(2, "express")).unwrap();
+        z.take_events();
+        z.remove_option(oid(1)).unwrap();
+        let events = z.take_events();
+        assert_eq!(deleted_options(&events), [oid(1).to_string()]);
+        assert!(events.iter().all(|e| e.subject.kind == "shipping_zone"));
+    }
+
+    #[test]
+    fn a_deleted_zone_records_each_options_deletion_and_keeps_those_removed_before() {
+        let mut z = zone();
+        z.add_option(option(1, "standard")).unwrap();
+        z.add_option(option(2, "express")).unwrap();
+        z.take_events();
+        z.remove_option(oid(1)).unwrap();
+        z.delete();
+        let events = z.take_events();
+        assert_eq!(
+            deleted_options(&events),
+            [oid(1).to_string(), oid(2).to_string(),]
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|e| e.event_type == "shipping_zone.changed")
+        );
     }
 }

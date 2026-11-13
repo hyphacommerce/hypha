@@ -3,7 +3,7 @@
 
 use hypha_core::{
     AssetId, Email, EventId, Language, NotificationId, OrderId, Page, PageRequest, PurchaseOrderId,
-    RepoError, Timestamp, Version, Versioned, stamp_insert, stamp_update,
+    Recorded, RepoError, Timestamp, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_notifications::{
     Colour, Notification, NotificationFilter, NotificationRepo, NotificationSettings,
@@ -19,6 +19,7 @@ use crate::{
         version_from_db, version_to_db, write_stamps,
     },
     error::{corrupt, repo_error},
+    outbox::insert_events,
     store::{PgConnection, PgStore, Queries, in_transaction},
 };
 
@@ -258,7 +259,12 @@ impl<C: PgConnection> NotificationSettingsRepo for PgStore<C> {
     async fn insert(&self, settings: &mut NotificationSettings) -> Result<(), RepoError> {
         stamp_insert(settings, self.now());
         let s = settings.snapshot();
-        in_transaction!(self, |tx| insert_settings(tx, &s).await)?;
+        let events = settings.take_events();
+        let stamp = self.event_stamp();
+        in_transaction!(self, |tx| {
+            insert_settings(tx, &s).await?;
+            insert_events(tx, &events, Some(Version::NEW.next()), stamp).await
+        })?;
         settings.set_version(Version::NEW.next());
         Ok(())
     }
@@ -266,7 +272,13 @@ impl<C: PgConnection> NotificationSettingsRepo for PgStore<C> {
     async fn update(&self, settings: &mut NotificationSettings) -> Result<(), RepoError> {
         stamp_update(settings, self.now());
         let s = settings.snapshot();
-        let version = in_transaction!(self, |tx| update_settings(tx, &s).await)?;
+        let events = settings.take_events();
+        let stamp = self.event_stamp();
+        let version = in_transaction!(self, |tx| {
+            let version = update_settings(tx, &s).await?;
+            insert_events(tx, &events, Some(version), stamp).await?;
+            Ok(version)
+        })?;
         settings.set_version(version);
         Ok(())
     }

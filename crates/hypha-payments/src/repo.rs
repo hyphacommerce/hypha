@@ -25,8 +25,9 @@ pub trait PaymentMethodRepo {
     /// (changed or gone since). Refused with `Reference(OPEN_PAYMENT_METHOD)` while an open
     /// (`pending` or `authorized`) payment uses it, in the same step as the delete, so a
     /// checkout racing it can't strand a payment. Its other payments keep its ID, name and
-    /// provider.
-    async fn delete(&self, method: &PaymentMethod) -> Result<(), RepoError>;
+    /// provider. Writes the method's recorded events (`payment_method.deleted`) with the
+    /// delete; a refused or stale delete writes none.
+    async fn delete(&self, method: &mut PaymentMethod) -> Result<(), RepoError>;
 }
 
 #[allow(async_fn_in_trait)]

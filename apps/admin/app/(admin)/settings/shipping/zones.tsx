@@ -26,6 +26,7 @@ import { ArrowDownIcon, ArrowUpIcon, PencilIcon, TrashIcon } from "@heroicons/re
 import { useState, useTransition } from "react";
 
 import { useCurrencies } from "@/components/currencies";
+import { TranslateButton } from "@/components/translate-button";
 import { currencyCodes } from "@/lib/format";
 import {
   RATE_KINDS,
@@ -54,7 +55,16 @@ type Option = AdminSchemas["ShippingOptionResponse"];
 type Provider = RateApp;
 type Currency = AdminSchemas["Currency"];
 
-export function ZonesSection({ zones, providers }: { zones: Zone[]; providers: Provider[] }) {
+export function ZonesSection({
+  zones,
+  providers,
+  canTranslate,
+}: {
+  zones: Zone[];
+  providers: Provider[];
+  /** Whether each option offers "Translate" (its name). */
+  canTranslate: boolean;
+}) {
   const t = useT<"shipping">();
   const [isAdding, setIsAdding] = useState(false);
 
@@ -79,7 +89,7 @@ export function ZonesSection({ zones, providers }: { zones: Zone[]; providers: P
         </Card>
       )}
       {zones.map((zone) => (
-        <ZoneCard key={zone.id} zone={zone} providers={providers} />
+        <ZoneCard key={zone.id} zone={zone} providers={providers} canTranslate={canTranslate} />
       ))}
       {isAdding && <ZoneDialog onClose={() => setIsAdding(false)} />}
     </VStack>
@@ -141,7 +151,15 @@ function ZoneDialog({ zone, onClose }: { zone?: Zone; onClose: () => void }) {
   );
 }
 
-function ZoneCard({ zone, providers }: { zone: Zone; providers: Provider[] }) {
+function ZoneCard({
+  zone,
+  providers,
+  canTranslate,
+}: {
+  zone: Zone;
+  providers: Provider[];
+  canTranslate: boolean;
+}) {
   const t = useT<"shipping">();
   const [isEditing, setIsEditing] = useState(false);
   const [isAddingOption, setIsAddingOption] = useState(false);
@@ -239,6 +257,7 @@ function ZoneCard({ zone, providers }: { zone: Zone; providers: Provider[] }) {
                   zone={zone}
                   option={option}
                   providers={providers}
+                  canTranslate={canTranslate}
                   canMoveUp={index > 0}
                   canMoveDown={index < zone.options.length - 1}
                   onMove={(by) => move(index, by)}
@@ -261,6 +280,7 @@ function OptionRow({
   zone,
   option,
   providers,
+  canTranslate,
   canMoveUp,
   canMoveDown,
   onMove,
@@ -269,6 +289,7 @@ function OptionRow({
   zone: Zone;
   option: Option;
   providers: Provider[];
+  canTranslate: boolean;
   canMoveUp: boolean;
   canMoveDown: boolean;
   onMove: (by: -1 | 1) => void;
@@ -343,6 +364,9 @@ function OptionRow({
             </>
           ) : (
             <>
+              {canTranslate && (
+                <TranslateButton t={t} kind="shipping_option" id={option.id} isCompact />
+              )}
               <IconButton
                 label={t("common.move_up_named", { name: option.name })}
                 icon={<ArrowUpIcon />}

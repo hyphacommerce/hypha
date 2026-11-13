@@ -529,6 +529,36 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "validation_apps",
             sql: include_str!("../migrations/0101_validation_apps.sql"),
         },
+        Migration {
+            version: 102,
+            name: "languages",
+            sql: include_str!("../migrations/0102_languages.sql"),
+        },
+        Migration {
+            version: 103,
+            name: "translations",
+            sql: include_str!("../migrations/0103_translations.sql"),
+        },
+        Migration {
+            version: 104,
+            name: "cart_order_language",
+            sql: include_str!("../migrations/0104_cart_order_language.sql"),
+        },
+        Migration {
+            version: 105,
+            name: "search_languages",
+            sql: include_str!("../migrations/0105_search_languages.sql"),
+        },
+        Migration {
+            version: 106,
+            name: "user_language",
+            sql: include_str!("../migrations/0106_user_language.sql"),
+        },
+        Migration {
+            version: 107,
+            name: "translation_sources",
+            sql: include_str!("../migrations/0107_translation_sources.sql"),
+        },
     ],
 };
 

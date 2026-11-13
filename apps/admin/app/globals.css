@@ -1021,3 +1021,56 @@ html[data-theme="dark"] .hypha-wordmark-dark {
   color: var(--color-text-secondary);
   font-size: 0.875em;
 }
+
+/* The translation editor (app/(admin)/translations): a field's source beside its
+   translation, stacked when the page is narrow. */
+.translation-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+@media (max-width: 720px) {
+  .translation-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  /* The column heads name the two sides; stacked, each field's own labels do. */
+  .translation-row-head {
+    display: none;
+  }
+}
+
+/* The source text: read, not edited. */
+.translation-source {
+  padding: var(--spacing-2, 8px) var(--spacing-3, 12px);
+  border-radius: var(--radius-inner);
+  background: var(--color-background-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Stored HTML shown as it reads (a description's source). */
+.rich-text-source {
+  white-space: normal;
+}
+
+.rich-text-source > :first-child {
+  margin-top: 0;
+}
+
+.rich-text-source > :last-child {
+  margin-bottom: 0;
+}
+
+.rich-text-source ul,
+.rich-text-source ol {
+  padding-inline-start: 1.5em;
+}
+
+/* What's wrong with a field, under it. */
+.translation-problem {
+  color: var(--color-error);
+}

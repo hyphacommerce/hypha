@@ -7,10 +7,12 @@ import { type Crumb, PageHeader } from "@/components/page-header";
 import { type SearchParams, one } from "@/components/resource-table/params";
 import { listPage, pageQuery } from "@/components/resource-table/server";
 import { FormSkeleton } from "@/components/skeletons";
+import { TranslateButton } from "@/components/translate-button";
 import { type Discount, methodLabel, withDiscountMarkets } from "@/lib/discounts/wire";
 import { loaded, perRequest, requireStaff, sessionClient } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
 import { hasScope } from "@/lib/navigation";
+import { offersTranslate } from "@/lib/translations-server";
 
 import { loadLive, loadNames, loadOptions } from "../data";
 import { EditDiscount } from "../discount-editor";
@@ -95,6 +97,8 @@ async function DiscountView({
   const hasUsage = hasScope(me.scopes, "customers:read") && hasScope(me.scopes, "orders:read");
   const tab =
     (asked === "codes" && !hasCodes) || (asked === "usage" && !hasUsage) ? "settings" : asked;
+  // Already read for the layout and this page: no call of its own.
+  const canTranslate = await offersTranslate("discount");
   return (
     <>
       <PageHeader
@@ -102,6 +106,7 @@ async function DiscountView({
         back={back}
         badges={<DiscountStatusBadge t={t} phase={discount.phase} />}
         description={`${methodLabel(discount, t)} · ${discount.summary}`}
+        actions={canTranslate && <TranslateButton t={t} kind="discount" id={discount.id} />}
       />
       <DiscountTabs id={id} tab={tab} hasCodes={hasCodes} hasUsage={hasUsage}>
         <Suspense fallback={tabFallback(id, tab)}>

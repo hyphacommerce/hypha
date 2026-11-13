@@ -379,11 +379,20 @@ pub async fn search_sync<S: Storage>(state: &AppState<S>) -> Step {
         .await
         .map_err(|_| "no connection".to_string())?;
     let now = state.clock.now();
+    // What markets may offer and translations are read in: the store's languages now,
+    // read only when there's something to rebuild.
+    let servable = async {
+        crate::routes::stores::store_as_system(state, &ports)
+            .await
+            .map(|store| store.offered_languages())
+            .map_err(|e| hypha_core::RepoError::Backend(format!("the store: {}", e.body().error)))
+    };
     let synced = hypha_search::sync(
         &ports,
         &state.storage.search(&ports),
         &state.clock,
         &state.config.search_sync,
+        servable,
     )
     .await
     .map_err(|e| e.to_string())?;
@@ -396,6 +405,52 @@ pub async fn search_sync<S: Storage>(state: &AppState<S>) -> Step {
     Ok(Ran {
         retry_at,
         ..Ran::of(synced.progress)
+    })
+}
+
+/// Reads a batch of the queued resources again for the translation worklist
+/// (`translation_sources`): what the migration that made it queued (every resource there
+/// was), and what a custom field definition's change queued (every product or category).
+/// A resource that fails goes to the back of the queue, so the rest go on.
+pub async fn translation_sources<S: Storage>(state: &AppState<S>) -> Step {
+    use hypha_translations::{HasTranslations, TranslationSourceRepo};
+    let ports = state
+        .public_ports()
+        .await
+        .map_err(|_| "no connection".to_string())?;
+    let batch = state.config.translation_sources.batch;
+    let repo = ports.translations();
+    let queued = repo.queued(batch).await.map_err(|e| e.to_string())?;
+    let mut done = Vec::with_capacity(queued.len());
+    let mut failed = Vec::new();
+    for item in &queued {
+        match crate::translations::source(state, &ports, item.resource).await {
+            Ok(loaded) => {
+                let source = loaded.as_ref().map(|l| &l.source);
+                match hypha_translations::sync_sources(&ports, item.resource, source).await {
+                    Ok(()) => done.push(*item),
+                    Err(e) => failed.push((item.resource, e.to_string())),
+                }
+            }
+            Err(e) => failed.push((item.resource, e.body().error)),
+        }
+    }
+    repo.unqueue(&done).await.map_err(|e| e.to_string())?;
+    for (resource, error) in &failed {
+        tracing::warn!(
+            kind = %resource.kind,
+            id = %resource.id,
+            "translation sources: reading a resource failed, tried again later: {error}"
+        );
+    }
+    let failed: Vec<_> = failed.into_iter().map(|(resource, _)| resource).collect();
+    repo.queue(&failed).await.map_err(|e| e.to_string())?;
+    let full = u32::try_from(queued.len()).is_ok_and(|n| n == batch);
+    Ok(Ran {
+        // Only failures left in a full batch would loop: the next run is the timer's.
+        more: full && !done.is_empty(),
+        idle: queued.is_empty(),
+        retry_at: None,
     })
 }
 

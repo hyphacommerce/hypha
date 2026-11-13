@@ -47,5 +47,13 @@
   "price_lists_add_label": "Add a {currency} price list",
   "price_lists_add_placeholder": "Choose a price list",
   "price_lists_option_description": "{kind} · {adjustment}",
-  "price_lists_full": "A catalog holds at most {max, number} price lists."
+  "price_lists_full": "A catalog holds at most {max, number} price lists.",
+  "languages_title": "Languages",
+  "languages_description": "The languages shoppers in this market can choose, in order. The first is the market's default.",
+  "languages_empty": "Shoppers here get the store's content language, {language}.",
+  "languages_default_badge": "Market default",
+  "languages_add_label": "Add a language",
+  "languages_add_placeholder": "Choose a language",
+  "languages_none_published": "The store has no other published language yet. Add and publish one in <link>Settings → Languages</link>.",
+  "languages_hint": "Only published languages can be offered. Manage them in <link>Settings → Languages</link>."
 }

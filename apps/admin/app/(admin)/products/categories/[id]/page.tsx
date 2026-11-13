@@ -9,9 +9,11 @@ import { Suspense } from "react";
 import { CustomFieldsCard } from "@/components/custom-fields/custom-fields-card";
 import { type Crumb, PageHeader } from "@/components/page-header";
 import { DetailSkeleton } from "@/components/skeletons";
+import { TranslateButton } from "@/components/translate-button";
 import { definitionsOf } from "@/lib/custom-fields-server";
 import { loaded, requireStaff, sessionClient } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
+import { offersTranslate } from "@/lib/translations-server";
 
 import { CategoryForm, DeleteCategory, ImageCard, ProductsCard } from "./category-cards";
 
@@ -68,6 +70,8 @@ async function Category({
   ]);
   // Ancestors come nearest first; a breadcrumb reads from the top.
   const trail = category.ancestors.toReversed();
+  // Already read for the layout and this page: no call of its own.
+  const canTranslate = await offersTranslate("category");
 
   return (
     <>
@@ -78,7 +82,12 @@ async function Category({
           ...trail.map((a) => ({ label: a.name, href: `/products/categories/${a.id}` })),
         ]}
         badges={!category.visible && <Badge label={t("categories.hidden")} />}
-        actions={<DeleteCategory id={category.id} name={category.name} />}
+        actions={
+          <>
+            {canTranslate && <TranslateButton t={t} kind="category" id={category.id} />}
+            <DeleteCategory id={category.id} name={category.name} />
+          </>
+        }
       />
 
       <CategoryForm

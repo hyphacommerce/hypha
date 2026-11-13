@@ -32,6 +32,7 @@ import {
 import { useRef, useState, useTransition } from "react";
 
 import { useCurrencies } from "@/components/currencies";
+import { TranslateButton } from "@/components/translate-button";
 import {
   BASE_TYPES,
   type BaseType,
@@ -72,6 +73,7 @@ export function DefinitionsCard({
   definitions,
   suggestions,
   canWrite,
+  canTranslate,
 }: {
   owner: OwnerType;
   /** The owner type's definitions, in their order. */
@@ -80,6 +82,8 @@ export function DefinitionsCard({
   suggestions: Suggestion[];
   /** `custom_fields:write`: the merchant's fields can change. */
   canWrite: boolean;
+  /** Whether each field offers "Translate" (its name, description and choices). */
+  canTranslate: boolean;
 }) {
   const t = useT<"custom_fields">();
   const [editing, setEditing] = useState<Definition | "new">();
@@ -176,8 +180,26 @@ export function DefinitionsCard({
                         </HStack>
                       </TableCell>
                       <TableCell>
+                        {canTranslate && !(isOwn && canWrite) && (
+                          <HStack gap={1} hAlign="end">
+                            <TranslateButton
+                              t={t}
+                              kind="custom_field_definition"
+                              id={definition.id}
+                              isCompact
+                            />
+                          </HStack>
+                        )}
                         {isOwn && canWrite && (
                           <HStack gap={1} hAlign="end">
+                            {canTranslate && (
+                              <TranslateButton
+                                t={t}
+                                kind="custom_field_definition"
+                                id={definition.id}
+                                isCompact
+                              />
+                            )}
                             <IconButton
                               label={t("common.move_up_named", { name: definition.name })}
                               icon={<ArrowUpIcon />}

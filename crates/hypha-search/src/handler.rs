@@ -1,9 +1,10 @@
 //! `SearchIndexer`: the event handler that queues what to rebuild. It only marks; the sync
 //! job does the work, so a busy product is rebuilt once however many events it had.
 
-use hypha_core::{EventHandler, PriceListId, RepoError, StoredEvent};
+use hypha_core::{EventHandler, PriceListId, ProductId, RepoError, StoredEvent};
 use hypha_markets::{AppliesTo, CatalogRepo, HasCatalogs, HasPriceLists, PriceListRepo};
 use hypha_search_index::{HasSearchQueue, SearchQueue, Target};
+use hypha_translations::{ResourceKind, ResourceRef};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SearchIndexer;
@@ -58,12 +59,18 @@ const LIST_PRICING: &[&str] = &[
     "compare_at",
     "audience",
 ];
+/// A translation's change, by the kind of its resource (`data.resource.kind`): a
+/// product's text is in its documents. Nothing else translated is: images' alt text,
+/// promotions' titles, facet and choice labels are read when a search answers.
+const TRANSLATIONS: &[&str] = &["translation.updated", "translation.deleted"];
 /// Past this many fixed prices a list's variants aren't marked one by one: everything is.
 pub const MAX_VARIANT_MARKS: u32 = 1000;
 /// What to rebuild when one of the fields named changed (the event's `fields`):
 /// - a location's `markets` decide where its stock counts, the settings' `split_by`
-///   changes every listing key, and a market's countries, currency and tax rule decide
-///   every price there: everything;
+///   changes every listing key, a market's countries, currency and tax rule decide
+///   every price there, and the store's languages decide what every market may offer:
+///   everything;
+/// - a market's `languages` decide which languages its documents are in: its products;
 /// - a category's `parent` or `visible` change which categories the products below it are
 ///   listed under: that subtree.
 ///
@@ -74,6 +81,12 @@ const WHEN_FIELD: &[(&str, &[&str], Rebuild)] = &[
     (
         "market.changed",
         &["created", "countries", "currency", "prices_include_tax"],
+        Rebuild::All,
+    ),
+    ("market.changed", &["languages"], Rebuild::Market),
+    (
+        "store.updated",
+        &["languages", "default_language"],
         Rebuild::All,
     ),
     (
@@ -87,6 +100,8 @@ const WHEN_FIELD: &[(&str, &[&str], Rebuild)] = &[
 #[derive(Clone, Copy)]
 enum Rebuild {
     All,
+    /// The event's `market`'s products.
+    Market,
     /// The event's `category` and everything below it.
     Category,
 }
@@ -107,6 +122,7 @@ impl<P: HasSearchQueue + HasPriceLists + HasCatalogs> EventHandler<P> for Search
             STOCK,
             WINDOWS,
             CATALOG_LISTS,
+            TRANSLATIONS,
         ]
         .iter()
         .any(|types| types.contains(&event_type))
@@ -340,23 +356,50 @@ pub fn targets(event: &StoredEvent) -> Result<Vec<Target>, String> {
                 _ => return Err(bad("fields")),
             };
         Ok(if changed { vec![Target::All] } else { vec![] })
-    } else if let Some((_, wanted, rebuild)) = WHEN_FIELD.iter().find(|(w, ..)| *w == t) {
+    } else if TRANSLATIONS.contains(&t) {
+        let resource = &event.data["resource"];
+        let kind = resource["kind"].as_str().ok_or_else(|| bad("resource"))?;
+        let id = resource["id"].as_str().ok_or_else(|| bad("resource"))?;
+        match kind.parse() {
+            Ok(ResourceKind::Product) => {
+                let product =
+                    ResourceRef::parse(ResourceKind::Product, id).map_err(|_| bad("resource"))?;
+                Ok(vec![Target::Product(ProductId::from_uuid(product.id))])
+            }
+            // A kind made since this build is in no document it builds.
+            _ => Ok(vec![]),
+        }
+    } else if WHEN_FIELD.iter().any(|(w, ..)| *w == t) {
         // Events written before `fields` existed (`market.changed`) rebuild as if every
         // field changed: the safe guess.
-        let changed = match &event.data["fields"] {
-            serde_json::Value::Null => true,
+        let fields: Option<Vec<&str>> = match &event.data["fields"] {
+            serde_json::Value::Null => None,
             serde_json::Value::Array(fields) => {
-                fields.iter().any(|f| wanted.iter().any(|w| f == *w))
+                Some(fields.iter().filter_map(|f| f.as_str()).collect())
             }
             _ => return Err(bad("fields")),
         };
-        if !changed {
-            return Ok(vec![]);
+        let mut marks = Vec::new();
+        for (_, wanted, rebuild) in WHEN_FIELD.iter().filter(|(w, ..)| *w == t) {
+            let changed = fields
+                .as_ref()
+                .is_none_or(|fields| fields.iter().any(|f| wanted.contains(f)));
+            if !changed {
+                continue;
+            }
+            match rebuild {
+                Rebuild::All => return Ok(vec![Target::All]),
+                Rebuild::Market => {
+                    marks.extend(parse("market", |id| id.parse().ok().map(Target::Market))?);
+                }
+                Rebuild::Category => {
+                    marks.extend(parse("category", |id| {
+                        id.parse().ok().map(Target::Category)
+                    })?);
+                }
+            }
         }
-        match rebuild {
-            Rebuild::All => Ok(vec![Target::All]),
-            Rebuild::Category => parse("category", |id| id.parse().ok().map(Target::Category)),
-        }
+        Ok(marks)
     } else {
         Ok(vec![])
     }

@@ -827,7 +827,7 @@ export function hereTools(dir: string, d: Deployment, env: EnvFile): Tools {
       }),
     async checkToolchain() {
       await run("worker-build", ["--version"], { capture: true }).catch(() => {
-        throw new Error("worker-build is missing: `cargo install worker-build`");
+        throw new Error("worker-build is missing: `cargo install worker-build@0.8.7`");
       });
       const targets = await run("rustup", ["target", "list", "--installed"], {
         capture: true,

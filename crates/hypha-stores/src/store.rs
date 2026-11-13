@@ -1,9 +1,23 @@
+use std::collections::BTreeSet;
+
 use hypha_core::{
-    Address, AddressParts, Currency, Email, Language, Stamped, Stamps, StoreId, Timestamp,
-    Timezone, Version, Versioned, optional_text,
+    Address, AddressParts, Currency, Email, Language, PendingEvent, Recorded, Stamped, Stamps,
+    StoreId, Subject, Timestamp, Timezone, Version, Versioned, optional_text,
 };
 
-use crate::error::StoreError;
+use crate::{
+    error::StoreError,
+    events::{STORE, StoreUpdated},
+};
+
+/// A language the store's content is translated into, beside its default language.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoreLanguage {
+    pub language: Language,
+    /// Whether shoppers may be served it. An unpublished language can be translated and
+    /// previewed, but no storefront read answers in it and no market may offer it.
+    pub published: bool,
+}
 
 /// A merchant's store and its details. Store-wide settings (policies, custom field
 /// definitions) will hang off it.
@@ -20,9 +34,42 @@ pub struct Store {
     legal_address: Option<Address>,
     timezone: Option<Timezone>,
     default_language: Language,
+    /// The other languages, in the merchant's order; never the default one.
+    languages: Vec<StoreLanguage>,
     /// The base currency every cost is kept in; `None` until the merchant chooses one.
     currency: Option<Currency>,
     setup: SetupProgress,
+    changes: Changes,
+}
+
+/// The fields changed since the store was loaded, coalesced into one `store.updated` per
+/// write. Compares as always equal, so it never makes two stores unequal.
+#[derive(Debug, Clone, Default)]
+struct Changes(BTreeSet<&'static str>);
+
+impl PartialEq for Changes {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for Changes {}
+
+impl Recorded for Store {
+    fn take_events(&mut self) -> Vec<PendingEvent> {
+        let fields = std::mem::take(&mut self.changes.0);
+        if fields.is_empty() {
+            return Vec::new();
+        }
+        let event = StoreUpdated {
+            store: self.id,
+            fields: fields.into_iter().collect(),
+        };
+        vec![PendingEvent::new(
+            Subject::new(STORE, self.id.as_uuid()),
+            &event,
+        )]
+    }
 }
 
 /// How far the merchant got through the admin's setup guide: the step they were last on,
@@ -64,6 +111,8 @@ impl Store {
     pub const MAX_NAME_CHARS: usize = 100;
     /// A short plain-text description, for a storefront's header or meta tags.
     pub const MAX_DESCRIPTION_CHARS: usize = 500;
+    /// How many languages a store has beside its default one.
+    pub const MAX_LANGUAGES: usize = 20;
 
     /// The name is trimmed; it must not be empty or longer than `MAX_NAME_CHARS`. Every
     /// other detail starts empty, and the content language is English (`en`) until the
@@ -80,66 +129,143 @@ impl Store {
             legal_address: None,
             timezone: None,
             default_language: english(),
+            languages: Vec::new(),
             currency: None,
             setup: SetupProgress::default(),
+            changes: Changes::default(),
         })
     }
 
+    fn changed(&mut self, field: &'static str) {
+        self.changes.0.insert(field);
+    }
+
     pub fn rename(&mut self, name: &str) -> Result<(), StoreError> {
-        self.name = valid_name(name)?;
+        let name = valid_name(name)?;
+        if self.name != name {
+            self.name = name;
+            self.changed("name");
+        }
         Ok(())
     }
 
     /// Where shoppers and agents can write to the store; `None` clears it.
     pub fn set_contact_email(&mut self, email: Option<Email>) {
-        self.contact_email = email;
+        if self.contact_email != email {
+            self.contact_email = email;
+            self.changed("contact_email");
+        }
     }
 
     /// Plain text, trimmed, at most `MAX_DESCRIPTION_CHARS`; blank or `None` clears it.
     pub fn set_description(&mut self, description: Option<&str>) -> Result<(), StoreError> {
-        self.description = valid_description(description)?;
+        let description = valid_description(description)?;
+        if self.description != description {
+            self.description = description;
+            self.changed("description");
+        }
         Ok(())
     }
 
     /// The registered business name, for invoices and legal pages; blank clears it.
     pub fn set_legal_name(&mut self, legal_name: Option<&str>) -> Result<(), StoreError> {
-        self.legal_name = optional_text("legal_name", legal_name.map(str::to_string))?;
+        let legal_name = optional_text("legal_name", legal_name.map(str::to_string))?;
+        if self.legal_name != legal_name {
+            self.legal_name = legal_name;
+            self.changed("legal_name");
+        }
         Ok(())
     }
 
     pub fn set_legal_address(&mut self, address: Option<Address>) {
-        self.legal_address = address;
+        if self.legal_address != address {
+            self.legal_address = address;
+            self.changed("legal_address");
+        }
     }
 
     pub fn set_timezone(&mut self, timezone: Option<Timezone>) {
-        self.timezone = timezone;
+        if self.timezone != timezone {
+            self.timezone = timezone;
+            self.changed("timezone");
+        }
     }
 
     /// The language every content field (titles, descriptions, option labels) is
-    /// written in.
-    pub fn set_default_language(&mut self, language: Language) {
-        self.default_language = language;
+    /// written in. One of the store's other languages is refused rather than dropped from
+    /// them: the list is the merchant's to change, with `set_languages`.
+    pub fn set_default_language(&mut self, language: Language) -> Result<(), StoreError> {
+        if self.languages.iter().any(|l| l.language == language) {
+            return Err(StoreError::DefaultLanguageListed(language));
+        }
+        if self.default_language != language {
+            self.default_language = language;
+            self.changed("default_language");
+        }
+        Ok(())
+    }
+
+    /// Sets the default language and the other languages together, replacing both: at
+    /// most `MAX_LANGUAGES` others, each once, none of them the default.
+    pub fn set_languages(
+        &mut self,
+        default: Language,
+        languages: Vec<StoreLanguage>,
+    ) -> Result<(), StoreError> {
+        if languages.len() > Self::MAX_LANGUAGES {
+            return Err(StoreError::TooManyLanguages {
+                max: Self::MAX_LANGUAGES,
+            });
+        }
+        for (i, entry) in languages.iter().enumerate() {
+            if entry.language == default {
+                return Err(StoreError::LanguageIsDefault(default));
+            }
+            if languages[..i].iter().any(|l| l.language == entry.language) {
+                return Err(StoreError::DuplicateLanguage(entry.language.clone()));
+            }
+        }
+        if self.default_language != default {
+            self.default_language = default;
+            self.changed("default_language");
+        }
+        if self.languages != languages {
+            self.languages = languages;
+            self.changed("languages");
+        }
+        Ok(())
     }
 
     /// The currency costs are kept in. Whether it may still change (no cost recorded in
     /// the old one) is the command's to check.
     pub fn set_currency(&mut self, currency: Option<Currency>) {
-        self.currency = currency;
+        if self.currency != currency {
+            self.currency = currency;
+            self.changed("currency");
+        }
     }
 
     /// The setup guide step the merchant is on; `None` clears it.
     pub fn set_setup_step(&mut self, step: Option<SetupStep>) {
-        self.setup.step = step;
+        if self.setup.step != step {
+            self.setup.step = step;
+            self.changed("setup");
+        }
     }
 
     /// The guide is done (or put away) as of `at`; finishing again keeps the first time.
     pub fn finish_setup(&mut self, at: Timestamp) {
-        self.setup.finished_at.get_or_insert(at);
+        if self.setup.finished_at.is_none() {
+            self.setup.finished_at = Some(at);
+            self.changed("setup");
+        }
     }
 
     /// Shows the guide again, from the step it was left on.
     pub fn reopen_setup(&mut self) {
-        self.setup.finished_at = None;
+        if self.setup.finished_at.take().is_some() {
+            self.changed("setup");
+        }
     }
 
     pub fn setup(&self) -> &SetupProgress {
@@ -178,6 +304,27 @@ impl Store {
         &self.default_language
     }
 
+    /// The languages beside the default one, published or not.
+    pub fn languages(&self) -> &[StoreLanguage] {
+        &self.languages
+    }
+
+    /// The published languages beside the default one, in order.
+    pub fn published_languages(&self) -> impl Iterator<Item = &Language> {
+        self.languages
+            .iter()
+            .filter(|l| l.published)
+            .map(|l| &l.language)
+    }
+
+    /// The languages shoppers may be served: the default one, then the published others.
+    pub fn offered_languages(&self) -> Vec<Language> {
+        std::iter::once(&self.default_language)
+            .chain(self.published_languages())
+            .cloned()
+            .collect()
+    }
+
     pub fn currency(&self) -> Option<Currency> {
         self.currency
     }
@@ -194,6 +341,7 @@ impl Store {
             legal_address: self.legal_address.as_ref().map(|a| a.parts().clone()),
             timezone: self.timezone,
             default_language: self.default_language.clone(),
+            languages: self.languages.clone(),
             currency: self.currency,
             setup_step: self.setup.step.as_ref().map(|s| s.as_str().to_string()),
             setup_finished_at: self.setup.finished_at,
@@ -210,12 +358,14 @@ impl Store {
         store.set_legal_name(s.legal_name.as_deref())?;
         store.legal_address = s.legal_address.map(Address::new).transpose()?;
         store.timezone = s.timezone;
-        store.default_language = s.default_language;
+        store.set_languages(s.default_language, s.languages)?;
         store.currency = s.currency;
         store.setup = SetupProgress {
             step: s.setup_step.as_deref().map(SetupStep::new).transpose()?,
             finished_at: s.setup_finished_at,
         };
+        // Built through the setters, which record changes that didn't happen.
+        store.changes = Changes::default();
         Ok(store)
     }
 }
@@ -263,6 +413,7 @@ pub struct StoreSnapshot {
     pub legal_address: Option<AddressParts>,
     pub timezone: Option<Timezone>,
     pub default_language: Language,
+    pub languages: Vec<StoreLanguage>,
     pub currency: Option<Currency>,
     pub setup_step: Option<String>,
     pub setup_finished_at: Option<Timestamp>,
@@ -438,7 +589,213 @@ mod tests {
         };
         store.set_legal_address(Some(Address::new(parts).unwrap()));
         store.set_timezone(Some(Timezone::new("Europe/Zagreb").unwrap()));
-        store.set_default_language(Language::new("hr").unwrap());
+        store
+            .set_languages(lang("hr"), vec![other("de", true), other("sr-Latn", false)])
+            .unwrap();
         assert_eq!(Store::restore(store.snapshot()), Ok(store));
+    }
+
+    fn lang(tag: &str) -> Language {
+        Language::new(tag).unwrap()
+    }
+
+    fn other(tag: &str, published: bool) -> StoreLanguage {
+        StoreLanguage {
+            language: lang(tag),
+            published,
+        }
+    }
+
+    #[test]
+    fn a_new_store_has_no_other_languages_and_offers_its_default() {
+        let store = Store::new(sid(), "Acme").unwrap();
+        assert_eq!(store.languages(), &[]);
+        assert_eq!(store.offered_languages(), vec![lang("en")]);
+    }
+
+    #[test]
+    fn languages_keep_their_order_and_only_published_ones_are_offered() {
+        let mut store = Store::new(sid(), "Acme").unwrap();
+        let list = vec![
+            other("de", true),
+            other("fr", false),
+            other("sr-Latn", true),
+        ];
+        assert_eq!(store.set_languages(lang("en"), list.clone()), Ok(()));
+        assert_eq!(store.languages(), list.as_slice());
+        assert_eq!(
+            store.offered_languages(),
+            vec![lang("en"), lang("de"), lang("sr-Latn")]
+        );
+    }
+
+    #[test]
+    fn the_default_language_is_never_among_the_others() {
+        let mut store = Store::new(sid(), "Acme").unwrap();
+        assert_eq!(
+            store.set_languages(lang("en"), vec![other("de", true), other("EN", false)]),
+            Err(StoreError::LanguageIsDefault(lang("en")))
+        );
+        assert_eq!(store.languages(), &[]);
+    }
+
+    #[test]
+    fn a_language_is_listed_once_whatever_its_spelling() {
+        let mut store = Store::new(sid(), "Acme").unwrap();
+        assert_eq!(
+            store.set_languages(lang("en"), vec![other("de", true), other("DE", false)]),
+            Err(StoreError::DuplicateLanguage(lang("de")))
+        );
+    }
+
+    #[test]
+    fn twenty_other_languages_is_the_limit() {
+        let mut store = Store::new(sid(), "Acme").unwrap();
+        // `aa`, `ab`, …: 21 distinct tags, none of them `en`.
+        let tags: Vec<StoreLanguage> = (b'a'..=b'u')
+            .map(|c| other(&format!("a{}", c as char), true))
+            .collect();
+        assert_eq!(store.set_languages(lang("en"), tags[..20].to_vec()), Ok(()));
+        assert_eq!(
+            store.set_languages(lang("en"), tags),
+            Err(StoreError::TooManyLanguages { max: 20 })
+        );
+        assert_eq!(store.languages().len(), 20);
+    }
+
+    #[test]
+    fn the_default_language_cant_become_one_of_the_others() {
+        let mut store = Store::new(sid(), "Acme").unwrap();
+        store
+            .set_languages(lang("en"), vec![other("de", true)])
+            .unwrap();
+        assert_eq!(
+            store.set_default_language(lang("de")),
+            Err(StoreError::DefaultLanguageListed(lang("de")))
+        );
+        assert_eq!(store.default_language(), &lang("en"));
+        assert_eq!(store.set_default_language(lang("fr")), Ok(()));
+        assert_eq!(store.default_language(), &lang("fr"));
+    }
+
+    #[test]
+    fn the_default_and_the_others_can_swap_in_one_change() {
+        let mut store = Store::new(sid(), "Acme").unwrap();
+        store
+            .set_languages(lang("en"), vec![other("de", true)])
+            .unwrap();
+        assert_eq!(
+            store.set_languages(lang("de"), vec![other("en", true)]),
+            Ok(())
+        );
+        assert_eq!(store.offered_languages(), vec![lang("de"), lang("en")]);
+    }
+
+    fn fields(store: &mut Store) -> Vec<String> {
+        store
+            .take_events()
+            .iter()
+            .inspect(|e| assert_eq!(e.event_type, "store.updated"))
+            .flat_map(|e| e.data["fields"].as_array().cloned().unwrap_or_default())
+            .filter_map(|f| f.as_str().map(str::to_string))
+            .collect()
+    }
+
+    #[test]
+    fn a_new_or_restored_store_has_recorded_nothing() {
+        let mut store = Store::new(sid(), "Acme").unwrap();
+        assert!(store.take_events().is_empty());
+        store.set_description(Some("Mugs")).unwrap();
+        store
+            .set_languages(lang("hr"), vec![other("de", true)])
+            .unwrap();
+        let mut restored = Store::restore(store.snapshot()).unwrap();
+        assert!(restored.take_events().is_empty());
+    }
+
+    #[test]
+    fn a_write_records_one_event_naming_the_fields_that_changed() {
+        let mut store = Store::new(sid(), "Acme").unwrap();
+        store.rename("Acme EU").unwrap();
+        store.set_description(Some("Mugs")).unwrap();
+        store.set_contact_email(Some(Email::new("hi@acme.example").unwrap()));
+        store.set_legal_name(Some("Acme d.o.o.")).unwrap();
+        store.set_timezone(Some(Timezone::new("Europe/Zagreb").unwrap()));
+        store.set_currency(Some(Currency::EUR));
+        store.set_setup_step(Some(SetupStep::new("market").unwrap()));
+        let events = store.clone().take_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].data["store"], sid().to_string());
+        assert_eq!(
+            fields(&mut store),
+            [
+                "contact_email",
+                "currency",
+                "description",
+                "legal_name",
+                "name",
+                "setup",
+                "timezone"
+            ]
+        );
+        assert!(store.take_events().is_empty(), "taken once");
+    }
+
+    #[test]
+    fn setting_a_field_to_what_it_is_records_nothing() {
+        let mut store = Store::new(sid(), "Acme").unwrap();
+        store.rename(" Acme ").unwrap();
+        store.set_description(None).unwrap();
+        store.set_contact_email(None);
+        store.set_legal_name(Some("  ")).unwrap();
+        store.set_legal_address(None);
+        store.set_timezone(None);
+        store.set_currency(None);
+        store.set_setup_step(None);
+        store.reopen_setup();
+        store.set_default_language(lang("en")).unwrap();
+        store.set_languages(lang("en"), Vec::new()).unwrap();
+        assert!(store.take_events().is_empty());
+    }
+
+    #[test]
+    fn language_changes_name_the_default_and_the_list_apart() {
+        let mut store = Store::new(sid(), "Acme").unwrap();
+        store
+            .set_languages(lang("en"), vec![other("de", false)])
+            .unwrap();
+        assert_eq!(fields(&mut store), ["languages"]);
+        // Publishing one is a change of the list.
+        store
+            .set_languages(lang("en"), vec![other("de", true)])
+            .unwrap();
+        assert_eq!(fields(&mut store), ["languages"]);
+        store.set_default_language(lang("hr")).unwrap();
+        assert_eq!(fields(&mut store), ["default_language"]);
+        store
+            .set_languages(lang("de"), vec![other("hr", true)])
+            .unwrap();
+        assert_eq!(fields(&mut store), ["default_language", "languages"]);
+    }
+
+    #[test]
+    fn the_setup_guide_is_one_field() {
+        let mut store = Store::new(sid(), "Acme").unwrap();
+        store.finish_setup(Timestamp::from_unix_micros(5));
+        assert_eq!(fields(&mut store), ["setup"]);
+        store.finish_setup(Timestamp::from_unix_micros(9));
+        assert!(store.take_events().is_empty(), "already finished");
+        store.reopen_setup();
+        assert_eq!(fields(&mut store), ["setup"]);
+    }
+
+    #[test]
+    fn restore_rechecks_the_languages() {
+        let mut bad = Store::new(sid(), "Acme").unwrap().snapshot();
+        bad.languages = vec![other("en", true)];
+        assert_eq!(
+            Store::restore(bad),
+            Err(StoreError::LanguageIsDefault(lang("en")))
+        );
     }
 }

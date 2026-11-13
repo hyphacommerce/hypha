@@ -7,6 +7,7 @@ import { FormSkeleton } from "@/components/skeletons";
 import { loaded, sessionClient } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
 import { settingsCrumb } from "@/lib/navigation";
+import { offersTranslate } from "@/lib/translations-server";
 
 import { ProvidersCard, type RateApp } from "./providers";
 import { ZonesSection } from "./zones";
@@ -49,7 +50,11 @@ async function Shipping() {
   }));
   return (
     <>
-      <ZonesSection zones={zones.items} providers={rateApps} />
+      <ZonesSection
+        zones={zones.items}
+        providers={rateApps}
+        canTranslate={await offersTranslate("shipping_option")}
+      />
       <ProvidersCard providers={rateApps} />
     </>
   );

@@ -24,6 +24,11 @@ const EVENTS = [
   "discount.deleted",
   "discount.started",
   "discount.ended",
+  // Translations: a page in another language shows them. The store: its details, and
+  // which languages each country is offered in.
+  "translation.updated",
+  "translation.deleted",
+  "store.updated",
 ];
 
 /** `webhookSecret` is `null` without a webhook (on this machine); `orderUrl` is the
