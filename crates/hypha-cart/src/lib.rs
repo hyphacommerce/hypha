@@ -13,11 +13,11 @@ pub use cart::{
 };
 pub use commands::{
     ADD_LINE, AddLine, CREATE_CART, CartPorts, CartReading, CommandError, CreateCart, GroupOffers,
-    IdempotentCartPorts, PricingPorts, SetLineQuantity, add_discount_code, add_line, buyer_groups,
-    create_cart, find_cart, get_cart, group_offers, price_for_checkout, product_categories,
-    read_cart, remove_cart_line, remove_discount_code, select_shipping, set_cart_customer,
-    set_cart_email, set_cart_language, set_cart_marketing, set_line_quantity, set_shipping_address,
-    shipping_offers,
+    IdempotentCartPorts, PricingPorts, SetLineQuantity, ShippingOffers, add_discount_code,
+    add_line, buyer_groups, create_cart, find_cart, get_cart, group_offers, price_for_checkout,
+    product_categories, read_cart, remove_cart_line, remove_discount_code, select_shipping,
+    set_cart_customer, set_cart_email, set_cart_language, set_cart_marketing, set_line_quantity,
+    set_shipping_address, shipping_offers,
 };
 pub use error::{CartError, LineError, RestoreError};
 pub use language::ContentLanguages;

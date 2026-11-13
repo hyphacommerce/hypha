@@ -682,18 +682,10 @@ pub async fn report_event<S: Storage>(
     };
     let done = record_payment_event(&ctx, &ports, &state.clock, input).await?;
     let mut report = done.value;
-    // A cart's money committed: its checkout completes now, the store read on this
-    // request's connection.
-    let completed = match async {
-        let store = super::stores::store_as_system(&state, &ports)
-            .await
-            .map_err(|e| hypha_core::RepoError::Backend(format!("{e:?}")))?;
-        let languages = crate::language::content_languages(&store);
-        state
-            .complete_paid_checkout_in(&ports, &ctx, &report.payment, languages)
-            .await
-    }
-    .await
+    // A cart's money committed: its checkout completes now.
+    let completed = match state
+        .complete_paid_checkout(&ports, &ctx, &report.payment)
+        .await
     {
         Ok(order) => order,
         // The report stands; the app's next report (or the shopper's checkout) tries

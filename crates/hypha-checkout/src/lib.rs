@@ -21,6 +21,6 @@ pub use commands::{
 };
 pub use hypha_cart::ContentLanguages;
 pub use messages::{CartChecks, Checks, cart_messages, without_echoed_warnings};
-pub use payment::{cart_payment_methods, set_payment_method};
+pub use payment::{CartPaymentMethods, cart_payment_methods, set_payment_method};
 pub use validation::{CheckoutValidators, NoValidators, Validator, validate_cart};
 pub use view::view_cart;
