@@ -11,14 +11,14 @@
 )]
 use hypha_core::{
     Actor, Address, AddressParts, ApiKeyId, AssetId, AuthError, CartId, ChannelId, CountryCode,
-    Ctx, Currency, CustomerId, Email, EventHandler, EventId, FulfillmentId, LocationId, MarketId,
-    Money, OrderId, OrderLineId, PageLimit, PageRequest, PaymentId, Price, ProductId,
+    Ctx, Currency, CustomerId, Email, EventHandler, EventId, FulfillmentId, Language, LocationId,
+    MarketId, Money, OrderId, OrderLineId, PageLimit, PageRequest, PaymentId, Price, ProductId,
     PurchaseOrderId, Quantity, Scope, ShippingGroupId, ShippingOptionId, StoreId, StoredEvent,
     SupplierId, Timestamp, Timezone, UnitCost, UserId, VariantId, Versioned,
 };
 use hypha_fulfillment::{Fulfillment, FulfillmentLine, FulfillmentRepo, NewFulfillment, Tracking};
 use hypha_mail::{
-    CommandError, MailContext, MailEnv, Mailer, Sources, StaffMailer, TemplateInput,
+    CommandError, Locale, MailContext, MailEnv, Mailer, Sources, StaffMailer, TemplateInput,
     UpdateSettings, order_context, preview, queue_event, render_for_sending, resend, save_template,
     send_customer, send_due, send_staff, send_test, update_settings,
 };
@@ -30,7 +30,8 @@ use hypha_notifications::{
     EffectiveTemplate, EmailSender, NewTemplate, Notification, NotificationFilter,
     NotificationRepo, NotificationSettings, NotificationSettingsRepo, NotificationStatus,
     NotificationTemplateRepo, OutgoingEmail, RenderError, SendError, SendSettings, Sent, Template,
-    TemplateError, TemplateKey, TemplatePart, TemplateSources, default_template, render,
+    TemplateError, TemplateKey, TemplateLanguages, TemplatePart, TemplateSources, default_template,
+    render,
 };
 use hypha_orders::{
     CancelReason, NewOrder, Order, OrderLine, OrderNumber, OrderRepo, OrderShippingLine,
@@ -46,6 +47,19 @@ use hypha_users::{StaffEmail, User, UserRepo};
 use pollster::block_on;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use uuid::Uuid;
+
+fn en() -> Language {
+    Language::new("en").unwrap()
+}
+
+/// An English store's languages, with no others.
+fn no_languages() -> TemplateLanguages<'static> {
+    static EN: std::sync::LazyLock<Language> = std::sync::LazyLock::new(en);
+    TemplateLanguages {
+        default: &EN,
+        others: &[],
+    }
+}
 
 fn uuid(n: u128) -> Uuid {
     Uuid::from_u128(n)
@@ -202,10 +216,29 @@ fn line(n: u128, title: &str, variant: Option<&str>, quantity: u32, unit: i64) -
 /// A store in Belgrade's time zone, order #1001 (two shirts, a mug, shipped to Ana by
 /// standard delivery) with a pending bank transfer, and staff member 1300.
 fn world() -> InMemoryPorts {
+    world_in(None)
+}
+
+/// `world()` with the order placed in `language` (an English store that also has it): its
+/// lines, shipping and payment named in Serbian when that's the language.
+fn world_in(language: Option<&str>) -> InMemoryPorts {
     let ports = InMemoryPorts::default();
+    let language = language.map(|tag| Language::new(tag).unwrap());
+    let serbian = language.as_ref().is_some_and(|l| l.as_str() == "sr-Latn");
     let mut store = Store::new(store_id(), "Fern & Field").unwrap();
     store.set_contact_email(Some(email("hello@fernandfield.example")));
     store.set_timezone(Timezone::new("Europe/Belgrade").ok());
+    if let Some(language) = &language {
+        store
+            .set_languages(
+                en(),
+                vec![hypha_stores::StoreLanguage {
+                    language: language.clone(),
+                    published: true,
+                }],
+            )
+            .unwrap();
+    }
     block_on(ports.stores.insert(&mut store)).unwrap();
 
     let address = Address::new(AddressParts {
@@ -221,10 +254,20 @@ fn world() -> InMemoryPorts {
         phone: None,
     })
     .unwrap();
-    let lines = vec![
+    let mut lines = vec![
         line(1, "Linen shirt", Some("M / Blue"), 2, 4500),
         line(2, "Ceramic mug", None, 1, 1800),
     ];
+    if serbian {
+        lines[0].localized = Some(hypha_orders::LocalizedLine {
+            product_title: "Lanena košulja".to_string(),
+            variant_title: Some("M / Plava".to_string()),
+        });
+        lines[1].localized = Some(hypha_orders::LocalizedLine {
+            product_title: "Keramička šolja".to_string(),
+            variant_title: None,
+        });
+    }
     let mut order = Order::place(NewOrder {
         id: order_id(),
         number: OrderNumber::new(1001).unwrap(),
@@ -253,7 +296,9 @@ fn world() -> InMemoryPorts {
             amount: Price::new(eur(490)).unwrap(),
             estimate_days: None,
             tax: None,
-            localized: None,
+            localized: serbian.then(|| hypha_orders::LocalizedShipping {
+                name: "Standardna dostava".to_string(),
+            }),
         }],
         lines,
         shipping_address: Some(address),
@@ -262,7 +307,7 @@ fn world() -> InMemoryPorts {
         shipping_total: eur(490),
         tax_total: eur(0),
         total: eur(11290),
-        language: None,
+        language,
     })
     .unwrap();
     block_on(ports.orders.insert(&mut order)).unwrap();
@@ -276,7 +321,10 @@ fn world() -> InMemoryPorts {
         provider: ProviderKey::manual(),
         amount: eur(11290),
         instructions: Some("IBAN: HR12 1001 0051 8630 0016 0\nReference: 1001".to_string()),
-        localized: None,
+        localized: serbian.then(|| hypha_payments::LocalizedPayment {
+            method_name: Some("Uplata na račun".to_string()),
+            instructions: Some("IBAN: HR12 1001 0051 8630 0016 0\nPoziv na broj: 1001".to_string()),
+        }),
     })
     .unwrap();
     block_on(ports.payments.insert(&mut payment)).unwrap();
@@ -478,7 +526,14 @@ fn staff_get_no_buyers_order_link() {
     let order = block_on(ports.orders.get(order_id())).unwrap().unwrap();
     let context = |key| {
         let context = block_on(order_context(
-            &env, &ports, &branding, key, &order, None, None,
+            &env,
+            &ports,
+            &branding,
+            key,
+            &order,
+            None,
+            None,
+            &Locale::english(),
         ))
         .unwrap();
         serde_json::to_value(context).unwrap()
@@ -525,12 +580,10 @@ fn every_default_renders_against_a_real_order() {
             &order,
             payment.as_ref(),
             None,
+            &Locale::english(),
         ))
         .unwrap();
-        let sources = Sources {
-            layout: EffectiveTemplate::of(TemplateKey::Layout, None),
-            template: EffectiveTemplate::of(key, None),
-        };
+        let sources = block_on(Sources::load(&ports, key, &en(), &en())).unwrap();
         let rendering =
             render_for_sending(&sources, &context).unwrap_or_else(|e| panic!("{key}: {e}"));
         assert_eq!(rendering.note, None);
@@ -1271,7 +1324,15 @@ fn save(
     input: TemplateInput,
     enabled: bool,
 ) -> Result<EffectiveTemplate, CommandError> {
-    block_on(save_template(&Ctx::system(), ports, key, input, enabled))
+    block_on(save_template(
+        &Ctx::system(),
+        ports,
+        key,
+        None,
+        no_languages(),
+        input,
+        Some(enabled),
+    ))
 }
 
 #[test]
@@ -1462,8 +1523,10 @@ fn saving_needs_notifications_write() {
             &ctx,
             &world(),
             TemplateKey::OrderShipped,
+            None,
+            no_languages(),
             input("x", "y"),
-            true
+            Some(true)
         )),
         Err(CommandError::Auth(AuthError::MissingScope(
             Scope::NotificationsWrite
@@ -1496,6 +1559,7 @@ fn a_preview_renders_the_sample_with_the_stores_branding() {
             r#"{% extends "layout" %}{% block content %}{{ order.payment.method }}{% endblock %}"#,
         ),
         None,
+        None,
     ))
     .unwrap();
     assert_eq!(rendered.subject, "#1001 at Fern & Field");
@@ -1522,6 +1586,7 @@ fn a_preview_can_render_a_real_order() {
             r#"{% extends "layout" %}{% block content %}x{% endblock %}"#,
         ),
         Some(order_id()),
+        None,
     ))
     .unwrap();
     assert_eq!(rendered.subject, "ana@example.hr");
@@ -1534,6 +1599,7 @@ fn a_preview_can_render_a_real_order() {
             TemplateKey::OrderConfirmation,
             default_input(TemplateKey::OrderConfirmation),
             Some(order_id()),
+            None
         )),
         Err(CommandError::Auth(AuthError::MissingScope(
             Scope::OrdersRead
@@ -1556,6 +1622,7 @@ fn a_layout_previews_around_the_confirmation() {
             text: None,
         },
         None,
+        None,
     ))
     .unwrap();
     assert!(rendered.html.starts_with("<main>FRAME"));
@@ -1573,6 +1640,7 @@ fn a_test_goes_to_the_staff_members_own_address() {
         &ports,
         TemplateKey::OrderShipped,
         default_input(TemplateKey::OrderShipped),
+        None,
         None,
     ))
     .unwrap();
@@ -1597,6 +1665,7 @@ fn a_test_needs_a_real_sender_and_a_staff_member() {
             &ports,
             key,
             default_input(key),
+            None,
             None
         )),
         Err(CommandError::EmailNotConfigured)
@@ -1613,6 +1682,7 @@ fn a_test_needs_a_real_sender_and_a_staff_member() {
             &ports,
             key,
             default_input(key),
+            None,
             None
         )),
         Err(CommandError::StaffOnly)
@@ -1628,6 +1698,7 @@ fn a_test_needs_a_real_sender_and_a_staff_member() {
             &ports,
             key,
             default_input(key),
+            None,
             None
         )),
         Err(CommandError::Send(SendError::Permanent(
@@ -1773,9 +1844,33 @@ fn the_futures_are_send_on_send_ports() {
     ));
     send(send_due(&env, &ports, &SendSettings::default()));
     send(update_settings(&ctx, &ports, UpdateSettings::default()));
-    send(save_template(&ctx, &ports, key, default_input(key), true));
-    send(preview(&ctx, &env, &ports, key, default_input(key), None));
-    send(send_test(&ctx, &env, &ports, key, default_input(key), None));
+    send(save_template(
+        &ctx,
+        &ports,
+        key,
+        None,
+        no_languages(),
+        default_input(key),
+        Some(true),
+    ));
+    send(preview(
+        &ctx,
+        &env,
+        &ports,
+        key,
+        default_input(key),
+        None,
+        None,
+    ));
+    send(send_test(
+        &ctx,
+        &env,
+        &ports,
+        key,
+        default_input(key),
+        None,
+        None,
+    ));
     send(resend(
         &ctx,
         &env,
@@ -1794,6 +1889,7 @@ fn a_login_code_email_says_how_many_minutes_it_works() {
         to: email("ana@example.hr"),
         code: "481516".to_string(),
         expires_at: now.plus_secs(600),
+        language: None,
     };
     let record = block_on(send_customer(&env, &ports, code)).unwrap();
     assert_eq!(record.status(), NotificationStatus::Sent);
@@ -1811,6 +1907,7 @@ fn a_customer_or_staff_email_that_fails_is_an_error() {
     let erasure = hypha_customer_accounts::CustomerEmail::ErasureRequested {
         to: email("ana@example.hr"),
         due_at: hypha_core::Clock::now(env.clock()),
+        language: None,
     };
     assert_eq!(
         block_on(send_customer(&env, &ports, erasure)).map(|r| r.status()),
@@ -1945,4 +2042,245 @@ fn an_email_to_a_supplier_is_resent_as_the_order_is_now() {
             .text
             .contains("Please ship by Friday.")
     );
+}
+
+// Languages.
+
+fn sr() -> Language {
+    Language::new("sr-Latn").unwrap()
+}
+
+#[test]
+fn a_buyers_context_reads_the_orders_copies_in_their_language_and_staffs_the_stores() {
+    let ports = world_in(Some("sr-Latn"));
+    let env = TestEnv::new();
+    let branding = block_on(hypha_mail::branding(&env, &ports)).unwrap();
+    let order = block_on(ports.orders.get(order_id())).unwrap().unwrap();
+    let payment = block_on(newest_payment(&ports, order_id())).unwrap();
+    let context = |key, locale: &Locale| {
+        let context = block_on(order_context(
+            &env,
+            &ports,
+            &branding,
+            key,
+            &order,
+            payment.as_ref(),
+            None,
+            locale,
+        ))
+        .unwrap();
+        serde_json::to_value(context).unwrap()
+    };
+    let buyer = context(TemplateKey::OrderConfirmation, &Locale::of(sr()));
+    assert_eq!(buyer["language"], "sr-Latn");
+    assert_eq!(buyer["dir"], "ltr");
+    assert_eq!(buyer["order"]["language"], "sr-Latn");
+    assert_eq!(buyer["order"]["lines"][0]["title"], "Lanena košulja");
+    assert_eq!(buyer["order"]["lines"][0]["variant"], "M / Plava");
+    assert_eq!(buyer["order"]["lines"][1]["title"], "Keramička šolja");
+    assert_eq!(buyer["order"]["shipping_method"], "Standardna dostava");
+    assert_eq!(buyer["order"]["payment"]["method"], "Uplata na račun");
+    assert_eq!(
+        buyer["order"]["payment"]["instructions"],
+        "IBAN: HR12 1001 0051 8630 0016 0\nPoziv na broj: 1001"
+    );
+    assert_eq!(buyer["order"]["total"]["formatted"], "112,90\u{a0}€");
+    assert_eq!(buyer["order"]["total"]["amount"], 11290);
+    let staff = context(TemplateKey::StaffNewOrder, &Locale::english());
+    assert_eq!(staff["language"], "en");
+    assert_eq!(staff["order"]["language"], "sr-Latn");
+    assert_eq!(staff["order"]["lines"][0]["title"], "Linen shirt");
+    assert_eq!(staff["order"]["shipping_method"], "Standard delivery");
+    assert_eq!(staff["order"]["payment"]["method"], "Bank transfer");
+    assert_eq!(staff["order"]["total"]["formatted"], "€112.90");
+}
+
+#[test]
+fn an_order_from_before_languages_reads_as_the_stores_default() {
+    let ports = world();
+    let env = TestEnv::new();
+    let branding = block_on(hypha_mail::branding(&env, &ports)).unwrap();
+    let order = block_on(ports.orders.get(order_id())).unwrap().unwrap();
+    let context = block_on(order_context(
+        &env,
+        &ports,
+        &branding,
+        TemplateKey::OrderConfirmation,
+        &order,
+        None,
+        None,
+        &Locale::english(),
+    ))
+    .unwrap();
+    let context = serde_json::to_value(context).unwrap();
+    assert_eq!(context["order"]["language"], "en");
+    assert_eq!(context["language"], "en");
+}
+
+#[test]
+fn a_serbian_order_is_emailed_in_serbian_and_staff_still_in_english() {
+    let ports = world_in(Some("sr-Latn"));
+    set_staff_recipients(&ports, &["orders@fernandfield.example"]);
+    let env = TestEnv::new();
+    mail_event(&env, &ports, &event(&ports, "order.placed")).unwrap();
+    let emails = env.sender.sent();
+    let buyer = emails
+        .iter()
+        .find(|e| e.to == email("ana@example.hr"))
+        .unwrap();
+    assert_eq!(buyer.subject, "Porudžbina #1001 je potvrđena");
+    let text = &buyer.text;
+    for expected in [
+        "Zdravo, Ana Horvat,",
+        "Primili smo vašu porudžbinu #1001 i pripremamo je.",
+        "Plaćanje: Uplata na račun",
+        "Poziv na broj: 1001",
+        "Porudžbina #1001, datum: 1. jan 2026. 01:00",
+        "- 2 × Lanena košulja (M / Plava): 90,00\u{a0}€",
+        "- 1 × Keramička šolja: 18,00\u{a0}€",
+        "Međuzbir: 108,00\u{a0}€",
+        "Ukupno: 112,90\u{a0}€",
+        "Od toga porez: 0,00\u{a0}€",
+        "Adresa za dostavu:",
+        "Način dostave: Standardna dostava",
+    ] {
+        assert!(text.contains(expected), "{expected:?} not in:\n{text}");
+    }
+    assert!(buyer.html.contains(r#"lang="sr-Latn""#), "{}", buyer.html);
+    assert!(buyer.html.contains("Hvala vam na porudžbini"));
+    let staff = emails
+        .iter()
+        .find(|e| e.to == email("orders@fernandfield.example"))
+        .unwrap();
+    assert_eq!(staff.subject, "New order #1001: €112.90");
+    assert!(staff.text.contains("2 × Linen shirt (M / Blue): €90.00"));
+    assert!(staff.html.contains(r#"lang="en""#));
+}
+
+#[test]
+fn a_serbian_cancellation_gives_its_reason_in_serbian() {
+    let ports = world_in(Some("sr-Latn"));
+    cancel(&ports, true);
+    let env = TestEnv::new();
+    mail_event(&env, &ports, &event(&ports, "order.cancelled")).unwrap();
+    let sent = env.sender.sent();
+    assert_eq!(sent[0].subject, "Porudžbina #1001 je otkazana");
+    assert!(
+        sent[0]
+            .text
+            .contains("Vaša porudžbina #1001 je otkazana. Razlog: Artikli nisu dostupni."),
+        "{}",
+        sent[0].text
+    );
+}
+
+#[test]
+fn an_order_in_a_language_without_defaults_is_emailed_in_english_as_before() {
+    let ports = world_in(Some("de"));
+    let env = TestEnv::new();
+    mail_event(&env, &ports, &event(&ports, "order.placed")).unwrap();
+    let sent = env.sender.sent();
+    assert_eq!(sent[0].subject, "Order #1001 confirmed");
+    // English text keeps English money: the formats follow the words.
+    assert!(sent[0].text.contains("Total: €112.90"), "{}", sent[0].text);
+    assert!(sent[0].html.contains(r#"lang="en""#));
+}
+
+#[test]
+fn a_merchants_template_for_the_buyers_language_is_sent_and_others_keep_the_default() {
+    let ports = world_in(Some("sr-Latn"));
+    let languages = [sr()];
+    let store_languages = TemplateLanguages {
+        default: &en(),
+        others: &languages,
+    };
+    block_on(save_template(
+        &Ctx::system(),
+        &ports,
+        TemplateKey::OrderConfirmation,
+        Some(&sr()),
+        store_languages,
+        input(
+            "Hvala, {{ order.number }} za {{ order.total.formatted }}",
+            r#"{% extends "layout" %}{% block content %}<p>{{ order.lines[0].title }}</p>{% endblock %}"#,
+        ),
+        None,
+    ))
+    .unwrap();
+    let env = TestEnv::new();
+    mail_event(&env, &ports, &event(&ports, "order.placed")).unwrap();
+    // A subject is made one line: its no-break space too.
+    assert_eq!(env.sender.sent()[0].subject, "Hvala, #1001 za 112,90 €");
+    let stored = block_on(ports.notification_templates.list()).unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].locale(), Some(&sr()));
+}
+
+#[test]
+fn a_template_saved_in_another_language_can_t_switch_it_on_or_off() {
+    let ports = world_in(Some("sr-Latn"));
+    let languages = [sr()];
+    let store_languages = TemplateLanguages {
+        default: &en(),
+        others: &languages,
+    };
+    let save = |language: &Language, enabled| {
+        block_on(save_template(
+            &Ctx::system(),
+            &ports,
+            TemplateKey::OrderShipped,
+            Some(language),
+            store_languages,
+            default_input(TemplateKey::OrderShipped),
+            enabled,
+        ))
+        .map(|_| ())
+    };
+    assert_eq!(
+        save(&sr(), Some(false)),
+        Err(CommandError::EnabledNotPerLanguage)
+    );
+    let french = Language::new("fr").unwrap();
+    assert_eq!(
+        save(&french, None),
+        Err(CommandError::LanguageNotListed(french.clone()))
+    );
+}
+
+#[test]
+fn a_preview_in_a_language_renders_the_sample_written_in_it() {
+    let ports = world_in(Some("sr-Latn"));
+    let env = TestEnv::new();
+    let rendered = block_on(preview(
+        &Ctx::system(),
+        &env,
+        &ports,
+        TemplateKey::OrderConfirmation,
+        input(
+            "{{ order.total.formatted }} {{ order.placed_at.formatted }}",
+            r#"{% extends "layout" %}{% block content %}x{% endblock %}"#,
+        ),
+        None,
+        Some(&sr()),
+    ))
+    .unwrap();
+    assert_eq!(rendered.subject, "102,10 € 18. okt 2026. 12:05");
+    assert!(rendered.html.contains(r#"lang="sr-Latn""#));
+}
+
+#[test]
+fn a_login_code_is_written_in_the_customers_language() {
+    let ports = world_in(Some("sr-Latn"));
+    let env = TestEnv::new();
+    let now = hypha_core::Clock::now(env.clock());
+    let code = hypha_customer_accounts::CustomerEmail::LoginCode {
+        to: email("ana@example.hr"),
+        code: "481516".to_string(),
+        expires_at: now.plus_secs(600),
+        language: Some(sr()),
+    };
+    block_on(send_customer(&env, &ports, code)).unwrap();
+    let sent = &env.sender.sent()[0];
+    assert_eq!(sent.subject, "Vaš kod za prijavu: Fern & Field");
+    assert!(sent.text.contains("Kod važi 10 min."), "{}", sent.text);
 }

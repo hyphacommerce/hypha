@@ -85,6 +85,7 @@ fn asking_for_a_code_creates_the_customer_and_emails_a_six_digit_code() {
         to,
         code,
         expires_at,
+        language,
     } = &sent[0]
     else {
         panic!("not a code: {:?}", sent[0]);
@@ -93,6 +94,7 @@ fn asking_for_a_code_creates_the_customer_and_emails_a_six_digit_code() {
     assert_eq!(code.len(), 6);
     assert!(code.bytes().all(|b| b.is_ascii_digit()), "{code}");
     assert_eq!(*expires_at, env.now().plus(Duration::from_secs(600)));
+    assert_eq!(*language, None, "a new customer has no language yet");
 }
 
 #[test]

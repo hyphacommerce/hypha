@@ -6,17 +6,80 @@
 //! previews, test sends, the editor's variable list and checking a template on save.
 
 use hypha_core::{
-    Address, CountryCode, Currency, Email, Money, OrderId, Timestamp, Timezone, UnitCost,
+    Address, CountryCode, Currency, Email, Language, Money, OrderId, Timestamp, Timezone, UnitCost,
 };
 use hypha_fulfillment::Fulfillment;
-use hypha_notifications::{NotificationSettings, TemplateKey};
+use hypha_notifications::{ContextStrings, NotificationSettings, TemplateKey};
 use hypha_orders::{CancelReason, Order};
 use hypha_payments::Payment;
 use hypha_purchasing::{CostKind, PaymentDue, PurchaseOrder, PurchasingError, ShipTo};
 use hypha_stores::Store;
 use serde::Serialize;
 
-use crate::format::{CostValue, MoneyValue, TimeValue};
+use crate::format::{CostValue, Formats, MoneyValue, TimeValue, direction};
+
+/// The language an email is written in, and what follows from it: how its money and times
+/// read and the text the context carries itself (a cancellation's reason).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Locale {
+    pub language: Language,
+    pub formats: &'static Formats,
+    pub strings: &'static ContextStrings,
+}
+
+impl Locale {
+    pub fn of(language: Language) -> Self {
+        Self {
+            formats: Formats::of(&language),
+            strings: ContextStrings::of(&language),
+            language,
+        }
+    }
+
+    /// English, as every email was before languages.
+    pub fn english() -> Self {
+        Self {
+            language: english(),
+            formats: Formats::english(),
+            strings: ContextStrings::english(),
+        }
+    }
+
+    /// An email for a reader of `asked`, written with sources in `written`: the reader's
+    /// own language when the sources are in it or in it without its region (a `de`
+    /// template for `de-AT` reads Austrian money), else the sources' (an English default
+    /// for a German reader keeps English formats, as before).
+    pub fn writing(asked: &Language, written: &Language) -> Self {
+        let same = asked == written || asked.without_region().as_ref() == Some(written);
+        Self::of(if same { asked } else { written }.clone())
+    }
+
+    /// A context's `language`: the tag.
+    pub fn tag(&self) -> String {
+        self.language.as_str().to_string()
+    }
+
+    /// A context's `dir`: `ltr` or `rtl`.
+    pub fn dir(&self) -> &'static str {
+        direction(&self.language)
+    }
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "\"en\" is a valid language tag, a constant"
+)]
+fn english() -> Language {
+    Language::new("en").expect("\"en\" is a language tag")
+}
+
+/// Whose names an order's email reads: the buyer's copies (the order's language), or the
+/// store's own (staff read the store's language).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reader {
+    Buyer,
+    Staff,
+}
 
 /// `shop`: in every template.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -142,14 +205,17 @@ pub struct PaymentContext {
 }
 
 impl PaymentContext {
-    /// A payment recorded by hand has no method: it reads as "Manual payment".
-    pub const BY_HAND: &str = "Manual payment";
-
-    pub fn of(payment: &Payment) -> Self {
+    /// `payment` as `reader` reads it: the buyer, the method's name and instructions in the
+    /// order's language; a payment by hand as `locale` says it.
+    pub fn of(payment: &Payment, reader: Reader, locale: &Locale) -> Self {
+        let (method, instructions) = match reader {
+            Reader::Buyer => (payment.buyer_method_name(), payment.buyer_instructions()),
+            Reader::Staff => (payment.method_name(), payment.instructions()),
+        };
         Self {
-            method: payment.method_name().unwrap_or(Self::BY_HAND).to_string(),
+            method: method.unwrap_or(locale.strings.manual_payment).to_string(),
             status: payment.status().as_str().to_string(),
-            instructions: payment.instructions().map(str::to_string),
+            instructions: instructions.map(str::to_string),
         }
     }
 }
@@ -184,64 +250,113 @@ pub struct OrderContext {
     pub discounts: Vec<DiscountContext>,
     /// What they took off in all.
     pub discount_total: MoneyValue,
+    /// The language the buyer checked out in (a BCP 47 tag), the store's default for an
+    /// order from before orders had one.
+    pub language: String,
+}
+
+/// What an order's context is built with besides the order.
+#[derive(Debug, Clone, Copy)]
+pub struct OrderReading<'a> {
+    /// Whose names it reads: a buyer's email the order's copies in their language.
+    pub reader: Reader,
+    /// The language the email is written in.
+    pub locale: &'a Locale,
+    /// The store's time zone.
+    pub zone: Option<Timezone>,
+    /// The store's default language: an order without one reads as it.
+    pub default_language: &'a Language,
 }
 
 impl OrderContext {
     /// `order` with its newest `payment`; `url` is its page's link (`OrderUrl::link`).
+    /// A buyer reads the lines', shipping's, payment's and discounts' names in the order's
+    /// language; staff the store's.
     pub fn of(
         order: &Order,
         payment: Option<&Payment>,
         url: Option<String>,
-        zone: Option<Timezone>,
+        reading: OrderReading<'_>,
     ) -> Self {
+        let OrderReading {
+            reader,
+            locale,
+            zone,
+            default_language,
+        } = reading;
+        let f = locale.formats;
+        let buyer = reader == Reader::Buyer;
         let names: Vec<&str> = order
             .shipping_lines()
             .iter()
-            .map(|l| l.name.as_str())
+            .map(|l| {
+                if buyer {
+                    l.buyer_name()
+                } else {
+                    l.name.as_str()
+                }
+            })
             .collect();
         Self {
             id: order.id().to_string(),
             number: order.number().to_string(),
             url,
             email: order.email().as_str().to_string(),
-            placed_at: TimeValue::of(order.placed_at(), zone),
+            placed_at: TimeValue::of(order.placed_at(), zone, f),
             lines: order
                 .lines()
                 .iter()
                 .map(|line| LineContext {
-                    title: line.product_title.clone(),
-                    variant: line.variant_title.clone(),
+                    title: if buyer {
+                        line.buyer_product_title().to_string()
+                    } else {
+                        line.product_title.clone()
+                    },
+                    variant: if buyer {
+                        line.buyer_variant_title().map(str::to_string)
+                    } else {
+                        line.variant_title.clone()
+                    },
                     sku: line.sku.clone(),
                     quantity: line.quantity.value(),
-                    unit_price: MoneyValue::of(line.unit_price.money()),
-                    total: MoneyValue::of(line.total),
-                    original_total: MoneyValue::of(line.subtotal),
+                    unit_price: MoneyValue::of(line.unit_price.money(), f),
+                    total: MoneyValue::of(line.total, f),
+                    original_total: MoneyValue::of(line.subtotal, f),
                     discount: line
                         .discount_total()
                         .ok()
                         .filter(|d| d.amount() > 0)
-                        .map(MoneyValue::of),
+                        .map(|d| MoneyValue::of(d, f)),
                 })
                 .collect(),
-            subtotal: MoneyValue::of(order.subtotal()),
-            shipping: MoneyValue::of(order.shipping_total()),
-            tax: MoneyValue::of(order.tax_total()),
-            total: MoneyValue::of(order.total()),
+            subtotal: MoneyValue::of(order.subtotal(), f),
+            shipping: MoneyValue::of(order.shipping_total(), f),
+            tax: MoneyValue::of(order.tax_total(), f),
+            total: MoneyValue::of(order.total(), f),
             taxes_included: order.taxes_included(),
             shipping_address: order.shipping_address().map(AddressContext::of),
             shipping_method: (!names.is_empty()).then(|| names.join(", ")),
-            payment: payment.map(PaymentContext::of),
+            payment: payment.map(|p| PaymentContext::of(p, reader, locale)),
             discounts: order
                 .discounts()
                 .iter()
                 .map(|d| DiscountContext {
-                    title: d.title.clone(),
+                    title: if buyer {
+                        d.buyer_title().to_string()
+                    } else {
+                        d.title.clone()
+                    },
                     code: d.code.clone(),
                     summary: d.summary.clone(),
-                    amount: MoneyValue::of(d.amount),
+                    amount: MoneyValue::of(d.amount, f),
                 })
                 .collect(),
-            discount_total: MoneyValue::of(order.discount_total()),
+            discount_total: MoneyValue::of(order.discount_total(), f),
+            language: order
+                .language()
+                .unwrap_or(default_language)
+                .as_str()
+                .to_string(),
         }
     }
 }
@@ -285,7 +400,7 @@ pub struct FulfillmentContext {
 }
 
 impl FulfillmentContext {
-    /// `fulfillment` of `order`: its lines named as the order names them.
+    /// `fulfillment` of `order`: its lines named as the order names them for the buyer.
     pub fn of(fulfillment: &Fulfillment, order: &Order) -> Self {
         Self {
             lines: fulfillment
@@ -294,8 +409,8 @@ impl FulfillmentContext {
                 .filter_map(|shipped| {
                     let line = order.lines().iter().find(|l| l.id == shipped.line)?;
                     Some(ShippedLineContext {
-                        title: line.product_title.clone(),
-                        variant: line.variant_title.clone(),
+                        title: line.buyer_product_title().to_string(),
+                        variant: line.buyer_variant_title().map(str::to_string),
                         quantity: shipped.quantity.value(),
                     })
                 })
@@ -321,21 +436,24 @@ pub struct CancellationContext {
 }
 
 impl CancellationContext {
-    pub fn of(reason: Option<CancelReason>) -> Self {
+    pub fn of(reason: Option<CancelReason>, locale: &Locale) -> Self {
         Self {
-            reason: reason.and_then(reason_text).map(str::to_string),
+            reason: reason
+                .and_then(|r| reason_text(r, locale.strings))
+                .map(str::to_string),
         }
     }
 }
 
-/// What the buyer is told for each reason; nothing for `other`, which says nothing.
-pub fn reason_text(reason: CancelReason) -> Option<&'static str> {
+/// What the buyer is told for each reason, in `strings`' language; nothing for `other`,
+/// which says nothing.
+pub fn reason_text(reason: CancelReason, strings: &ContextStrings) -> Option<&'static str> {
     match reason {
-        CancelReason::Customer => Some("Requested by you"),
-        CancelReason::Inventory => Some("Items unavailable"),
-        CancelReason::Fraud => Some("Suspected fraud"),
-        CancelReason::Declined => Some("Payment declined"),
-        CancelReason::Staff => Some("Cancelled by the store"),
+        CancelReason::Customer => Some(strings.cancel_customer),
+        CancelReason::Inventory => Some(strings.cancel_inventory),
+        CancelReason::Fraud => Some(strings.cancel_fraud),
+        CancelReason::Declined => Some(strings.cancel_declined),
+        CancelReason::Staff => Some(strings.cancel_staff),
         CancelReason::Other => None,
     }
 }
@@ -349,6 +467,10 @@ pub struct UserContext {
 /// An order email: `order_confirmation`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct OrderMail {
+    /// The language the email is written in (a BCP 47 tag): the layout's `lang`.
+    pub language: String,
+    /// `ltr` or `rtl`, from `language`: the layout's `dir`.
+    pub dir: &'static str,
     pub shop: ShopContext,
     pub brand: BrandContext,
     pub order: OrderContext,
@@ -383,6 +505,10 @@ pub struct NewOrderMail {
 /// `staff_invite`, `staff_password_reset`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StaffMail {
+    /// The language the email is written in (a BCP 47 tag): the layout's `lang`.
+    pub language: String,
+    /// `ltr` or `rtl`, from `language`: the layout's `dir`.
+    pub dir: &'static str,
     pub shop: ShopContext,
     pub brand: BrandContext,
     pub user: UserContext,
@@ -395,6 +521,10 @@ pub struct StaffMail {
 /// `customer_login_code`: the code itself, how long it works.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CodeMail {
+    /// The language the email is written in (a BCP 47 tag): the layout's `lang`.
+    pub language: String,
+    /// `ltr` or `rtl`, from `language`: the layout's `dir`.
+    pub dir: &'static str,
     pub shop: ShopContext,
     pub brand: BrandContext,
     /// Six digits.
@@ -413,6 +543,10 @@ pub struct CodeMail {
 /// `customer_erasure_requested`: when the erasure runs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ErasureMail {
+    /// The language the email is written in (a BCP 47 tag): the layout's `lang`.
+    pub language: String,
+    /// `ltr` or `rtl`, from `language`: the layout's `dir`.
+    pub dir: &'static str,
     pub shop: ShopContext,
     pub brand: BrandContext,
     pub due_at: TimeValue,
@@ -541,6 +675,7 @@ impl PurchaseOrderContext {
         po: &PurchaseOrder,
         ship_to: Option<&ShipTo>,
         zone: Option<Timezone>,
+        f: &Formats,
     ) -> Result<Self, PurchasingError> {
         let totals = po.totals(None)?;
         let lines = po
@@ -553,8 +688,8 @@ impl PurchaseOrderContext {
                     sku: line.sku().map(str::to_string),
                     supplier_sku: line.supplier_sku().map(str::to_string),
                     quantity: line.effective_quantity(),
-                    unit_cost: CostValue::of(line.unit_cost()),
-                    total: MoneyValue::of(line.total()?),
+                    unit_cost: CostValue::of(line.unit_cost(), f),
+                    total: MoneyValue::of(line.total()?, f),
                 })
             })
             .collect::<Result<_, PurchasingError>>()?;
@@ -566,15 +701,15 @@ impl PurchaseOrderContext {
                 kind: c.kind().as_str(),
                 label: cost_label(c.kind()),
                 description: c.description().map(str::to_string),
-                amount: MoneyValue::of(c.amount()),
+                amount: MoneyValue::of(c.amount(), f),
             })
             .collect();
         Ok(Self {
             id: po.id().to_string(),
             number: po.number().to_string(),
             revision: po.revision(),
-            ordered_at: po.ordered_at().map(|at| TimeValue::of(at, zone)),
-            expected_at: po.expected_at().map(TimeValue::date),
+            ordered_at: po.ordered_at().map(|at| TimeValue::of(at, zone, f)),
+            expected_at: po.expected_at().map(|at| TimeValue::date(at, f)),
             supplier_reference: po.supplier_reference().map(str::to_string),
             payment_terms: po.payment_terms().map(|t| TermsContext {
                 summary: terms_summary(t.due()),
@@ -584,10 +719,10 @@ impl PurchaseOrderContext {
             currency: po.currency().as_str(),
             lines,
             costs,
-            subtotal: MoneyValue::of(totals.subtotal),
-            costs_total: MoneyValue::of(totals.costs),
-            tax: po.tax().map(MoneyValue::of),
-            total: MoneyValue::of(totals.total),
+            subtotal: MoneyValue::of(totals.subtotal, f),
+            costs_total: MoneyValue::of(totals.costs, f),
+            tax: po.tax().map(|t| MoneyValue::of(t, f)),
+            total: MoneyValue::of(totals.total, f),
             ship_to: ship_to.map(ShipToContext::of),
         })
     }
@@ -615,6 +750,10 @@ fn terms_summary(due: PaymentDue) -> String {
 /// `supplier_purchase_order`: a purchase order sent to its supplier.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SupplierOrderMail {
+    /// The language the email is written in (a BCP 47 tag): the layout's `lang`.
+    pub language: String,
+    /// `ltr` or `rtl`, from `language`: the layout's `dir`.
+    pub dir: &'static str,
     pub shop: ShopContext,
     pub brand: BrandContext,
     pub supplier: SupplierContext,
@@ -640,9 +779,15 @@ pub enum MailContext {
 impl MailContext {
     /// The made-up context of `key`'s template (the layout's is an order
     /// confirmation's): two lines, a bank transfer's instructions, a tracking number,
-    /// a few fields left `null`.
+    /// a few fields left `null`. In English.
     pub fn sample(key: TemplateKey) -> Self {
-        let mail = sample_order_mail();
+        Self::sample_in(key, &Locale::english())
+    }
+
+    /// `sample(key)` written in `locale`'s language: its money, times and reason read so.
+    pub fn sample_in(key: TemplateKey, locale: &Locale) -> Self {
+        let f = locale.formats;
+        let mail = sample_order_mail(locale);
         match key {
             TemplateKey::Layout | TemplateKey::OrderConfirmation => MailContext::Order(mail),
             TemplateKey::OrderShipped | TemplateKey::OrderTrackingUpdated => {
@@ -674,7 +819,7 @@ impl MailContext {
             }
             TemplateKey::OrderCancelled => MailContext::Cancellation(CancellationMail {
                 mail,
-                cancellation: CancellationContext::of(Some(CancelReason::Inventory)),
+                cancellation: CancellationContext::of(Some(CancelReason::Inventory), locale),
             }),
             TemplateKey::StaffNewOrder => MailContext::NewOrder(NewOrderMail {
                 admin_url: Some(format!(
@@ -692,20 +837,26 @@ impl MailContext {
             }),
             TemplateKey::StaffInvite => MailContext::Staff(sample_staff(
                 "https://admin.example.com/invite?token=hypha_inv_sample",
+                locale,
             )),
             TemplateKey::StaffPasswordReset => MailContext::Staff(sample_staff(
                 "https://admin.example.com/reset-password?token=hypha_pwr_sample",
+                locale,
             )),
             TemplateKey::CustomerErasureRequested => MailContext::Erasure(ErasureMail {
+                language: locale.tag(),
+                dir: locale.dir(),
                 shop: sample_shop(),
                 brand: sample_brand(),
                 // Ten days after the sample order.
-                due_at: TimeValue::of(SAMPLE_PLACED_AT.plus_secs(10 * 24 * 3600), None),
+                due_at: TimeValue::of(SAMPLE_PLACED_AT.plus_secs(10 * 24 * 3600), None, f),
             }),
             TemplateKey::SupplierPurchaseOrder => {
-                MailContext::SupplierOrder(sample_supplier_order())
+                MailContext::SupplierOrder(sample_supplier_order(locale))
             }
             TemplateKey::CustomerLoginCode => MailContext::Code(CodeMail {
+                language: locale.tag(),
+                dir: locale.dir(),
                 shop: sample_shop(),
                 brand: sample_brand(),
                 code: "481516".to_string(),
@@ -715,7 +866,7 @@ impl MailContext {
                     "marko@fernandfield.example",
                     "481516",
                 ),
-                expires_at: TimeValue::of(SAMPLE_PLACED_AT.plus_secs(10 * 60), None),
+                expires_at: TimeValue::of(SAMPLE_PLACED_AT.plus_secs(10 * 60), None, f),
                 expires_in_minutes: 10,
             }),
         }
@@ -727,7 +878,12 @@ impl MailContext {
     /// cancellation reason, no admin URL. A template saved must render against it too,
     /// or a real order without them would break it.
     pub fn sparse(key: TemplateKey) -> Self {
-        let mut context = Self::sample(key);
+        Self::sparse_in(key, &Locale::english())
+    }
+
+    /// `sparse(key)` in `locale`'s language.
+    pub fn sparse_in(key: TemplateKey, locale: &Locale) -> Self {
+        let mut context = Self::sample_in(key, locale);
         let thin = |mail: &mut OrderMail| {
             thin_branding(&mut mail.shop, &mut mail.brand);
             let order = &mut mail.order;
@@ -792,7 +948,12 @@ impl MailContext {
     /// address with only its required lines, a payment without instructions, tracking
     /// without carrier or URL. With `sparse`, what a saved template is checked against.
     pub fn sparse_fields(key: TemplateKey) -> Self {
-        let mut context = Self::sample(key);
+        Self::sparse_fields_in(key, &Locale::english())
+    }
+
+    /// `sparse_fields(key)` in `locale`'s language.
+    pub fn sparse_fields_in(key: TemplateKey, locale: &Locale) -> Self {
+        let mut context = Self::sample_in(key, locale);
         let thin = |mail: &mut OrderMail| {
             if let Some(address) = &mut mail.order.shipping_address {
                 address.company = None;
@@ -839,10 +1000,16 @@ impl MailContext {
     /// What a template of `key` is checked against before it's saved: the sample, and
     /// the sample with what may be absent absent (`sparse`, `sparse_fields`).
     pub fn checks(key: TemplateKey) -> [MailContext; 3] {
+        Self::checks_in(key, &Locale::english())
+    }
+
+    /// `checks(key)` in `locale`'s language: what a template saved for it is checked
+    /// against.
+    pub fn checks_in(key: TemplateKey, locale: &Locale) -> [MailContext; 3] {
         [
-            Self::sample(key),
-            Self::sparse(key),
-            Self::sparse_fields(key),
+            Self::sample_in(key, locale),
+            Self::sparse_in(key, locale),
+            Self::sparse_fields_in(key, locale),
         ]
     }
 
@@ -898,14 +1065,19 @@ fn thin_branding(shop: &mut ShopContext, brand: &mut BrandContext) {
 
 /// A purchase order of two kits from a supplier in euros, revised once, with shipping and
 /// tax, to a warehouse with an address.
-fn sample_supplier_order() -> SupplierOrderMail {
+fn sample_supplier_order(locale: &Locale) -> SupplierOrderMail {
+    let f = locale.formats;
+    let eur = |amount| eur(amount, f);
     let cost = |minor: &str| {
         // A constant in range.
         CostValue::of(
             UnitCost::parse(minor, Currency::EUR).unwrap_or(UnitCost::zero(Currency::EUR)),
+            f,
         )
     };
     SupplierOrderMail {
+        language: locale.tag(),
+        dir: locale.dir(),
         shop: sample_shop(),
         brand: sample_brand(),
         supplier: SupplierContext {
@@ -916,8 +1088,11 @@ fn sample_supplier_order() -> SupplierOrderMail {
             id: "po_01a1984511d7710d8c5c680eed308d93".to_string(),
             number: "PO-1001".to_string(),
             revision: 1,
-            ordered_at: Some(TimeValue::of(SAMPLE_PLACED_AT, None)),
-            expected_at: Some(TimeValue::date(SAMPLE_PLACED_AT.plus_secs(14 * 24 * 3600))),
+            ordered_at: Some(TimeValue::of(SAMPLE_PLACED_AT, None, f)),
+            expected_at: Some(TimeValue::date(
+                SAMPLE_PLACED_AT.plus_secs(14 * 24 * 3600),
+                f,
+            )),
             supplier_reference: Some("SO-778".to_string()),
             payment_terms: Some(TermsContext {
                 summary: "Net 30 days".to_string(),
@@ -989,19 +1164,26 @@ fn sample_brand() -> BrandContext {
     }
 }
 
-fn eur(amount: i64) -> MoneyValue {
+fn eur(amount: i64, f: &Formats) -> MoneyValue {
     // Small constants, well inside `Money::MAX_AMOUNT`.
-    MoneyValue::of(Money::new(amount, Currency::EUR).unwrap_or(Money::zero(Currency::EUR)))
+    MoneyValue::of(
+        Money::new(amount, Currency::EUR).unwrap_or(Money::zero(Currency::EUR)),
+        f,
+    )
 }
 
 /// 18 Oct 2026, 12:05 UTC.
 const SAMPLE_PLACED_AT: Timestamp = Timestamp::from_unix_micros(1_792_325_100_000_000);
 
-fn sample_order_mail() -> OrderMail {
+fn sample_order_mail(locale: &Locale) -> OrderMail {
+    let f = locale.formats;
+    let eur = |amount| eur(amount, f);
     let id = OrderId::from_uuid(uuid::Uuid::from_u128(
         0x0199_f3a2_8c00_7000_8000_0000_0000_1001,
     ));
     OrderMail {
+        language: locale.tag(),
+        dir: locale.dir(),
         shop: sample_shop(),
         brand: sample_brand(),
         order: OrderContext {
@@ -1011,7 +1193,7 @@ fn sample_order_mail() -> OrderMail {
                 "https://shop.fernandfield.example/order/{id}?token=hypha_ord_sample"
             )),
             email: "ana.horvat@example.com".to_string(),
-            placed_at: TimeValue::of(SAMPLE_PLACED_AT, None),
+            placed_at: TimeValue::of(SAMPLE_PLACED_AT, None, f),
             lines: vec![
                 LineContext {
                     title: "Linen shirt".to_string(),
@@ -1066,6 +1248,7 @@ fn sample_order_mail() -> OrderMail {
                 amount: eur(1080),
             }],
             discount_total: eur(1080),
+            language: locale.tag(),
         },
         customer: CustomerContext {
             name: Some("Ana Horvat".to_string()),
@@ -1073,8 +1256,10 @@ fn sample_order_mail() -> OrderMail {
     }
 }
 
-fn sample_staff(link: &str) -> StaffMail {
+fn sample_staff(link: &str, locale: &Locale) -> StaffMail {
     StaffMail {
+        language: locale.tag(),
+        dir: locale.dir(),
         shop: sample_shop(),
         brand: sample_brand(),
         user: UserContext {
@@ -1082,7 +1267,11 @@ fn sample_staff(link: &str) -> StaffMail {
         },
         link: link.to_string(),
         // Three days after the sample order.
-        expires_at: TimeValue::of(SAMPLE_PLACED_AT.plus_secs(3 * 24 * 3600), None),
+        expires_at: TimeValue::of(
+            SAMPLE_PLACED_AT.plus_secs(3 * 24 * 3600),
+            None,
+            locale.formats,
+        ),
     }
 }
 

@@ -659,6 +659,7 @@ pub async fn request_erasure_handler<S: Storage>(
             .notify(CustomerEmail::ErasureRequested {
                 to: customer.email().clone(),
                 due_at,
+                language: customer.language().cloned(),
             })
             .await
     {

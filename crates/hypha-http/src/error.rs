@@ -2188,6 +2188,13 @@ fn notification_error_status(e: &hypha_notifications::NotificationError) -> Opti
     }
 }
 
+/// A language tag a request sent that isn't one.
+impl From<hypha_core::LanguageError> for ApiError {
+    fn from(e: hypha_core::LanguageError) -> Self {
+        Self::domain(StatusCode::UNPROCESSABLE_ENTITY, e)
+    }
+}
+
 impl From<hypha_notifications::CommandError> for ApiError {
     fn from(e: hypha_notifications::CommandError) -> Self {
         use hypha_notifications::{CommandError as E, TemplateError as T};
@@ -2201,6 +2208,8 @@ impl From<hypha_notifications::CommandError> for ApiError {
             },
             // Message IDs only ever arrive in URLs.
             E::NotificationNotFound(_) => StatusCode::NOT_FOUND,
+            // A template's `language`, in the query.
+            E::LanguageNotListed(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
@@ -2238,6 +2247,8 @@ impl From<hypha_mail::CommandError> for ApiError {
             | E::AssetNotReady(_)
             | E::AssetNotPublic(_)
             | E::AssetKindNotAllowed { .. } => StatusCode::UNPROCESSABLE_ENTITY,
+            // A template's `language` the store doesn't have, or `enabled` sent with one.
+            E::LanguageNotListed(_) | E::EnabledNotPerLanguage => StatusCode::UNPROCESSABLE_ENTITY,
             // Message IDs only ever arrive in URLs; a resent message's purchase order is
             // its own (only drafts are deleted, and a sent order isn't one).
             E::NotificationNotFound(_) | E::PurchaseOrderNotFound(_) => StatusCode::NOT_FOUND,
