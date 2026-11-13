@@ -255,6 +255,34 @@ impl EffectiveTemplate {
     pub fn fallback(&self) -> (TemplateSources, &Language) {
         (self.fallback.0.sources(), &self.fallback.1)
     }
+
+    /// The language `sources` (what the editor shows) are written in, in a store whose
+    /// default language is `default`: this row's when the merchant edited it, else that of
+    /// the sources its emails send.
+    pub fn sources_language<'a>(&'a self, default: &'a Language) -> &'a Language {
+        match (self.customized, &self.locale) {
+            (true, Some(locale)) => locale,
+            (true, None) => default,
+            (false, _) => &self.language,
+        }
+    }
+
+    /// This template with unsaved `sources` (a preview's) in place of what the editor
+    /// shows, sent as they are and written in the language of the sources they replace
+    /// (`sources_language`): a preview of a language's tab that still shows another
+    /// language's sources renders as that language's emails send.
+    pub fn with_sources(self, sources: TemplateSources, default: &Language) -> Self {
+        let language = self.sources_language(default).clone();
+        Self {
+            origin: Origin::Merchant {
+                locale: self.locale.clone(),
+            },
+            sending: sources.clone(),
+            sources,
+            language,
+            ..self
+        }
+    }
 }
 
 /// A template in the list: in the default language, and the other languages the merchant

@@ -10917,7 +10917,7 @@
             "type": "string"
           },
           "language": {
-            "description": "The language the sources are written for (a BCP 47 tag, one of the store's):\nrendered in that language's layout, its money and dates written its way. Absent:\nthe store's default.",
+            "description": "The language the sources are written for (a BCP 47 tag, one of the store's):\nrendered as that language's emails send, in its layout, with money and dates\nwritten the way of the template's `sources_language` (a language still sending\nanother's sources keeps their formats). Absent: the store's default.",
             "type": [
               "string",
               "null"

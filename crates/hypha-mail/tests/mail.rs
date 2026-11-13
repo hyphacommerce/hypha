@@ -2328,3 +2328,134 @@ fn a_layout_is_checked_against_the_languages_that_would_send_in_it() {
     ));
     assert!(matches!(saved, Err(CommandError::Render(_))), "{saved:?}");
 }
+
+fn de() -> Language {
+    Language::new("de").unwrap()
+}
+
+/// What the template editor shows for `key` in `language`: the sources in effect.
+fn shown(ports: &InMemoryPorts, key: TemplateKey, language: &Language) -> TemplateInput {
+    let template = block_on(hypha_notifications::template_in_effect(
+        ports,
+        key,
+        Some(language),
+        &en(),
+    ))
+    .unwrap();
+    TemplateInput {
+        subject: template.sources.subject().to_string(),
+        html: template.sources.html().to_string(),
+        text: template.sources.text().map(str::to_string),
+    }
+}
+
+/// Saves `input` as the German `order_confirmation` of a store offering German.
+fn save_german(ports: &InMemoryPorts, input: TemplateInput) {
+    let languages = [de()];
+    let store_languages = TemplateLanguages {
+        default: &en(),
+        others: &languages,
+    };
+    block_on(save_template(
+        &Ctx::system(),
+        ports,
+        TemplateKey::OrderConfirmation,
+        Some(&de()),
+        store_languages,
+        input,
+        None,
+    ))
+    .unwrap();
+}
+
+fn totals_input() -> TemplateInput {
+    input(
+        "{{ order.total.formatted }}",
+        r#"{% extends "layout" %}{% block content %}x{% endblock %}"#,
+    )
+}
+
+#[test]
+fn a_preview_in_a_language_sending_english_sources_keeps_english_formats() {
+    let ports = world_in(Some("de"));
+    let env = TestEnv::new();
+    let rendered = block_on(preview(
+        &Ctx::system(),
+        &env,
+        &ports,
+        TemplateKey::OrderConfirmation,
+        totals_input(),
+        None,
+        Some(&de()),
+    ))
+    .unwrap();
+    assert_eq!(rendered.subject, "€102.10");
+    assert!(rendered.html.contains(r#"lang="en""#), "{}", rendered.html);
+    // A test send is the same rendering.
+    let ctx = Ctx::new(Actor::User(staff_user()), vec![Scope::NotificationsWrite]);
+    block_on(send_test(
+        &ctx,
+        &env,
+        &ports,
+        TemplateKey::OrderConfirmation,
+        totals_input(),
+        None,
+        Some(&de()),
+    ))
+    .unwrap();
+    assert_eq!(env.sender.sent()[0].subject, "[Test] €102.10");
+}
+
+#[test]
+fn a_preview_in_a_language_with_its_own_template_uses_its_formats() {
+    let ports = world_in(Some("de"));
+    save_german(&ports, totals_input());
+    let env = TestEnv::new();
+    let rendered = block_on(preview(
+        &Ctx::system(),
+        &env,
+        &ports,
+        TemplateKey::OrderConfirmation,
+        totals_input(),
+        None,
+        Some(&de()),
+    ))
+    .unwrap();
+    assert_eq!(rendered.subject, "102,10 €");
+    assert!(rendered.html.contains(r#"lang="de""#), "{}", rendered.html);
+}
+
+#[test]
+fn a_preview_of_an_order_is_byte_for_byte_the_email_it_sends() {
+    let ctx = Ctx::new(
+        Actor::User(staff_user()),
+        vec![Scope::NotificationsRead, Scope::OrdersRead],
+    );
+    let german = input(
+        "Bestellung {{ order.number }}: {{ order.total.formatted }}",
+        r#"{% extends "layout" %}{% block content %}<p>{{ order.placed_at.formatted }}</p>{% endblock %}"#,
+    );
+    // Sending the English default, then a German template of the merchant's.
+    for own in [None, Some(german)] {
+        let ports = world_in(Some("de"));
+        if let Some(own) = own {
+            save_german(&ports, own);
+        }
+        let env = TestEnv::new();
+        mail_event(&env, &ports, &event(&ports, "order.placed")).unwrap();
+        let sent = env.sender.sent().remove(0);
+        let rendered = block_on(preview(
+            &ctx,
+            &env,
+            &ports,
+            TemplateKey::OrderConfirmation,
+            shown(&ports, TemplateKey::OrderConfirmation, &de()),
+            Some(order_id()),
+            Some(&de()),
+        ))
+        .unwrap();
+        assert_eq!(rendered.subject, sent.subject);
+        assert_eq!(rendered.html, sent.html);
+        assert_eq!(rendered.text, sent.text);
+    }
+}
