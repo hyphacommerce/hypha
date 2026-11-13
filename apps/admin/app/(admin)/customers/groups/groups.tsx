@@ -168,9 +168,7 @@ function GroupDialog({ group, onClose }: { group?: Group; onClose: () => void })
     <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={480} purpose="form">
       <DialogHeader
         title={
-          group
-            ? t("customers.groups_edit_named", { name: group.name })
-            : t("customers.groups_add")
+          group ? t("customers.groups_edit_named", { name: group.name }) : t("customers.groups_add")
         }
         subtitle={t("customers.groups_dialog_subtitle")}
         onOpenChange={(open) => !open && onClose()}

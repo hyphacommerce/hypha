@@ -193,8 +193,7 @@ export async function addProduct(input: {
       body: { variant: variant.id, tracked: true },
     });
     if (e3) return partly("stock", e3);
-    if (!item.id)
-      return { error: t("setup.product_partly_stock_unknown", { title: input.title }) };
+    if (!item.id) return { error: t("setup.product_partly_stock_unknown", { title: input.title }) };
     const { error: e4 } = await client.PUT("/admin/inventory-items/{id}/levels/{location_id}", {
       params: { path: { id: item.id, location_id: location.id } },
       body: { on_hand: count },

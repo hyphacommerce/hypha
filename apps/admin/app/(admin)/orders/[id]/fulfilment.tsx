@@ -122,11 +122,7 @@ export function FulfilButton({ order, places }: { order: Order; places: Place[] 
   const [isOpen, setIsOpen] = useState(false);
   return (
     <>
-      <Button
-        label={t("orders.fulfil_button")}
-        variant="primary"
-        onClick={() => setIsOpen(true)}
-      />
+      <Button label={t("orders.fulfil_button")} variant="primary" onClick={() => setIsOpen(true)} />
       {isOpen && <FulfilDialog order={order} places={places} onClose={() => setIsOpen(false)} />}
     </>
   );

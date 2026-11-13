@@ -32,13 +32,7 @@ import {
 } from "@/components/status";
 import { cancelReasonLabel, unitCostTotal } from "@/lib/format";
 import { type Format, getFormat } from "@/lib/get-format";
-import {
-  channelNames,
-  loaded,
-  requireStaff,
-  sessionClient,
-  staffNames,
-} from "@/lib/hypha";
+import { channelNames, loaded, requireStaff, sessionClient, staffNames } from "@/lib/hypha";
 import { type T, getT } from "@/lib/i18n";
 import { type Extensions, loadExtensions } from "@/lib/app-extensions";
 import { definitionsOf } from "@/lib/custom-fields-server";
@@ -313,28 +307,19 @@ async function Order({ id }: { id: string }) {
   // emails need `notifications:read` and `orders:read` (they name the buyer); without
   // them the request is refused and the card isn't shown. The staff member is the
   // layout's read too. What installed apps add here is one more read.
-  const [
-    found,
-    shipments,
-    locations,
-    channelName,
-    emails,
-    me,
-    extensions,
-    definitions,
-    fields,
-  ] = await Promise.all([
-    client.GET("/admin/orders/{id}", { params: { path: { id } } }),
-    client.GET("/admin/orders/{id}/fulfillments", { params: { path: { id } } }),
-    client.GET("/admin/locations"),
-    channelNames(client),
-    client.GET("/admin/notifications", { params: { query: { order: id } } }),
-    requireStaff(),
-    loadExtensions(),
-    // Its custom fields: none shown without `custom_fields:read`.
-    definitionsOf("order"),
-    client.GET("/admin/orders/{id}/custom-fields", { params: { path: { id } } }),
-  ]);
+  const [found, shipments, locations, channelName, emails, me, extensions, definitions, fields] =
+    await Promise.all([
+      client.GET("/admin/orders/{id}", { params: { path: { id } } }),
+      client.GET("/admin/orders/{id}/fulfillments", { params: { path: { id } } }),
+      client.GET("/admin/locations"),
+      channelNames(client),
+      client.GET("/admin/notifications", { params: { query: { order: id } } }),
+      requireStaff(),
+      loadExtensions(),
+      // Its custom fields: none shown without `custom_fields:read`.
+      definitionsOf("order"),
+      client.GET("/admin/orders/{id}/custom-fields", { params: { path: { id } } }),
+    ]);
   const order = loaded(found);
   // The country's form, for changing the address: read once the order names its country.
   // The address check names an app and a staff member by ID: their names, when it does
@@ -508,9 +493,7 @@ async function Order({ id }: { id: string }) {
                     </TableRow>
                   ))}
                   <TotalRow
-                    label={
-                      order.taxes_included ? t("orders.detail_tax_included") : t("common.tax")
-                    }
+                    label={order.taxes_included ? t("orders.detail_tax_included") : t("common.tax")}
                   >
                     {format.money(order.tax_total)}
                   </TotalRow>

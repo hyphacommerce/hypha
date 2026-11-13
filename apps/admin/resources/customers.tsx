@@ -40,6 +40,12 @@ const SHOWN_LABELS = 3;
 
 type Customer = AdminSchemas["CustomerSummaryResponse"];
 
+/**
+ * What the bulk banner counts. It builds an English sentence around it ("Labelled 3
+ * customers") until `resources/bulk.tsx` reads the catalogs, so this stays English with it.
+ */
+const BULK_NOUN = "customer";
+
 /** Every order the list offers, as the API names them. */
 const SORT_VALUES = [
   "newest",
@@ -54,7 +60,6 @@ const SORTS: Record<string, SortDef> = {
   email: { asc: "email_asc", desc: "email_desc" },
   created: { asc: "oldest", desc: "newest" },
 };
-
 
 export function CustomersTable({
   page,
@@ -173,7 +178,7 @@ export function CustomersTable({
       {outcome && (
         <BulkOutcomeBanner
           outcome={outcome}
-          noun="customer"
+          noun={BULK_NOUN}
           onClose={() => setOutcome(undefined)}
         />
       )}

@@ -72,9 +72,7 @@ function MarkPaidDialog({
         // An order's number is shown as it is, never grouped like a count.
         title={t("orders.mark_paid_dialog_title", { number: String(number) })}
         subtitle={
-          hasPayment
-            ? t("orders.mark_paid_dialog_collected")
-            : t("orders.mark_paid_dialog_manual")
+          hasPayment ? t("orders.mark_paid_dialog_collected") : t("orders.mark_paid_dialog_manual")
         }
         onOpenChange={(open) => !open && onClose()}
       />

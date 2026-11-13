@@ -20,13 +20,7 @@ import { startOfDay, nextDay } from "@/components/resource-table/server";
 import { CardSkeleton } from "@/components/skeletons";
 import { CancelledBadge, FulfillmentBadge, PaymentBadge } from "@/components/status";
 import { type Format, getFormat } from "@/lib/get-format";
-import {
-  loadSetup,
-  loadStore,
-  loadTimeZone,
-  requireStaff,
-  sessionClient,
-} from "@/lib/hypha";
+import { loadSetup, loadStore, loadTimeZone, requireStaff, sessionClient } from "@/lib/hypha";
 import { type T, getT } from "@/lib/i18n";
 import { LOW_STOCK } from "@/lib/inventory";
 import { hasScope } from "@/lib/navigation";
@@ -68,9 +62,7 @@ export default async function HomePage() {
       <VStack gap={6} maxWidth={1280}>
         <PageHeader
           title={t(`home.greeting_${dayPart(now, timeZone)}`, { name: me.user.name })}
-          description={[longDate(now, timeZone, t.locale), store?.name]
-            .filter(Boolean)
-            .join(" · ")}
+          description={[longDate(now, timeZone, t.locale), store?.name].filter(Boolean).join(" · ")}
           actions={
             <>
               {canSeeOrders && (

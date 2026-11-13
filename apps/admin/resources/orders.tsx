@@ -40,6 +40,12 @@ const NO_CODES: string[] = [];
 
 type Order = AdminSchemas["OrderSummaryResponse"];
 
+/**
+ * What the bulk banner counts. It builds an English sentence around it ("Marked paid 3
+ * orders") until `resources/bulk.tsx` reads the catalogs, so this stays English with it.
+ */
+const BULK_NOUN = "order";
+
 /** The payment and fulfilment statuses the list filters by, in the order offered. */
 const FINANCIAL = [
   "pending",
@@ -234,7 +240,11 @@ export function OrdersTable({
   return (
     <VStack gap={3}>
       {outcome && (
-        <BulkOutcomeBanner outcome={outcome} noun="order" onClose={() => setOutcome(undefined)} />
+        <BulkOutcomeBanner
+          outcome={outcome}
+          noun={BULK_NOUN}
+          onClose={() => setOutcome(undefined)}
+        />
       )}
       <ResourceTable<Order>
         renderBulkActions={(selected, clear) => (

@@ -72,7 +72,11 @@ const STEPS: StepDef[] = [
   {
     key: "store",
     isDone: (d) => d.store,
-    why: ["setup.step_store_why_name", "setup.step_store_why_time_zone", "setup.step_store_why_language"],
+    why: [
+      "setup.step_store_why_name",
+      "setup.step_store_why_time_zone",
+      "setup.step_store_why_language",
+    ],
   },
   {
     key: "market",
@@ -191,12 +195,7 @@ export function SetupWizard({
           </Text>
           <Text color="secondary">{t("setup.description")}</Text>
         </VStack>
-        <Button
-          label={t("setup.hide")}
-          variant="ghost"
-          isLoading={isFinishing}
-          onClick={finish}
-        />
+        <Button label={t("setup.hide")} variant="ghost" isLoading={isFinishing} onClick={finish} />
       </HStack>
       {finishError && <Banner status="error" title={finishError} />}
       {allDone && (
@@ -346,12 +345,7 @@ function StoreStep({ store, onSaved }: { store: WizardData["store"]; onSaved: ()
     <Card>
       <VStack gap={4}>
         {error && <Banner status="error" title={error} />}
-        <TextInput
-          label={t("setup.store_name")}
-          value={name}
-          onChange={setName}
-          hasAutoFocus
-        />
+        <TextInput label={t("setup.store_name")} value={name} onChange={setName} hasAutoFocus />
         <TextInput
           label={t("setup.store_email")}
           description={t("setup.store_email_description")}
@@ -533,7 +527,11 @@ function NeedsMarket({ goTo }: { goTo: (step: number) => void }) {
       title={t("setup.needs_market_title")}
       description={t("setup.needs_market_description")}
       endContent={
-        <Button label={t("setup.needs_market_action")} variant="secondary" onClick={() => goTo(1)} />
+        <Button
+          label={t("setup.needs_market_action")}
+          variant="secondary"
+          onClick={() => goTo(1)}
+        />
       }
     />
   );
@@ -797,9 +795,7 @@ function ProductStep({
             </div>
             <Switch
               label={t("setup.product_track")}
-              description={
-                track ? t("setup.product_track_on") : t("setup.product_track_off")
-              }
+              description={track ? t("setup.product_track_on") : t("setup.product_track_off")}
               value={track}
               onChange={setTrack}
             />
