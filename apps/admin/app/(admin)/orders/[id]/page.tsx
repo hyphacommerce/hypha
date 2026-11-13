@@ -43,6 +43,7 @@ import {
 import { type T, getT } from "@/lib/i18n";
 import { type Extensions, loadExtensions } from "@/lib/app-extensions";
 import { definitionsOf } from "@/lib/custom-fields-server";
+import { languageLabel } from "@/lib/languages";
 import { canMarkPaid, providerLabel } from "@/lib/payments";
 import { countryName } from "@/lib/regions";
 
@@ -443,6 +444,15 @@ async function Order({ id }: { id: string }) {
                                 .join(" · ")}
                             </Text>
                           )}
+                          {line.localized && (
+                            <Text type="supporting" color="secondary">
+                              {t("orders.detail_line_localized", {
+                                title: [line.localized.product_title, line.localized.variant_title]
+                                  .filter(Boolean)
+                                  .join(" · "),
+                              })}
+                            </Text>
+                          )}
                         </VStack>
                       </TableCell>
                       <TableCell>
@@ -624,6 +634,13 @@ async function Order({ id }: { id: string }) {
               <MetadataListItem label={t("common.channel")}>
                 {channelName.get(order.channel) ?? order.channel}
               </MetadataListItem>
+              {/* The language the buyer checked out in; none for an order from before
+                  orders kept one. */}
+              {order.language && (
+                <MetadataListItem label={t("common.language")}>
+                  {languageLabel(format, order.language)}
+                </MetadataListItem>
+              )}
             </MetadataList>
           </Card>
 

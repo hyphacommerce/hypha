@@ -18,6 +18,7 @@ import { loadExtensions } from "@/lib/app-extensions";
 import { definitionsOf } from "@/lib/custom-fields-server";
 import { loadCountries, loaded, requireStaff, sessionClient } from "@/lib/hypha";
 import { type T, getT } from "@/lib/i18n";
+import { languageLabel } from "@/lib/languages";
 import { hasScope } from "@/lib/navigation";
 import type { AddressFormat } from "@/lib/address";
 import { wellKnownField, withoutWellKnown } from "@/lib/well-known-fields";
@@ -216,6 +217,11 @@ async function Customer({ id }: { id: string }) {
                 </MetadataListItem>
                 <MetadataListItem label={t("common.phone")}>
                   {customer.phone ?? t("common.empty_value")}
+                </MetadataListItem>
+                <MetadataListItem label={t("common.language")}>
+                  {customer.language
+                    ? languageLabel(format, customer.language)
+                    : t("customers.detail_language_default")}
                 </MetadataListItem>
                 <MetadataListItem label={t("common.orders")}>
                   {stats.count === 0
