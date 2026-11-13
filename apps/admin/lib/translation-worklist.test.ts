@@ -10,7 +10,6 @@ import {
   type WorklistItem,
   idsToName,
   isStoreWide,
-  isUncounted,
   kindLabel,
   nameKey,
   progressParts,
@@ -99,15 +98,6 @@ test("the shown share rounds down, so one field missing never reads 100%", () =>
 test("the shown share is exact where the fraction isn't (29 of 100 is 29%)", () => {
   assert.equal(shownShare(progressParts(progress(100, 29, 0))), 0.29);
   assert.equal(shownShare(progressParts(progress(100, 57, 3))), 0.57);
-});
-
-test("a store whose every total is 0 isn't counted yet", () => {
-  assert.equal(isUncounted([progress(0, 0, 0), progress(0, 0, 0)]), true);
-  assert.equal(isUncounted([progress(0, 0, 0), progress(1, 0, 0)]), false);
-});
-
-test("a store without other languages isn't called uncounted", () => {
-  assert.equal(isUncounted([]), false);
 });
 
 // ---------- filters → query ----------

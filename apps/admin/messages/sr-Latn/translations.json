@@ -107,8 +107,8 @@
   "worklist_no_results_missing": "Ništa od ove vrste nije ostalo za prevođenje",
   "worklist_no_results_outdated": "Ništa od ove vrste nije zastarelo",
   "worklist_no_results_complete": "Ništa od ove vrste još nije prevedeno u celosti",
-  "worklist_uncounted_title": "Tekstovi prodavnice još nisu prebrojani",
-  "worklist_uncounted_description": "Brojevi se pojavljuju kada se tekstovi prodavnice indeksiraju, ubrzo posle nadogradnje.",
+  "worklist_uncounted_title": "Tekstovi prodavnice još nisu svi prebrojani",
+  "worklist_uncounted_description": "{count, plural, one {Još se broji: #} few {Još se broji: #} other {Još se broji: #}}. Brojevi su potpuni kada se tekstovi prodavnice indeksiraju, ubrzo posle nadogradnje.",
   "worklist_no_languages_title": "Prodavnica još nema druge jezike",
   "worklist_no_languages_description": "Dodajte jezik na koji ćete prevoditi.",
   "worklist_no_languages_action": "Upravljaj jezicima"

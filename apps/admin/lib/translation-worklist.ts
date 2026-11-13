@@ -71,15 +71,6 @@ export function shownShare(parts: Pick<ProgressParts, "current" | "outdated" | "
   return Math.floor(((parts.current + parts.outdated) * 100) / parts.total) / 100;
 }
 
-/**
- * Whether no language has anything counted: the store's texts haven't been indexed yet
- * (the API counts nothing until its background job read them once after an upgrade), or
- * the store has no text to translate.
- */
-export function isUncounted(languages: readonly LanguageProgress[]): boolean {
-  return languages.length > 0 && languages.every((language) => language.total === 0);
-}
-
 /** What the worklist shows, read from its URL against the store's other languages. */
 export type WorklistFilters = {
   /** One of `languages`, in its canonical case; `undefined` when the store has none. */

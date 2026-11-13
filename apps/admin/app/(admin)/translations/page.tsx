@@ -20,10 +20,8 @@ import { getT } from "@/lib/i18n";
 import type { T } from "@/lib/messages";
 import { hasScope, settingsCrumb } from "@/lib/navigation";
 import {
-  type LanguageProgress,
   WORKLIST_PATH,
   type WorklistFilters,
-  isUncounted,
   worklistFilters,
   worklistQuery,
 } from "@/lib/translation-worklist";
@@ -121,7 +119,7 @@ function Worklist({
   params,
   kinds,
   canManage,
-  progress,
+  pending,
   t,
 }: {
   languages: Language[];
@@ -130,8 +128,8 @@ function Worklist({
   kinds: Kind[];
   /** Whether the role may open Settings → Languages. */
   canManage: boolean;
-  /** Each language's progress, where the page has read it already. */
-  progress?: LanguageProgress[];
+  /** The store's resources still being counted, where the page has read it already. */
+  pending?: number;
   t: T;
 }) {
   const { language, state } = filters;
@@ -156,12 +154,7 @@ function Worklist({
   return (
     <WorklistControls languages={languages} language={language} state={state} kind={filters.kind}>
       <Suspense fallback={<WorklistTable kinds={kinds} language={language} state={state} />}>
-        <Rows
-          filters={{ ...filters, language }}
-          params={params}
-          kinds={kinds}
-          progress={progress}
-        />
+        <Rows filters={{ ...filters, language }} params={params} kinds={kinds} pending={pending} />
       </Suspense>
     </WorklistControls>
   );
@@ -179,7 +172,7 @@ async function LanguagesThenRows({ params, kinds }: { params: SearchParams; kind
       params={params}
       kinds={kinds}
       canManage={false}
-      progress={progress.languages}
+      pending={progress.pending}
       t={t}
     />
   );
@@ -189,23 +182,21 @@ async function Rows({
   filters,
   params,
   kinds,
-  progress,
+  pending,
 }: {
   filters: WorklistFilters & { language: string };
   params: SearchParams;
   kinds: Kind[];
-  progress?: LanguageProgress[];
+  pending?: number;
 }) {
   const [client, t] = await Promise.all([sessionClient(), getT()]);
   const result = await client.GET("/admin/translations", {
     params: { query: worklistQuery(filters, pageQuery(params)) },
   });
   const page = await listPage(result, WORKLIST_PATH, params);
-  const [names, uncounted] = await Promise.all([
+  const [names, counting] = await Promise.all([
     resourceNames(page.items, t),
-    page.items.length === 0 && !page.error && filters.kind === undefined
-      ? isUncountedFor(filters.language, progress)
-      : false,
+    page.items.length === 0 && !page.error ? pendingFor(filters.kind, pending) : 0,
   ]);
   return (
     <WorklistTable
@@ -214,22 +205,22 @@ async function Rows({
       kinds={kinds}
       language={filters.language}
       state={filters.state}
-      isUncounted={uncounted}
+      pending={counting}
     />
   );
 }
 
 /**
- * Whether an unfiltered list is empty because nothing is counted yet (the API counts the
- * store's texts in the background after an upgrade), not because nothing is left: then
- * the table says so rather than "Nothing left to translate". Only without a kind, since
- * a kind the store has nothing of counts 0 too. `known` is the page's own read, if any.
+ * How many of the list's resources the API is still counting (it reads the store's texts
+ * in the background after an upgrade): an empty list with some is empty because they
+ * aren't counted yet, not because nothing is left, and the table says so rather than
+ * "Nothing left to translate". `known` is the page's own read, which is of every kind.
  */
-async function isUncountedFor(language: string, known?: LanguageProgress[]): Promise<boolean> {
-  let languages = known;
-  if (languages === undefined) {
-    const client = await sessionClient();
-    languages = (await client.GET("/admin/translations/progress")).data?.languages ?? [];
-  }
-  return isUncounted(languages.filter((l) => l.language === language));
+async function pendingFor(kind: Kind | undefined, known?: number): Promise<number> {
+  if (kind === undefined && known !== undefined) return known;
+  const client = await sessionClient();
+  const progress = await client.GET("/admin/translations/progress", {
+    params: { query: { kind } },
+  });
+  return progress.data?.pending ?? 0;
 }

@@ -43,7 +43,7 @@ export function WorklistTable({
   kinds,
   language,
   state,
-  isUncounted = false,
+  pending = 0,
 }: {
   /** The page of resources; absent while it loads (the toolbar shows meanwhile). */
   page?: { items: WorklistItem[]; next_cursor: string | null; error?: string };
@@ -53,8 +53,8 @@ export function WorklistTable({
   kinds: readonly Kind[];
   language: string;
   state: WorklistState;
-  /** The list is empty because the store's texts aren't counted yet. */
-  isUncounted?: boolean;
+  /** The resources still being counted: the list is empty because they aren't yet. */
+  pending?: number;
 }) {
   const t = useT<"translations">();
   const format = useFormat();
@@ -157,11 +157,11 @@ export function WorklistTable({
       filters={filters}
       error={page?.error}
       empty={
-        isUncounted
+        pending > 0
           ? {
               icon: <LanguageIcon width={32} />,
               title: t("translations.worklist_uncounted_title"),
-              description: t("translations.worklist_uncounted_description"),
+              description: t("translations.worklist_uncounted_description", { count: pending }),
             }
           : {
               icon: <LanguageIcon width={32} />,
@@ -170,10 +170,10 @@ export function WorklistTable({
             }
       }
       noResults={
-        isUncounted
+        pending > 0
           ? {
               title: t("translations.worklist_uncounted_title"),
-              description: t("translations.worklist_uncounted_description"),
+              description: t("translations.worklist_uncounted_description", { count: pending }),
             }
           : { title: t(`translations.worklist_no_results_${state}`) }
       }

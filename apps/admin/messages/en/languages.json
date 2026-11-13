@@ -36,7 +36,7 @@
   "progress_title": "Translation progress",
   "progress_description": "How much of the store's text each language covers, counted in fields.",
   "progress_worklist": "Open worklist",
-  "progress_uncounted": "Counts appear once the store's texts are indexed, shortly after an upgrade.",
+  "progress_uncounted": "{count, plural, one {# still being counted} other {# still being counted}}: the numbers are complete once the store's texts are indexed, shortly after an upgrade.",
   "progress_nothing": "Nothing to translate yet",
   "progress_share": "{share} translated · {translated, number} of {total, number} fields",
   "progress_current": "{count, plural, one {# up to date} other {# up to date}}",

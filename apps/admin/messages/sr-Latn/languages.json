@@ -36,7 +36,7 @@
   "progress_title": "Napredak prevoda",
   "progress_description": "Koliki deo teksta prodavnice pokriva svaki jezik, brojano u poljima.",
   "progress_worklist": "Otvori listu za prevođenje",
-  "progress_uncounted": "Brojevi se pojavljuju kada se tekstovi prodavnice indeksiraju, ubrzo posle nadogradnje.",
+  "progress_uncounted": "{count, plural, one {Još se broji: #} few {Još se broji: #} other {Još se broji: #}}. Brojevi su potpuni kada se tekstovi prodavnice indeksiraju, ubrzo posle nadogradnje.",
   "progress_nothing": "Još nema šta da se prevodi",
   "progress_share": "Prevedeno: {share} · {translated, number} od {total, number} polja",
   "progress_current": "{count, plural, one {Ažurno: #} few {Ažurno: #} other {Ažurno: #}}",

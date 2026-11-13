@@ -107,8 +107,8 @@
   "worklist_no_results_missing": "Nothing of this kind left to translate",
   "worklist_no_results_outdated": "Nothing of this kind is outdated",
   "worklist_no_results_complete": "Nothing of this kind fully translated yet",
-  "worklist_uncounted_title": "The store's texts aren't counted yet",
-  "worklist_uncounted_description": "Counts appear once the store's texts are indexed, shortly after an upgrade.",
+  "worklist_uncounted_title": "The store's texts aren't all counted yet",
+  "worklist_uncounted_description": "{count, plural, one {# still being counted} other {# still being counted}}: the numbers are complete once the store's texts are indexed, shortly after an upgrade.",
   "worklist_no_languages_title": "The store has no other languages yet",
   "worklist_no_languages_description": "Add a language to translate into.",
   "worklist_no_languages_action": "Manage languages"

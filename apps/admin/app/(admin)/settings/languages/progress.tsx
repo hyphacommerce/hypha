@@ -18,7 +18,6 @@ import type { T } from "@/lib/messages";
 import { hasScope } from "@/lib/navigation";
 import {
   type LanguageProgress,
-  isUncounted,
   progressParts,
   shownShare,
   worklistHref,
@@ -54,9 +53,9 @@ export async function TranslationProgress() {
             href={worklistHref({ language: first.language })}
           />
         </HStack>
-        {isUncounted(data.languages) && (
+        {data.pending > 0 && (
           <Text type="supporting" color="secondary">
-            {t("languages.progress_uncounted")}
+            {t("languages.progress_uncounted", { count: data.pending })}
           </Text>
         )}
         <VStack gap={4}>
