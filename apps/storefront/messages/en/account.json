@@ -44,7 +44,7 @@
   "last_name": "Last name",
   "phone": "Phone",
   "language": "Language",
-  "language_note": "The emails we send you are written in this language.",
+  "language_note": "The language you'd like us to write to you in.",
   "choose_language": "Choose a language",
   "saved": "Saved",
   "save": "Save",

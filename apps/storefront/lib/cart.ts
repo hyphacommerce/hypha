@@ -18,8 +18,10 @@ export type CartRead = {
  * The cart `id` for a page in `place`. The page's language wins: a cart that reads in
  * another (a link shared from another language, a second tab) is moved to the page's
  * (`PUT …/language`, which answers the cart in it), so its lines, messages and the
- * order's emails follow what the shopper reads. Once moved, the next read matches, so
- * it's written once per change of language. A checked-out cart is left as it is.
+ * order placed from it follow what the shopper reads. Once moved, the next read
+ * matches, so it's written once per change of language; two tabs in two languages move
+ * it back and forth, and the order takes the last one read. A checked-out cart is left
+ * as it is.
  */
 export async function readCart(id: string, place: Locale): Promise<CartRead> {
   const client = api();

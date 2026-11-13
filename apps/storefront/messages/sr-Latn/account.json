@@ -44,7 +44,7 @@
   "last_name": "Prezime",
   "phone": "Telefon",
   "language": "Jezik",
-  "language_note": "Imejlove koje vam šaljemo pišemo na ovom jeziku.",
+  "language_note": "Jezik na kom želite da vam pišemo.",
   "choose_language": "Izaberite jezik",
   "saved": "Sačuvano",
   "save": "Sačuvaj",

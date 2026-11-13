@@ -55,7 +55,7 @@ function optional(value: string | undefined): string | null {
 }
 
 /** A new cart in the page's place, in the page's language (so its messages and the
- * order's emails follow the page), remembered in the shopper's cookies; a signed-in
+ * order placed from it follow the page), remembered in the shopper's cookies; a signed-in
  * shopper's is theirs from the start. */
 async function newCart(place: Locale): Promise<string> {
   const session = await sessionHeaders();
@@ -464,15 +464,20 @@ export async function setLanguage(input: { locale: string; target: string; path:
     path: "/",
     maxAge: YEAR,
   });
-  // The cart follows: its lines, messages and the order's emails in the language picked.
-  // A cart that's gone or checked out has nothing to follow, and the page is what the
-  // shopper asked for, so a refusal doesn't stop the switch.
+  // The cart follows: its lines, messages and the order placed from it in the language
+  // picked. A cart that's gone or checked out has nothing to follow, and the page is
+  // what the shopper asked for, so neither a refusal nor an API that didn't answer
+  // stops the switch (the next read for the page moves the cart, `readCart`).
   const cart = await cartId(there.country);
   if (cart) {
-    await api().PUT("/storefront/carts/{id}/language", {
-      params: { path: { id: cart } },
-      body: { language: there.language },
-    });
+    try {
+      await api().PUT("/storefront/carts/{id}/language", {
+        params: { path: { id: cart } },
+        body: { language: there.language },
+      });
+    } catch (error) {
+      console.error("setLanguage: the cart's language wasn't set", error);
+    }
   }
   redirect(link(there.segment, withoutLocale(mode(), path, countries)));
 }

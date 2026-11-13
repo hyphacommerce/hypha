@@ -84,6 +84,11 @@ export function CartProvider({
   // The page's place: actions answer in its language.
   const locale = useLocale();
 
+  // Changes go one at a time: each writes the cart, so two at once would race for its
+  // version. A read waits its turn too: it may write (`loadCart` moves a cart in
+  // another language to the page's).
+  const queue = useRef(SETTLED);
+
   // Which read is the latest: an older one answering late is dropped.
   const reads = useRef(0);
   const reload = useCallback(async () => {
@@ -91,8 +96,11 @@ export function CartProvider({
     let found: Cart | null | undefined = null;
     try {
       // No cart in this country (the flag cookie says so): nothing to read.
-      // Read for this page: a cart in another language is moved to the page's.
-      if (hasCartFlag(country)) found = await loadCart(locale);
+      if (hasCartFlag(country)) {
+        const run = queue.current.then(() => loadCart(locale));
+        queue.current = run.catch(() => undefined);
+        found = await run;
+      }
     } catch {
       // The shop's server didn't answer: keep the cart shown (none, on the first read)
       // rather than the cart page's skeleton for good.
@@ -116,7 +124,9 @@ export function CartProvider({
 
   const add = useCallback(
     async (variant: string, quantity: number) => {
-      const result = await addToCart({ locale, variant, quantity });
+      const run = queue.current.then(() => addToCart({ locale, variant, quantity }));
+      queue.current = run.catch(() => undefined);
+      const result = await run;
       // Within the page: the caller's transition would otherwise start a view
       // transition, which snapshots the page while the drawer animates open.
       startTransition(() => {
@@ -130,9 +140,8 @@ export function CartProvider({
     [locale],
   );
 
-  // Changes go one at a time: each writes the cart, so two at once would race.
-  // Each answers with the cart, shown as it comes; the error is the caller's to place.
-  const queue = useRef(SETTLED);
+  // Each change answers with the cart, shown as it comes; the error is the caller's to
+  // place.
   const write = useCallback(async (send: () => Promise<CartResult>) => {
     const run = queue.current.then(send);
     queue.current = run.catch(() => undefined);
