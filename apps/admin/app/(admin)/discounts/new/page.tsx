@@ -12,7 +12,6 @@ import { getT } from "@/lib/i18n";
 import { loadLive, loadOptions } from "../data";
 import { NewDiscount } from "../discount-editor";
 
-
 /**
  * A new discount: a template (`?template=` picks one), then the form. The header
  * renders at once; the form waits for the store's markets, channels and categories.

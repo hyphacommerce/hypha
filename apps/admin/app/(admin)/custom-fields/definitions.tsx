@@ -169,9 +169,7 @@ export function DefinitionsCard({
                           {definition.personal && (
                             <Badge label={t("custom_fields.badge_personal")} variant="warning" />
                           )}
-                          {definition.private && (
-                            <Badge label={t("custom_fields.badge_private")} />
-                          )}
+                          {definition.private && <Badge label={t("custom_fields.badge_private")} />}
                           {!isOwn && definition.access.admin === "read" && (
                             <Badge label={t("custom_fields.badge_staff_read_only")} />
                           )}

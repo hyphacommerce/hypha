@@ -66,7 +66,9 @@ export function UsageTable({
       header: t("common.code"),
       width: pixel(160),
       renderCell: (u) => (
-        <Text color={u.code ? undefined : "secondary"}>{u.code ?? t("discounts.method_automatic")}</Text>
+        <Text color={u.code ? undefined : "secondary"}>
+          {u.code ?? t("discounts.method_automatic")}
+        </Text>
       ),
     },
     {

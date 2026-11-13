@@ -173,11 +173,7 @@ export function ValueFields({
       >
         {hasFree && <SegmentedControlItem value="free" label={t("discounts.value_free")} />}
         {types.map((type) => (
-          <SegmentedControlItem
-            key={type}
-            value={type}
-            label={t(`discounts.value_type_${type}`)}
-          />
+          <SegmentedControlItem key={type} value={type} label={t(`discounts.value_type_${type}`)} />
         ))}
       </SegmentedControl>
       {value.type === "percent" && !isFree && (

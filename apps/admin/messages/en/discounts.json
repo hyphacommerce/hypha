@@ -9,7 +9,7 @@
   "edit_fix_fields": "Fix the fields marked below.",
   "edit_read_only": "Your role can see discounts but not change them.",
   "edit_used_on": "{count, plural, one {Used on # order} other {Used on # orders}}",
-  "edit_uses_of_limit": "{used} of {limit} uses",
+  "edit_uses_of_limit": "{used, number} of {limit, number} uses",
 
   "list_search_placeholder": "Search titles and codes",
   "list_filter_class": "Takes off",
@@ -27,7 +27,7 @@
   "codes": "Codes",
   "uses": "Uses",
   "codes_count": "{count, plural, one {# code} other {# codes}}",
-  "uses_of_limit": "{used} of {limit}",
+  "uses_of_limit": "{used, number} of {limit, number}",
 
   "tab_usage": "Usage",
 
@@ -56,7 +56,7 @@
   "codes_generate_title": "Generate codes",
   "codes_generate_subtitle": "Random codes without look-alike characters (no 0/O or 1/I/L), for flyers, partners or one per customer.",
   "codes_generate_count": "How many",
-  "codes_generate_count_invalid": "How many: 1 to {max}.",
+  "codes_generate_count_invalid": "How many: 1 to {max, number}.",
   "codes_generate_length": "Length",
   "codes_generate_length_hint": "{min} to {max}, the prefix included, with at least {random} random characters.",
   "codes_generate_prefix": "Prefix",
@@ -297,7 +297,7 @@
   "problem_value_type": "This reward can't take that kind of value.",
   "problem_whole_number": "A whole number, 1 or more.",
   "problem_choose": "{what, select, products {Choose the products.} variants {Choose the variants.} other {Choose the categories.}}",
-  "problem_too_many": "{what, select, products {At most {max} products.} variants {At most {max} variants.} categories {At most {max} categories.} markets {At most {max} markets.} channels {At most {max} channels.} customer_groups {At most {max} customer groups.} other {At most {max} customers.}}",
+  "problem_too_many": "{what, select, products {At most {max, number} products.} variants {At most {max, number} variants.} categories {At most {max, number} categories.} markets {At most {max, number} markets.} channels {At most {max, number} channels.} customer_groups {At most {max, number} customer groups.} other {At most {max, number} customers.}}",
   "problem_kind_empty": "Choose what it takes off: products, the order or shipping.",
   "problem_uses_per_order": "A whole number, or blank for any.",
   "problem_tiers_empty": "Add a tier.",

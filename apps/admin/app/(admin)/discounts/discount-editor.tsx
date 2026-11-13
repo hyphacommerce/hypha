@@ -248,9 +248,7 @@ export function EditDiscount({
       if (result.refusal) {
         const problems = refusalProblems(result.refusal, draft, t);
         setErrors(fieldErrors(problems));
-        setError(
-          problems.some((p) => p.path !== "") ? t("discounts.edit_fix_fields") : undefined,
-        );
+        setError(problems.some((p) => p.path !== "") ? t("discounts.edit_fix_fields") : undefined);
       } else {
         setError(undefined);
       }
@@ -274,9 +272,7 @@ export function EditDiscount({
           setError(undefined);
         }}
       />
-      {isReadOnly && (
-        <Banner status="info" title={t("discounts.edit_read_only")} />
-      )}
+      {isReadOnly && <Banner status="info" title={t("discounts.edit_read_only")} />}
       <DiscountForm
         draft={draft}
         errors={{ ...preview.errors, ...errors }}

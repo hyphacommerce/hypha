@@ -105,7 +105,9 @@ const columns = (t: DiscountsT, format: Format): TableColumn<Code>[] => [
     key: "batch",
     header: t("discounts.codes_batch"),
     width: proportional(1, { minWidth: 120 }),
-    renderCell: (c) => <Text color={c.batch ? undefined : "secondary"}>{c.batch ?? t("common.none")}</Text>,
+    renderCell: (c) => (
+      <Text color={c.batch ? undefined : "secondary"}>{c.batch ?? t("common.none")}</Text>
+    ),
   },
   {
     key: "created_at",

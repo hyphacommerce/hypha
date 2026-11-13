@@ -40,7 +40,12 @@ export const OWNER_TYPES: {
   { value: "product", label: "common.products", read: "products:read", write: "products:write" },
   { value: "variant", label: "common.variants", read: "products:read", write: "products:write" },
   { value: "category", label: "common.categories", read: "products:read", write: "products:write" },
-  { value: "customer", label: "common.customers", read: "customers:read", write: "customers:write" },
+  {
+    value: "customer",
+    label: "common.customers",
+    read: "customers:read",
+    write: "customers:write",
+  },
   { value: "order", label: "common.orders", read: "orders:read", write: "orders:write" },
 ];
 
@@ -309,9 +314,7 @@ function parseItem(
     case "integer": {
       if (!/^-?\d+$/.test(typed)) return { error: t("custom_fields.value_integer") };
       const n = Number(typed);
-      return Number.isSafeInteger(n)
-        ? { value: n }
-        : { error: t("custom_fields.value_too_large") };
+      return Number.isSafeInteger(n) ? { value: n } : { error: t("custom_fields.value_too_large") };
     }
     case "decimal":
       return /^-?\d+(\.\d+)?$/.test(typed)

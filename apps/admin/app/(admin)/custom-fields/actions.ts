@@ -76,9 +76,7 @@ async function ownerNames(client: Client, owners: unknown[], t: T): Promise<stri
       }
       if (id.startsWith("ord_")) {
         const { data } = await client.GET("/admin/orders/{id}", path);
-        return data
-          ? t("custom_fields.owner_order_number", { number: String(data.number) })
-          : id;
+        return data ? t("custom_fields.owner_order_number", { number: String(data.number) }) : id;
       }
       return id;
     }),

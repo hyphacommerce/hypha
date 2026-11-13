@@ -19,7 +19,6 @@ import { DeleteDiscount } from "./delete-discount";
 import { type DiscountTab, DiscountTabs } from "./discount-tabs";
 import { UsageTable } from "./usage-table";
 
-
 /** The discounts this request read, by ID: the header and the tab share one read. */
 const discountReads = perRequest(async () => new Map<string, Promise<Discount>>());
 

@@ -17,13 +17,7 @@ import {
   amountMarkets,
   combinedClasses,
 } from "./draft.ts";
-import {
-  type DiscountsT,
-  type MarketOption,
-  amountsOf,
-  parseCount,
-  parseOff,
-} from "./validate.ts";
+import { type DiscountsT, type MarketOption, amountsOf, parseCount, parseOff } from "./validate.ts";
 
 export type SummaryContext = {
   markets: readonly MarketOption[];
@@ -83,7 +77,14 @@ function amountsPhrase(
   return ctx.t("discounts.summary_amount_and_more", { amount: first, count: shown.length - 1 });
 }
 
-type Counted = "products" | "variants" | "categories" | "markets" | "channels" | "groups" | "customers";
+type Counted =
+  | "products"
+  | "variants"
+  | "categories"
+  | "markets"
+  | "channels"
+  | "groups"
+  | "customers";
 
 /** "Grow kits", "Grow kits and Cultures", "3 categories": a list by its names. */
 function named(ids: readonly string[], ctx: SummaryContext, what: Counted): string {
@@ -171,7 +172,9 @@ function standard(kind: StandardDraft, markets: readonly MarketOption[], ctx: Su
     const percent = value.type === "percent" ? parseOff(value.percent) : null;
     if (percent?.ok && percent.value === 10_000) {
       parts.push(
-        cap ? t("discounts.summary_free_shipping_capped", { cap }) : t("discounts.summary_free_shipping"),
+        cap
+          ? t("discounts.summary_free_shipping_capped", { cap })
+          : t("discounts.summary_free_shipping"),
       );
     } else {
       const off = offPhrase(value, markets, ctx);
@@ -264,7 +267,9 @@ export function draftSummary(draft: DiscountDraft, ctx: SummaryContext): string 
     parts.push(t("discounts.summary_in_markets", { markets: named(c.markets, ctx, "markets") }));
   }
   if (c.channels.length > 0) {
-    parts.push(t("discounts.summary_on_channels", { channels: named(c.channels, ctx, "channels") }));
+    parts.push(
+      t("discounts.summary_on_channels", { channels: named(c.channels, ctx, "channels") }),
+    );
   }
   if (c.customerGroups.length > 0) {
     parts.push(t("discounts.summary_for", { who: named(c.customerGroups, ctx, "groups") }));
