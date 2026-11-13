@@ -41,6 +41,8 @@ import {
   type PaymentPreset,
   providerLabel,
 } from "@/lib/payments";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import {
   createPaymentMethod,
@@ -55,10 +57,15 @@ type Method = AdminSchemas["PaymentMethodResponse"];
 type Option = { value: string; label: string };
 
 /** "Every market", or the names of the ones listed (IDs for any this admin can't name). */
-function where(ids: string[], options: Option[], every: string): string {
+function where(
+  ids: string[],
+  options: Option[],
+  every: string,
+  list: (names: string[]) => string,
+): string {
   if (ids.length === 0) return every;
   const names = new Map(options.map((o) => [o.value, o.label]));
-  return ids.map((id) => names.get(id) ?? id).join(", ");
+  return list(ids.map((id) => names.get(id) ?? id));
 }
 
 export function PaymentMethodsCard({
@@ -75,6 +82,9 @@ export function PaymentMethodsCard({
   paymentApps: PaymentApp[];
   canWrite: boolean;
 }) {
+  const t = useT<"payments">();
+  const format = useFormat();
+  const list = (names: string[]) => format.list(names, "unit");
   const [editing, setEditing] = useState<Method | "new">();
   const [deleting, setDeleting] = useState<Method>();
   const [error, setError] = useState<string>();
@@ -95,15 +105,15 @@ export function PaymentMethodsCard({
         <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Payment methods
+              {t("payments.methods_title")}
             </Text>
             <Text type="supporting" color="secondary">
-              Shoppers see the enabled ones offered in their market and channel, in this order.
+              {t("payments.methods_description")}
             </Text>
           </VStack>
           {canWrite && (
             <Button
-              label="Add payment method"
+              label={t("payments.methods_add")}
               variant="secondary"
               onClick={() => setEditing("new")}
             />
@@ -112,16 +122,16 @@ export function PaymentMethodsCard({
         {error && <Banner status="error" title={error} onDismiss={() => setError(undefined)} />}
         {methods.length === 0 ? (
           <EmptyState
-            title="No payment methods yet"
-            description="Add cash on delivery or a bank transfer to start taking orders."
+            title={t("payments.methods_empty_title")}
+            description={t("payments.methods_empty_description")}
           />
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHeaderCell>Method</TableHeaderCell>
-                <TableHeaderCell>Offered in</TableHeaderCell>
-                <TableHeaderCell>Enabled</TableHeaderCell>
+                <TableHeaderCell>{t("payments.methods_column_method")}</TableHeaderCell>
+                <TableHeaderCell>{t("payments.methods_column_offered_in")}</TableHeaderCell>
+                <TableHeaderCell>{t("common.enabled")}</TableHeaderCell>
                 <TableHeaderCell>
                   <span />
                 </TableHeaderCell>
@@ -148,16 +158,21 @@ export function PaymentMethodsCard({
                   <TableCell>
                     <VStack gap={0.5}>
                       <Text type="supporting">
-                        {where(method.markets, markets, "Every market")}
+                        {where(method.markets, markets, t("payments.methods_every_market"), list)}
                       </Text>
                       <Text type="supporting" color="secondary">
-                        {where(method.channels, channels, "Every channel")}
+                        {where(
+                          method.channels,
+                          channels,
+                          t("payments.methods_every_channel"),
+                          list,
+                        )}
                       </Text>
                     </VStack>
                   </TableCell>
                   <TableCell>
                     <Switch
-                      label={`Offer ${method.name}`}
+                      label={t("payments.method_offer", { name: method.name })}
                       isLabelHidden
                       size="sm"
                       value={method.enabled}
@@ -171,7 +186,7 @@ export function PaymentMethodsCard({
                     {canWrite && (
                       <HStack gap={1} hAlign="end">
                         <IconButton
-                          label={`Move ${method.name} up`}
+                          label={t("payments.method_move_up", { name: method.name })}
                           icon={<ArrowUpIcon />}
                           size="sm"
                           variant="ghost"
@@ -179,7 +194,7 @@ export function PaymentMethodsCard({
                           onClick={() => move(index, -1)}
                         />
                         <IconButton
-                          label={`Move ${method.name} down`}
+                          label={t("payments.method_move_down", { name: method.name })}
                           icon={<ArrowDownIcon />}
                           size="sm"
                           variant="ghost"
@@ -187,14 +202,14 @@ export function PaymentMethodsCard({
                           onClick={() => move(index, 1)}
                         />
                         <IconButton
-                          label={`Edit ${method.name}`}
+                          label={t("payments.method_edit", { name: method.name })}
                           icon={<PencilSquareIcon />}
                           size="sm"
                           variant="ghost"
                           onClick={() => setEditing(method)}
                         />
                         <IconButton
-                          label={`Delete ${method.name}`}
+                          label={t("payments.method_delete", { name: method.name })}
                           icon={<TrashIcon />}
                           size="sm"
                           variant="ghost"
@@ -252,6 +267,7 @@ function MethodDialog({
   paymentApps: PaymentApp[];
   onClose: () => void;
 }) {
+  const t = useT<"payments">();
   const [kind, setKind] = useState<Kind>({ preset: PAYMENT_PRESETS[0] });
   const kindName = kind.app ? kind.app.name : kind.preset.name;
   const kindValue = kind.app ? `app:${kind.app.key}` : kind.preset.value;
@@ -294,13 +310,17 @@ function MethodDialog({
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={560} purpose="form">
       <DialogHeader
-        title={method ? `Edit ${method.name}` : "Add payment method"}
+        title={
+          method
+            ? t("payments.method_dialog_title_edit", { name: method.name })
+            : t("payments.method_dialog_title_add")
+        }
         subtitle={
           method
-            ? "Orders already placed keep the name and instructions they were placed with."
+            ? t("payments.method_dialog_subtitle_edit")
             : kind.app
-              ? `The shopper pays at checkout through ${kind.app.name}, which reports the payment.`
-              : "A manual method: the shopper pays you directly, and you mark the order paid."
+              ? t("payments.method_dialog_subtitle_app", { app: kind.app.name })
+              : t("payments.method_dialog_subtitle_manual")
         }
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
@@ -310,7 +330,7 @@ function MethodDialog({
         <VStack gap={4} padding={4}>
           {!method && (
             <Selector
-              label="Kind"
+              label={t("payments.method_kind_label")}
               options={[
                 ...PAYMENT_PRESETS.map(({ value, label, description }) => ({
                   value,
@@ -321,8 +341,8 @@ function MethodDialog({
                   value: `app:${app.key}`,
                   label: app.name,
                   description: app.isBuiltIn
-                    ? `${app.name}, built into the API: the shopper pays at checkout.`
-                    : `Taken by the ${app.name} app: the shopper pays at checkout.`,
+                    ? t("payments.method_kind_built_in", { app: app.name })
+                    : t("payments.method_kind_app", { app: app.name }),
                 })),
               ]}
               value={kindValue}
@@ -330,16 +350,16 @@ function MethodDialog({
             />
           )}
           <TextInput
-            label="Name"
-            description="What shoppers see at checkout."
-            placeholder="Cash on delivery"
+            label={t("common.name")}
+            description={t("payments.method_name_description")}
+            placeholder={t("payments.method_name_placeholder")}
             value={form.name}
             onChange={(name) => set({ name })}
           />
           {!isApp && (
             <TextArea
-              label="Instructions"
-              description="Shown to the shopper after checkout and on their order: bank details, what to pay the courier."
+              label={t("payments.method_instructions_label")}
+              description={t("payments.method_instructions_description")}
               placeholder={method || kind.app ? undefined : kind.preset.instructionsPlaceholder}
               isOptional
               maxLength={2000}
@@ -349,9 +369,9 @@ function MethodDialog({
             />
           )}
           <MultiSelector
-            label="Markets"
-            description="None chosen: offered in every market."
-            placeholder="Every market"
+            label={t("common.markets")}
+            description={t("payments.method_markets_description")}
+            placeholder={t("payments.method_markets_placeholder")}
             options={markets}
             value={form.markets}
             onChange={(chosen) => set({ markets: chosen })}
@@ -359,17 +379,17 @@ function MethodDialog({
             triggerDisplay="labels"
           />
           <MultiSelector
-            label="Channels"
-            description="None chosen: offered in every channel."
-            placeholder="Every channel"
+            label={t("common.channels")}
+            description={t("payments.method_channels_description")}
+            placeholder={t("payments.method_channels_placeholder")}
             options={channels}
             value={form.channels}
             onChange={(chosen) => set({ channels: chosen })}
             triggerDisplay="labels"
           />
           <Switch
-            label="Enabled"
-            description="Shoppers see it at checkout."
+            label={t("common.enabled")}
+            description={t("payments.method_enabled_description")}
             value={form.enabled}
             onChange={(enabled) => set({ enabled })}
           />
@@ -378,9 +398,9 @@ function MethodDialog({
       <VStack gap={3} padding={4}>
         {error && <Banner status="error" title={error} />}
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label={method ? "Save" : "Add method"}
+            label={method ? t("common.save") : t("payments.method_add_submit")}
             variant="primary"
             isLoading={isPending}
             isDisabled={!isComplete}
@@ -393,18 +413,16 @@ function MethodDialog({
 }
 
 function DeleteDialog({ method, onClose }: { method: Method; onClose: () => void }) {
+  const t = useT<"payments">();
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
   return (
     <AlertDialog
       isOpen
       onOpenChange={(isOpen) => !isOpen && onClose()}
-      title={`Delete ${method.name}?`}
-      description={
-        error ??
-        "Shoppers stop seeing it. Orders already paid this way keep its name and instructions."
-      }
-      actionLabel="Delete method"
+      title={t("common.delete_named", { name: method.name })}
+      description={error ?? t("payments.method_delete_description")}
+      actionLabel={t("payments.method_delete_action")}
       isActionLoading={isPending}
       onAction={() =>
         startTransition(async () => {

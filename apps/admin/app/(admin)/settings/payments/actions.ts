@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { describe, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 
 /** The outcome of an edit: a message to show, if it failed. */
 export type Result = { error?: string };
@@ -31,7 +32,10 @@ function instructions(text: string): string | null {
 
 /** A method, after the others: manual (staff record the money) or a payment app's. */
 export async function createPaymentMethod(input: MethodInput): Promise<Result> {
-  if (input.name.trim() === "") return { error: "The method needs a name." };
+  if (input.name.trim() === "") {
+    const t = await getT();
+    return { error: t("payments.method_name_required") };
+  }
   const client = await sessionClient();
   const { error } = await client.POST("/admin/payment-methods", {
     body: {
@@ -49,7 +53,10 @@ export async function createPaymentMethod(input: MethodInput): Promise<Result> {
 }
 
 export async function updatePaymentMethod(id: string, input: MethodInput): Promise<Result> {
-  if (input.name.trim() === "") return { error: "The method needs a name." };
+  if (input.name.trim() === "") {
+    const t = await getT();
+    return { error: t("payments.method_name_required") };
+  }
   const client = await sessionClient();
   const { error } = await client.PATCH("/admin/payment-methods/{id}", {
     params: { path: { id } },

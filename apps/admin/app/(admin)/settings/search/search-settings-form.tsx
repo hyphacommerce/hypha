@@ -15,11 +15,16 @@ import { ArrowDownIcon, ArrowUpIcon, PlusIcon, XMarkIcon } from "@heroicons/reac
 import { type ReactNode, useState, useTransition } from "react";
 
 import { SaveBar } from "@/components/save-bar";
+import type { Format } from "@/lib/format";
+import type { TFor } from "@/lib/messages";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { saveSearchSettings } from "./actions";
 import type { Counted, SearchCatalog } from "./catalog";
 
 type Settings = AdminSchemas["SearchSettingsResponse"];
+type SettingsT = TFor<"settings">;
 
 /**
  * A facet as saved: `option.<name>`, `field.<namespace>.<key>`, `vendor`,
@@ -37,9 +42,11 @@ const OPTION = "option.";
 const FIELD = "field.";
 
 /** What a facet filters by, in the merchant's words. */
-function kindOf(key: string): string {
-  if (key.startsWith(OPTION)) return "Option";
-  return key.startsWith(FIELD) ? "Custom field" : "Product field";
+function kindOf(t: SettingsT, key: string): string {
+  if (key.startsWith(OPTION)) return t("settings.search_filter_kind_option");
+  return key.startsWith(FIELD)
+    ? t("settings.search_filter_kind_custom_field")
+    : t("settings.search_filter_kind_product_field");
 }
 
 /**
@@ -47,7 +54,7 @@ function kindOf(key: string): string {
  * option name, then vendor, product type and tags. Saved facets the scan didn't see
  * (an option on older products) are kept, with no values to show.
  */
-function candidates(catalog: SearchCatalog, saved: Facet[]) {
+function candidates(t: SettingsT, catalog: SearchCatalog, saved: Facet[]) {
   const list = [
     ...catalog.options.map((o) => ({
       key: `${OPTION}${o.name}`,
@@ -56,14 +63,24 @@ function candidates(catalog: SearchCatalog, saved: Facet[]) {
       values: o.values,
     })),
     ...catalog.fields,
-    { key: "vendor", name: "Vendor", count: sum(catalog.vendors), values: catalog.vendors },
+    {
+      key: "vendor",
+      name: t("settings.search_filter_vendor"),
+      count: sum(catalog.vendors),
+      values: catalog.vendors,
+    },
     {
       key: "product_type",
-      name: "Product type",
+      name: t("settings.search_filter_product_type"),
       count: sum(catalog.productTypes),
       values: catalog.productTypes,
     },
-    { key: "tag", name: "Tags", count: catalog.tags.length, values: catalog.tags },
+    {
+      key: "tag",
+      name: t("settings.search_filter_tags"),
+      count: catalog.tags.length,
+      values: catalog.tags,
+    },
   ];
   for (const facet of saved) {
     if (!list.some((c) => same(c.key, facet.key))) {
@@ -116,8 +133,10 @@ export function SearchSettingsForm({
   /** The index card, shown in the side column. */
   status: ReactNode;
 }) {
+  const t = useT<"settings">();
+  const format = useFormat();
   const savedFacets: Facet[] = settings.facets.map((f) => ({ key: f.key, label: f.label ?? "" }));
-  const all = candidates(catalog, savedFacets);
+  const all = candidates(t, catalog, savedFacets);
   const [custom, setCustom] = useState(savedFacets.length > 0);
   const [facets, setFacets] = useState<Facet[]>(savedFacets);
   const [split, setSplit] = useState<string[]>(settings.split_by);
@@ -176,26 +195,25 @@ export function SearchSettingsForm({
       <Card>
         <VStack gap={3}>
           <Text type="display-3" as="h2">
-            What this controls
+            {t("settings.search_intro_title")}
           </Text>
-          <Text color="secondary">
-            Your storefront&apos;s search, category pages and product listings all come from the
-            search index. Here you choose:
-          </Text>
+          <Text color="secondary">{t("settings.search_intro_description")}</Text>
           <VStack gap={1}>
             <Text>
-              <strong>Filters</strong> — the checklists shoppers narrow results with (Color, Size,
-              Brand…). Price and availability are always offered.
+              {t.rich("settings.search_intro_filters", {
+                b: (chunks, key) => <strong key={key}>{chunks}</strong>,
+              })}
             </Text>
             <Text>
-              <strong>Listings</strong> — whether a product with several colours shows once, or once
-              per colour.
+              {t.rich("settings.search_intro_listings", {
+                b: (chunks, key) => <strong key={key}>{chunks}</strong>,
+              })}
             </Text>
           </VStack>
           <Text type="supporting" color="secondary">
             {catalog.hasMore
-              ? `The choices below come from your ${catalog.scanned.toLocaleString()} newest products (options and tags from the 60 newest); counts are among those.`
-              : `The choices below come from your ${catalog.scanned.toLocaleString()} products.`}
+              ? t("settings.search_scanned_newest", { count: catalog.scanned })
+              : t("settings.search_scanned_all", { count: catalog.scanned })}
           </Text>
         </VStack>
       </Card>
@@ -206,18 +224,18 @@ export function SearchSettingsForm({
             <VStack gap={4}>
               <VStack gap={1}>
                 <Text type="display-3" as="h2">
-                  Filters
+                  {t("settings.search_filters_title")}
                 </Text>
                 <Text type="supporting" color="secondary">
-                  Changes show on the storefront as soon as you save; nothing is rebuilt.
+                  {t("settings.search_filters_description")}
                 </Text>
               </VStack>
               <Switch
-                label="Choose the filters myself"
+                label={t("settings.search_filters_custom")}
                 description={
                   custom
-                    ? "Shoppers see these filters, in this order."
-                    : "Shoppers see product type, vendor, every option your products have (most used first) and tags."
+                    ? t("settings.search_filters_custom_on")
+                    : t("settings.search_filters_custom_off")
                 }
                 value={custom}
                 onChange={(on) => {
@@ -229,7 +247,7 @@ export function SearchSettingsForm({
               {custom && (
                 <VStack gap={0}>
                   {facets.length === 0 && (
-                    <Text color="secondary">No filters yet: add one below.</Text>
+                    <Text color="secondary">{t("settings.search_filters_empty")}</Text>
                   )}
                   {facets.map((f, i) => {
                     const c = candidate(f.key);
@@ -242,23 +260,23 @@ export function SearchSettingsForm({
                           <HStack gap={2} vAlign="center">
                             <Text weight="medium">{c?.name ?? f.key}</Text>
                             <Text type="supporting" color="secondary">
-                              {kindOf(f.key)}
+                              {kindOf(t, f.key)}
                             </Text>
                           </HStack>
                           <Text type="supporting" color="secondary">
-                            {sample(c?.values ?? [])}
+                            {sample(t, format, c?.values ?? [])}
                           </Text>
                         </VStack>
                         <TextInput
-                          label={`Label for ${c?.name ?? f.key}`}
+                          label={t("settings.search_filter_label_for", { name: c?.name ?? f.key })}
                           isLabelHidden
-                          placeholder={c?.name ?? "Label"}
+                          placeholder={c?.name ?? t("settings.search_filter_label_placeholder")}
                           value={f.label}
                           onChange={(label) => update(f.key, label)}
                         />
                         <HStack gap={0}>
                           <IconButton
-                            label="Move up"
+                            label={t("settings.search_filter_move_up")}
                             icon={<ArrowUpIcon width={16} />}
                             variant="ghost"
                             size="sm"
@@ -266,7 +284,7 @@ export function SearchSettingsForm({
                             onClick={() => move(i, i - 1)}
                           />
                           <IconButton
-                            label="Move down"
+                            label={t("settings.search_filter_move_down")}
                             icon={<ArrowDownIcon width={16} />}
                             variant="ghost"
                             size="sm"
@@ -274,7 +292,7 @@ export function SearchSettingsForm({
                             onClick={() => move(i, i + 1)}
                           />
                           <IconButton
-                            label={`Remove ${c?.name ?? f.key}`}
+                            label={t("settings.search_filter_remove", { name: c?.name ?? f.key })}
                             icon={<XMarkIcon width={16} />}
                             variant="ghost"
                             size="sm"
@@ -290,7 +308,7 @@ export function SearchSettingsForm({
                     <VStack gap={2}>
                       <Divider />
                       <Text type="supporting" color="secondary">
-                        Add a filter
+                        {t("settings.search_filter_add")}
                       </Text>
                       <HStack gap={2} wrap="wrap">
                         {unused.map((c) => (
@@ -307,8 +325,7 @@ export function SearchSettingsForm({
                         ))}
                       </HStack>
                       <Text type="supporting" color="secondary">
-                        The number is how many of the scanned products have it. Leave a label blank
-                        to use the name shown.
+                        {t("settings.search_filter_add_hint")}
                       </Text>
                     </VStack>
                   )}
@@ -321,18 +338,14 @@ export function SearchSettingsForm({
             <VStack gap={4}>
               <VStack gap={1}>
                 <Text type="display-3" as="h2">
-                  Listings
+                  {t("settings.search_listings_title")}
                 </Text>
                 <Text type="supporting" color="secondary">
-                  Pick an option to show each of its values as its own result, with its own photo
-                  and price — like showing a T-shirt once per colour, each with its sizes. Up to{" "}
-                  {MAX_SPLIT}. Leave all unticked for one result per product.
+                  {t("settings.search_listings_description", { max: MAX_SPLIT })}
                 </Text>
               </VStack>
               {options.length === 0 ? (
-                <Text color="secondary">
-                  None of your products have options yet, so each product is one result.
-                </Text>
+                <Text color="secondary">{t("settings.search_listings_no_options")}</Text>
               ) : (
                 <VStack gap={3}>
                   {options.map((o) => {
@@ -341,10 +354,10 @@ export function SearchSettingsForm({
                       <CheckboxInput
                         key={o.key}
                         label={o.name}
-                        description={splitExample(o.name, o.values)}
+                        description={splitExample(t, o.name, o.values)}
                         value={checked}
                         isDisabled={!checked && split.length >= MAX_SPLIT}
-                        disabledMessage={`Up to ${MAX_SPLIT} options can split listings.`}
+                        disabledMessage={t("settings.search_listings_limit", { max: MAX_SPLIT })}
                         onChange={(on) =>
                           setSplit((before) =>
                             on ? [...before, o.name] : before.filter((s) => !same(s, o.name)),
@@ -357,8 +370,7 @@ export function SearchSettingsForm({
               )}
               {splitChanged && (
                 <Text type="supporting" color="secondary">
-                  Saving this rebuilds the whole search index in the background: results keep
-                  working, and the new listings appear as it catches up (see Search index).
+                  {t("settings.search_listings_rebuild_hint")}
                 </Text>
               )}
             </VStack>
@@ -370,14 +382,22 @@ export function SearchSettingsForm({
             <VStack gap={3}>
               <VStack gap={1}>
                 <Text type="display-3" as="h2">
-                  Preview
+                  {t("settings.search_preview_title")}
                 </Text>
                 <Text type="supporting" color="secondary">
-                  The filter panel shoppers see, with values from your products.
+                  {t("settings.search_preview_description")}
                 </Text>
               </VStack>
-              <PreviewGroup title="Price" values={[]} note="A range from the results" />
-              <PreviewGroup title="Availability" values={[]} note="In stock only" />
+              <PreviewGroup
+                title={t("common.price")}
+                values={[]}
+                note={t("settings.search_preview_price_note")}
+              />
+              <PreviewGroup
+                title={t("settings.search_preview_availability")}
+                values={[]}
+                note={t("settings.search_preview_availability_note")}
+              />
               {shown.map((f) => {
                 const c = candidate(f.key);
                 return (
@@ -390,7 +410,7 @@ export function SearchSettingsForm({
               })}
               {split.length > 0 && (
                 <Text type="supporting" color="secondary">
-                  Results: one per {split.join(" × ")} value of each product.
+                  {t("settings.search_preview_results", { options: split.join(" × ") })}
                 </Text>
               )}
             </VStack>
@@ -403,18 +423,22 @@ export function SearchSettingsForm({
 }
 
 /** "Red, Blue, Green and 4 more", or a note when the scan found none. */
-function sample(values: Counted[]): string {
-  if (values.length === 0) return "No values found on recent products";
-  const first = values.slice(0, 3).map((v) => v.value);
-  const more = values.length - first.length;
-  return more > 0 ? `${first.join(", ")} and ${more} more` : first.join(", ");
+function sample(t: SettingsT, format: Format, values: Counted[]): string {
+  if (values.length === 0) return t("settings.search_sample_none");
+  const first = format.list(
+    values.slice(0, 3).map((v) => v.value),
+    "unit",
+  );
+  const more = values.length - 3;
+  return more > 0 ? t("settings.search_sample_more", { values: first, count: more }) : first;
 }
 
 /** "A product in Red and Blue shows as 2 results." */
-function splitExample(name: string, values: Counted[]): string {
+function splitExample(t: SettingsT, name: string, values: Counted[]): string {
   const two = values.slice(0, 2).map((v) => v.value);
-  if (two.length < 2) return `One result per ${name.toLowerCase()} a product comes in.`;
-  return `A product in ${two[0]} and ${two[1]} shows as 2 results, one per ${name.toLowerCase()}.`;
+  const option = name.toLowerCase();
+  if (two.length < 2) return t("settings.search_split_example_one", { option });
+  return t("settings.search_split_example_two", { first: two[0], second: two[1], option });
 }
 
 /** One group of the mock filter panel: its title and up to 4 values with counts. */
@@ -427,6 +451,7 @@ function PreviewGroup({
   values: Counted[];
   note?: string;
 }) {
+  const t = useT<"settings">();
   return (
     <VStack gap={1}>
       <Text weight="medium">{title}</Text>
@@ -436,7 +461,7 @@ function PreviewGroup({
         </Text>
       ) : values.length === 0 ? (
         <Text type="supporting" color="secondary">
-          No values yet
+          {t("settings.search_preview_no_values")}
         </Text>
       ) : (
         <>
@@ -451,7 +476,7 @@ function PreviewGroup({
           ))}
           {values.length > 4 && (
             <Text type="supporting" color="secondary">
-              Show {values.length - 4} more
+              {t("settings.search_preview_show_more", { count: values.length - 4 })}
             </Text>
           )}
         </>

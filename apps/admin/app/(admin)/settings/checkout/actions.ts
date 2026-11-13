@@ -30,9 +30,7 @@ function problemsOf(error: { code: string; details?: unknown }): RuleProblems | 
 
 async function failed(error: { code: string; error: string; details?: unknown }): Promise<Result> {
   const problems = problemsOf(error);
-  return problems
-    ? { error: "Check the highlighted parts of the rule.", problems }
-    : { error: await describe(error) };
+  return { error: await describe(error), problems };
 }
 
 function refresh() {

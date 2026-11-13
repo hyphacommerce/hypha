@@ -22,8 +22,8 @@ export default async function NotificationsSettingsPage() {
       <VStack gap={5} maxWidth={960}>
         <PageHeader
           back={settingsCrumb(t)}
-          title="Notifications"
-          description="The emails your store sends: order confirmations and shipping updates to customers, new orders to staff, and staff account emails."
+          title={t("notifications.page_title")}
+          description={t("notifications.page_description")}
         />
         <Suspense fallback={<FormSkeleton cards={5} />}>
           <Notifications />
@@ -35,7 +35,8 @@ export default async function NotificationsSettingsPage() {
 
 async function Notifications() {
   const client = await sessionClient();
-  const [me, settings, templates] = await Promise.all([
+  const [t, me, settings, templates] = await Promise.all([
+    getT(),
     requireStaff(),
     loadNotificationSettings(),
     client.GET("/admin/notification-templates"),
@@ -44,8 +45,8 @@ async function Notifications() {
     return (
       <Banner
         status="info"
-        title="Your role can't see notifications"
-        description="Ask the store owner for the notifications:read scope."
+        title={t("notifications.no_access_title")}
+        description={t("notifications.no_access_description")}
       />
     );
   }

@@ -25,8 +25,8 @@ export default async function CheckoutSettingsPage() {
       <VStack gap={5} maxWidth={960}>
         <PageHeader
           back={settingsCrumb(t)}
-          title="Checkout"
-          description="Address verification and autocomplete, apps that validate carts, and rules on the shipping address and the cart: an error stops checkout with your message under the field, a warning only shows it."
+          title={t("checkout.page_title")}
+          description={t("checkout.page_description")}
         />
         <Suspense fallback={<CardSkeleton lines={6} />}>
           <AddressApps />
@@ -77,7 +77,8 @@ async function AddressApps() {
 
 async function Rules() {
   const client = await sessionClient();
-  const [me, rules, options] = await Promise.all([
+  const [t, me, rules, options] = await Promise.all([
+    getT(),
     requireStaff(),
     client.GET("/admin/checkout-rules"),
     loadRuleOptions(client),
@@ -86,8 +87,8 @@ async function Rules() {
     return (
       <Banner
         status="info"
-        title="Your role can't see checkout rules"
-        description="Ask the store owner for the checkout_rules:read scope."
+        title={t("checkout.rules_no_access_title")}
+        description={t("checkout.rules_no_access_description")}
       />
     );
   }

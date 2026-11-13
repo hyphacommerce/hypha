@@ -1,10 +1,15 @@
 // Checkout rules as the admin edits them: the form's state, its conversion to and from
 // the API's rule, the presets "Add rule" offers, and a sentence for each condition.
-// Shared by server and client components.
+// Shared by server and client components: what builds text takes the caller's translator
+// (and its `Format`, where it writes money or lists).
 
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
-import { type Currencies, formatMoney, moneyInput, parseMoney } from "./format";
+import { type Currencies, type Format, moneyInput, parseMoney } from "./format";
+import { hasKey } from "./keys.ts";
+import type { TFor } from "./messages";
+
+type CheckoutT = TFor<"checkout">;
 
 export type Rule = AdminSchemas["CheckoutRuleResponse"];
 export type Condition = AdminSchemas["RuleCondition"];
@@ -27,63 +32,111 @@ export type RuleOptions = {
   categories: Option[];
 };
 
-export const FIELDS: Option[] = [
-  { value: "line1", label: "Address line 1" },
-  { value: "line2", label: "Address line 2" },
-  { value: "city", label: "City" },
-  { value: "province", label: "Region" },
-  { value: "postal_code", label: "Postal code" },
-  { value: "country", label: "Country" },
-  { value: "company", label: "Company" },
-  { value: "first_name", label: "First name" },
-  { value: "last_name", label: "Last name" },
-  { value: "phone", label: "Phone" },
-  { value: "email", label: "Email" },
-];
+/** The fields a condition can read, as the picker lists them. */
+const FIELDS = [
+  "line1",
+  "line2",
+  "city",
+  "province",
+  "postal_code",
+  "country",
+  "company",
+  "first_name",
+  "last_name",
+  "phone",
+  "email",
+] as const;
 
-export const FLAGS: Option[] = [
-  { value: "po_box", label: "a PO box" },
-  { value: "military", label: "a military address (APO, FPO, DPO)" },
-  { value: "parcel_locker", label: "a parcel locker (Packstation)" },
-  { value: "non_latin", label: "written in a non-Latin script" },
-  { value: "residential", label: "residential (verification)" },
-  { value: "business", label: "a business (verification)" },
-  { value: "vacant", label: "vacant (verification)" },
-];
+/** What an address can be flagged as: by its format, then by verification. */
+const FLAGS = [
+  "po_box",
+  "military",
+  "parcel_locker",
+  "non_latin",
+  "residential",
+  "business",
+  "vacant",
+] as const;
 
-export const VERDICTS: Option[] = [
-  { value: "deliverable", label: "Deliverable" },
-  { value: "deliverable_with_fixes", label: "Deliverable with fixes" },
-  { value: "missing_subpremise", label: "Missing an apartment or unit" },
-  { value: "ambiguous", label: "Ambiguous" },
-  { value: "undeliverable", label: "Undeliverable" },
-  { value: "unknown", label: "Unknown (verification failed)" },
-];
+const VERDICTS = [
+  "deliverable",
+  "deliverable_with_fixes",
+  "missing_subpremise",
+  "ambiguous",
+  "undeliverable",
+  "unknown",
+] as const;
+
+type ConditionGroup = "fields" | "address" | "cart";
 
 /** Every kind of condition, grouped as the editor's picker shows them. */
-export const CONDITION_TYPES: { value: ConditionType; label: string; group: string }[] = [
-  { value: "field_missing", label: "A field is empty", group: "Fields" },
-  { value: "field_present", label: "A field isn't empty", group: "Fields" },
-  { value: "field_contains", label: "A field contains", group: "Fields" },
-  { value: "field_not_contains", label: "A field doesn't contain", group: "Fields" },
-  { value: "field_matches", label: "A field matches a pattern", group: "Fields" },
-  { value: "field_not_matches", label: "A field doesn't match a pattern", group: "Fields" },
-  { value: "field_longer_than", label: "A field is longer than", group: "Fields" },
-  { value: "field_shorter_than", label: "A field is shorter than", group: "Fields" },
-  { value: "postal_code_in", label: "The postal code is in", group: "Address" },
-  { value: "postal_code_not_in", label: "The postal code isn't in", group: "Address" },
-  { value: "region_in", label: "The region is one of", group: "Address" },
-  { value: "region_not_in", label: "The region isn't one of", group: "Address" },
-  { value: "address_is", label: "The address is", group: "Address" },
-  { value: "address_is_not", label: "The address isn't", group: "Address" },
-  { value: "verification_is", label: "Verification says", group: "Address" },
-  { value: "cart_contains", label: "The cart contains", group: "Cart" },
-  { value: "cart_not_contains", label: "The cart doesn't contain", group: "Cart" },
-  { value: "subtotal_at_least", label: "The subtotal is at least", group: "Cart" },
-  { value: "subtotal_below", label: "The subtotal is below", group: "Cart" },
-  { value: "weight_at_least", label: "The weight is at least", group: "Cart" },
-  { value: "weight_below", label: "The weight is below", group: "Cart" },
+export const CONDITION_TYPES: { value: ConditionType; group: ConditionGroup }[] = [
+  { value: "field_missing", group: "fields" },
+  { value: "field_present", group: "fields" },
+  { value: "field_contains", group: "fields" },
+  { value: "field_not_contains", group: "fields" },
+  { value: "field_matches", group: "fields" },
+  { value: "field_not_matches", group: "fields" },
+  { value: "field_longer_than", group: "fields" },
+  { value: "field_shorter_than", group: "fields" },
+  { value: "postal_code_in", group: "address" },
+  { value: "postal_code_not_in", group: "address" },
+  { value: "region_in", group: "address" },
+  { value: "region_not_in", group: "address" },
+  { value: "address_is", group: "address" },
+  { value: "address_is_not", group: "address" },
+  { value: "verification_is", group: "address" },
+  { value: "cart_contains", group: "cart" },
+  { value: "cart_not_contains", group: "cart" },
+  { value: "subtotal_at_least", group: "cart" },
+  { value: "subtotal_below", group: "cart" },
+  { value: "weight_at_least", group: "cart" },
+  { value: "weight_below", group: "cart" },
 ];
+
+/** An address field's name; one this admin doesn't know as it is. */
+export function fieldLabel(t: CheckoutT, field: string): string {
+  const key = `checkout.field_${field}`;
+  return hasKey(t, key) ? t(key) : field;
+}
+
+/** What an address is flagged as, to follow "The address is"; an unknown flag as it is. */
+export function flagLabel(t: CheckoutT, flag: string): string {
+  const key = `checkout.flag_${flag}`;
+  return hasKey(t, key) ? t(key) : flag;
+}
+
+/** A verdict as it reads inside a sentence ("Verification says …"); an unknown one as it is. */
+export function verdictPhrase(t: CheckoutT, verdict: string): string {
+  const key = `checkout.verdict_inline_${verdict}`;
+  return hasKey(t, key) ? t(key) : verdict;
+}
+
+/** The fields a condition can read, for the picker. */
+export function fieldOptions(t: CheckoutT): Option[] {
+  return FIELDS.map((value) => ({ value, label: t(`checkout.field_${value}`) }));
+}
+
+/** What an address can be, for the picker. */
+export function flagOptions(t: CheckoutT): Option[] {
+  return FLAGS.map((value) => ({ value, label: t(`checkout.flag_${value}`) }));
+}
+
+/** The verdicts a rule can name, for the picker. */
+export function verdictOptions(t: CheckoutT): Option[] {
+  return VERDICTS.map((value) => ({ value, label: t(`checkout.verdict_${value}`) }));
+}
+
+/** Every kind of condition under its group's name, for the picker. */
+export function conditionTypeOptions(
+  t: CheckoutT,
+): { value: ConditionType; label: string; group: string }[] {
+  return CONDITION_TYPES.map(({ value, group }) => ({
+    value,
+    label: t(`checkout.condition_${value}`),
+    group: t(`checkout.condition_group_${group}`),
+  }));
+}
 
 /**
  * One condition as the form edits it: every kind's fields at once, lists as text (one
@@ -309,50 +362,65 @@ export function formOf(rule: Rule, currencies: Currencies): RuleForm {
 }
 
 /** Where a message may point: the cart's paths a rule can name. */
-export const PATHS: Option[] = [
-  { value: "", label: "Where the rule is about (default)" },
-  { value: "$", label: "The whole cart (top of checkout)" },
-  { value: "$.email", label: "Email" },
-  { value: "$.shipping_address", label: "The shipping address" },
-  ...FIELDS.filter((f) => f.value !== "email").map((f) => ({
-    value: `$.shipping_address.${f.value}`,
-    label: `Address: ${f.label}`,
-  })),
-  { value: "$.shipping_groups[0]", label: "The shipping options" },
-];
+export function pathOptions(t: CheckoutT): Option[] {
+  return [
+    { value: "", label: t("checkout.path_default") },
+    { value: "$", label: t("checkout.path_cart") },
+    { value: "$.email", label: t("checkout.path_email") },
+    { value: "$.shipping_address", label: t("checkout.path_shipping_address") },
+    ...FIELDS.filter((field) => field !== "email").map((field) => ({
+      value: `$.shipping_address.${field}`,
+      label: t("checkout.path_address_field", { field: t(`checkout.field_${field}`) }),
+    })),
+    { value: "$.shipping_groups[0]", label: t("checkout.path_shipping_options") },
+  ];
+}
 
 function label(options: Option[], value: string): string {
   return options.find((o) => o.value === value)?.label ?? value;
 }
 
-function names(ids: readonly string[], options: Option[]): string {
-  return ids.map((id) => label(options, id)).join(", ");
+/** "A, B, C": the names of `ids` among `options`, an ID for one that isn't there. */
+function names(format: Format, ids: readonly string[], options: Option[]): string {
+  return format.list(
+    ids.map((id) => label(options, id)),
+    "unit",
+  );
 }
 
-/** A condition in a sentence: "Phone is empty", "Postal code starts with 35, 38". */
+/** A condition in a sentence: "Phone is empty", "Postal code is 35…, 38…". */
 export function conditionSummary(
+  t: CheckoutT,
+  format: Format,
   c: Condition,
   options: Pick<RuleOptions, "categories">,
-  currencies: Currencies,
 ): string {
-  const field = "field" in c ? label(FIELDS, c.field) : "";
+  const field = "field" in c ? fieldLabel(t, c.field) : "";
+  const quoted = (values: readonly string[]) =>
+    values.map((value) => t("checkout.summary_quoted", { value }));
   switch (c.type) {
     case "field_missing":
-      return `${field} is empty`;
+      return t("checkout.summary_field_missing", { field });
     case "field_present":
-      return `${field} isn't empty`;
+      return t("checkout.summary_field_present", { field });
     case "field_matches":
-      return `${field} matches /${c.pattern}/`;
+      return t("checkout.summary_field_matches", { field, pattern: c.pattern });
     case "field_not_matches":
-      return `${field} doesn't match /${c.pattern}/`;
+      return t("checkout.summary_field_not_matches", { field, pattern: c.pattern });
     case "field_contains":
-      return `${field} contains ${c.values.map((v) => `“${v}”`).join(" or ")}`;
+      return t("checkout.summary_field_contains", {
+        field,
+        values: format.list(quoted(c.values), "disjunction"),
+      });
     case "field_not_contains":
-      return `${field} contains none of ${c.values.map((v) => `“${v}”`).join(", ")}`;
+      return t("checkout.summary_field_not_contains", {
+        field,
+        values: format.list(quoted(c.values), "unit"),
+      });
     case "field_longer_than":
-      return `${field} is longer than ${c.length} characters`;
+      return t("checkout.summary_field_longer_than", { field, length: c.length });
     case "field_shorter_than":
-      return `${field} is shorter than ${c.length} characters`;
+      return t("checkout.summary_field_shorter_than", { field, length: c.length });
     case "postal_code_in":
     case "postal_code_not_in": {
       const parts = [
@@ -360,61 +428,115 @@ export function conditionSummary(
         ...(c.ranges ?? []).map((r) => `${r.from}–${r.to}`),
         ...(c.codes ?? []),
       ];
-      const list = parts.length > 6 ? `${parts.slice(0, 6).join(", ")}, …` : parts.join(", ");
-      return `Postal code ${c.type === "postal_code_in" ? "is" : "isn't"} ${list}`;
+      const list = format.list(parts.length > 6 ? [...parts.slice(0, 6), "…"] : parts, "unit");
+      return c.type === "postal_code_in"
+        ? t("checkout.summary_postal_code_in", { list })
+        : t("checkout.summary_postal_code_not_in", { list });
     }
     case "region_in":
-      return `Region is ${c.regions.join(", ")}`;
+      return t("checkout.summary_region_in", { list: format.list(c.regions, "unit") });
     case "region_not_in":
-      return `Region isn't ${c.regions.join(", ")}`;
+      return t("checkout.summary_region_not_in", { list: format.list(c.regions, "unit") });
     case "address_is":
-      return `The address is ${label(FLAGS, c.flag)}`;
+      return t("checkout.summary_address_is", { flag: flagLabel(t, c.flag) });
     case "address_is_not":
-      return `The address isn't ${label(FLAGS, c.flag)}`;
+      return t("checkout.summary_address_is_not", { flag: flagLabel(t, c.flag) });
     case "verification_is":
-      return `Verification says ${c.verdicts.map((v) => label(VERDICTS, v).toLowerCase()).join(" or ")}`;
+      return t("checkout.summary_verification_is", {
+        verdicts: format.list(
+          c.verdicts.map((v) => verdictPhrase(t, v)),
+          "disjunction",
+        ),
+      });
     case "cart_contains":
     case "cart_not_contains": {
       const products = (c.products ?? []).length;
-      const listed = [
-        ...(products > 0 ? [`${products} chosen product${products === 1 ? "" : "s"}`] : []),
-        ...(c.categories ?? []).map((id) => label(options.categories, id)),
-      ].join(" or ");
-      return `The cart ${c.type === "cart_contains" ? "contains" : "doesn't contain"} ${listed}`;
+      const list = format.list(
+        [
+          ...(products > 0 ? [t("checkout.summary_chosen_products", { count: products })] : []),
+          ...(c.categories ?? []).map((id) => label(options.categories, id)),
+        ],
+        "disjunction",
+      );
+      return c.type === "cart_contains"
+        ? t("checkout.summary_cart_contains", { list })
+        : t("checkout.summary_cart_not_contains", { list });
     }
     case "subtotal_at_least":
-      return `Subtotal is at least ${c.amounts.map((m) => formatMoney(m, currencies)).join(" / ")}`;
+      return t("checkout.summary_subtotal_at_least", {
+        amounts: c.amounts.map((m) => format.money(m)).join(" / "),
+      });
     case "subtotal_below":
-      return `Subtotal is below ${c.amounts.map((m) => formatMoney(m, currencies)).join(" / ")}`;
+      return t("checkout.summary_subtotal_below", {
+        amounts: c.amounts.map((m) => format.money(m)).join(" / "),
+      });
     case "weight_at_least":
-      return `What's shipped weighs at least ${c.grams} g`;
+      return t("checkout.summary_weight_at_least", { grams: String(c.grams) });
     case "weight_below":
-      return `What's shipped weighs less than ${c.grams} g`;
+      return t("checkout.summary_weight_below", { grams: String(c.grams) });
   }
 }
 
+/** A rule's conditions in one sentence: "A and B and C", since each may hold a list. */
+export function conditionsSummary(
+  t: CheckoutT,
+  format: Format,
+  conditions: readonly Condition[],
+  options: Pick<RuleOptions, "categories">,
+): string {
+  const [first = "", ...rest] = conditions.map((c) => conditionSummary(t, format, c, options));
+  return rest.reduce((so, next) => t("checkout.summary_both", { first: so, second: next }), first);
+}
+
 /** Where a rule applies, in a sentence; empty when everywhere. */
-export function appliesSummary(rule: Rule, options: RuleOptions): string {
+export function appliesSummary(
+  t: CheckoutT,
+  format: Format,
+  rule: Rule,
+  options: RuleOptions,
+): string {
   const to = rule.applies_to;
   const parts: string[] = [];
   const countries = to.countries ?? { mode: "all" };
   if (countries.mode !== "all" && "codes" in countries) {
-    const list = names(countries.codes, options.countries);
-    parts.push(countries.mode === "include" ? `Only ${list}` : `Not ${list}`);
+    const list = names(format, countries.codes, options.countries);
+    parts.push(
+      countries.mode === "include"
+        ? t("checkout.applies_only", { list })
+        : t("checkout.applies_not", { list }),
+    );
   }
-  if ((to.markets ?? []).length > 0) parts.push(names(to.markets ?? [], options.markets));
-  if ((to.channels ?? []).length > 0) parts.push(names(to.channels ?? [], options.channels));
+  if ((to.markets ?? []).length > 0) parts.push(names(format, to.markets ?? [], options.markets));
+  if ((to.channels ?? []).length > 0) {
+    parts.push(names(format, to.channels ?? [], options.channels));
+  }
   if ((to.shipping_options ?? []).length > 0) {
-    parts.push(`with ${names(to.shipping_options ?? [], options.shippingOptions)}`);
+    parts.push(
+      t("checkout.applies_with", {
+        list: names(format, to.shipping_options ?? [], options.shippingOptions),
+      }),
+    );
   }
   return parts.join(" · ");
 }
 
-/** A preset "Add rule" offers: a filled-in rule the merchant then edits. */
+/** A preset's stable key: `checkout.preset_<key>_title` and `…_description` name it. */
+export type PresetKey =
+  | "no_po_boxes"
+  | "no_military"
+  | "house_number"
+  | "phone_required"
+  | "line_length"
+  | "canary_islands"
+  | "undeliverable";
+
+/**
+ * A preset "Add rule" offers: a filled-in rule the merchant then edits. The rule's name
+ * and the message shoppers read are stored content, so they stay English whatever the
+ * staff member's language: the merchant rewrites them in the store's.
+ */
 export type Preset = {
-  key: string;
-  title: string;
-  description: string;
+  key: PresetKey;
   rule: () => RuleForm;
 };
 
@@ -428,8 +550,6 @@ const condition = (type: ConditionType, patch: Partial<ConditionForm>): Conditio
 export const PRESETS: Preset[] = [
   {
     key: "no_po_boxes",
-    title: "No PO boxes",
-    description: "For every option, or only couriers that can't deliver to them.",
     rule: () =>
       rule({
         name: "No PO boxes",
@@ -440,8 +560,6 @@ export const PRESETS: Preset[] = [
   },
   {
     key: "no_military",
-    title: "No military addresses",
-    description: "APO, FPO and DPO addresses, which only the postal service delivers to.",
     rule: () =>
       rule({
         name: "No military addresses",
@@ -452,8 +570,6 @@ export const PRESETS: Preset[] = [
   },
   {
     key: "house_number",
-    title: "House number required",
-    description: "The first address line must have a number (the Netherlands, Germany, Belgium).",
     rule: () =>
       rule({
         name: "House number required",
@@ -466,8 +582,6 @@ export const PRESETS: Preset[] = [
   },
   {
     key: "phone_required",
-    title: "Phone required",
-    description: "For the shipping options whose carrier calls ahead.",
     rule: () =>
       rule({
         name: "Phone required",
@@ -478,8 +592,6 @@ export const PRESETS: Preset[] = [
   },
   {
     key: "line_length",
-    title: "Lines of at most 35 characters",
-    description: "What UPS and FedEx print on a label.",
     rule: () =>
       rule({
         name: "Address lines of at most 35 characters",
@@ -490,8 +602,6 @@ export const PRESETS: Preset[] = [
   },
   {
     key: "canary_islands",
-    title: "No Canary Islands, Ceuta or Melilla",
-    description: "Spanish postal codes outside the EU's VAT area.",
     rule: () =>
       rule({
         name: "No Canary Islands, Ceuta or Melilla",
@@ -504,8 +614,6 @@ export const PRESETS: Preset[] = [
   },
   {
     key: "undeliverable",
-    title: "Refuse undeliverable addresses",
-    description: "When the verification app finds no such address.",
     rule: () =>
       rule({
         name: "Refuse undeliverable addresses",
@@ -525,5 +633,3 @@ export function presetOf(key: string | undefined): Preset | undefined {
 export function marketCurrencies(options: RuleOptions): string[] {
   return [...new Set(options.markets.map((m) => m.currency))].toSorted();
 }
-
-export { formatMoney };

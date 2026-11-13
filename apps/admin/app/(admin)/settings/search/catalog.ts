@@ -4,7 +4,9 @@
 // types, whole products for options and tags), so a large catalog costs a few requests,
 // not one per product.
 
+import { getFormat } from "@/lib/get-format";
 import type { sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 
 type Client = Awaited<ReturnType<typeof sessionClient>>;
 
@@ -36,6 +38,12 @@ const DETAILS = 60;
 /** Counts values ignoring case, keeping the first spelling, most used first. */
 class Tally {
   private counts = new Map<string, Counted>();
+  private compare: (a: string, b: string) => number;
+
+  /** `compare` orders values used equally often: the staff member's language's order. */
+  constructor(compare: (a: string, b: string) => number) {
+    this.compare = compare;
+  }
 
   add(value: string | null | undefined) {
     const v = value?.trim();
@@ -48,7 +56,7 @@ class Tally {
 
   sorted(): Counted[] {
     return [...this.counts.values()].toSorted(
-      (a, b) => b.count - a.count || a.value.localeCompare(b.value),
+      (a, b) => b.count - a.count || this.compare(a.value, b.value),
     );
   }
 }
@@ -59,7 +67,7 @@ const FACET_TYPES = new Set(["text", "choice", "boolean", "integer"]);
 const FIELD_VALUES = 50;
 
 async function facetFields(client: Client): Promise<SearchCatalog["fields"]> {
-  const { data } = await client.GET("/admin/custom-field-definitions");
+  const [t, { data }] = await Promise.all([getT(), client.GET("/admin/custom-field-definitions")]);
   const eligible = (data?.items ?? []).filter(
     (d) =>
       (d.owner_type === "product" || d.owner_type === "variant") &&
@@ -79,8 +87,8 @@ async function facetFields(client: Client): Promise<SearchCatalog["fields"]> {
       const labels = new Map<string, string>(
         d.type === "boolean"
           ? [
-              ["true", "Yes"],
-              ["false", "No"],
+              ["true", t("common.yes")],
+              ["false", t("common.no")],
             ]
           : (d.validations.choices ?? []).map((c) => [c.key, c.label]),
       );
@@ -99,9 +107,11 @@ async function facetFields(client: Client): Promise<SearchCatalog["fields"]> {
 }
 
 export async function loadSearchCatalog(client: Client): Promise<SearchCatalog> {
+  const format = await getFormat();
+  const compare = (a: string, b: string) => format.compare(a, b);
   const ids: string[] = [];
-  const vendors = new Tally();
-  const productTypes = new Tally();
+  const vendors = new Tally(compare);
+  const productTypes = new Tally(compare);
   let cursor: string | undefined;
   let hasMore = false;
   while (ids.length < SUMMARIES) {
@@ -126,8 +136,8 @@ export async function loadSearchCatalog(client: Client): Promise<SearchCatalog> 
         client.GET("/admin/products/{id}", { params: { path: { id } } }).then((r) => r.data),
       ),
   );
-  const tags = new Tally();
-  const optionNames = new Tally();
+  const tags = new Tally(compare);
+  const optionNames = new Tally(compare);
   const optionValues = new Map<string, Tally>();
   for (const product of details) {
     if (!product) continue;
@@ -135,7 +145,7 @@ export async function loadSearchCatalog(client: Client): Promise<SearchCatalog> 
     for (const option of product.options) {
       optionNames.add(option.name);
       const key = option.name.trim().toLowerCase();
-      const values = optionValues.get(key) ?? new Tally();
+      const values = optionValues.get(key) ?? new Tally(compare);
       for (const v of option.values) values.add(v.label);
       optionValues.set(key, values);
     }

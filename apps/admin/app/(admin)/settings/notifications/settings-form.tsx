@@ -19,6 +19,7 @@ import { useState, useTransition } from "react";
 import { ImagePicker } from "@/components/image-picker";
 import { SaveBar } from "@/components/save-bar";
 import { FOOTER_MAX, STAFF_RECIPIENTS_MAX } from "@/lib/notifications";
+import { useT } from "@/lib/use-t";
 
 import { type SettingsPatch, updateNotificationSettings } from "./actions";
 
@@ -55,6 +56,7 @@ export function NotificationSettingsForm({
   settings: Settings;
   canWrite: boolean;
 }) {
+  const t = useT<"notifications">();
   const [form, setForm] = useState(() => draftOf(settings));
   const [error, setError] = useState<string>();
   const [isSaved, setIsSaved] = useState(false);
@@ -102,15 +104,15 @@ export function NotificationSettingsForm({
           setError(undefined);
         }}
       />
-      {isSaved && !isDirty && <Banner status="success" title="Saved." />}
+      {isSaved && !isDirty && <Banner status="success" title={t("notifications.settings_saved")} />}
       <Card>
         <VStack gap={4}>
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Branding
+              {t("notifications.branding_title")}
             </Text>
             <Text type="supporting" color="secondary">
-              Every email shows these, through the email layout.
+              {t("notifications.branding_description")}
             </Text>
           </VStack>
           <LogoField
@@ -119,33 +121,37 @@ export function NotificationSettingsForm({
             canWrite={canWrite}
           />
           <VStack gap={1}>
-            <Text type="label">Accent colour</Text>
+            <Text type="label">{t("notifications.accent_label")}</Text>
             <HStack gap={2} vAlign="center">
               <input
                 type="color"
-                aria-label="Pick the accent colour"
+                aria-label={t("notifications.accent_picker_label")}
                 value={isAccentValid ? form.accent.toLowerCase() : "#000000"}
                 disabled={!canWrite}
                 onChange={(e) => set({ accent: e.target.value })}
                 className="colour-swatch"
               />
               <TextInput
-                label="Accent colour"
+                label={t("notifications.accent_label")}
                 isLabelHidden
                 width={140}
                 value={form.accent}
                 isDisabled={!canWrite}
-                status={isAccentValid ? undefined : { type: "error", message: "Like #1a2b3c" }}
+                status={
+                  isAccentValid
+                    ? undefined
+                    : { type: "error", message: t("notifications.accent_invalid") }
+                }
                 onChange={(accent) => set({ accent })}
               />
             </HStack>
             <Text type="supporting" color="secondary">
-              Buttons and links.
+              {t("notifications.accent_hint")}
             </Text>
           </VStack>
           <TextArea
-            label="Footer"
-            description="Plain text under every email: your address, legal lines."
+            label={t("notifications.footer_label")}
+            description={t("notifications.footer_description")}
             isOptional
             maxLength={FOOTER_MAX}
             rows={3}
@@ -159,25 +165,25 @@ export function NotificationSettingsForm({
         <VStack gap={4}>
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Sender
+              {t("notifications.sender_title")}
             </Text>
             <Text type="supporting" color="secondary">
-              The from address is the deployment&apos;s ({settings.from}); the name goes with it.
+              {t("notifications.sender_description", { from: settings.from })}
             </Text>
           </VStack>
           <div className="form-grid">
             <TextInput
-              label="Sender name"
-              description="Blank: the store's name."
+              label={t("notifications.sender_name_label")}
+              description={t("notifications.sender_name_description")}
               isOptional
               value={form.senderName}
               isDisabled={!canWrite}
               onChange={(senderName) => set({ senderName })}
             />
             <TextInput
-              label="Reply-to"
-              description="Where customers' replies go."
-              placeholder="support@example.com"
+              label={t("notifications.reply_to_label")}
+              description={t("notifications.reply_to_description")}
+              placeholder={t("notifications.reply_to_placeholder")}
               isOptional
               value={form.replyTo}
               isDisabled={!canWrite}
@@ -190,19 +196,21 @@ export function NotificationSettingsForm({
         <VStack gap={4}>
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Staff recipients
+              {t("notifications.recipients_title")}
             </Text>
             <Text type="supporting" color="secondary">
-              Who gets the New order email. Up to {STAFF_RECIPIENTS_MAX} addresses.
+              {t("notifications.recipients_description", { max: STAFF_RECIPIENTS_MAX })}
             </Text>
           </VStack>
-          {form.recipients.length === 0 && <Text color="secondary">Nobody yet.</Text>}
+          {form.recipients.length === 0 && (
+            <Text color="secondary">{t("notifications.recipients_empty")}</Text>
+          )}
           {form.recipients.map((recipient, index) => (
             <HStack key={recipient.id} gap={2} vAlign="center">
               <TextInput
-                label={`Recipient ${index + 1}`}
+                label={t("notifications.recipient_label", { number: index + 1 })}
                 isLabelHidden
-                placeholder="orders@example.com"
+                placeholder={t("notifications.recipient_placeholder")}
                 width="100%"
                 value={recipient.email}
                 isDisabled={!canWrite}
@@ -210,7 +218,11 @@ export function NotificationSettingsForm({
               />
               {canWrite && (
                 <IconButton
-                  label={`Remove ${recipient.email || "recipient"}`}
+                  label={
+                    recipient.email
+                      ? t("notifications.recipient_remove", { email: recipient.email })
+                      : t("notifications.recipient_remove_blank")
+                  }
                   icon={<TrashIcon />}
                   size="sm"
                   variant="ghost"
@@ -224,7 +236,7 @@ export function NotificationSettingsForm({
           {canWrite && (
             <HStack>
               <Button
-                label="Add recipient"
+                label={t("notifications.recipient_add")}
                 variant="secondary"
                 isDisabled={form.recipients.length >= STAFF_RECIPIENTS_MAX}
                 onClick={() =>
@@ -241,18 +253,16 @@ export function NotificationSettingsForm({
         <VStack gap={4}>
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Order link
+              {t("notifications.order_link_title")}
             </Text>
             <Text type="supporting" color="secondary">
-              The customer&apos;s order page, linked from their emails. {"{order}"} becomes the
-              order&apos;s ID and {"{token}"} its access token, which lets the page show the order
-              on any device. Blank: emails link to no order.
+              {t("notifications.order_link_description")}
             </Text>
           </VStack>
           <TextInput
-            label="Order page URL"
+            label={t("notifications.order_link_label")}
             isOptional
-            placeholder="https://shop.example.com/order/{order}?token={token}"
+            placeholder={t("notifications.order_link_placeholder")}
             value={form.orderUrl}
             isDisabled={!canWrite}
             onChange={(orderUrl) => set({ orderUrl })}
@@ -273,6 +283,7 @@ function LogoField({
   hasLogo: boolean;
   canWrite: boolean;
 }) {
+  const t = useT<"notifications">();
   const [isPicking, setIsPicking] = useState(false);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -287,24 +298,23 @@ function LogoField({
     <VStack gap={2}>
       <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
         <VStack gap={0.5}>
-          <Text type="label">Logo</Text>
+          <Text type="label">{t("notifications.logo_label")}</Text>
           <Text type="supporting" color="secondary">
-            A public image from the media library. It can&apos;t be deleted there while it&apos;s
-            the logo.
+            {t("notifications.logo_description")}
           </Text>
         </VStack>
         {canWrite && (
           <HStack gap={2}>
             {hasLogo && (
               <Button
-                label="Remove"
+                label={t("common.remove")}
                 variant="ghost"
                 isLoading={isPending && !isPicking}
                 onClick={() => setLogo(null)}
               />
             )}
             <Button
-              label={hasLogo ? "Change" : "Pick from library"}
+              label={hasLogo ? t("common.change") : t("notifications.logo_pick")}
               variant="secondary"
               onClick={() => setIsPicking(true)}
             />
@@ -314,9 +324,11 @@ function LogoField({
       {error && <Banner status="error" title={error} />}
       {logoUrl ? (
         // A plain <img>: the media URLs resize, so no Next.js image pipeline.
-        <img src={logoUrl} alt="The emails' logo" className="email-logo" />
+        <img src={logoUrl} alt={t("notifications.logo_alt")} className="email-logo" />
       ) : (
-        <Text color="secondary">{hasLogo ? "Media storage isn't set up." : "No logo."}</Text>
+        <Text color="secondary">
+          {hasLogo ? t("notifications.logo_no_storage") : t("notifications.logo_none")}
+        </Text>
       )}
       {isPicking && (
         <ImagePicker isSaving={isPending} onPick={setLogo} onClose={() => setIsPicking(false)} />

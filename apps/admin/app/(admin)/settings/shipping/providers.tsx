@@ -23,6 +23,9 @@ import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { KeyIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { useState, useTransition } from "react";
 
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
+
 import {
   createProvider,
   deleteProvider,
@@ -46,6 +49,7 @@ type Provider = RateApp;
  * rotated.
  */
 export function ProvidersCard({ providers }: { providers: Provider[] }) {
+  const t = useT<"shipping">();
   const [isAdding, setIsAdding] = useState(false);
   const [secret, setSecret] = useState<{ providerKey: string; secret: string }>();
   const [message, setMessage] = useState<Message>();
@@ -56,13 +60,17 @@ export function ProvidersCard({ providers }: { providers: Provider[] }) {
         <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Rate apps
+              {t("shipping.apps_title")}
             </Text>
             <Text type="supporting" color="secondary">
-              Services that quote live prices: carriers, or your own code in any language.
+              {t("shipping.apps_description")}
             </Text>
           </VStack>
-          <Button label="Add rate app" variant="secondary" onClick={() => setIsAdding(true)} />
+          <Button
+            label={t("shipping.apps_add")}
+            variant="secondary"
+            onClick={() => setIsAdding(true)}
+          />
         </HStack>
         {message && (
           <Banner
@@ -72,14 +80,14 @@ export function ProvidersCard({ providers }: { providers: Provider[] }) {
           />
         )}
         {providers.length === 0 ? (
-          <Text color="secondary">None yet. Built-in rates need no app.</Text>
+          <Text color="secondary">{t("shipping.apps_empty")}</Text>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHeaderCell>App</TableHeaderCell>
-                <TableHeaderCell>Callback</TableHeaderCell>
-                <TableHeaderCell>On</TableHeaderCell>
+                <TableHeaderCell>{t("common.app")}</TableHeaderCell>
+                <TableHeaderCell>{t("shipping.apps_column_callback")}</TableHeaderCell>
+                <TableHeaderCell>{t("common.on")}</TableHeaderCell>
                 <TableHeaderCell>
                   <span />
                 </TableHeaderCell>
@@ -124,6 +132,8 @@ function ProviderRow({
   onSecret: (secret: string) => void;
   onMessage: (message?: Message) => void;
 }) {
+  const t = useT<"shipping">();
+  const format = useFormat();
   const setError = (error?: string) =>
     onMessage(error ? { text: error, isError: true } : undefined);
   // Both actions break a live app at once, so each asks first.
@@ -140,8 +150,14 @@ function ProviderRow({
         isError: false,
         text:
           services.length === 0
-            ? `${provider.name} answered, with no services.`
-            : `${provider.name} answered: ${services.map((s) => `${s.name} (${s.code})`).join(", ")}.`,
+            ? t("shipping.app_answered_none", { app: provider.name })
+            : t("shipping.app_answered", {
+                app: provider.name,
+                services: format.list(
+                  services.map((s) => `${s.name} (${s.code})`),
+                  "unit",
+                ),
+              }),
       });
     });
 
@@ -159,14 +175,14 @@ function ProviderRow({
         <VStack gap={1}>
           <Text type="code">{provider.callback_url}</Text>
           <HStack gap={1}>
-            <Badge label={`${provider.timeout_ms} ms`} />
+            <Badge label={t("shipping.app_timeout", { ms: String(provider.timeout_ms) })} />
           </HStack>
         </VStack>
       </TableCell>
       <TableCell>
         {provider.enabled !== null && (
           <Switch
-            label={`Use ${provider.name} (its webhooks too)`}
+            label={t("shipping.app_use", { app: provider.name })}
             isLabelHidden
             size="sm"
             value={provider.enabled}
@@ -181,13 +197,13 @@ function ProviderRow({
           {confirming === "delete" ? (
             <>
               <Button
-                label="Cancel"
+                label={t("common.cancel")}
                 size="sm"
                 variant="ghost"
                 onClick={() => setConfirming(undefined)}
               />
               <Button
-                label="Stop using"
+                label={t("shipping.app_stop_using")}
                 size="sm"
                 variant="destructive"
                 isLoading={isPending}
@@ -202,16 +218,16 @@ function ProviderRow({
           ) : confirming === "rotate" ? (
             <>
               <Text type="supporting" color="secondary">
-                The current secret stops working at once.
+                {t("shipping.app_rotate_warning")}
               </Text>
               <Button
-                label="Cancel"
+                label={t("common.cancel")}
                 size="sm"
                 variant="ghost"
                 onClick={() => setConfirming(undefined)}
               />
               <Button
-                label="New secret"
+                label={t("shipping.app_new_secret")}
                 size="sm"
                 variant="destructive"
                 isLoading={isPending}
@@ -228,23 +244,23 @@ function ProviderRow({
           ) : (
             <>
               <Button
-                label="Test callback"
+                label={t("shipping.app_test")}
                 size="sm"
                 variant="secondary"
                 isLoading={isTesting}
                 onClick={test}
               />
               <IconButton
-                label={`New secret for ${provider.name}`}
+                label={t("shipping.app_new_secret_for", { app: provider.name })}
                 icon={<KeyIcon />}
                 size="sm"
                 variant="ghost"
-                tooltip="New secret: the current one stops working at once."
+                tooltip={t("shipping.app_new_secret_tooltip")}
                 isDisabled={isPending}
                 onClick={() => setConfirming("rotate")}
               />
               <IconButton
-                label={`Stop using ${provider.name} for rates`}
+                label={t("shipping.app_stop_using_for_rates", { app: provider.name })}
                 icon={<TrashIcon />}
                 size="sm"
                 variant="ghost"
@@ -265,6 +281,7 @@ function AddProviderDialog({
   onClose: () => void;
   onCreated: (key: string, secret: string) => void;
 }) {
+  const t = useT<"shipping">();
   const [name, setName] = useState("");
   const [key, setKey] = useState<string>();
   const [callbackUrl, setCallbackUrl] = useState("");
@@ -282,8 +299,7 @@ function AddProviderDialog({
   const submit = () => {
     if (!isComplete) return;
     const timeoutMs = Number(timeout);
-    if (!Number.isInteger(timeoutMs))
-      return setError("Enter the timeout in milliseconds, like 3000.");
+    if (!Number.isInteger(timeoutMs)) return setError(t("shipping.app_timeout_invalid"));
     startTransition(async () => {
       const result = await createProvider({ key: shownKey, name, callbackUrl, timeoutMs });
       if (result.error) setError(result.error);
@@ -296,37 +312,42 @@ function AddProviderDialog({
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={520} purpose="form">
       <DialogHeader
-        title="Add rate app"
-        subtitle="Hypha POSTs each rate request to the callback, signed with the app's secret: a new app's is shown next."
+        title={t("shipping.app_dialog_title")}
+        subtitle={t("shipping.app_dialog_subtitle")}
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
-        <TextInput label="Name" placeholder="Courier" value={name} onChange={setName} />
         <TextInput
-          label="Key"
-          description="How options name it: app_ and lowercase letters, digits and _. Can't change later. An existing app's key adds rates to that app."
+          label={t("common.name")}
+          placeholder={t("shipping.app_name_placeholder")}
+          value={name}
+          onChange={setName}
+        />
+        <TextInput
+          label={t("common.key")}
+          description={t("shipping.app_key_description")}
           value={shownKey}
           onChange={setKey}
         />
         <TextInput
-          label="Callback URL"
-          description="https://, or http://localhost while developing."
-          placeholder="https://rates.example.com/hypha"
+          label={t("shipping.app_callback_label")}
+          description={t("shipping.app_callback_description")}
+          placeholder={t("shipping.app_callback_placeholder")}
           value={callbackUrl}
           onChange={setCallbackUrl}
           onEnter={submit}
         />
         <TextInput
-          label="Timeout (ms)"
-          description="Slower answers count as failures, and the zone's backup options show."
+          label={t("shipping.app_timeout_label")}
+          description={t("shipping.app_timeout_description")}
           value={timeout}
           onChange={setTimeoutMs}
         />
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label="Add rate app"
+            label={t("shipping.app_dialog_submit")}
             variant="primary"
             isLoading={isPending}
             isDisabled={!isComplete}
@@ -347,17 +368,18 @@ function SecretDialog({
   secret: string;
   onClose: () => void;
 }) {
+  const t = useT<"shipping">();
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={560}>
       <DialogHeader
-        title={`Signing secret for ${providerKey}`}
-        subtitle="Copy it now: it isn't shown again. The app checks the Hypha-Signature header with it."
+        title={t("shipping.app_secret_title", { key: providerKey })}
+        subtitle={t("shipping.app_secret_subtitle")}
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={4} padding={4}>
         <CodeBlock code={secret} />
         <HStack hAlign="end">
-          <Button label="Done" variant="primary" onClick={onClose} />
+          <Button label={t("common.done")} variant="primary" onClick={onClose} />
         </HStack>
       </VStack>
     </Dialog>

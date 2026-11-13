@@ -22,8 +22,8 @@ export default async function StoreSettingsPage() {
       <VStack gap={5} maxWidth={640}>
         <PageHeader
           back={settingsCrumb(t)}
-          title="Store details"
-          description="The store this deployment serves."
+          title={t("settings.store_title")}
+          description={t("settings.store_description")}
         />
         <Suspense fallback={<FormSkeleton />}>
           <StoreDetails />
@@ -35,14 +35,14 @@ export default async function StoreSettingsPage() {
 
 async function StoreDetails() {
   // The store is the layout's read too (`loadStore`): one call for both.
-  const [store, countries] = await Promise.all([requireStore(), loadCountries()]);
+  const [t, store, countries] = await Promise.all([getT(), requireStore(), loadCountries()]);
   return (
     <>
       <StoreForm store={store} countries={countries} />
       {store.setup.finished_at && <SetupGuideCard />}
       <Card>
-        <MetadataList title="Details">
-          <MetadataListItem label="ID">
+        <MetadataList title={t("common.details")}>
+          <MetadataListItem label={t("common.id")}>
             <Text type="supporting" color="secondary">
               {store.id}
             </Text>

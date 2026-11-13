@@ -7,13 +7,13 @@ import { FormSkeleton } from "@/components/skeletons";
 import { loadNotificationSettings, loaded, requireStaff, sessionClient } from "@/lib/hypha";
 import { type T, getT } from "@/lib/i18n";
 import { settingsCrumb } from "@/lib/navigation";
-import { TEMPLATES, templateName } from "@/lib/notifications";
+import { templateDescription, templateName } from "@/lib/notifications";
 
 import { TemplateEditor } from "./template-editor";
 
 const back = (t: T): Crumb[] => [
   settingsCrumb(t),
-  { label: "Notifications", href: "/settings/notifications" },
+  { label: t("notifications.page_title"), href: "/settings/notifications" },
 ];
 
 /**
@@ -62,11 +62,11 @@ async function Template({ templateKey: key }: { templateKey: string }) {
         return { template: saved, firstPreview: preview.data ?? null };
       }),
   ]);
-  const name = templateName(template.key);
+  const name = templateName(t, template.key);
 
   return (
     <>
-      <PageHeader title={name} description={TEMPLATES[template.key]?.description} back={back(t)} />
+      <PageHeader title={name} description={templateDescription(t, template.key)} back={back(t)} />
       <TemplateEditor
         template={template}
         firstPreview={firstPreview}

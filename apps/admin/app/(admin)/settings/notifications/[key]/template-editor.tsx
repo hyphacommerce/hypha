@@ -21,6 +21,7 @@ import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { useRef, useState, useTransition } from "react";
 
 import { type Problem, describeProblem, variablePaths } from "@/lib/notifications";
+import { useT } from "@/lib/use-t";
 
 import {
   type Sources,
@@ -39,6 +40,8 @@ type Rendered = AdminSchemas["RenderedNotificationResponse"];
 const PREVIEW_DELAY_MS = 400;
 
 const ORDER_ID = /^ord_[0-9a-f]{32}$/;
+/** How an order ID starts: a code, the same in every language. */
+const ORDER_ID_EXAMPLE = "ord_…";
 
 function sourcesOf(template: Template): Sources {
   return { subject: template.subject, html: template.html, text: template.text ?? null };
@@ -69,6 +72,7 @@ export function TemplateEditor({
   /** Whether a preview can use a real order (`orders:read`). */
   canReadOrders: boolean;
 }) {
+  const t = useT<"notifications">();
   const key = template.key;
   const isLayout = key === "layout";
   // Templates about no order: their preview is the sample's.
@@ -97,7 +101,7 @@ export function TemplateEditor({
 
   const isDirty = !same(draft, saved);
   const orderId = ORDER_ID.test(order.trim()) ? order.trim() : null;
-  const variables = variablePaths(template.variables);
+  const variables = variablePaths(t, template.variables);
 
   /** Renders `sources` once typing pauses; only the newest request's answer shows. */
   const schedulePreview = (sources: Sources, forOrder: string | null) => {
@@ -142,7 +146,7 @@ export function TemplateEditor({
       if (!result.error) {
         setSaved(draft);
         setIsCustomized(true);
-        toast({ body: "Template saved" });
+        toast({ body: t("notifications.editor_saved_toast") });
       }
     });
 
@@ -155,7 +159,7 @@ export function TemplateEditor({
     startSending(async () => {
       const result = await sendTestEmail(key, draft, orderId);
       if (result.sentTo) {
-        toast({ body: `Sent to ${result.sentTo}` });
+        toast({ body: t("notifications.editor_sent_toast", { email: result.sentTo }) });
       } else {
         setProblem(result.problem);
         setError(result.error);
@@ -171,33 +175,35 @@ export function TemplateEditor({
         <HStack gap={3} hAlign="between" vAlign="center" wrap="wrap">
           <HStack gap={2} vAlign="center">
             {isCustomized ? (
-              <Badge label="Customized" variant="info" />
+              <Badge label={t("notifications.template_customized")} variant="info" />
             ) : (
-              <Badge label="Default" variant="neutral" />
+              <Badge label={t("common.default")} variant="neutral" />
             )}
-            {!template.enabled && <Badge label="Off" variant="warning" />}
-            <Text weight="medium">{isDirty ? "Unsaved changes" : "No unsaved changes"}</Text>
+            {!template.enabled && <Badge label={t("common.off")} variant="warning" />}
+            <Text weight="medium">
+              {isDirty ? t("common.unsaved_changes") : t("notifications.editor_no_unsaved_changes")}
+            </Text>
           </HStack>
           {canWrite && (
             <HStack gap={2} wrap="wrap">
               {isCustomized && (
                 <Button
-                  label="Revert to default"
+                  label={t("notifications.editor_revert")}
                   variant="ghost"
                   onClick={() => setIsReverting(true)}
                 />
               )}
-              {isDirty && <Button label="Discard" variant="ghost" onClick={discard} />}
+              {isDirty && <Button label={t("common.discard")} variant="ghost" onClick={discard} />}
               <Tooltip
                 content={
                   canSend
-                    ? "Sends this preview to your own address."
-                    : "Emails are only logged on this deployment: a test would reach nobody."
+                    ? t("notifications.editor_send_test_tooltip")
+                    : t("notifications.editor_send_test_logged")
                 }
               >
                 <span>
                   <Button
-                    label="Send test"
+                    label={t("notifications.editor_send_test")}
                     variant="secondary"
                     isDisabled={!canSend}
                     isLoading={isSending}
@@ -206,7 +212,7 @@ export function TemplateEditor({
                 </span>
               </Tooltip>
               <Button
-                label="Save"
+                label={t("common.save")}
                 variant="primary"
                 isDisabled={!isDirty}
                 isLoading={isSaving}
@@ -232,15 +238,17 @@ export function TemplateEditor({
       {template.problem && !isDirty && (
         <Banner
           status="error"
-          title="These saved sources stopped working"
-          description={`${describeProblem(template.problem)}. Emails use the default until you fix and save it, or revert.`}
+          title={t("notifications.editor_broken_title")}
+          description={t("notifications.editor_broken_description", {
+            problem: describeProblem(t, template.problem),
+          })}
         />
       )}
       {isLayout && (
         <Banner
           status="info"
-          title="The frame of every email"
-          description="Messages fill its {% block preheader %} and {% block content %}. Saving checks every email against it, so a layout that breaks one isn't saved."
+          title={t("notifications.editor_layout_title")}
+          description={t("notifications.editor_layout_description")}
         />
       )}
 
@@ -250,8 +258,8 @@ export function TemplateEditor({
             <VStack gap={4}>
               {!isLayout && (
                 <TextInput
-                  label="Subject"
-                  description="One line of Jinja, like Order {{ order.number }} confirmed."
+                  label={t("notifications.editor_subject_label")}
+                  description={t("notifications.editor_subject_description")}
                   value={draft.subject}
                   status={
                     problem?.part === "subject"
@@ -262,14 +270,14 @@ export function TemplateEditor({
                 />
               )}
               <VStack gap={1}>
-                <Text type="label">HTML</Text>
+                <Text type="label">{t("notifications.editor_html_label")}</Text>
                 {!isLayout && (
                   <Text type="supporting" color="secondary">
-                    Starts with {'{% extends "layout" %}'} and fills the layout&apos;s blocks.
+                    {t("notifications.editor_html_hint")}
                   </Text>
                 )}
                 <CodeEditor
-                  label="HTML source"
+                  label={t("notifications.editor_html_source")}
                   language="html"
                   value={draft.html}
                   onChange={(html) => edit({ html })}
@@ -280,14 +288,14 @@ export function TemplateEditor({
               {!isLayout && (
                 <VStack gap={2}>
                   <Switch
-                    label="Write the plain text yourself"
-                    description="Off: the plain-text version is made from the HTML."
+                    label={t("notifications.editor_text_switch")}
+                    description={t("notifications.editor_text_switch_description")}
                     value={textEditor}
                     onChange={(isOn) => edit({ text: isOn ? (rendered?.text ?? "") : null })}
                   />
                   {textEditor && (
                     <CodeEditor
-                      label="Plain-text source"
+                      label={t("notifications.editor_text_source")}
                       language="text"
                       value={draft.text ?? ""}
                       onChange={(text) => edit({ text })}
@@ -307,26 +315,33 @@ export function TemplateEditor({
             <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
               <HStack gap={2} vAlign="center">
                 <Text type="display-3" as="h2">
-                  Preview
+                  {t("notifications.preview_title")}
                 </Text>
-                {isPreviewing && <Spinner size="sm" aria-label="Rendering the preview" />}
+                {isPreviewing && (
+                  <Spinner size="sm" aria-label={t("notifications.preview_rendering")} />
+                )}
               </HStack>
-              <SegmentedControl label="Preview width" size="sm" value={width} onChange={setWidth}>
-                <SegmentedControlItem value="desktop" label="Desktop" />
-                <SegmentedControlItem value="mobile" label="Mobile" />
-                <SegmentedControlItem value="text" label="Plain text" />
+              <SegmentedControl
+                label={t("notifications.preview_width")}
+                size="sm"
+                value={width}
+                onChange={setWidth}
+              >
+                <SegmentedControlItem value="desktop" label={t("notifications.preview_desktop")} />
+                <SegmentedControlItem value="mobile" label={t("notifications.preview_mobile")} />
+                <SegmentedControlItem value="text" label={t("notifications.preview_text")} />
               </SegmentedControl>
             </HStack>
             {canReadOrders && !isStaffAccount && (
               <TextInput
-                label="Preview with an order"
-                description="An order ID (ord_…) from the orders page; blank: a made-up order."
+                label={t("notifications.preview_order_label")}
+                description={t("notifications.preview_order_description")}
                 isOptional
-                placeholder="ord_…"
+                placeholder={ORDER_ID_EXAMPLE}
                 value={order}
                 status={
                   order.trim() !== "" && !orderId
-                    ? { type: "warning", message: "Not an order ID yet" }
+                    ? { type: "warning", message: t("notifications.preview_order_invalid") }
                     : undefined
                 }
                 onChange={chooseOrder}
@@ -334,10 +349,14 @@ export function TemplateEditor({
             )}
             {rendered ? (
               <VStack gap={2}>
-                {!isLayout && <Text weight="medium">Subject: {rendered.subject}</Text>}
+                {!isLayout && (
+                  <Text weight="medium">
+                    {t("notifications.preview_subject", { subject: rendered.subject })}
+                  </Text>
+                )}
                 {problem && (
                   <Text type="supporting" color="secondary">
-                    Showing the last preview that worked.
+                    {t("notifications.preview_last_working")}
                   </Text>
                 )}
                 {width === "text" ? (
@@ -346,7 +365,7 @@ export function TemplateEditor({
                   <div className="email-frame">
                     {/* No scripts, forms or same-origin access: just the email. */}
                     <iframe
-                      title="Email preview"
+                      title={t("notifications.preview_frame_title")}
                       sandbox=""
                       srcDoc={rendered.html}
                       style={{ width: width === "mobile" ? 375 : "100%" }}
@@ -356,7 +375,7 @@ export function TemplateEditor({
               </VStack>
             ) : (
               <Text color="secondary">
-                {problem ? "Fix the problem above to see a preview." : "No preview yet."}
+                {problem ? t("notifications.preview_fix_problem") : t("notifications.preview_none")}
               </Text>
             )}
           </VStack>
@@ -374,7 +393,7 @@ export function TemplateEditor({
             setProblem(undefined);
             setError(undefined);
             schedulePreview(sources, orderId);
-            toast({ body: "Back to the default" });
+            toast({ body: t("notifications.editor_reverted_toast") });
           }}
         />
       )}
@@ -391,18 +410,16 @@ function RevertDialog({
   onClose: () => void;
   onReverted: (sources: Sources) => void;
 }) {
+  const t = useT<"notifications">();
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
   return (
     <AlertDialog
       isOpen
       onOpenChange={(isOpen) => !isOpen && onClose()}
-      title="Revert to the default?"
-      description={
-        error ??
-        "Your changes to this template are deleted, and emails use Hypha's default from now on. Whether it's on stays as it is."
-      }
-      actionLabel="Revert"
+      title={t("notifications.revert_dialog_title")}
+      description={error ?? t("notifications.revert_dialog_description")}
+      actionLabel={t("notifications.revert_dialog_action")}
       isActionLoading={isPending}
       onAction={() =>
         startTransition(async () => {
