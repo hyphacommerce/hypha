@@ -17,8 +17,8 @@ use hypha_notifications::{
     EffectiveTemplate, EmailSender, HasNotificationSettings, HasNotificationTemplates,
     HasNotifications, LONGEST_SEND, Mailbox, NewNotification, Notification, NotificationRepo,
     NotificationSettings, NotificationTemplateRepo, OutgoingEmail, QueuedEmail, RenderError,
-    Rendered, SendError, SendSettings, Sent, TemplateKey, default_template, keys, render,
-    settings_or_default,
+    Rendered, SendError, SendSettings, Sent, Template, TemplateKey, TemplateSources,
+    default_template, keys, render, settings_or_default,
 };
 use hypha_stores::{Store, StoreRepo};
 
@@ -103,13 +103,67 @@ impl Sources {
         default: &Language,
     ) -> Result<Self, RepoError> {
         let stored = ports.notification_templates().list().await?;
+        Ok(Self::resolve(&stored, key, language, default, None))
+    }
+
+    /// What a preview or test send of unsaved `edited` sources of `key` renders with: `load`
+    /// for `language` with them in place of the template's (a layout's in place of the
+    /// layout's, around the order confirmation), so it's what that language's emails would
+    /// send with them, formats included.
+    pub async fn previewing<P: HasNotificationTemplates>(
+        ports: &P,
+        key: TemplateKey,
+        edited: TemplateSources,
+        language: &Language,
+        default: &Language,
+    ) -> Result<Self, RepoError> {
+        let stored = ports.notification_templates().list().await?;
+        let message = match key {
+            TemplateKey::Layout => TemplateKey::OrderConfirmation,
+            other => other,
+        };
+        Ok(Self::resolve(
+            &stored,
+            message,
+            language,
+            default,
+            Some((key, edited)),
+        ))
+    }
+
+    /// The one rule for what an email of `key` to a reader of `language` renders with:
+    /// the template and layout the chain finds in `stored` (`edited` standing in for one of
+    /// them), and the formats of the language the template is written in
+    /// (`Locale::writing`).
+    fn resolve(
+        stored: &[Template],
+        key: TemplateKey,
+        language: &Language,
+        default: &Language,
+        edited: Option<(TemplateKey, TemplateSources)>,
+    ) -> Self {
         let locale = (language != default).then_some(language);
-        let template = EffectiveTemplate::resolve(key, &stored, locale, default);
-        Ok(Self {
-            layout: EffectiveTemplate::resolve(TemplateKey::Layout, &stored, locale, default),
+        let mut layout = EffectiveTemplate::resolve(TemplateKey::Layout, stored, locale, default);
+        let mut template = EffectiveTemplate::resolve(key, stored, locale, default);
+        match edited {
+            Some((TemplateKey::Layout, sources)) => layout = layout.with_sources(sources, default),
+            Some((_, sources)) => template = template.with_sources(sources, default),
+            None => {}
+        }
+        Self {
+            layout,
             locale: Locale::writing(language, template.language()),
             template,
-        })
+        }
+    }
+
+    /// The email these sources make of `context`, or why they don't render.
+    pub fn render(&self, context: &MailContext) -> Result<Rendered, RenderError> {
+        render(
+            self.layout.sending_sources().html(),
+            &self.template.sending_sources(),
+            context,
+        )
     }
 
     /// The store's default language's: what staff and suppliers read.
@@ -149,12 +203,7 @@ pub fn render_for_sending(
     let Sources {
         layout, template, ..
     } = sources;
-    let first = render(
-        layout.sending_sources().html(),
-        &template.sending_sources(),
-        context,
-    );
-    match first {
+    match sources.render(context) {
         Err(error) if layout.sends_merchants() || template.sends_merchants() => {
             tracing::warn!(
                 template = template.key.as_str(),
