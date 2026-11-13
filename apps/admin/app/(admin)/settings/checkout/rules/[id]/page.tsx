@@ -4,10 +4,12 @@ import { Suspense } from "react";
 
 import { type Crumb, PageHeader } from "@/components/page-header";
 import { DetailSkeleton } from "@/components/skeletons";
+import { TranslateButton } from "@/components/translate-button";
 import { formOf } from "@/lib/checkout-rules";
 import { loadCurrencies, loaded, requireStaff, sessionClient } from "@/lib/hypha";
 import { type T, getT } from "@/lib/i18n";
 import { settingsCrumb } from "@/lib/navigation";
+import { offersTranslate } from "@/lib/translations-server";
 
 import { productSummaries } from "../../../../markets/price-lists/grid-data";
 import { loadRuleOptions, loadTryFormat } from "../../data";
@@ -50,9 +52,15 @@ async function Rule({ id }: { id: string }) {
   );
   const initial = formOf(rule, currencies);
   const tryFormat = await loadTryFormat(client, initial, options);
+  // Already read for the layout and this page: no call of its own.
+  const canTranslate = await offersTranslate("checkout_rule");
   return (
     <>
-      <PageHeader title={rule.name} back={back(t)} />
+      <PageHeader
+        title={rule.name}
+        back={back(t)}
+        actions={canTranslate && <TranslateButton t={t} kind="checkout_rule" id={rule.id} />}
+      />
       <RuleEditor
         id={rule.id}
         initial={initial}

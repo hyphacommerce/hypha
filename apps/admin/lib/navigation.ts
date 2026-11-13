@@ -14,6 +14,7 @@ import {
   GlobeEuropeAfricaIcon,
   HomeIcon,
   KeyIcon,
+  LanguageIcon,
   MagnifyingGlassIcon,
   PhotoIcon,
   PuzzlePieceIcon,
@@ -191,6 +192,13 @@ export const SETTINGS_GROUPS: { title: NavKey; description: NavKey; pages: Setti
         icon: BuildingStorefrontIcon,
         scope: "stores:read",
         description: "nav.settings_store_description",
+      },
+      {
+        label: "nav.settings_languages",
+        href: "/settings/languages",
+        icon: LanguageIcon,
+        scope: "stores:read",
+        description: "nav.settings_languages_description",
       },
       {
         label: "nav.settings_channels",

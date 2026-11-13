@@ -42,6 +42,7 @@ import {
   paymentPresets,
   providerLabel,
 } from "@/lib/payments";
+import { TranslateButton } from "@/components/translate-button";
 import { useFormat } from "@/lib/use-format";
 import { useT } from "@/lib/use-t";
 
@@ -76,6 +77,7 @@ export function PaymentMethodsCard({
   paymentApps,
   presetNames,
   canWrite,
+  canTranslate,
 }: {
   /** By position, then ID: as the API lists them. */
   methods: Method[];
@@ -85,6 +87,8 @@ export function PaymentMethodsCard({
   channels: Option[];
   paymentApps: PaymentApp[];
   canWrite: boolean;
+  /** Whether each method offers "Translate" (its name and instructions). */
+  canTranslate: boolean;
 }) {
   const t = useT<"payments">();
   const format = useFormat();
@@ -187,8 +191,16 @@ export function PaymentMethodsCard({
                     />
                   </TableCell>
                   <TableCell>
+                    {canTranslate && !canWrite && (
+                      <HStack gap={1} hAlign="end">
+                        <TranslateButton t={t} kind="payment_method" id={method.id} isCompact />
+                      </HStack>
+                    )}
                     {canWrite && (
                       <HStack gap={1} hAlign="end">
+                        {canTranslate && (
+                          <TranslateButton t={t} kind="payment_method" id={method.id} isCompact />
+                        )}
                         <IconButton
                           label={t("common.move_up_named", { name: method.name })}
                           icon={<ArrowUpIcon />}

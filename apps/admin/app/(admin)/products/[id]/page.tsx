@@ -12,6 +12,7 @@ import { DateTime } from "@/components/date-time";
 import { type Crumb, PageHeader } from "@/components/page-header";
 import { CardSkeleton, DetailSkeleton } from "@/components/skeletons";
 import { ProductStatusBadge } from "@/components/status";
+import { TranslateButton } from "@/components/translate-button";
 import { loadExtensions } from "@/lib/app-extensions";
 import { definitionsOf } from "@/lib/custom-fields-server";
 import { type Format, getFormat } from "@/lib/get-format";
@@ -20,6 +21,7 @@ import { describe, isMissingScope, loaded, requireStaff, sessionClient } from "@
 import { getT } from "@/lib/i18n";
 import type { KeyIn, T } from "@/lib/messages";
 import { OPTION_NAME_DEFAULTS } from "@/lib/store-defaults";
+import { offersTranslate } from "@/lib/translations-server";
 
 import type { Stock } from "../actions";
 import { MediaSection } from "./media-section";
@@ -93,6 +95,8 @@ async function ProductDetail({ id, back }: { id: string; back: Crumb }) {
     getStoreDefaults(OPTION_NAME_DEFAULTS),
   ]);
   const stock = locations.data ? stockOf(product, inventory.data?.items ?? []) : undefined;
+  // Already read for the layout and this page: no call of its own.
+  const canTranslate = await offersTranslate("product");
 
   return (
     <>
@@ -100,7 +104,12 @@ async function ProductDetail({ id, back }: { id: string; back: Crumb }) {
         title={product.title}
         back={back}
         badges={<ProductStatusBadge status={product.status} t={t} />}
-        actions={<StatusActions id={product.id} title={product.title} status={product.status} />}
+        actions={
+          <>
+            {canTranslate && <TranslateButton t={t} kind="product" id={product.id} />}
+            <StatusActions id={product.id} title={product.title} status={product.status} />
+          </>
+        }
       />
 
       <ProductEditor

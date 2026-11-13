@@ -8,6 +8,7 @@ import { type OwnerType, isOwnerType } from "@/lib/custom-fields";
 import { loaded, requireStaff, sessionClient } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
 import { hasScope } from "@/lib/navigation";
+import { offersTranslate } from "@/lib/translations-server";
 
 import { DefinitionsCard } from "./definitions";
 import { OwnerTabs } from "./owner-tabs";
@@ -65,6 +66,7 @@ async function Definitions({ owner }: { owner: OwnerType }) {
       definitions={definitions.items.toSorted((a, b) => a.position - b.position)}
       suggestions={suggestions.items.filter((s) => !s.existing)}
       canWrite={hasScope(me.scopes, "custom_fields:write")}
+      canTranslate={await offersTranslate("custom_field_definition")}
     />
   );
 }

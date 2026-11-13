@@ -44,9 +44,10 @@ text in JSX is a lint error everywhere (`app/**`, `components/**`, `resources/**
 
 1. **Put the screen's English in its area's namespace file**, `messages/en/<namespace>.json`:
    `account`, `agents`, `api_keys`, `apps`, `bulk`, `categories`, `checkout`,
-   `custom_fields`, `customers`, `discounts`, `home`, `inventory`, `markets`, `media`,
-   `notifications`, `orders`, `payments`, `price_lists`, `products`, `purchasing`,
-   `settings`, `setup`, `shipping`, `staff`, `suppliers`, `transfers`.
+   `custom_fields`, `customers`, `discounts`, `home`, `inventory`, `languages`,
+   `markets`, `media`, `notifications`, `orders`, `payments`, `price_lists`, `products`,
+   `purchasing`, `settings`, `setup`, `shipping`, `staff`, `suppliers`, `transfers`,
+   `translations`.
    A new namespace is a new file plus `pnpm --filter admin i18n:index`, which rewrites the
    generated modules (committed; `i18n:check` fails while they're stale). No list is
    edited by hand.

@@ -42,12 +42,21 @@ export async function createMarket(input: {
 
 export async function updateMarket(
   id: string,
-  input: { name?: string; pricesIncludeTax?: boolean },
+  input: {
+    name?: string;
+    pricesIncludeTax?: boolean;
+    /** The languages offered, in order, replacing the list; absent keeps it. */
+    languages?: string[];
+  },
 ): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.PATCH("/admin/markets/{id}", {
     params: { path: { id } },
-    body: { name: input.name, prices_include_tax: input.pricesIncludeTax },
+    body: {
+      name: input.name,
+      prices_include_tax: input.pricesIncludeTax,
+      languages: input.languages,
+    },
   });
   if (error) return { error: await describe(error) };
   refresh(id);

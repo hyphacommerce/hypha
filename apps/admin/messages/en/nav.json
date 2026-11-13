@@ -54,5 +54,7 @@
   "settings_api_keys": "API keys",
   "settings_api_keys_description": "Secret keys for your own code, publishable keys for storefronts.",
   "settings_apps": "Webhooks and custom apps",
-  "settings_apps_description": "Apps made by hand: their webhooks, events and signing secrets."
+  "settings_apps_description": "Apps made by hand: their webhooks, events and signing secrets.",
+  "settings_languages": "Languages",
+  "settings_languages_description": "The language your content is written in and the ones it's translated into."
 }

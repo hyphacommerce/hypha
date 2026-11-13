@@ -87,5 +87,6 @@
   "amount_no_decimals": "This currency has no decimals.",
   "amount_too_many_decimals": "At most {digits, plural, one {# decimal place} other {# decimal places}}.",
   "amount_too_large": "Too large.",
-  "amount_invalid": "{input} isn't an amount."
+  "amount_invalid": "{input} isn't an amount.",
+  "translate_action": "Translate"
 }
