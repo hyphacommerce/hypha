@@ -12,7 +12,7 @@ import { cache } from "react";
 import { type AddressFormat, type FieldProblems, problemsOf } from "./address";
 import { FRESH_SECONDS, TAGS } from "./cache-tags";
 import { type FieldContext, type FieldPart, referenceIds } from "./custom-fields";
-import type { T as Translator } from "./messages";
+import { type T as Translator, isKey } from "./messages";
 import { link, segmentCountry } from "./site";
 
 export type Country = StorefrontSchemas["StorefrontCountryResponse"];
@@ -269,83 +269,30 @@ export function refusedWith(
   return { error: describe(t, error) };
 }
 
+/** The codes that share another's sentence, by the key it's under: a code's own
+ * sentence is `errors.<code>`, which needs no entry here. */
+const SHARED_ERRORS = new Map([
+  ["product_not_published", "product_unavailable"],
+  ["product_not_active", "product_unavailable"],
+  ["product_not_found", "product_unavailable"],
+  ["account_required", "sign_in_again"],
+  ["invalid_token", "sign_in_again"],
+  ["field_required", "invalid_address"],
+  ["cart_email_missing", "email_required"],
+  ["shipping_option_unavailable", "shipping_option_required"],
+  ["payment_method_not_found", "payment_method_unavailable"],
+]);
+
 /**
- * A message for the shopper, by the API's stable error code. The API's own `error` text
- * is for developers and always English: for a code this storefront doesn't know, it's
- * shown as it is only on an English page, and a general sentence stands in elsewhere.
+ * A message for the shopper, by the API's stable error code: `errors.<code>` in the
+ * catalogs, so a code gets its sentence by being added there. The API's own `error` text
+ * is for developers and always English: for a code without a sentence, it's shown as it
+ * is only on an English page, and a general sentence stands in elsewhere.
  */
 export function describe(t: Translator, error: { code: string; error: string }): string {
-  switch (error.code) {
-    case "out_of_stock":
-      return t("errors.out_of_stock");
-    case "product_not_published":
-    case "product_not_active":
-    case "product_not_found":
-      return t("errors.product_unavailable");
-    case "invalid_email":
-      return t("errors.invalid_email");
-    case "invalid_code":
-      return t("errors.invalid_code");
-    case "account_required":
-    case "invalid_token":
-      return t("errors.sign_in_again");
-    case "cart_email_fixed":
-      return t("errors.cart_email_fixed");
-    case "consent_needs_phone":
-      return t("errors.consent_needs_phone");
-    case "erasure_already_requested":
-      return t("errors.erasure_already_requested");
-    case "erasure_not_requested":
-      return t("errors.erasure_not_requested");
-    case "customer_erased":
-      return t("errors.customer_erased");
-    case "rate_limited":
-      return t("errors.rate_limited");
-    case "invalid_address":
-    case "field_required":
-      return t("errors.invalid_address");
-    case "no_shipping_to_country":
-      return t("errors.no_shipping_to_country");
-    case "discount_code_invalid":
-      return t("errors.discount_code_invalid");
-    case "checkout_blocked":
-      return t("errors.checkout_blocked");
-    case "discounts_changed":
-      return t("errors.discounts_changed");
-    case "total_changed":
-      return t("errors.total_changed");
-    case "cart_completed":
-      return t("errors.cart_completed");
-    case "cart_empty":
-      return t("errors.cart_empty");
-    case "cart_unavailable":
-      return t("errors.cart_unavailable");
-    case "email_required":
-    case "cart_email_missing":
-      return t("errors.email_required");
-    case "shipping_address_required":
-      return t("errors.shipping_address_required");
-    case "shipping_option_required":
-    case "shipping_option_unavailable":
-      return t("errors.shipping_option_required");
-    case "address_country_mismatch":
-      return t("errors.address_country_mismatch");
-    case "payment_method_required":
-      return t("errors.payment_method_required");
-    case "payment_method_unavailable":
-    case "payment_method_not_found":
-      return t("errors.payment_method_unavailable");
-    case "app_unavailable":
-      return t("errors.app_unavailable");
-    case "order_not_payable":
-      return t("errors.order_not_payable");
-    case "order_cancelled":
-      return t("errors.order_cancelled");
-    case "order_not_found":
-      return t("errors.order_not_found");
-    default:
-      return isEnglish(t.language) ? error.error : t("errors.generic");
-  }
+  const key = `errors.${SHARED_ERRORS.get(error.code) ?? error.code}`;
+  if (isKey(key)) return t(key);
+  return isEnglish(t.language) ? error.error : t("errors.generic");
 }
 
 /** Whether a page in `language` reads English (the pseudo-language included). */

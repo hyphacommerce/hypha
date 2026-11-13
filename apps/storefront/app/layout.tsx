@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 
 import "./globals.css";
 import { loadStore } from "@/lib/api";
+import { writtenIn } from "@/lib/messages";
 import { pageLanguage, siteUrl } from "@/lib/site";
 
 import { Providers } from "./providers";
@@ -41,9 +42,10 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  // The page's language. This layout is above the URL's locale segment, so it knows
-  // the store's only: what every page is in today.
-  const language = pageLanguage(undefined, await storeOrDefaults());
+  // The language the page is written in (a store in plain `sr` reads the `sr-Latn`
+  // catalog, so that's what the document says). This layout is above the URL's locale
+  // segment, so it knows the store's only: what every page is in today.
+  const language = writtenIn(pageLanguage(undefined, await storeOrDefaults()));
   const direction = directionOf(language);
   return (
     // `data-astryx-theme` on <html> from the server: the theme's tokens are scoped to it,

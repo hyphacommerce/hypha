@@ -14,7 +14,7 @@ import { pageT } from "@/lib/i18n";
 import { readListingPage } from "@/lib/listing-data";
 import { pageMetadata } from "@/lib/metadata";
 import { breadcrumbLd, plainText } from "@/lib/seo";
-import { absolute, link } from "@/lib/site";
+import { absolute, link, segmentCountry } from "@/lib/site";
 
 /** Static, refreshed at most every five minutes. */
 export const revalidate = 300;
@@ -39,7 +39,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { country, handle } = await params;
   const category = await load(handle);
   return pageMetadata({
-    country: country.toUpperCase(),
+    country: segmentCountry(country),
     path: `/c/${handle}`,
     title: category.name,
     description: plainText(category.description),

@@ -1,7 +1,7 @@
 {
   "generic": "Došlo je do greške. Pokušajte ponovo.",
   "check_fields": "Proverite označena polja.",
-  "cart_gone": "Vaša korpa više ne postoji. Počnite ispočetka.",
+  "cart_not_found": "Vaša korpa više ne postoji. Počnite ispočetka.",
   "out_of_stock": "Toga nema dovoljno na stanju.",
   "product_unavailable": "Taj proizvod se ovde više ne prodaje.",
   "invalid_email": "Unesite imejl adresu, na primer ana@example.com.",

@@ -1,6 +1,14 @@
 // Server-only: the translator of a request. Pages, layouts, route handlers and actions
 // make it here; client components get theirs from the provider the country layout
 // renders (`lib/use-t.ts`). Never import this from a "use client" file.
+//
+// Two languages, never mixed up:
+// - The page's language is `pageLanguage(segment, store)` (`lib/site.ts`): one of the
+//   store's own. A call to the API that names a language takes this one.
+// - A translator's `language` (`t.language`, `useLanguage()`) is the catalog's: what the
+//   words are written in, `sr-Latn` for a store in `sr`, `en-XA` under the
+//   pseudo-language. It's for formats and `<html lang>`, and is never sent to the API,
+//   which would refuse or misread it.
 
 import { type Messages, createTranslator, localeOf } from "@hyphacommerce/i18n";
 import { cache } from "react";

@@ -20,7 +20,7 @@ import type { T } from "@/lib/messages";
 import { search } from "@/lib/listing-data";
 import { pageMetadata } from "@/lib/metadata";
 import { storeLd } from "@/lib/seo";
-import { absolute, link } from "@/lib/site";
+import { absolute, link, segmentCountry } from "@/lib/site";
 
 type Hit = StorefrontSchemas["SearchHitResponse"];
 
@@ -50,7 +50,7 @@ export async function generateMetadata({
 }: {
   params: Promise<{ country: string }>;
 }): Promise<Metadata> {
-  const code = (await params).country.toUpperCase();
+  const code = segmentCountry((await params).country);
   const [categories, newest] = await Promise.all([
     loadCategories(),
     shelf({ country: code, sort: "newest", limit: 8 }),
@@ -106,7 +106,7 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
   // countries' folders through), and the category shelves start as soon as the
   // categories are in, without waiting for the other reads.
   const folder = (await params).country;
-  const code = folder.toUpperCase();
+  const code = segmentCountry(folder);
   const [country, t, store, categories, newest, value, shelves] = await Promise.all([
     countryOf(folder),
     pageT(folder),

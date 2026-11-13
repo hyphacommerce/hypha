@@ -22,7 +22,7 @@ export async function checkOutCart(input: {
 }): Promise<CheckedOut> {
   const t = await actionT(input.country);
   const id = await cartId(input.country);
-  if (!id) return { code: "cart_not_found", error: t("errors.cart_gone") };
+  if (!id) return { code: "cart_not_found", error: t("errors.cart_not_found") };
   const { data, error } = await api().POST("/storefront/carts/{id}/checkout", {
     params: { path: { id }, header: { "Idempotency-Key": input.attempt } },
     body: input.total ? { expected_total: input.total } : {},

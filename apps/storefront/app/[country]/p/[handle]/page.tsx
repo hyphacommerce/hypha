@@ -16,7 +16,7 @@ import { pageT } from "@/lib/i18n";
 import { relatedProducts } from "@/lib/listing-data";
 import { pageMetadata } from "@/lib/metadata";
 import { breadcrumbLd, plainText, productLd } from "@/lib/seo";
-import { absolute, link } from "@/lib/site";
+import { absolute, link, segmentCountry } from "@/lib/site";
 
 import { ProductForm } from "./product-form";
 
@@ -39,7 +39,7 @@ async function load(handle: string, country: string) {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { country, handle } = await params;
-  const code = country.toUpperCase();
+  const code = segmentCountry(country);
   const product = await load(handle, code);
   const image = product.media.find((m) => m.kind === "image");
   return pageMetadata({
@@ -61,7 +61,7 @@ export default async function ProductPage({ params }: Props) {
   // countries' folders through), and an unknown one 404s either way.
   const [country, product, appBlocks, t] = await Promise.all([
     countryOf(folder),
-    load(handle, folder.toUpperCase()),
+    load(handle, segmentCountry(folder)),
     // What installed apps show on a product: elements, loaded in the browser, so the
     // page stays static.
     elementsFor("product.block"),

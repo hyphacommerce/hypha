@@ -1,7 +1,7 @@
 {
   "generic": "Something went wrong. Please try again.",
   "check_fields": "Check the highlighted fields.",
-  "cart_gone": "Your cart is gone. Please start again.",
+  "cart_not_found": "Your cart is gone. Please start again.",
   "out_of_stock": "There isn't enough of that in stock.",
   "product_unavailable": "That product isn't for sale here any more.",
   "invalid_email": "Enter an email address, like ana@example.com.",

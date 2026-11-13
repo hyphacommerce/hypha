@@ -3,11 +3,23 @@
 // The browser's side of `ClientMessages`: the messages it's given, added to those a
 // provider above it was given, as one catalog for `useT`.
 
-import type { Messages } from "@hyphacommerce/i18n";
+import type { Messages, Missing } from "@hyphacommerce/i18n";
 import { I18nProvider } from "@hyphacommerce/i18n/react";
 import { createContext, useContext, useMemo } from "react";
 
 const Sent = createContext<Messages>({});
+
+/** A key no provider above the component was given: its namespace wasn't sent to this
+ * page, and the key itself is on screen. */
+function warn({ key }: Missing) {
+  console.warn(
+    `i18n: "${key}" was read by a client component, but its namespace wasn't sent to this page. ` +
+      "Send it with <ClientMessages> in the route's layout, and ask for it with useT<…>().",
+  );
+}
+
+/** Told only in development: in production a missing message just shows its key. */
+const onMissing = process.env.NODE_ENV === "development" ? warn : undefined;
 
 export function MessagesProvider({
   language,
@@ -29,7 +41,7 @@ export function MessagesProvider({
   const all = useMemo<Messages>(() => ({ ...above, ...JSON.parse(sent) }), [above, sent]);
   return (
     <Sent value={all}>
-      <I18nProvider language={language} locale={locale} messages={all}>
+      <I18nProvider language={language} locale={locale} messages={all} onMissing={onMissing}>
         {children}
       </I18nProvider>
     </Sent>

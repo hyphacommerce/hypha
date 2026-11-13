@@ -10,6 +10,7 @@ import { SESSION_COOKIE, SESSION_LIFETIME_COOKIE, sessionCookie } from "@/lib/ac
 import { api } from "@/lib/api";
 import { cartFlagCookie } from "@/lib/cart-flag";
 import { COUNTRY_COOKIE, pickCountry, routing } from "@/lib/routing";
+import { segmentCountry } from "@/lib/site";
 
 /** The store's countries, kept for a minute: they change rarely, and every page asks. */
 let cached: { codes: string[]; until: number } | undefined;
@@ -91,8 +92,8 @@ async function route(request: NextRequest): Promise<NextResponse> {
     url.pathname = `${folder}${pathname}`;
     return NextResponse.rewrite(url);
   }
-  const first = pathname.split("/")[1]?.toUpperCase();
-  if (first && codes.includes(first)) return NextResponse.next();
+  const first = pathname.split("/")[1];
+  if (first && codes.includes(segmentCountry(first))) return NextResponse.next();
   const target = pathname === "/" ? folder : `${folder}${pathname}`;
   return NextResponse.redirect(new URL(`${target}${search}`, request.url));
 }

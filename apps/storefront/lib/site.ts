@@ -35,7 +35,8 @@ export function pageLanguage(
   return store.default_language;
 }
 
-/** The country code a URL's first segment names (`hr` → `HR`). */
+/** The country code a URL's first segment names (`hr` → `HR`): the one place that
+ * reads it, as `pageLanguage` is for the language. */
 export function segmentCountry(segment: string): string {
   return segment.toUpperCase();
 }
