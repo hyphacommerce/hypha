@@ -75,6 +75,12 @@ test("a label without a key, or with one this build doesn't know, is the API's",
   assert.equal(fieldLabel(sr, formWith("barangay", "Barangay"), "city"), "Barangay");
 });
 
+test("a format from an API before label keys reads its English labels", () => {
+  const older = formWith("city", "Town");
+  Reflect.deleteProperty(older, "label_keys");
+  assert.equal(fieldLabel(sr, older, "city"), "Town");
+});
+
 test("a field the format doesn't label is named as it is, the country by the catalog", () => {
   assert.equal(fieldLabel(sr, formWith("city"), "phone"), "phone");
   assert.equal(fieldLabel(sr, formWith("city"), "country"), "Zemlja");
@@ -84,7 +90,7 @@ test("a label inside a sentence starts lower case, unless it starts with an acro
   assert.equal(inSentence("State", "en"), "state");
   assert.equal(inSentence("ZIP code", "en"), "ZIP code");
   assert.equal(inSentence("Poštanski broj", "sr-Latn"), "poštanski broj");
-  assert.equal(inSentence("A", "en"), "a");
+  assert.equal(inSentence("A", "en"), "A");
   assert.equal(inSentence("", "en"), "");
 });
 

@@ -94,7 +94,9 @@ function isLabelKey(key: string): key is keyof typeof LABELS {
  * know. The country, which forms show apart, has a message of its own.
  */
 export function fieldLabel(t: TFor<"address">, format: AddressFormat, field: string): string {
-  const key = format.label_keys[field];
+  // A format cached from an API before label keys (storefronts may deploy first) has none.
+  const keys: AddressFormat["label_keys"] | undefined = format.label_keys;
+  const key = keys?.[field];
   if (key != null && isLabelKey(key)) return t(LABELS[key]);
   if (field === "country") return t("address.label_country");
   return format.labels[field] ?? field;
@@ -104,8 +106,8 @@ export function fieldLabel(t: TFor<"address">, format: AddressFormat, field: str
  * stays as it is (the API's own rule). */
 export function inSentence(label: string, language: string): string {
   const [first, second] = label;
-  if (first === undefined) return label;
-  if (second !== undefined && second !== second.toLocaleLowerCase(language)) return label;
+  if (first === undefined || second === undefined) return label;
+  if (second !== second.toLocaleLowerCase(language)) return label;
   return first.toLocaleLowerCase(language) + label.slice(first.length);
 }
 
