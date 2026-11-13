@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use hypha_core::{
     ChannelId, MarketId, PaymentMethodId, PendingEvent, Recorded, Recorder, Stamped, Stamps,
     Subject, Version, Versioned, required_text,
@@ -5,7 +7,7 @@ use hypha_core::{
 
 use crate::{
     PaymentError, ProviderKey,
-    events::{PAYMENT_METHOD, PaymentMethodDeleted},
+    events::{PAYMENT_METHOD, PaymentMethodCreated, PaymentMethodDeleted, PaymentMethodUpdated},
 };
 
 /// How shoppers can pay: a provider (`manual` for cash on delivery or a bank transfer), the
@@ -32,12 +34,23 @@ pub struct PaymentMethod {
     position: u32,
     /// The provider's own settings (none for `manual`).
     settings: serde_json::Value,
-    /// Only its deletion is recorded: nothing follows a method's other changes.
     events: Recorder,
+    /// The fields changed since it was loaded: one `payment_method.updated` names them
+    /// all when its events are taken.
+    changed: BTreeSet<&'static str>,
 }
 
 impl Recorded for PaymentMethod {
     fn take_events(&mut self) -> Vec<PendingEvent> {
+        let changed = std::mem::take(&mut self.changed);
+        // A new method's `created` says it all.
+        if !changed.is_empty() && self.version != Version::NEW {
+            let event = PaymentMethodUpdated {
+                payment_method: self.id,
+                fields: changed.into_iter().collect(),
+            };
+            self.events.record(self.subject(), &event);
+        }
         self.events.take()
     }
 }
@@ -81,7 +94,7 @@ impl PaymentMethod {
     pub const MAX_INSTRUCTIONS_LEN: usize = 2000;
 
     pub fn new(new: NewPaymentMethod) -> Result<Self, PaymentError> {
-        Self::restore(PaymentMethodSnapshot {
+        let mut method = Self::restore(PaymentMethodSnapshot {
             id: new.id,
             version: Version::NEW,
             stamps: None,
@@ -93,7 +106,16 @@ impl PaymentMethod {
             enabled: new.enabled,
             position: new.position,
             settings: new.settings,
-        })
+        })?;
+        let event = PaymentMethodCreated {
+            payment_method: method.id,
+        };
+        method.events.record(method.subject(), &event);
+        Ok(method)
+    }
+
+    fn subject(&self) -> Subject {
+        Subject::new(PAYMENT_METHOD, self.id.as_uuid())
     }
 
     /// Offered to a cart in `market`, sold through `channel`: enabled, and both lists
@@ -106,34 +128,41 @@ impl PaymentMethod {
 
     pub fn rename(&mut self, name: &str) -> Result<(), PaymentError> {
         self.name = required_text("name", name)?;
+        self.changed.insert("name");
         Ok(())
     }
 
     /// Blank clears them.
     pub fn set_instructions(&mut self, instructions: Option<String>) -> Result<(), PaymentError> {
         self.instructions = instructions_text(instructions)?;
+        self.changed.insert("instructions");
         Ok(())
     }
 
     pub fn set_markets(&mut self, markets: Vec<MarketId>) {
         self.markets = sorted(markets);
+        self.changed.insert("markets");
     }
 
     pub fn set_channels(&mut self, channels: Vec<ChannelId>) {
         self.channels = sorted(channels);
+        self.changed.insert("channels");
     }
 
     pub fn set_enabled(&mut self, enabled: bool) {
         self.enabled = enabled;
+        self.changed.insert("enabled");
     }
 
     pub fn set_position(&mut self, position: u32) {
         self.position = position;
+        self.changed.insert("position");
     }
 
     /// The caller checked them with the provider.
     pub fn set_settings(&mut self, settings: serde_json::Value) {
         self.settings = settings;
+        self.changed.insert("settings");
     }
 
     pub fn id(&self) -> PaymentMethodId {
@@ -239,16 +268,17 @@ impl PaymentMethod {
             position: s.position,
             settings: s.settings,
             events: Recorder::default(),
+            changed: BTreeSet::new(),
         })
     }
 
     /// Records that the method is being deleted; the repository's `delete` writes it.
     pub fn delete(&mut self) {
+        self.changed.clear();
         let event = PaymentMethodDeleted {
             payment_method: self.id,
         };
-        self.events
-            .record(Subject::new(PAYMENT_METHOD, self.id.as_uuid()), &event);
+        self.events.record(self.subject(), &event);
     }
 }
 
@@ -334,14 +364,44 @@ mod tests {
         assert!(!m.offered_in(market(1), channel(2)));
     }
 
+    fn types(m: &mut PaymentMethod) -> Vec<&'static str> {
+        m.take_events().iter().map(|e| e.event_type).collect()
+    }
+
+    #[test]
+    fn a_new_method_records_its_creation_alone() {
+        let mut m = PaymentMethod::new(new()).unwrap();
+        m.set_enabled(false);
+        assert_eq!(types(&mut m), ["payment_method.created"]);
+    }
+
+    #[test]
+    fn a_stored_methods_changes_are_one_event_naming_the_fields() {
+        let mut m = PaymentMethod::new(new()).unwrap();
+        m.take_events();
+        m.set_version(Version::new(1));
+        assert!(m.take_events().is_empty(), "nothing changed");
+        m.rename("Cash").unwrap();
+        m.set_enabled(false);
+        m.rename("Cash on delivery").unwrap();
+        let events = m.take_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "payment_method.updated");
+        assert_eq!(
+            events[0].data["fields"],
+            serde_json::json!(["enabled", "name"])
+        );
+        assert!(m.take_events().is_empty(), "taken once");
+    }
+
     #[test]
     fn a_deleted_method_records_its_deletion_alone() {
         let mut m = PaymentMethod::new(new()).unwrap();
+        m.take_events();
+        m.set_version(Version::new(1));
         m.set_enabled(false);
-        assert!(m.take_events().is_empty(), "other changes record nothing");
         m.delete();
-        let types: Vec<&str> = m.take_events().iter().map(|e| e.event_type).collect();
-        assert_eq!(types, ["payment_method.deleted"]);
+        assert_eq!(types(&mut m), ["payment_method.deleted"]);
     }
 
     #[test]
@@ -349,6 +409,7 @@ mod tests {
         let mut m = PaymentMethod::new(new()).unwrap();
         m.set_markets(vec![market(2), market(1)]);
         m.set_position(7);
+        m.take_events();
         assert_eq!(PaymentMethod::restore(m.snapshot()), Ok(m));
     }
 }

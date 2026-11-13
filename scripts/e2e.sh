@@ -313,7 +313,7 @@ MUG=$(id)
 MUG_VAR=$(variant)
 step "the mug's translatable fields" 200 - "$BASE/admin/translations/product/$MUG"
 contains "what it can be translated from and into" '"default_language":"en","languages":["de","fr"]'
-contains "the title's source text" '"key":"title","format":"text","max_length":255,"source":"Mug"'
+contains "the title's source text" '"key":"title","format":"text","max_length":255,"min_length":null,"source":"Mug"'
 step "nothing to translate in an empty description" 422 invalid_translation \
     -X PUT "$BASE/admin/translations/product/$MUG/de" -H "$JSON" -d '{"fields":{"description":{"value":"<p>Eine Tasse.</p>"}}}'
 contains "says why" '"code":"source_empty","key":"description"'
@@ -332,7 +332,15 @@ step "a field a product doesn't have" 422 invalid_translation -X PUT "$BASE/admi
 contains "says which" '"code":"unknown_field"'
 step "a kind that has no translations" 404 unknown_resource_kind "$BASE/admin/translations/variant/$MUG"
 step "what's translated into German" 200 - "$BASE/admin/translations?kind=product&language=de"
-contains "the mug's title" "{\"resource\":{\"kind\":\"product\",\"id\":\"$MUG\"},\"language\":\"de\",\"fields\":[\"title\"]"
+contains "the mug's translation" "{\"resource\":{\"kind\":\"product\",\"id\":\"$MUG\"},\"language\":\"de\",\"state\":"
+contains "its title" '"fields":["title"]'
+wait_for "the mug is complete in German" "$BASE/admin/translations?kind=product&language=de&state=complete" "\"id\":\"$MUG\""
+contains "every field with text translated" '"state":"complete","total":1,"missing":0,"outdated":0'
+step "nothing of it is missing in German" 200 - "$BASE/admin/translations?kind=product&language=de&state=missing"
+lacks "the mug isn't listed" "\"id\":\"$MUG\""
+step "the worklist is in a language" 400 invalid_query "$BASE/admin/translations?state=missing"
+step "each language's progress" 200 - "$BASE/admin/translations/progress?kind=product"
+contains "German covers the mug" '"language":"de","total":1,"translated":1,"outdated":0,"missing":0'
 step "the default language is fixed while anything is translated" 409 default_language_in_use -X PATCH "$BASE/admin/store" \
     -H "$JSON" -d '{"default_language":"es"}'
 step "remove the German translation" 204 - -X DELETE "$BASE/admin/translations/product/$MUG/de"
@@ -2191,7 +2199,7 @@ contains "brass" '"custom.material":"brass"'
 step "and their definitions, to name them" 200 - "$BASE/storefront/custom-field-definitions?owner_type=product"
 contains "by name" '"field":"custom.material","name":"Material"'
 step "the lamp's translatable fields" 200 - "$BASE/admin/translations/product/$LAMP"
-contains "its material" "\"key\":\"custom_fields.$MATERIAL_FIELD.value\",\"format\":\"text\",\"max_length\":255,\"source\":\"brass\""
+contains "its material" "\"key\":\"custom_fields.$MATERIAL_FIELD.value\",\"format\":\"text\",\"max_length\":255,\"min_length\":null,\"source\":\"brass\""
 contains "named by its definition" "\"custom_field\":{\"definition\":\"$MATERIAL_FIELD\",\"key\":\"custom.material\",\"name\":\"Material\",\"type\":\"text\""
 step "a text value is one line" 422 invalid_translation -X PUT "$BASE/admin/translations/product/$LAMP/de" -H "$JSON" \
     -d "{\"fields\":{\"custom_fields.$MATERIAL_FIELD.value\":{\"value\":\"Mes\\nsing\"}}}"

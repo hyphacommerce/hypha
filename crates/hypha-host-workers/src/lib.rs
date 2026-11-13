@@ -622,6 +622,16 @@ mod worker_main {
                         .await,
                     );
                 }
+                // What dispatch's handlers queued for the translation worklist (a custom
+                // field definition's change queues a kind); what's left marks a tick.
+                if jobs.translation_sources.enabled {
+                    run = run.and(
+                        steps("translation sources", &state, Some(deadline), || {
+                            jobs::translation_sources(&state)
+                        })
+                        .await,
+                    );
+                }
                 // The emails the dispatch run's mailer (or a resend) queued.
                 if jobs.send_notifications.enabled {
                     run = run.and(
@@ -644,9 +654,10 @@ mod worker_main {
     }
 
     /// The cron tick (every minute, `wrangler.toml`; `worker!`'s `#[event(scheduled)]`):
-    /// the price list and discount schedules, dispatch, search sync and sending emails when
-    /// KV's marks say there's work (a window boundary due among them) or on the safety
-    /// net's ticks, the others on the ticks that start their interval (`schedule::due`).
+    /// the price list and discount schedules, dispatch, search sync, the translation
+    /// worklist's sources and sending emails when KV's marks say there's work (a window
+    /// boundary due among them) or on the safety net's ticks, the others on the ticks that
+    /// start their interval (`schedule::due`).
     pub async fn scheduled<D: Deployment>(tick: ScheduledEvent, env: Env, ctx: ScheduleContext) {
         let isolate = match isolate::<D>(&env).await {
             Ok(isolate) => isolate,
@@ -698,6 +709,16 @@ mod worker_main {
                 }
                 if jobs.search_sync.enabled {
                     run = run.and(steps("search sync", &state, None, || search_step(&state)).await);
+                }
+                // What dispatch's handlers (or the migration) queued for the translation
+                // worklist; a run that leaves some marks the next tick.
+                if jobs.translation_sources.enabled {
+                    run = run.and(
+                        steps("translation sources", &state, None, || {
+                            jobs::translation_sources(&state)
+                        })
+                        .await,
+                    );
                 }
                 if jobs.send_notifications.enabled {
                     run = run.and(

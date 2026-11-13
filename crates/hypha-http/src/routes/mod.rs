@@ -240,6 +240,7 @@ macro_rules! route_table {
             [admin, GET, "/admin/checkout-settings", checkout_rules::settings],
             [admin, PATCH, "/admin/checkout-settings", checkout_rules::update_settings],
             [admin, GET, "/admin/translations", translations::list],
+            [admin, GET, "/admin/translations/progress", translations::progress],
             [admin, GET, "/admin/translations/{kind}/{id}", translations::fetch],
             [admin, PUT, "/admin/translations/{kind}/{id}/{language}", translations::put],
             [admin, DELETE, "/admin/translations/{kind}/{id}/{language}", translations::remove],

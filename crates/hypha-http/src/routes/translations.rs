@@ -5,11 +5,14 @@
 use std::collections::BTreeMap;
 
 use axum::{Json, extract::State, http::StatusCode};
+use hypha_core::PageRequest;
 use hypha_core::{Language, Stamped};
 use hypha_translations::{
-    FieldInput, FieldRule, ResourceKind, ResourceRef, StoreLanguages, Translation, TranslationKey,
-    delete_translation, get_translations, list_translations, put_translation, require_read,
-    require_write,
+    FieldCounts, FieldInput, FieldRule, HasTranslations, InvalidWorkPosition, ResourceKind,
+    ResourceRef, SourceDigest, StoreLanguages, Translation, TranslationKey, TranslationSourceRepo,
+    TranslationState, WorkPosition, delete_translation, get_translations, list_translations,
+    put_translation, require_read, require_write, source_digests, translation_progress,
+    translation_worklist,
 };
 use serde::{Deserialize, Serialize};
 
@@ -20,7 +23,7 @@ use super::{
 };
 use crate::{
     error::ApiError,
-    extract::{Caller, JsonBody, PathId},
+    extract::{Caller, JsonBody, PathId, Query},
     state::{AppState, SharedState, Storage},
     translations::{Loaded, TranslatedValue, source},
 };
@@ -376,16 +379,78 @@ pub async fn remove<S: Storage>(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// A translation in a list: which resource, which language, which fields.
+/// Where a resource stands in a language: `missing` while any field with source text
+/// has no translation in it, else `outdated` while any translates a source text that has
+/// changed since, else `complete`.
+#[derive(Serialize, utoipa::ToSchema, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum TranslationStatus {
+    Missing,
+    Outdated,
+    Complete,
+}
+
+impl From<TranslationState> for TranslationStatus {
+    fn from(state: TranslationState) -> Self {
+        match state {
+            TranslationState::Missing => TranslationStatus::Missing,
+            TranslationState::Outdated => TranslationStatus::Outdated,
+            TranslationState::Complete => TranslationStatus::Complete,
+        }
+    }
+}
+
+/// A resource's translation into one language in a list: which resource, which
+/// language, how it covers the resource's fields with source text, which fields it has.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct TranslationSummaryResponse {
     resource: TranslatedResourceResponse,
     language: Language,
-    /// The keys it translates. Read the resource's translations for the text.
+    state: TranslationStatus,
+    /// The resource's fields with source text: a field it leaves empty has nothing to
+    /// translate and isn't counted. 0 until the resource was first read for the
+    /// worklist (in the background, after an upgrade).
+    total: u32,
+    /// Of those, the ones without a translation in `language`.
+    missing: u32,
+    /// Of those translated, the ones whose source text changed since.
+    outdated: u32,
+    /// The keys it translates (a key whose option, value, choice or facet is gone
+    /// included, until the translation is next written); empty when it has none yet.
     fields: Vec<String>,
-    /// RFC 3339.
-    created_at: String,
-    updated_at: String,
+    /// RFC 3339; `null` when the resource has no translation into `language` yet.
+    created_at: Option<String>,
+    updated_at: Option<String>,
+}
+
+impl TranslationSummaryResponse {
+    fn new(
+        resource: ResourceRef,
+        language: Language,
+        counts: FieldCounts,
+        translation: Option<&Translation>,
+    ) -> Result<Self, ApiError> {
+        let (created_at, updated_at) = match translation {
+            Some(t) => {
+                let (created, updated) = stamp_times(t.stamps())?;
+                (Some(created), Some(updated))
+            }
+            None => (None, None),
+        };
+        Ok(Self {
+            resource: resource.into(),
+            language,
+            state: counts.state().into(),
+            total: counts.total,
+            missing: counts.missing,
+            outdated: counts.outdated,
+            fields: translation
+                .map(|t| t.fields().keys().cloned().collect())
+                .unwrap_or_default(),
+            created_at,
+            updated_at,
+        })
+    }
 }
 
 pub type TranslationPage = PageResponse<TranslationSummaryResponse>;
@@ -394,16 +459,57 @@ pub type TranslationPage = PageResponse<TranslationSummaryResponse>;
 #[serde(deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
 pub struct TranslationFilters {
-    /// Only translations of this kind of resource (and its read scope is needed);
-    /// without it, of every kind the caller may read.
+    /// Only resources of this kind (and its read scope is needed); without it, of every
+    /// kind the caller may read.
     kind: Option<String>,
-    /// Only translations into this language.
+    /// Only translations into this language. Required with `state`.
     language: Option<String>,
+    /// `missing`, `outdated` or `complete`: the worklist. Lists every resource with
+    /// source text in that state in `language`, whether it has a translation yet or not,
+    /// by kind in the catalog's order (`product`, `category`, `custom_field_definition`,
+    /// `shipping_option`, `payment_method`, `discount`, `checkout_rule`, `asset`,
+    /// `store`, `search_facet`), then by ID. Without it, the translations there are, by
+    /// kind name, then resource, then language.
+    state: Option<String>,
 }
 
-/// The store's translations, by kind, then resource, then language: what has been
-/// translated. What's missing or outdated is each resource's to say (`GET
-/// /admin/translations/{kind}/{id}`).
+/// Where a list of translations continues: a translation's key, or a worklist's
+/// resource.
+enum ListAfter {
+    Translation(TranslationKey),
+    Work(WorkPosition),
+}
+
+impl std::fmt::Display for ListAfter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ListAfter::Translation(key) => key.fmt(f),
+            ListAfter::Work(position) => position.fmt(f),
+        }
+    }
+}
+
+impl std::str::FromStr for ListAfter {
+    type Err = InvalidWorkPosition;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.parse() {
+            Ok(key) => Ok(ListAfter::Translation(key)),
+            Err(_) => s.parse().map(ListAfter::Work),
+        }
+    }
+}
+
+/// The store's translations, or what's left to translate. Without `state`: the
+/// translations there are, by kind name, then resource, then language, each with its
+/// state (a resource not yet read for the worklist is read for it). With `state` (and
+/// `language`: `400 invalid_query` without it, `422 translation_into_default_language`
+/// or `422 language_not_listed` for one that isn't another on the store's list): the
+/// worklist, every resource with source text whose translation into `language` is
+/// `missing` (some field untranslated, or no translation at all), `outdated` (every
+/// field translated, some from a source text that changed since) or `complete`, in the
+/// catalog's order of kinds, then by ID. Counts are in fields, and only fields with
+/// source text count.
 #[utoipa::path(
     get,
     path = "/admin/translations",
@@ -417,7 +523,7 @@ pub async fn list<S: Storage>(
     query: ListQuery<TranslationFilters>,
 ) -> Result<Json<TranslationPage>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let (page, filters, scope) = query.parse::<TranslationKey>()?;
+    let (page, filters, scope) = query.parse::<ListAfter>()?;
     let kind = filters
         .kind
         .as_deref()
@@ -430,20 +536,162 @@ pub async fn list<S: Storage>(
         .map(Language::new)
         .transpose()
         .map_err(|e| ApiError::invalid_query(format!("`language`: {e}")))?;
-    let found = list_translations(&ctx, &ports, kind, language, page).await?;
+    let wanted = filters
+        .state
+        .as_deref()
+        .map(str::parse::<TranslationState>)
+        .transpose()
+        .map_err(|e| ApiError::invalid_query(format!("`state`: {e}")))?;
+    let limit = page.limit;
+    if let Some(wanted) = wanted {
+        let language = language.ok_or_else(|| {
+            ApiError::invalid_query("`state` needs `language`: the language it's the state in")
+        })?;
+        // Anything else would be all missing: there's nothing to translate into it.
+        let store_languages = languages(&state, &ports).await?;
+        if language == store_languages.default {
+            return Err(hypha_translations::CommandError::DefaultLanguage(language).into());
+        }
+        if !store_languages.others.contains(&language) {
+            return Err(hypha_translations::CommandError::LanguageNotListed(language).into());
+        }
+        let after = match page.after {
+            None => None,
+            Some(ListAfter::Work(position)) => Some(position.0),
+            Some(ListAfter::Translation(_)) => return Err(ApiError::invalid_cursor()),
+        };
+        let found = translation_worklist(
+            &ctx,
+            &ports,
+            kind,
+            language.clone(),
+            Some(wanted),
+            PageRequest { after, limit },
+        )
+        .await?;
+        return Ok(Json(PageResponse::new(
+            found,
+            &scope,
+            |item| ListAfter::Work(WorkPosition(item.resource)),
+            |item| {
+                TranslationSummaryResponse::new(
+                    item.resource,
+                    language.clone(),
+                    item.counts,
+                    item.translation.as_ref(),
+                )
+            },
+        )?));
+    }
+    let after = match page.after {
+        None => None,
+        Some(ListAfter::Translation(key)) => Some(key),
+        Some(ListAfter::Work(_)) => return Err(ApiError::invalid_cursor()),
+    };
+    let found =
+        list_translations(&ctx, &ports, kind, language, PageRequest { after, limit }).await?;
+    // Each translation's state, from its resource's digests: one more read for the page.
+    let mut resources: Vec<ResourceRef> = found.items.iter().map(Translation::resource).collect();
+    resources.dedup();
+    let mut sources: BTreeMap<ResourceRef, Vec<SourceDigest>> = BTreeMap::new();
+    for (resource, digest) in ports.translations().sources(&resources).await? {
+        sources.entry(resource).or_default().push(digest);
+    }
+    // A resource without digests may not have been read for the worklist yet (after an
+    // upgrade, or a read that failed): read it now, so its state isn't a guess.
+    let unread: Vec<ResourceRef> = resources
+        .into_iter()
+        .filter(|r| !sources.contains_key(r))
+        .collect();
+    for resource in unread {
+        if let Some(loaded) = source(&state, &ports, resource).await? {
+            sources.insert(resource, source_digests(&loaded.source));
+        }
+    }
     Ok(Json(PageResponse::new(
         found,
         &scope,
-        TranslationKey::of,
+        |t| ListAfter::Translation(TranslationKey::of(t)),
         |t| {
-            let (created_at, updated_at) = stamp_times(t.stamps())?;
-            Ok(TranslationSummaryResponse {
-                resource: t.resource().into(),
-                language: t.language().clone(),
-                fields: t.fields().keys().cloned().collect(),
-                created_at,
-                updated_at,
-            })
+            let digests = sources.get(&t.resource()).map_or(&[][..], Vec::as_slice);
+            TranslationSummaryResponse::new(
+                t.resource(),
+                t.language().clone(),
+                FieldCounts::of(digests, Some(&t)),
+                Some(&t),
+            )
         },
     )?))
+}
+
+/// How far one language's translations cover the store's text, in fields with source
+/// text: `translated` + `missing` = `total`, and `outdated` are among `translated`.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct LanguageProgressResponse {
+    language: Language,
+    total: u64,
+    /// Translated, outdated or not.
+    translated: u64,
+    /// Translated from a source text that has changed since.
+    outdated: u64,
+    /// Without a translation.
+    missing: u64,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct TranslationProgressResponse {
+    /// The language the source text is in.
+    default_language: Language,
+    /// Each of the store's other languages, published or not, in the store's order.
+    languages: Vec<LanguageProgressResponse>,
+}
+
+#[derive(Deserialize, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub struct ProgressQuery {
+    /// Only this kind of resource (and its read scope is needed); without it, every kind
+    /// the caller may read.
+    kind: Option<String>,
+}
+
+/// How far each of the store's languages covers its text: every field with source text
+/// of the kinds the caller may read, counted as translated (outdated among them) or
+/// missing. What Settings → Languages shows; the resources behind the numbers are
+/// `GET /admin/translations?language=&state=`.
+#[utoipa::path(
+    get,
+    path = "/admin/translations/progress",
+    params(ProgressQuery),
+    responses((status = 200, description = "OK", body = TranslationProgressResponse)),
+    extensions(("x-hypha-scopes" = json!(["translations:read"]))),
+)]
+pub async fn progress<S: Storage>(
+    State(state): State<SharedState<S>>,
+    caller: Caller,
+    query: Query<ProgressQuery>,
+) -> Result<Json<TranslationProgressResponse>, ApiError> {
+    let (ports, ctx) = caller.authenticate(&state).await?;
+    let query = query.parse()?;
+    let kind = query
+        .kind
+        .as_deref()
+        .map(str::parse::<ResourceKind>)
+        .transpose()
+        .map_err(|e| ApiError::invalid_query(format!("`kind`: {e}")))?;
+    let languages = languages(&state, &ports).await?;
+    let counted = translation_progress(&ctx, &ports, kind, &languages.others).await?;
+    Ok(Json(TranslationProgressResponse {
+        default_language: languages.default,
+        languages: counted
+            .into_iter()
+            .map(|p| LanguageProgressResponse {
+                missing: p.missing(),
+                language: p.language,
+                total: p.total,
+                translated: p.translated,
+                outdated: p.outdated,
+            })
+            .collect(),
+    }))
 }

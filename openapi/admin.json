@@ -7981,6 +7981,45 @@
         "pattern": "^[A-Za-z]{2,3}(-[A-Za-z]{4})?(-([A-Za-z]{2}|[0-9]{3}))?(-([A-Za-z0-9]{5,8}|[0-9][A-Za-z0-9]{3}))*$",
         "type": "string"
       },
+      "LanguageProgressResponse": {
+        "description": "How far one language's translations cover the store's text, in fields with source\ntext: `translated` + `missing` = `total`, and `outdated` are among `translated`.",
+        "properties": {
+          "language": {
+            "$ref": "#/components/schemas/Language"
+          },
+          "missing": {
+            "description": "Without a translation.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "outdated": {
+            "description": "Translated from a source text that has changed since.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "translated": {
+            "description": "Translated, outdated or not.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "language",
+          "total",
+          "translated",
+          "outdated",
+          "missing"
+        ],
+        "type": "object"
+      },
       "LevelResponse": {
         "properties": {
           "available": {
@@ -17057,6 +17096,26 @@
         ],
         "type": "object"
       },
+      "TranslationProgressResponse": {
+        "properties": {
+          "default_language": {
+            "$ref": "#/components/schemas/Language",
+            "description": "The language the source text is in."
+          },
+          "languages": {
+            "description": "Each of the store's other languages, published or not, in the store's order.",
+            "items": {
+              "$ref": "#/components/schemas/LanguageProgressResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "default_language",
+          "languages"
+        ],
+        "type": "object"
+      },
       "TranslationStateResponse": {
         "description": "One language's translation of a resource, as a whole.",
         "properties": {
@@ -17090,6 +17149,16 @@
         ],
         "type": "object"
       },
+      "TranslationStatus": {
+        "description": "Where a resource stands in a language: `missing` while any field with source text\nhas no translation in it, else `outdated` while any translates a source text that has\nchanged since, else `complete`.\n\nKnown values: `missing`, `outdated`, `complete`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "missing",
+          "outdated",
+          "complete"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
       "TranslationSummaryPage": {
         "description": "A page of a list, newest first.",
         "properties": {
@@ -17118,14 +17187,17 @@
         "type": "object"
       },
       "TranslationSummaryResponse": {
-        "description": "A translation in a list: which resource, which language, which fields.",
+        "description": "A resource's translation into one language in a list: which resource, which\nlanguage, how it covers the resource's fields with source text, which fields it has.",
         "properties": {
           "created_at": {
-            "description": "RFC 3339.",
-            "type": "string"
+            "description": "RFC 3339; `null` when the resource has no translation into `language` yet.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "fields": {
-            "description": "The keys it translates. Read the resource's translations for the text.",
+            "description": "The keys it translates (a key whose option, value, choice or facet is gone\nincluded, until the translation is next written); empty when it has none yet.",
             "items": {
               "type": "string"
             },
@@ -17134,19 +17206,45 @@
           "language": {
             "$ref": "#/components/schemas/Language"
           },
+          "missing": {
+            "description": "Of those, the ones without a translation in `language`.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "outdated": {
+            "description": "Of those translated, the ones whose source text changed since.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
           "resource": {
             "$ref": "#/components/schemas/TranslatedResourceResponse"
           },
+          "state": {
+            "$ref": "#/components/schemas/TranslationStatus"
+          },
+          "total": {
+            "description": "The resource's fields with source text: a field it leaves empty has nothing to\ntranslate and isn't counted. 0 until the resource was first read for the\nworklist (in the background, after an upgrade).",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
           "updated_at": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
           "resource",
           "language",
-          "fields",
-          "created_at",
-          "updated_at"
+          "state",
+          "total",
+          "missing",
+          "outdated",
+          "fields"
         ],
         "type": "object"
       },
@@ -56091,7 +56189,7 @@
         "operationId": "admin.translations.list",
         "parameters": [
           {
-            "description": "Only translations of this kind of resource (and its read scope is needed);\nwithout it, of every kind the caller may read.",
+            "description": "Only resources of this kind (and its read scope is needed); without it, of every\nkind the caller may read.",
             "in": "query",
             "name": "kind",
             "required": false,
@@ -56100,9 +56198,18 @@
             }
           },
           {
-            "description": "Only translations into this language.",
+            "description": "Only translations into this language. Required with `state`.",
             "in": "query",
             "name": "language",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "`missing`, `outdated` or `complete`: the worklist. Lists every resource with\nsource text in that state in `language`, whether it has a translation yet or not,\nby kind in the catalog's order (`product`, `category`, `custom_field_definition`,\n`shipping_option`, `payment_method`, `discount`, `checkout_rule`, `asset`,\n`store`, `search_facet`), then by ID. Without it, the translations there are, by\nkind name, then resource, then language.",
+            "in": "query",
+            "name": "state",
             "required": false,
             "schema": {
               "type": "string"
@@ -56197,7 +56304,87 @@
             "bearer": []
           }
         ],
-        "summary": "The store's translations, by kind, then resource, then language: what has been\ntranslated. What's missing or outdated is each resource's to say (`GET\n/admin/translations/{kind}/{id}`).",
+        "summary": "The store's translations, or what's left to translate. Without `state`: the\ntranslations there are, by kind name, then resource, then language, each with its\nstate (a resource not yet read for the worklist is read for it). With `state` (and\n`language`: `400 invalid_query` without it, `422 translation_into_default_language`\nor `422 language_not_listed` for one that isn't another on the store's list): the\nworklist, every resource with source text whose translation into `language` is\n`missing` (some field untranslated, or no translation at all), `outdated` (every\nfield translated, some from a source text that changed since) or `complete`, in the\ncatalog's order of kinds, then by ID. Counts are in fields, and only fields with\nsource text count.",
+        "tags": [
+          "translations"
+        ],
+        "x-hypha-scopes": [
+          "translations:read"
+        ]
+      }
+    },
+    "/admin/translations/progress": {
+      "get": {
+        "operationId": "admin.translations.progress",
+        "parameters": [
+          {
+            "description": "Only this kind of resource (and its read scope is needed); without it, every kind\nthe caller may read.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranslationProgressResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An unknown or malformed query parameter (`invalid_query`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "How far each of the store's languages covers its text: every field with source text\nof the kinds the caller may read, counted as translated (outdated among them) or\nmissing. What Settings → Languages shows; the resources behind the numbers are\n`GET /admin/translations?language=&state=`.",
         "tags": [
           "translations"
         ],

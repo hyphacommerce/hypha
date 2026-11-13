@@ -96,6 +96,8 @@ impl<C: PgConnection> PaymentMethodRepo for PgStore<C> {
     async fn insert(&self, method: &mut PaymentMethod) -> Result<(), RepoError> {
         stamp_insert(method, self.now());
         let s = method.snapshot();
+        let events = method.take_events();
+        let stamp = self.event_stamp();
         let settings = s.settings.to_string();
         in_transaction!(self, |tx| {
             tx.query_typed(
@@ -124,7 +126,8 @@ impl<C: PgConnection> PaymentMethodRepo for PgStore<C> {
                 Type::UUID,
                 s.stamps,
             )
-            .await
+            .await?;
+            insert_events(tx, &events, Some(Version::NEW.next()), stamp).await
         })?;
         method.set_version(Version::NEW.next());
         Ok(())
@@ -133,6 +136,8 @@ impl<C: PgConnection> PaymentMethodRepo for PgStore<C> {
     async fn update(&self, method: &mut PaymentMethod) -> Result<(), RepoError> {
         stamp_update(method, self.now());
         let s = method.snapshot();
+        let events = method.take_events();
+        let stamp = self.event_stamp();
         let settings = s.settings.to_string();
         let version = in_transaction!(self, |tx| {
             let row = tx
@@ -167,6 +172,7 @@ impl<C: PgConnection> PaymentMethodRepo for PgStore<C> {
                 s.stamps,
             )
             .await?;
+            insert_events(tx, &events, Some(version), stamp).await?;
             Ok(version)
         })?;
         method.set_version(version);

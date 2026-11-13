@@ -7,9 +7,13 @@ use hypha_core::{
 use crate::{
     catalog::{ResourceKind, ResourceRef},
     error::TranslationError,
-    repo::{HasTranslations, TranslationFilter, TranslationKey, TranslationRepo, keys},
+    repo::{
+        HasTranslations, TranslationFilter, TranslationKey, TranslationRepo, TranslationSourceRepo,
+        keys,
+    },
     source::Source,
     translation::{FieldInput, Translation},
+    worklist::{LanguageProgress, TranslationState, WorkItem, WorklistFilter, source_digests},
 };
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -83,6 +87,69 @@ pub async fn get_translations<S: HasTranslations>(
     Ok(ports.translations().for_resource(resource).await?)
 }
 
+/// The kinds a list shows the caller: `kind` alone (refused without its read scopes), or
+/// every kind whose resources they read, in the catalog's order.
+fn readable_kinds(ctx: &Ctx, kind: Option<ResourceKind>) -> Result<Vec<ResourceKind>, AuthError> {
+    ctx.require(Scope::TranslationsRead)?;
+    Ok(match kind {
+        Some(kind) => {
+            require_read(ctx, kind)?;
+            vec![kind]
+        }
+        None => ResourceKind::ALL
+            .into_iter()
+            .filter(|kind| require_read(ctx, *kind).is_ok())
+            .collect(),
+    })
+}
+
+/// A page of the resources with text to translate, by their state in `language`
+/// (`state`, or every state): what's left to translate, for the kinds the caller may read
+/// (`kind` alone, or every kind whose resources they read). In the catalog's order of
+/// kinds, then by resource ID.
+pub async fn translation_worklist<S: HasTranslations>(
+    ctx: &Ctx,
+    ports: &S,
+    kind: Option<ResourceKind>,
+    language: Language,
+    state: Option<TranslationState>,
+    page: PageRequest<ResourceRef>,
+) -> Result<Page<WorkItem>, CommandError> {
+    let filter = WorklistFilter {
+        kinds: readable_kinds(ctx, kind)?,
+        language,
+        state,
+    };
+    Ok(ports.translations().worklist(&filter, page).await?)
+}
+
+/// How far each of `languages` covers the text of the kinds the caller may read (`kind`
+/// alone, or every kind whose resources they read), in fields.
+pub async fn translation_progress<S: HasTranslations>(
+    ctx: &Ctx,
+    ports: &S,
+    kind: Option<ResourceKind>,
+    languages: &[Language],
+) -> Result<Vec<LanguageProgress>, CommandError> {
+    let kinds = readable_kinds(ctx, kind)?;
+    Ok(ports.translations().progress(&kinds, languages).await?)
+}
+
+/// Writes `resource`'s digests from `source`, the resource as the host read it now
+/// (`None`: it's gone, and its digests go). Idempotent: what's written is what the
+/// resource is when it runs. Not a command: the host's handler and job call it.
+pub async fn sync_sources<S: HasTranslations>(
+    ports: &S,
+    resource: ResourceRef,
+    source: Option<&Source>,
+) -> Result<(), RepoError> {
+    let digests = source.map(source_digests).unwrap_or_default();
+    ports
+        .translations()
+        .replace_sources(resource, &digests)
+        .await
+}
+
 /// A page of the store's translations, of the kinds the caller may read: `kind` alone,
 /// or every kind whose resources they read.
 pub async fn list_translations<S: HasTranslations>(
@@ -92,19 +159,8 @@ pub async fn list_translations<S: HasTranslations>(
     language: Option<Language>,
     page: PageRequest<TranslationKey>,
 ) -> Result<Page<Translation>, CommandError> {
-    ctx.require(Scope::TranslationsRead)?;
-    let kinds = match kind {
-        Some(kind) => {
-            require_read(ctx, kind)?;
-            vec![kind]
-        }
-        None => ResourceKind::ALL
-            .into_iter()
-            .filter(|kind| require_read(ctx, *kind).is_ok())
-            .collect(),
-    };
     let filter = TranslationFilter {
-        kinds: Some(kinds),
+        kinds: Some(readable_kinds(ctx, kind)?),
         language,
     };
     Ok(ports.translations().list(&filter, page).await?)
