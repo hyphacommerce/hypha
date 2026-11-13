@@ -16957,9 +16957,17 @@
             "type": "string"
           },
           "max_length": {
-            "description": "The longest translation: characters for `text`, bytes of HTML for `html`. A\ncustom field value's is its definition's `max_length` in characters, else its\ntype's cap (255 characters for `text`, 16 KiB for the others), and its\n`min_length` holds too.",
+            "description": "The longest translation: characters for `text`, bytes of HTML for `html`. A\ncustom field value's is its definition's `max_length` in characters, else its\ntype's cap (255 characters for `text`, 16 KiB for the others).",
             "minimum": 0,
             "type": "integer"
+          },
+          "min_length": {
+            "description": "The shortest translation, in characters (of the sanitised HTML, for `html`): a\ncustom field value's definition's `min_length`. `null` when there is none, as\nfor every field that isn't a custom field value.",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "source": {
             "description": "The text in the store's default language; empty when the resource has none.",

@@ -70,9 +70,12 @@ pub struct TranslatableFieldResponse {
     format: &'static str,
     /// The longest translation: characters for `text`, bytes of HTML for `html`. A
     /// custom field value's is its definition's `max_length` in characters, else its
-    /// type's cap (255 characters for `text`, 16 KiB for the others), and its
-    /// `min_length` holds too.
+    /// type's cap (255 characters for `text`, 16 KiB for the others).
     max_length: usize,
+    /// The shortest translation, in characters (of the sanitised HTML, for `html`): a
+    /// custom field value's definition's `min_length`. `null` when there is none, as
+    /// for every field that isn't a custom field value.
+    min_length: Option<usize>,
     /// The text in the store's default language; empty when the resource has none.
     source: String,
     /// SHA-256 of `source`, in hex: send it back as a field's `source_digest` to say
@@ -127,18 +130,22 @@ impl TranslationsResponse {
             .iter()
             .filter_map(|field| {
                 let (spec, _) = resource.kind.field(&field.key)?;
-                let (format, max_length) = match field.rule_or(spec.rule) {
-                    FieldRule::Text { max_chars } => ("text", max_chars),
-                    FieldRule::Html { max_bytes } => ("html", max_bytes),
-                    FieldRule::Value(rule) => match rule.format {
-                        hypha_translations::ValueFormat::Html => ("html", rule.max_length()),
-                        _ => ("text", rule.max_length()),
-                    },
+                let (format, max_length, min_length) = match field.rule_or(spec.rule) {
+                    FieldRule::Text { max_chars } => ("text", max_chars, None),
+                    FieldRule::Html { max_bytes } => ("html", max_bytes, None),
+                    FieldRule::Value(rule) => {
+                        let format = match rule.format {
+                            hypha_translations::ValueFormat::Html => "html",
+                            _ => "text",
+                        };
+                        (format, rule.max_length(), rule.min_chars)
+                    }
                 };
                 Some(TranslatableFieldResponse {
                     key: field.key.clone(),
                     format,
                     max_length,
+                    min_length,
                     source: field.text.clone(),
                     digest: field.digest.clone(),
                     translations: translations

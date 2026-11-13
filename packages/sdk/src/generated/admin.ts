@@ -10351,10 +10351,15 @@ export interface components {
             /**
              * @description The longest translation: characters for `text`, bytes of HTML for `html`. A
              *     custom field value's is its definition's `max_length` in characters, else its
-             *     type's cap (255 characters for `text`, 16 KiB for the others), and its
-             *     `min_length` holds too.
+             *     type's cap (255 characters for `text`, 16 KiB for the others).
              */
             max_length: number;
+            /**
+             * @description The shortest translation, in characters (of the sanitised HTML, for `html`): a
+             *     custom field value's definition's `min_length`. `null` when there is none, as
+             *     for every field that isn't a custom field value.
+             */
+            min_length?: number | null;
             /** @description The text in the store's default language; empty when the resource has none. */
             source: string;
             /** @description By language tag; a language without a translation of this field is absent. */
