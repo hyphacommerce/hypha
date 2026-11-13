@@ -27,7 +27,7 @@ pub use commands::{
     sweep_expired_uploads, update_asset,
 };
 pub use error::{BlobError, MediaError, UploadMismatch};
-pub use events::AssetDeleted;
+pub use events::{AssetDeleted, AssetUpdated};
 pub use filter::{AssetFilter, AssetSort};
 pub use mime::{AssetKind, MimeType};
 pub use repo::{

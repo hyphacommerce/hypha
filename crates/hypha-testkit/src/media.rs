@@ -3,7 +3,9 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
-use hypha_core::{AssetId, Keyset, Page, PageRequest, Recorded, RepoError, Timestamp, UploadId};
+use hypha_core::{
+    AssetId, Keyset, Page, PageRequest, Recorded, RepoError, Timestamp, UploadId, Versioned,
+};
 use hypha_media::{
     Asset, AssetFilter, AssetRepo, AssetSort, AssetStatus, AssetUsage, AssetUsageRepo, BlobError,
     BlobHead, BlobKey, BlobStore, HasAssetUsages, HasAssets, PresignedUpload, TemporaryUpload,
@@ -132,12 +134,18 @@ impl AssetRepo for InMemoryAssetRepo {
     }
 
     async fn insert(&self, asset: &mut Asset) -> Result<(), RepoError> {
+        let events = asset.take_events();
         self.assets
-            .insert(asset.id(), asset, keys::ASSET_ID, &no_unique_keys)
+            .insert(asset.id(), asset, keys::ASSET_ID, &no_unique_keys)?;
+        self.outbox.write(events, Some(asset.version()));
+        Ok(())
     }
 
     async fn update(&self, asset: &mut Asset) -> Result<(), RepoError> {
-        self.assets.update(asset.id(), asset, &no_unique_keys)
+        let events = asset.take_events();
+        self.assets.update(asset.id(), asset, &no_unique_keys)?;
+        self.outbox.write(events, Some(asset.version()));
+        Ok(())
     }
 
     async fn delete(&self, asset: &mut Asset) -> Result<(), RepoError> {

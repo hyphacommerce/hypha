@@ -48,6 +48,50 @@ pub enum FieldRule {
     /// HTML sanitised like core's `Description`, at most this many bytes as sent and as
     /// stored.
     Html { max_bytes: usize },
+    /// A custom field value's: its definition's type and lengths, which the host reads
+    /// for each value (`SourceField::rule`).
+    Value(ValueRule),
+}
+
+/// What a custom field value's translation is held to: what a value of its definition
+/// is, but the definition's pattern (a field with one holds a code, and isn't
+/// translatable).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ValueRule {
+    pub format: ValueFormat,
+    /// In characters (of the sanitised HTML, for `Html`).
+    pub min_chars: Option<usize>,
+    pub max_chars: Option<usize>,
+    /// In bytes, as sent and once sanitised.
+    pub max_bytes: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValueFormat {
+    /// One line of plain text (`text`).
+    Line,
+    /// Plain text, line breaks allowed (`multiline_text`).
+    Lines,
+    /// HTML sanitised like a description (`rich_text`).
+    Html,
+}
+
+impl ValueRule {
+    /// A `text` field's without validations of its own: the catalog's rule for a value
+    /// whose source names none.
+    pub const LINE: ValueRule = ValueRule {
+        format: ValueFormat::Line,
+        min_chars: None,
+        max_chars: Some(MAX_TEXT_LEN),
+        max_bytes: None,
+    };
+
+    /// The longest translation it takes, as editors are told: characters, else bytes.
+    pub fn max_length(&self) -> usize {
+        self.max_chars
+            .or(self.max_bytes)
+            .unwrap_or(Description::MAX_LEN)
+    }
 }
 
 /// One translatable field of a kind: the resource's own (`title`), or one each child in
@@ -85,6 +129,14 @@ const fn child(collection: &'static str, name: &'static str, max_chars: usize) -
     }
 }
 
+const fn value(collection: &'static str) -> FieldSpec {
+    FieldSpec {
+        collection: Some(collection),
+        name: fields::custom_field::VALUE,
+        rule: FieldRule::Value(ValueRule::LINE),
+    }
+}
+
 const PRODUCT: &[FieldSpec] = &[
     text(fields::product::TITLE, MAX_TEXT_LEN),
     html(fields::product::DESCRIPTION),
@@ -98,10 +150,13 @@ const PRODUCT: &[FieldSpec] = &[
         fields::product::OPTION_VALUE_LABEL,
         MAX_TEXT_LEN,
     ),
+    value(fields::custom_field::CUSTOM_FIELDS),
+    value(fields::custom_field::VARIANT_CUSTOM_FIELDS),
 ];
 const CATEGORY: &[FieldSpec] = &[
     text(fields::category::NAME, MAX_TEXT_LEN),
     html(fields::category::DESCRIPTION),
+    value(fields::custom_field::CUSTOM_FIELDS),
 ];
 const CUSTOM_FIELD_DEFINITION: &[FieldSpec] = &[
     text(fields::custom_field_definition::NAME, 255),

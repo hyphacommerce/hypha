@@ -610,9 +610,17 @@ fn address_problems(e: &hypha_core::AddressError) -> Value {
     let problems: Vec<Value> = e
         .problems()
         .iter()
-        .map(
-            |p| json!({ "field": p.field.as_str(), "code": p.code.as_str(), "message": p.message }),
-        )
+        .map(|p| {
+            let mut problem = json!({
+                "field": p.field.as_str(),
+                "code": p.code.as_str(),
+                "message": p.message,
+            });
+            if let Some(params) = crate::routes::address::MessageParamsDto::of(&p.params) {
+                problem["params"] = json!(params);
+            }
+            problem
+        })
         .collect();
     json!({ "problems": problems })
 }
@@ -2336,6 +2344,7 @@ impl From<hypha_users::CommandError> for ApiError {
             E::Role(R::Text(_) | R::NoScopes)
             | E::User(U::Text(_))
             | E::Email(_)
+            | E::Language(_)
             | E::Password(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Notify(_) => StatusCode::BAD_GATEWAY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),

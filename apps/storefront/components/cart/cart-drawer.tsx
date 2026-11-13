@@ -15,12 +15,14 @@ import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 
 import { readCartDiscounts, subtotalRows } from "@/lib/discounts";
+import { useT } from "@/lib/use-t";
 
 import { CartLines } from "./cart-lines";
 import { useCart } from "./cart-provider";
 import { DiscountCodeField } from "./discount-code-field";
 
 export function CartDrawer() {
+  const t = useT();
   const { cart, count, digits, base, isOpen, close, error } = useCart();
   const isEmpty = !cart || cart.lines.length === 0;
   const discounts = readCartDiscounts(cart);
@@ -33,19 +35,21 @@ export function CartDrawer() {
       maxHeight="100dvh"
       style={{ height: "100dvh", borderRadius: 0 }}
       padding={5}
-      aria-label="Cart"
+      aria-label={t("cart.title")}
     >
       <VStack gap={4} height="100%">
         <HStack hAlign="between" vAlign="center">
-          <Heading level={2}>Cart{count > 0 ? ` (${count})` : ""}</Heading>
-          <Button label="Close" variant="ghost" size="sm" clickAction={close} />
+          <Heading level={2}>{t("cart.heading", { count })}</Heading>
+          <Button label={t("common.close")} variant="ghost" size="sm" clickAction={close} />
         </HStack>
         {error && <Banner status="error" title={error} />}
         {isEmpty ? (
           <EmptyState
-            title="Your cart is empty"
-            description="Find something you like and add it here."
-            actions={<Button label="Keep shopping" variant="primary" clickAction={close} />}
+            title={t("cart.empty_title")}
+            description={t("cart.empty_description")}
+            actions={
+              <Button label={t("common.keep_shopping")} variant="primary" clickAction={close} />
+            }
           />
         ) : (
           <>
@@ -55,7 +59,7 @@ export function CartDrawer() {
             <Divider />
             <VStack gap={3}>
               <DiscountCodeField discounts={discounts} />
-              {subtotalRows(cart.subtotal, discounts, digits).map((row) => (
+              {subtotalRows(t, cart.subtotal, discounts, digits).map((row) => (
                 <HStack key={row.label} hAlign="between">
                   <Text
                     color={row.strong ? undefined : "secondary"}
@@ -69,16 +73,16 @@ export function CartDrawer() {
                 </HStack>
               ))}
               <Text type="supporting" color="secondary">
-                Shipping and taxes are worked out at checkout.
+                {t("cart.shipping_at_checkout")}
               </Text>
               <Button
-                label="Check out"
+                label={t("cart.check_out")}
                 variant="primary"
                 size="lg"
                 href={`${base}/checkout`}
                 isDisabled={!cart.fully_available}
               />
-              <Button label="View cart" variant="secondary" href={`${base}/cart`} />
+              <Button label={t("cart.view_cart")} variant="secondary" href={`${base}/cart`} />
             </VStack>
           </>
         )}

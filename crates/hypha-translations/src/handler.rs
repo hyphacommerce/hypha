@@ -11,9 +11,8 @@ use crate::{
 };
 
 /// The deletions it follows: the event, the kind that went, and the payload's field
-/// holding its ID. Shipping options and payment methods aren't here: no event names
-/// one that went, so the host removes their translations where it deletes them.
-pub const WANTED: [(&str, ResourceKind, &str); 6] = [
+/// holding its ID.
+pub const WANTED: [(&str, ResourceKind, &str); 8] = [
     ("product.deleted", ResourceKind::Product, "product"),
     ("category.deleted", ResourceKind::Category, "category"),
     (
@@ -28,6 +27,16 @@ pub const WANTED: [(&str, ResourceKind, &str); 6] = [
         "checkout_rule",
     ),
     ("asset.deleted", ResourceKind::Asset, "asset"),
+    (
+        "payment_method.deleted",
+        ResourceKind::PaymentMethod,
+        "payment_method",
+    ),
+    (
+        "shipping_option.deleted",
+        ResourceKind::ShippingOption,
+        "shipping_option",
+    ),
 ];
 
 /// Removes a deleted resource's translations, in every language. Idempotent: a second

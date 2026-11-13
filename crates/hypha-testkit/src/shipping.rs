@@ -76,7 +76,16 @@ impl ShippingZoneRepo for InMemoryShippingZoneRepo {
 
     async fn delete(&self, zone: &mut ShippingZone) -> Result<(), RepoError> {
         let events = zone.take_events();
-        self.zones.remove(&zone.id());
+        let mut rows = self.zones.lock();
+        match rows.get(&zone.id()) {
+            None => return Ok(()),
+            Some(stored) if stored.version() != zone.version() => {
+                return Err(RepoError::StaleVersion);
+            }
+            Some(_) => {}
+        }
+        rows.remove(&zone.id());
+        drop(rows);
         self.outbox.write(events, None);
         Ok(())
     }

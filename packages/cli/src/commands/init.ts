@@ -614,7 +614,7 @@ async function initCloudflare(dir: string, args: CloudflareArgs): Promise<void> 
     `Written to ${dir}`,
   );
   p.log.step(
-    "hypha deploy needs Rust with `rustup target add wasm32-unknown-unknown` and `cargo install worker-build`.",
+    "hypha deploy needs Rust with `rustup target add wasm32-unknown-unknown` and `cargo install worker-build@0.8.7`.",
   );
   p.outro(`Next: hypha deploy${args.dir === "hypha-deploy" ? "" : ` --dir ${args.dir}`}`);
 }

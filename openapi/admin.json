@@ -363,11 +363,21 @@
             "description": "Whether the first line is expected to hold a house number.",
             "type": "boolean"
           },
+          "label_keys": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LabelKeyOrNull"
+            },
+            "description": "Each label's key, by field, for the same fields as `labels` (`province: \"state\"`,\n`postal_code: \"zip_code\"`): what a form in another language translates the label\nby. `null` for a label outside the set, which is then shown as `labels` has it.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
           "labels": {
             "additionalProperties": {
               "type": "string"
             },
-            "description": "Each field's label, by field (\"State\", \"ZIP code\"). English for now.",
+            "description": "Each field's label, by field (\"State\", \"ZIP code\"), in English.",
             "propertyNames": {
               "type": "string"
             },
@@ -413,6 +423,7 @@
           "rows",
           "required",
           "labels",
+          "label_keys",
           "postal_code",
           "regions",
           "house_number_required",
@@ -2223,8 +2234,18 @@
             "type": "string"
           },
           "message": {
-            "description": "Plain text for the shopper.",
+            "description": "Plain text for the shopper, in English when the message is built in: a client\nshowing another language words it from `code` and `params`.",
             "type": "string"
+          },
+          "params": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MessageParamsDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "path": {
             "description": "An RFC 9535 JSONPath into this response, from a closed set: `$` (the cart),\n`$.email`, `$.shipping_address`, `$.shipping_address.<field>`,\n`$.shipping_groups[<i>]` (the group and its chosen option) or `$.lines[<i>]`. Show\nthe message by that field; one a client doesn't place goes at the top.",
@@ -7085,6 +7106,17 @@
         "type": "string",
         "x-hypha-open-enum": true
       },
+      "FieldTranslationPatch": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/FieldTranslationRequest",
+            "description": "One field of a patch: the field's new translation, or `null` to remove it."
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
       "FieldTranslationRequest": {
         "additionalProperties": false,
         "description": "One field of a translation being written.",
@@ -7904,6 +7936,53 @@
         ],
         "type": "string"
       },
+      "LabelKeyDto": {
+        "description": "What a field's label says, by meaning: a closed set for a client to translate labels\nby, the English `labels` being one rendering of it. Values are added, never renamed.\n\nKnown values: `first_name`, `last_name`, `company`, `address1`, `address2`, `street_and_house_number`, `full_address`, `additional_address`, `city`, `city_town`, `city_ward_town_village`, `ward`, `district`, `suburb`, `area`, `region`, `province`, `state`, `state_territory`, `county`, `prefecture`, `emirate`, `governorate`, `department`, `postal_code`, `postcode`, `zip_code`, `pin_code`, `phone`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "first_name",
+          "last_name",
+          "company",
+          "address1",
+          "address2",
+          "street_and_house_number",
+          "full_address",
+          "additional_address",
+          "city",
+          "city_town",
+          "city_ward_town_village",
+          "ward",
+          "district",
+          "suburb",
+          "area",
+          "region",
+          "province",
+          "state",
+          "state_territory",
+          "county",
+          "prefecture",
+          "emirate",
+          "governorate",
+          "department",
+          "postal_code",
+          "postcode",
+          "zip_code",
+          "pin_code",
+          "phone"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "LabelKeyOrNull": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/LabelKeyDto",
+            "description": "A label's key, or `null` for a label outside the set."
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
       "Language": {
         "description": "A BCP 47 language tag: a language, then optionally a script, region and variants (`en`, `en-GB`, `sr-Latn`). Responses show it in canonical case.",
         "examples": [
@@ -7912,6 +7991,52 @@
         "maxLength": 35,
         "pattern": "^[A-Za-z]{2,3}(-[A-Za-z]{4})?(-([A-Za-z]{2}|[0-9]{3}))?(-([A-Za-z0-9]{5,8}|[0-9][A-Za-z0-9]{3}))*$",
         "type": "string"
+      },
+      "LanguageProgressResponse": {
+        "description": "How far one language's translations cover the store's text, in fields with source\ntext: `translated` + `missing` = `total`, `outdated` are among `translated` and\n`inherited` among `missing`.",
+        "properties": {
+          "inherited": {
+            "description": "Of those missing, the ones shoppers still read in the language without its\nregion (`de` for `de-AT`), as storefronts fall back to it: the base language's\ntranslation when it's another of the store's languages (published or not), or\nthe source when it's the default (then every missing field is inherited). 0 for\na language without a region. `missing` − `inherited` are the fields a regional\nlanguage's shoppers read in the default language.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "language": {
+            "$ref": "#/components/schemas/Language"
+          },
+          "missing": {
+            "description": "Without a translation in exactly this language.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "outdated": {
+            "description": "Translated from a source text that has changed since.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "translated": {
+            "description": "Translated, outdated or not.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "language",
+          "total",
+          "translated",
+          "outdated",
+          "missing",
+          "inherited"
+        ],
+        "type": "object"
       },
       "LevelResponse": {
         "properties": {
@@ -8495,6 +8620,51 @@
           "id",
           "name"
         ],
+        "type": "object"
+      },
+      "MessageParamsDto": {
+        "description": "What a client needs to word a built-in cart message or an address problem from its\n`code` in the shopper's language, rather than show the English `message`. Absent where\nthere's nothing to say: a checkout rule's or a validation app's message (worded by\nwhoever wrote it), a built-in one that needs no data, a message stored before params.\nFields are added, never renamed. By code:\n\n- `required`, `unknown_region`: `field`.\n- `too_long`: `field`, `max`.\n- `invalid_format`: `field`, and `example` where the country gives one.\n- `region_mismatch`: `field` (`postal_code`), `region` (the code the address names) and\n  `region_name`.\n- `house_number_missing`: `field` (`line1`).\n- `apartment_missing`: `field` (`line2`).\n- `address_corrections_suggested`, `address_ambiguous`, `address_undeliverable`,\n  `validation_unavailable`: none (a suggested address is the cart's\n  `shipping_address_check.suggested`).\n\nA field's label in the country's words is the address format's `label_keys`, but for\n`country`, which forms show apart from the address's own fields.",
+        "properties": {
+          "example": {
+            "example": "90210",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "field": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AddressFieldDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "max": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "region": {
+            "example": "NY",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "region_name": {
+            "example": "New York",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
         "type": "object"
       },
       "MessageSourceDto": {
@@ -10115,6 +10285,25 @@
         ],
         "type": "object"
       },
+      "PatchTranslationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "fields": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FieldTranslationPatch"
+            },
+            "description": "The fields to change, by key (JSON Merge Patch): a field given an object is set,\nby the same rules as a PUT's (blank removes it); `null` removes it; a field left\nout keeps its translation.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "type": "object"
+      },
       "PaymentActionAcceptedResponse": {
         "description": "The provider took the action. Unless it said it's done already (`completed`), nothing\nhas moved yet: the payment changes when the provider reports what happened\n(`POST /admin/payments/{id}/events`).",
         "properties": {
@@ -10598,7 +10787,7 @@
       },
       "PostalAddressRequest": {
         "additionalProperties": false,
-        "description": "Sent: last name, first line and city required, text trimmed, at most 255 characters\nper field. A cart's or a location's address is also checked against its country's\nformat (`GET …/address-formats/{country}`): its required fields, the postal code's\nshape, the region (a name, alternate name or code, stored as the code where the\ncountry lists regions). Every problem comes back at once as `422 invalid_address`\nwith `details.problems: [{field, code, message}]`.",
+        "description": "Sent: last name, first line and city required, text trimmed, at most 255 characters\nper field. A cart's or a location's address is also checked against its country's\nformat (`GET …/address-formats/{country}`): its required fields, the postal code's\nshape, the region (a name, alternate name or code, stored as the code where the\ncountry lists regions). Every problem comes back at once as `422 invalid_address`\nwith `details.problems: [{field, code, message, params}]` (`params` as a cart\nmessage's).",
         "properties": {
           "city": {
             "type": "string"
@@ -10917,7 +11106,7 @@
             "type": "string"
           },
           "language": {
-            "description": "The language the sources are written for (a BCP 47 tag, one of the store's):\nrendered in that language's layout, its money and dates written its way. Absent:\nthe store's default.",
+            "description": "The language the sources are written for (a BCP 47 tag, one of the store's):\nrendered as that language's emails send, in its layout, with money and dates\nwritten the way of the template's `sources_language` (a language still sending\nanother's sources keeps their formats). Absent: the store's default.",
             "type": [
               "string",
               "null"
@@ -12502,7 +12691,7 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/FieldTranslationRequest"
             },
-            "description": "Every translated field of this language, by key. A field left out is removed, so\nsend the whole language; no fields at all deletes the translation.",
+            "description": "Every translated field of this language, by key. A field left out is removed, so\nsend the whole language (a PATCH changes only the fields it names); no fields at\nall deletes the translation.",
             "propertyNames": {
               "type": "string"
             },
@@ -13090,6 +13279,16 @@
           },
           "message": {
             "type": "string"
+          },
+          "params": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MessageParamsDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -16185,6 +16384,16 @@
           },
           "message": {
             "type": "string"
+          },
+          "params": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MessageParamsDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -16800,22 +17009,41 @@
       "TranslatableFieldResponse": {
         "description": "One translatable field of a resource: its source text and its translations.",
         "properties": {
+          "custom_field": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TranslatedValue",
+                "description": "For a custom field value, which one: its definition and variant. `null` for\nevery other field."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "digest": {
             "description": "SHA-256 of `source`, in hex: send it back as a field's `source_digest` to say\nwhich text was translated.",
             "type": "string"
           },
           "format": {
-            "description": "`text` (plain, trimmed) or `html` (sanitised like a description).",
+            "description": "`text` (plain, trimmed) or `html` (sanitised like a description). A custom field\nvalue's follows its definition's type: `text` for `text` (one line) and\n`multiline_text`, `html` for `rich_text`.",
             "type": "string"
           },
           "key": {
-            "description": "`title`, or a child's field by the child's ID: `options.<opt_…>.name`,\n`option_values.<optval_…>.label`, `choices.<key>.label`, `facets.<key>.label`.",
+            "description": "`title`, or a child's field by the child's ID: `options.<opt_…>.name`,\n`option_values.<optval_…>.label`, `choices.<key>.label`, `facets.<key>.label`,\na custom field value's `custom_fields.<cfdef_…>.value` (a product's or a\ncategory's) or `variant_custom_fields.<var_…>.<cfdef_…>.value` (a variant's, in\nits product's).",
             "type": "string"
           },
           "max_length": {
-            "description": "The longest translation: characters for `text`, bytes of HTML for `html`.",
+            "description": "The longest translation: characters for `text`, bytes of HTML for `html`. A\ncustom field value's is its definition's `max_length` in characters, else its\ntype's cap (255 characters for `text`, 16 KiB for the others).",
             "minimum": 0,
             "type": "integer"
+          },
+          "min_length": {
+            "description": "The shortest translation, in characters (of the sanitised HTML, for `html`): a\ncustom field value's definition's `min_length`. `null` when there is none, as\nfor every field that isn't a custom field value.",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "source": {
             "description": "The text in the store's default language; empty when the resource has none.",
@@ -16860,6 +17088,78 @@
         ],
         "type": "object"
       },
+      "TranslatedValue": {
+        "description": "The custom field value a translatable field is, for an editor to label it: its\ndefinition, and the variant whose value it is (in a product's translation).",
+        "properties": {
+          "definition": {
+            "$ref": "#/components/schemas/CustomFieldDefinitionId"
+          },
+          "key": {
+            "description": "The field's key, `custom.material`.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The definition's name, in the store's default language.",
+            "type": "string"
+          },
+          "type": {
+            "description": "`text`, `multiline_text` or `rich_text`.",
+            "type": "string"
+          },
+          "variant": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/VariantId",
+                "description": "The variant whose value it is, in a product's translation; `null` for the\nresource's own."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "variant_title": {
+            "description": "That variant's title as stored (\"M / Blue\"); `null` for the resource's own value\nand a variant without options.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "definition",
+          "key",
+          "name",
+          "type"
+        ],
+        "type": "object"
+      },
+      "TranslationProgressResponse": {
+        "properties": {
+          "default_language": {
+            "$ref": "#/components/schemas/Language",
+            "description": "The language the source text is in."
+          },
+          "languages": {
+            "description": "Each of the store's other languages, published or not, in the store's order.",
+            "items": {
+              "$ref": "#/components/schemas/LanguageProgressResponse"
+            },
+            "type": "array"
+          },
+          "pending": {
+            "description": "Resources of the kinds counted whose text is yet to be read: until it's 0 the\ntotals are short of the store's text (after an upgrade, while the job counts every\nresource once). 0 when everything is counted.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "default_language",
+          "languages",
+          "pending"
+        ],
+        "type": "object"
+      },
       "TranslationStateResponse": {
         "description": "One language's translation of a resource, as a whole.",
         "properties": {
@@ -16893,6 +17193,16 @@
         ],
         "type": "object"
       },
+      "TranslationStatus": {
+        "description": "Where a resource stands in a language: `missing` while any field with source text\nhas no translation in it, else `outdated` while any translates a source text that has\nchanged since, else `complete`.\n\nKnown values: `missing`, `outdated`, `complete`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "missing",
+          "outdated",
+          "complete"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
       "TranslationSummaryPage": {
         "description": "A page of a list, newest first.",
         "properties": {
@@ -16921,35 +17231,71 @@
         "type": "object"
       },
       "TranslationSummaryResponse": {
-        "description": "A translation in a list: which resource, which language, which fields.",
+        "description": "A resource's translation into one language in a list: which resource, which\nlanguage, how it covers the resource's fields with source text, which fields it has.",
         "properties": {
           "created_at": {
-            "description": "RFC 3339.",
-            "type": "string"
+            "description": "RFC 3339; `null` when the resource has no translation into `language` yet.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "fields": {
-            "description": "The keys it translates. Read the resource's translations for the text.",
+            "description": "The keys it translates (a key whose option, value, choice or facet is gone\nincluded, until the translation is next written); empty when it has none yet.",
             "items": {
               "type": "string"
             },
             "type": "array"
           },
+          "inherited": {
+            "description": "Of those missing, the ones shoppers still read in the language without its\nregion (`de` for `de-AT`), as storefronts fall back to it: the base language's\ntranslation when it's another of the store's languages, or the source when it's\nthe default (then every missing field is inherited). 0 for a language without a\nregion. `missing` − `inherited` are the fields a regional language's shoppers read\nin the default language.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
           "language": {
             "$ref": "#/components/schemas/Language"
+          },
+          "missing": {
+            "description": "Of those, the ones without a translation in exactly `language`. For a regional\nlanguage (`de-AT`) some of them may be `inherited`.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "outdated": {
+            "description": "Of those translated, the ones whose source text changed since.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
           },
           "resource": {
             "$ref": "#/components/schemas/TranslatedResourceResponse"
           },
+          "state": {
+            "$ref": "#/components/schemas/TranslationStatus"
+          },
+          "total": {
+            "description": "The resource's fields with source text: a field it leaves empty has nothing to\ntranslate and isn't counted. 0 until the resource was first read for the\nworklist (in the background, after an upgrade).",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
           "updated_at": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
           "resource",
           "language",
-          "fields",
-          "created_at",
-          "updated_at"
+          "state",
+          "total",
+          "missing",
+          "outdated",
+          "inherited",
+          "fields"
         ],
         "type": "object"
       },
@@ -17529,6 +17875,13 @@
         "additionalProperties": false,
         "description": "JSON Merge Patch on the caller's own profile: only the fields sent change.",
         "properties": {
+          "language": {
+            "description": "The language to read the admin in (a BCP 47 tag, `invalid_language` otherwise),\nor `null` to go by the browser's languages. Any tag: the admin matches it against\nits own translations, so it needn't be one of the store's languages.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "name": {
             "type": "string"
           }
@@ -18334,6 +18687,17 @@
           },
           "id": {
             "$ref": "#/components/schemas/UserId"
+          },
+          "language": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Language",
+                "description": "The language they read the admin in (a BCP 47 tag), as they chose it in their\nprofile; `null` leaves it to their browser's languages."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "name": {
             "type": "string"
@@ -39171,7 +39535,7 @@
             "bearer": []
           }
         ],
-        "summary": "Changes the caller's own name. Needs no scope: everyone may name themselves\n(changing someone else is `PATCH /admin/users/{id}`, with `users:write`).",
+        "summary": "Changes the caller's own name or language. Needs no scope: everyone may name\nthemselves and pick their language (changing someone else is\n`PATCH /admin/users/{id}`, with `users:write`).",
         "tags": [
           "me"
         ],
@@ -55876,7 +56240,7 @@
         "operationId": "admin.translations.list",
         "parameters": [
           {
-            "description": "Only translations of this kind of resource (and its read scope is needed);\nwithout it, of every kind the caller may read.",
+            "description": "Only resources of this kind (and its read scope is needed); without it, of every\nkind the caller may read.",
             "in": "query",
             "name": "kind",
             "required": false,
@@ -55885,9 +56249,18 @@
             }
           },
           {
-            "description": "Only translations into this language.",
+            "description": "Only translations into this language. Required with `state`.",
             "in": "query",
             "name": "language",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "`missing`, `outdated` or `complete`: the worklist. Lists every resource with\nsource text in that state in `language`, whether it has a translation yet or not,\nby kind in the catalog's order (`product`, `category`, `custom_field_definition`,\n`shipping_option`, `payment_method`, `discount`, `checkout_rule`, `asset`,\n`store`, `search_facet`), then by ID. Without it, the translations there are, by\nkind name, then resource, then language.",
+            "in": "query",
+            "name": "state",
             "required": false,
             "schema": {
               "type": "string"
@@ -55982,7 +56355,87 @@
             "bearer": []
           }
         ],
-        "summary": "The store's translations, by kind, then resource, then language: what has been\ntranslated. What's missing or outdated is each resource's to say (`GET\n/admin/translations/{kind}/{id}`).",
+        "summary": "The store's translations, or what's left to translate. Without `state`: the\ntranslations there are, by kind name, then resource, then language, each with its\nstate (a resource not yet read for the worklist is read for it). With `state` (and\n`language`: `400 invalid_query` without it, `422 translation_into_default_language`\nor `422 language_not_listed` for one that isn't another on the store's list): the\nworklist, every resource with source text whose translation into `language` is\n`missing` (some field untranslated, or no translation at all), `outdated` (every\nfield translated, some from a source text that changed since) or `complete`, in the\ncatalog's order of kinds, then by ID. Counts are in fields, and only fields with\nsource text count.",
+        "tags": [
+          "translations"
+        ],
+        "x-hypha-scopes": [
+          "translations:read"
+        ]
+      }
+    },
+    "/admin/translations/progress": {
+      "get": {
+        "operationId": "admin.translations.progress",
+        "parameters": [
+          {
+            "description": "Only this kind of resource (and its read scope is needed); without it, every kind\nthe caller may read.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranslationProgressResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An unknown or malformed query parameter (`invalid_query`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "How far each of the store's languages covers its text: every field with source text\nof the kinds the caller may read, counted as translated (outdated among them) or\nmissing. What Settings → Languages shows; the resources behind the numbers are\n`GET /admin/translations?language=&state=`.",
         "tags": [
           "translations"
         ],
@@ -56224,6 +56677,174 @@
           "translations:write"
         ]
       },
+      "patch": {
+        "operationId": "admin.translations.patch",
+        "parameters": [
+          {
+            "description": "The kind of resource.",
+            "example": "product",
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The resource's ID; the store's for `store` and `search_facet`.",
+            "example": "prod_00000000000000000000000000000000",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "A language on the store's list, published or not; never its default.",
+            "example": "de",
+            "in": "path",
+            "name": "language",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreview"
+          },
+          {
+            "$ref": "#/components/parameters/HyphaPreviewToken"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchTranslationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranslationsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`)."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The resource in the path doesn't exist (`<resource>_not_found`)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry)."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A body over the size limit, 2 MiB unless configured (`body_too_large`)."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No `Content-Type: application/json` (`missing_content_type`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A server failure (`internal_error`)."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Changes some fields of a resource's translation into one of the store's other\nlanguages, keeping the rest: what to send when translating a field or a few, since\na PUT replaces the whole language. Creates the translation when there's none, and\ndeletes it when no field is left. Answers the resource's translations as they are\nthen. Beside `translations:write` it takes the resource's own read scope.",
+        "tags": [
+          "translations"
+        ],
+        "x-hypha-preview": {
+          "$ref": "#/components/responses/Preview"
+        },
+        "x-hypha-scopes": [
+          "translations:write"
+        ]
+      },
       "put": {
         "operationId": "admin.translations.put",
         "parameters": [
@@ -56381,7 +57002,7 @@
             "bearer": []
           }
         ],
-        "summary": "Sets a resource's translation into one of the store's other languages, replacing the\nfields it had. Answers the resource's translations as they are then. Beside\n`translations:write` it takes the resource's own read scope.",
+        "summary": "Sets a resource's translation into one of the store's other languages, replacing the\nfields it had: a field left out is removed (to change a few, PATCH them). Answers the resource's translations as they are then. Beside\n`translations:write` it takes the resource's own read scope.",
         "tags": [
           "translations"
         ],

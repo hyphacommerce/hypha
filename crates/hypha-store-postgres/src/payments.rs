@@ -96,6 +96,8 @@ impl<C: PgConnection> PaymentMethodRepo for PgStore<C> {
     async fn insert(&self, method: &mut PaymentMethod) -> Result<(), RepoError> {
         stamp_insert(method, self.now());
         let s = method.snapshot();
+        let events = method.take_events();
+        let stamp = self.event_stamp();
         let settings = s.settings.to_string();
         in_transaction!(self, |tx| {
             tx.query_typed(
@@ -124,7 +126,8 @@ impl<C: PgConnection> PaymentMethodRepo for PgStore<C> {
                 Type::UUID,
                 s.stamps,
             )
-            .await
+            .await?;
+            insert_events(tx, &events, Some(Version::NEW.next()), stamp).await
         })?;
         method.set_version(Version::NEW.next());
         Ok(())
@@ -133,6 +136,8 @@ impl<C: PgConnection> PaymentMethodRepo for PgStore<C> {
     async fn update(&self, method: &mut PaymentMethod) -> Result<(), RepoError> {
         stamp_update(method, self.now());
         let s = method.snapshot();
+        let events = method.take_events();
+        let stamp = self.event_stamp();
         let settings = s.settings.to_string();
         let version = in_transaction!(self, |tx| {
             let row = tx
@@ -167,44 +172,47 @@ impl<C: PgConnection> PaymentMethodRepo for PgStore<C> {
                 s.stamps,
             )
             .await?;
+            insert_events(tx, &events, Some(version), stamp).await?;
             Ok(version)
         })?;
         method.set_version(version);
         Ok(())
     }
 
-    async fn delete(&self, method: &PaymentMethod) -> Result<(), RepoError> {
+    async fn delete(&self, method: &mut PaymentMethod) -> Result<(), RepoError> {
         let id = method.id().as_uuid();
         let version = version_to_db(method.version())?;
-        let mut conn = self.conn().await;
-        // One statement: a checkout starting a payment with the method can't slip in
-        // between the check and the delete.
-        let deleted = conn
-            .db()
-            .query_typed_opt(
-                "DELETE FROM payment_methods WHERE id = $1 AND version = $2
-                     AND NOT EXISTS (SELECT 1 FROM payments WHERE method_id = $1
-                                     AND status IN ('pending', 'authorized', 'processing'))
-                 RETURNING id",
-                &[(&id, Type::UUID), (&version, Type::INT8)],
-            )
-            .await
-            .map_err(repo_error)?;
-        if deleted.is_some() {
-            return Ok(());
-        }
-        // Nothing deleted: still there at its version means an open payment held it.
-        let held = conn
-            .db()
-            .query_typed_opt(
-                "SELECT 1 AS found FROM payment_methods WHERE id = $1 AND version = $2",
-                &[(&id, Type::UUID), (&version, Type::INT8)],
-            )
-            .await
-            .map_err(repo_error)?;
-        Err(match held {
-            Some(_) => RepoError::Reference(keys::OPEN_PAYMENT_METHOD),
-            None => RepoError::StaleVersion,
+        let events = method.take_events();
+        let stamp = self.event_stamp();
+        in_transaction!(self, |tx| {
+            // One statement: a checkout starting a payment with the method can't slip in
+            // between the check and the delete.
+            let deleted = tx
+                .query_typed_opt(
+                    "DELETE FROM payment_methods WHERE id = $1 AND version = $2
+                         AND NOT EXISTS (SELECT 1 FROM payments WHERE method_id = $1
+                                         AND status IN ('pending', 'authorized', 'processing'))
+                     RETURNING id",
+                    &[(&id, Type::UUID), (&version, Type::INT8)],
+                )
+                .await
+                .map_err(repo_error)?;
+            if deleted.is_some() {
+                // No version: the method is gone.
+                return insert_events(tx, &events, None, stamp).await;
+            }
+            // Nothing deleted: still there at its version means an open payment held it.
+            let held = tx
+                .query_typed_opt(
+                    "SELECT 1 AS found FROM payment_methods WHERE id = $1 AND version = $2",
+                    &[(&id, Type::UUID), (&version, Type::INT8)],
+                )
+                .await
+                .map_err(repo_error)?;
+            Err(match held {
+                Some(_) => RepoError::Reference(keys::OPEN_PAYMENT_METHOD),
+                None => RepoError::StaleVersion,
+            })
         })
     }
 }
