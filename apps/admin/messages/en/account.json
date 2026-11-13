@@ -4,7 +4,7 @@
   "profile_description": "Your name shows to your team. Your email is how you sign in; it can't change.",
   "profile_edit_name": "Edit name",
   "profile_name_required": "Enter a name.",
-  "language_description": "The language the admin speaks to you, on any browser you sign in on.",
+  "language_description": "The language the admin speaks to you, wherever you sign in.",
   "language_pseudo": "Pseudo-language (development)",
   "language_not_offered": "The admin doesn't have that language.",
   "language_browser_only": "This account can't change its own settings, so the language is kept on this browser only.",
