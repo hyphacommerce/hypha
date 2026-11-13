@@ -15,7 +15,7 @@ use hypha_translations::TranslationCleanup;
 
 use crate::{
     mail::MailHost,
-    translations::{LanguageCleanup, ValueTranslationCleanup},
+    translations::{LanguageCleanup, TranslationSourceSync, ValueTranslationCleanup},
 };
 
 /// Core's handlers, in no particular order (names must be unique, spores' included; a
@@ -28,12 +28,14 @@ pub type CoreHandlers = (
     TranslationCleanup,
     LanguageCleanup,
     ValueTranslationCleanup,
+    TranslationSourceSync,
     Mailer<Arc<MailHost>>,
 );
 
 /// Core's handlers, built once the store is known: the `Mailer` holds the host's mail
-/// environment (the sender, the store, the links).
+/// environment (the sender, the store, the links), the worklist's sync the store's ID.
 pub fn core_handlers(mail: Arc<MailHost>) -> CoreHandlers {
+    let store = hypha_mail::MailEnv::store(&*mail);
     (
         VariantCleanup,
         SearchIndexer,
@@ -42,6 +44,7 @@ pub fn core_handlers(mail: Arc<MailHost>) -> CoreHandlers {
         TranslationCleanup,
         LanguageCleanup,
         ValueTranslationCleanup,
+        TranslationSourceSync::new(store),
         Mailer::new(mail),
     )
 }

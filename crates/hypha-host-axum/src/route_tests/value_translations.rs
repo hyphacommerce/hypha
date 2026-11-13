@@ -107,7 +107,7 @@ async fn a_products_text_values_are_translated_and_read_in_german() {
         "variant",
         "fit",
         "multiline_text",
-        json!({"validations": {"max_length": 20}}),
+        json!({"validations": {"min_length": 2, "max_length": 20}}),
     )
     .await;
     // Not translatable: a code (a pattern), a field storefronts aren't shown, a choice
@@ -164,9 +164,15 @@ async fn a_products_text_values_are_translated_and_read_in_german() {
         (
             &care_field["source"],
             &care_field["format"],
-            &care_field["max_length"]
+            &care_field["max_length"],
+            &care_field["min_length"]
         ),
-        (&json!("Hand wash"), &json!("text"), &json!(255))
+        (
+            &json!("Hand wash"),
+            &json!("text"),
+            &json!(255),
+            &Value::Null
+        )
     );
     assert_eq!(
         care_field["custom_field"],
@@ -177,7 +183,10 @@ async fn a_products_text_values_are_translated_and_read_in_german() {
     );
     assert_eq!(field(&view, &story_key)["format"], "html");
     let fit_field = field(&view, &fit_key);
-    assert_eq!(fit_field["max_length"], 20);
+    assert_eq!(
+        (&fit_field["min_length"], &fit_field["max_length"]),
+        (&json!(2), &json!(20))
+    );
     assert_eq!(fit_field["custom_field"]["variant"], json!(variant));
     assert_eq!(field(&view, "title")["custom_field"], Value::Null);
 

@@ -6,6 +6,9 @@ use uuid::Uuid;
 use crate::{
     catalog::{ResourceKind, ResourceRef},
     translation::Translation,
+    worklist::{
+        LanguageProgress, ProgressLanguage, QueuedSource, SourceDigest, WorkItem, WorklistFilter,
+    },
 };
 
 /// Uniqueness rules the translations repo enforces, reported as
@@ -142,8 +145,62 @@ pub trait TranslationRepo {
     async fn retain_languages(&self, languages: &[Language]) -> Result<(), RepoError>;
 }
 
+/// The worklist's side of the store: each resource's source text as digests, a read model
+/// kept beside the translations (the host reads the resource and writes them), and the
+/// resources waiting to be read again. Its reads join the translations, so the same store
+/// keeps both.
+#[allow(async_fn_in_trait)]
+pub trait TranslationSourceRepo {
+    /// Sets `resource`'s digests to `digests` (`source_digests`: one per key), replacing
+    /// what it had; none removes them, as for a resource that's gone. Records no events.
+    async fn replace_sources(
+        &self,
+        resource: ResourceRef,
+        digests: &[SourceDigest],
+    ) -> Result<(), RepoError>;
+    /// The digests of `resources`, by resource then key.
+    async fn sources(
+        &self,
+        resources: &[ResourceRef],
+    ) -> Result<Vec<(ResourceRef, SourceDigest)>, RepoError>;
+    /// A page of the resources with digests that `filter` keeps (`WorklistFilter::keeps`,
+    /// counted by `FieldCounts::of` against the translation into its language, and the
+    /// one into its base for `inherits`), in
+    /// `ResourceRef` order: the catalog's order of kinds, then the ID's bytes. One read.
+    async fn worklist(
+        &self,
+        filter: &WorklistFilter,
+        page: PageRequest<ResourceRef>,
+    ) -> Result<Page<WorkItem>, RepoError>;
+    /// For each of `languages`, in the order given, how its translations cover the digests
+    /// of `kinds`' resources, in fields, by `FieldCounts::of`'s rule (`inherited` by what
+    /// it `inherits`). One read.
+    async fn progress(
+        &self,
+        kinds: &[ResourceKind],
+        languages: &[ProgressLanguage],
+    ) -> Result<Vec<LanguageProgress>, RepoError>;
+    /// Queues `resources` to have their digests read again; one queued already moves to
+    /// the back of the queue (a later `mark`).
+    async fn queue(&self, resources: &[ResourceRef]) -> Result<(), RepoError>;
+    /// Queues every resource of `kind` that has digests: what a change reaching all of
+    /// them (a custom field definition's access) does.
+    async fn queue_kind(&self, kind: ResourceKind) -> Result<(), RepoError>;
+    /// How many of `kinds`' resources are queued. One count.
+    async fn pending(&self, kinds: &[ResourceKind]) -> Result<u64, RepoError>;
+    /// Up to `limit` queued resources, longest waiting first.
+    async fn queued(&self, limit: u32) -> Result<Vec<QueuedSource>, RepoError>;
+    /// Takes `done` off the queue, each only if it wasn't queued again since it was read
+    /// (its `mark` is the same).
+    async fn unqueue(&self, done: &[QueuedSource]) -> Result<(), RepoError>;
+    /// Gives those of `resources` that are queued a later mark, leaving the rest
+    /// unqueued: a writer that read one of them since the queue's reader did tells it its
+    /// read may be older than this one's, so it reads again instead of unqueueing.
+    async fn touch_queued(&self, resources: &[ResourceRef]) -> Result<(), RepoError>;
+}
+
 pub trait HasTranslations {
-    type Translations: TranslationRepo;
+    type Translations: TranslationRepo + TranslationSourceRepo;
     fn translations(&self) -> &Self::Translations;
 }
 

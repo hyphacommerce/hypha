@@ -46,14 +46,29 @@ pick_creds() {
 
 # step NAME STATUS CODE_OR_DASH CURL_ARGS...
 # Runs curl, checks the status and (unless "-") the "code" field. Leaves the body in $BODY.
+# A step that doesn't expect a 429 and gets one waits out its `retry_after_secs` (at most
+# MAX_RATE_WAIT seconds) and sends once more: the script runs every step from one address,
+# so a busy section can use up a per-address allowance (cart creation's, say) that a
+# shopper never would. Steps that test a limit expect the 429 and aren't retried.
+MAX_RATE_WAIT=10
 step() {
     local name=$1 want_status=$2 want_code=$3
     shift 3
-    local out status
+    local out status wait
     pick_creds "$@"
     out=$(curl -s -w '\n%{http_code}' ${CREDS[@]+"${CREDS[@]}"} "$@")
     status=${out##*$'\n'}
     BODY=${out%$'\n'*}
+    if [[ $status == 429 && $want_status != 429 ]]; then
+        wait=$(sed -nE 's/.*"retry_after_secs":([0-9]+).*/\1/p' <<<"$BODY")
+        wait=${wait:-1}
+        ((wait > MAX_RATE_WAIT)) && wait=$MAX_RATE_WAIT
+        echo "wait $name: rate limited, retrying in ${wait}s"
+        sleep "$wait"
+        out=$(curl -s -w '\n%{http_code}' ${CREDS[@]+"${CREDS[@]}"} "$@")
+        status=${out##*$'\n'}
+        BODY=${out%$'\n'*}
+    fi
     if [[ $status != "$want_status" ]]; then
         echo "FAIL $name: expected HTTP $want_status, got $status: $BODY"
         FAILED=$((FAILED + 1))
@@ -313,7 +328,7 @@ MUG=$(id)
 MUG_VAR=$(variant)
 step "the mug's translatable fields" 200 - "$BASE/admin/translations/product/$MUG"
 contains "what it can be translated from and into" '"default_language":"en","languages":["de","fr"]'
-contains "the title's source text" '"key":"title","format":"text","max_length":255,"source":"Mug"'
+contains "the title's source text" '"key":"title","format":"text","max_length":255,"min_length":null,"source":"Mug"'
 step "nothing to translate in an empty description" 422 invalid_translation \
     -X PUT "$BASE/admin/translations/product/$MUG/de" -H "$JSON" -d '{"fields":{"description":{"value":"<p>Eine Tasse.</p>"}}}'
 contains "says why" '"code":"source_empty","key":"description"'
@@ -323,6 +338,17 @@ contains "the title, trimmed" '"de":{"value":"Tasse","source_digest":"'
 contains "up to date" '"language":"de","translated":1,"outdated":0'
 step "into an unpublished language too" 200 - -X PUT "$BASE/admin/translations/product/$MUG/fr" -H "$JSON" \
     -d '{"fields":{"title":{"value":"Tasse"}}}'
+step "a patch changes the fields it names" 200 - -X PATCH "$BASE/admin/translations/product/$MUG/de" -H "$JSON" \
+    -d '{"fields":{"title":{"value":"Becher"}}}'
+contains "the title changed" '"de":{"value":"Becher","source_digest":"'
+step "a patch checks the source's digest" 422 invalid_translation -X PATCH "$BASE/admin/translations/product/$MUG/de" \
+    -H "$JSON" -d '{"fields":{"title":{"value":"Tasse","source_digest":"0000000000000000000000000000000000000000000000000000000000000000"}}}'
+contains "says the source changed" '"code":"source_changed","key":"title"'
+step "null removes a field" 200 - -X PATCH "$BASE/admin/translations/product/$MUG/fr" -H "$JSON" -d '{"fields":{"title":null}}'
+contains "French went with its last field" '"translations":[{"language":"de",'
+step "a patch creates a translation" 200 - -X PATCH "$BASE/admin/translations/product/$MUG/fr" -H "$JSON" \
+    -d '{"fields":{"title":{"value":"Tasse"}}}'
+contains "French again" '"language":"fr","translated":1'
 step "never into the default language" 422 translation_into_default_language -X PUT "$BASE/admin/translations/product/$MUG/en" \
     -H "$JSON" -d '{"fields":{"title":{"value":"Mug"}}}'
 step "nor into a language the store doesn't list" 422 language_not_listed -X PUT "$BASE/admin/translations/product/$MUG/es" \
@@ -332,7 +358,15 @@ step "a field a product doesn't have" 422 invalid_translation -X PUT "$BASE/admi
 contains "says which" '"code":"unknown_field"'
 step "a kind that has no translations" 404 unknown_resource_kind "$BASE/admin/translations/variant/$MUG"
 step "what's translated into German" 200 - "$BASE/admin/translations?kind=product&language=de"
-contains "the mug's title" "{\"resource\":{\"kind\":\"product\",\"id\":\"$MUG\"},\"language\":\"de\",\"fields\":[\"title\"]"
+contains "the mug's translation" "{\"resource\":{\"kind\":\"product\",\"id\":\"$MUG\"},\"language\":\"de\",\"state\":"
+contains "its title" '"fields":["title"]'
+wait_for "the mug is complete in German" "$BASE/admin/translations?kind=product&language=de&state=complete" "\"id\":\"$MUG\""
+contains "every field with text translated" '"state":"complete","total":1,"missing":0,"outdated":0'
+step "nothing of it is missing in German" 200 - "$BASE/admin/translations?kind=product&language=de&state=missing"
+lacks "the mug isn't listed" "\"id\":\"$MUG\""
+step "the worklist is in a language" 400 invalid_query "$BASE/admin/translations?state=missing"
+step "each language's progress" 200 - "$BASE/admin/translations/progress?kind=product"
+contains "German covers the mug" '"language":"de","total":1,"translated":1,"outdated":0,"missing":0,"inherited":0'
 step "the default language is fixed while anything is translated" 409 default_language_in_use -X PATCH "$BASE/admin/store" \
     -H "$JSON" -d '{"default_language":"es"}'
 step "remove the German translation" 204 - -X DELETE "$BASE/admin/translations/product/$MUG/de"
@@ -2191,7 +2225,7 @@ contains "brass" '"custom.material":"brass"'
 step "and their definitions, to name them" 200 - "$BASE/storefront/custom-field-definitions?owner_type=product"
 contains "by name" '"field":"custom.material","name":"Material"'
 step "the lamp's translatable fields" 200 - "$BASE/admin/translations/product/$LAMP"
-contains "its material" "\"key\":\"custom_fields.$MATERIAL_FIELD.value\",\"format\":\"text\",\"max_length\":255,\"source\":\"brass\""
+contains "its material" "\"key\":\"custom_fields.$MATERIAL_FIELD.value\",\"format\":\"text\",\"max_length\":255,\"min_length\":null,\"source\":\"brass\""
 contains "named by its definition" "\"custom_field\":{\"definition\":\"$MATERIAL_FIELD\",\"key\":\"custom.material\",\"name\":\"Material\",\"type\":\"text\""
 step "a text value is one line" 422 invalid_translation -X PUT "$BASE/admin/translations/product/$LAMP/de" -H "$JSON" \
     -d "{\"fields\":{\"custom_fields.$MATERIAL_FIELD.value\":{\"value\":\"Mes\\nsing\"}}}"
@@ -3008,6 +3042,14 @@ step "rename myself, no users:write needed" 200 - -X PATCH "$BASE/admin/me" -H "
     -d '{"name":"Owner Two"}'
 contains "the new name" '"name":"Owner Two"'
 step "and back" 200 - -X PATCH "$BASE/admin/me" -H "$JSON" -d '{"name":"Owner"}'
+step "read the admin in Serbian, any tag" 200 - -X PATCH "$BASE/admin/me" -H "$JSON" \
+    -d '{"language":"sr-latn"}'
+contains "my language, in canonical case" '"language":"sr-Latn"'
+step "a language that isn't a tag" 422 invalid_language -X PATCH "$BASE/admin/me" -H "$JSON" \
+    -d '{"language":"Serbian please"}'
+step "back to the browser's languages" 200 - -X PATCH "$BASE/admin/me" -H "$JSON" \
+    -d '{"language":null}'
+contains "no language kept" '"language":null'
 step "sign in on a second device" 200 - -X POST "$BASE/admin/auth/login" -H "$JSON" \
     -H "user-agent: E2E second device" \
     -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"$OWNER_PASSWORD\"}"

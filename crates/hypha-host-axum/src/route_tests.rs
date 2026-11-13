@@ -2661,6 +2661,65 @@ async fn the_owner_logs_in_sees_themselves_and_logs_out() {
 }
 
 #[tokio::test]
+async fn staff_pick_the_admins_language_and_clear_it() {
+    let app = app().await;
+    let session = owner_session(&app).await;
+    let (_, me) = send_as(&app, &session, "GET", "/admin/me", None).await;
+    assert_eq!(me["user"]["language"], Value::Null);
+
+    // Any well-formed tag, in canonical case: the store publishes no languages here.
+    let (status, me) = send_as(
+        &app,
+        &session,
+        "PATCH",
+        "/admin/me",
+        Some(r#"{"language":"sr-latn"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(me["user"]["language"], "sr-Latn");
+    let (_, me) = send_as(&app, &session, "GET", "/admin/me", None).await;
+    assert_eq!(me["user"]["language"], "sr-Latn");
+    let (_, users) = send(&app, "GET", "/admin/users", None).await;
+    assert_eq!(users["items"][0]["language"], "sr-Latn");
+
+    // Absent keeps it.
+    let (_, me) = send_as(
+        &app,
+        &session,
+        "PATCH",
+        "/admin/me",
+        Some(r#"{"name":"Ana"}"#),
+    )
+    .await;
+    assert_eq!(me["user"]["language"], "sr-Latn");
+
+    let (status, json) = send_as(
+        &app,
+        &session,
+        "PATCH",
+        "/admin/me",
+        Some(r#"{"language":"not a tag"}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "invalid_language")
+    );
+
+    let (status, me) = send_as(
+        &app,
+        &session,
+        "PATCH",
+        "/admin/me",
+        Some(r#"{"language":null}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(me["user"]["language"], Value::Null);
+}
+
+#[tokio::test]
 async fn a_wrong_password_is_401() {
     let app = app().await;
     let body = json!({ "email": OWNER_EMAIL, "password": "nope nope" }).to_string();

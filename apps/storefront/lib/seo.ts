@@ -64,19 +64,20 @@ export function decimal(money: Money, digits: number): string {
 }
 
 /**
- * Where each country's copy of a page lives, as `hreflang` alternates: the store's
- * language with each country (`en-HR`), and `x-default` for the first. Only with
- * country folders: a single tree has one URL per page.
+ * Where each copy of a page lives, as `hreflang` alternates: one per place, by its tag
+ * (`de-CH`, `sr-Latn-RS`; `alternatePlaces` in `lib/routing.ts`), and `x-default` for
+ * the first (the first country in its default language). `hreflangPlaces` gives each tag
+ * one place; should two still share one, the first keeps it. None for a page with one
+ * copy: there's nothing to point at.
  */
-export function countryAlternates(
-  language: string,
-  countries: string[],
-  pathFor: (country: string) => string,
+export function localeAlternates(
+  places: { tag: string; href: string }[],
 ): Record<string, string> | undefined {
-  if (countries.length < 2) return undefined;
+  const [first] = places;
+  if (first === undefined || places.length < 2) return undefined;
   const alternates: Record<string, string> = {};
-  for (const c of countries) alternates[`${language}-${c}`] = pathFor(c);
-  alternates["x-default"] = pathFor(countries[0]);
+  for (const place of places) alternates[place.tag] ??= place.href;
+  alternates["x-default"] = first.href;
   return alternates;
 }
 
@@ -100,7 +101,7 @@ export function breadcrumbLd(items: { name: string; url: string }[]) {
  * Google reads only for apparel-like attributes; offers say what matters, the prices
  * and stock). `null` where it isn't sold, so no offer claims a price that isn't there.
  */
-export function productLd(product: Product, url: string, digits: number) {
+export function productLd(product: Product, url: string, digits: number, language: string) {
   const offers = product.variants.flatMap((v) =>
     v.price
       ? [
@@ -127,6 +128,8 @@ export function productLd(product: Product, url: string, digits: number) {
     "@type": "Product",
     name: product.title,
     url,
+    // The language its name and description were read in: the page's.
+    inLanguage: language,
     ...(description ? { description } : {}),
     ...(images.length > 0 ? { image: images } : {}),
     ...(product.vendor ? { brand: { "@type": "Brand", name: product.vendor } } : {}),
@@ -139,6 +142,7 @@ export function productLd(product: Product, url: string, digits: number) {
 export function storeLd(
   store: { name: string; description?: string | null; contact_email?: string | null },
   url: string,
+  language: string,
 ) {
   return [
     {
@@ -154,6 +158,7 @@ export function storeLd(
       "@type": "WebSite",
       name: store.name,
       url,
+      inLanguage: language,
     },
   ];
 }

@@ -2344,6 +2344,7 @@ impl From<hypha_users::CommandError> for ApiError {
             E::Role(R::Text(_) | R::NoScopes)
             | E::User(U::Text(_))
             | E::Email(_)
+            | E::Language(_)
             | E::Password(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Notify(_) => StatusCode::BAD_GATEWAY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),

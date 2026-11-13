@@ -2,15 +2,18 @@
 // range, the sort and the page, so every state can be linked to and the back button
 // works. Shared by the server page and the client controls.
 
+import type { KeyIn, TFor } from "./messages.ts";
+
 export type ListingParams = Record<string, string | string[] | undefined>;
 
+/** The sorts a listing offers, each with its label's message. */
 export const SORTS = [
-  { value: "relevance", label: "Best match" },
-  { value: "newest", label: "Newest" },
-  { value: "price_asc", label: "Price: low to high" },
-  { value: "price_desc", label: "Price: high to low" },
-  { value: "title", label: "Name" },
-] as const;
+  { value: "relevance", label: "listing.sort_relevance" },
+  { value: "newest", label: "listing.sort_newest" },
+  { value: "price_asc", label: "listing.sort_price_asc" },
+  { value: "price_desc", label: "listing.sort_price_desc" },
+  { value: "title", label: "listing.sort_title" },
+] as const satisfies readonly { value: string; label: KeyIn<"listing"> }[];
 
 export type Sort = (typeof SORTS)[number]["value"];
 
@@ -115,6 +118,21 @@ export function toMinor(value: string | undefined, digits: number): number | und
   return Number.isSafeInteger(minor) ? minor : undefined;
 }
 
+/**
+ * A search's cache key: its country and language, then every parameter in name order (one
+ * search written in another order is one entry). Hits read differently in each language
+ * (titles, options, facet labels), so a language is its own entry; none is the market's
+ * default.
+ */
+export function searchKey(
+  query: { country: string; language?: string } & Record<string, unknown>,
+): string[] {
+  const names = Object.keys(query)
+    .filter((k) => query[k] !== undefined)
+    .toSorted();
+  return ["search", query.country, query.language ?? "", JSON.stringify(query, names)];
+}
+
 /** The filter that keeps only what's shown with a compare-at price. */
 export const ON_SALE = "on_sale:true";
 
@@ -132,7 +150,7 @@ export function withOnSale(state: ListingState, on: boolean): ListingState {
 
 /** `option.color` → "Color", `field.custom.skin_type` → "Skin type" (a custom field: its
  * namespace isn't shown), `product_type` → "Type". */
-export function facetName(key: string): string {
+export function facetName(t: TFor<"listing">, key: string): string {
   if (key.startsWith("option.")) {
     const name = key.slice("option.".length);
     return name.charAt(0).toUpperCase() + name.slice(1);
@@ -142,5 +160,16 @@ export function facetName(key: string): string {
     const name = field.slice(field.indexOf(".") + 1).replaceAll("_", " ");
     return name.charAt(0).toUpperCase() + name.slice(1);
   }
-  return { vendor: "Brand", product_type: "Type", tag: "Tag", on_sale: "On sale" }[key] ?? key;
+  switch (key) {
+    case "vendor":
+      return t("listing.facet_brand");
+    case "product_type":
+      return t("listing.facet_type");
+    case "tag":
+      return t("listing.facet_tag");
+    case "on_sale":
+      return t("listing.on_sale");
+    default:
+      return key;
+  }
 }

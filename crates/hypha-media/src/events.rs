@@ -18,3 +18,16 @@ impl Event for AssetDeleted {
     const TYPE: &'static str = "asset.deleted";
     const VERSION: u16 = 1;
 }
+
+/// `asset.updated`: which of `alt` and `title` staff changed, one event per write. The
+/// values aren't in it: read the asset.
+#[derive(Debug, Serialize)]
+pub struct AssetUpdated {
+    pub asset: AssetId,
+    pub fields: Vec<&'static str>,
+}
+
+impl Event for AssetUpdated {
+    const TYPE: &'static str = "asset.updated";
+    const VERSION: u16 = 1;
+}
