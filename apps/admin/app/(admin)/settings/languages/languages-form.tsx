@@ -122,7 +122,9 @@ export function LanguagesForm({
       defaultLanguage: chosenDefault,
       languages: rest.length === languages.length ? undefined : rest,
     };
-    if (isBlocked(change)) return;
+    // No market check here: a content language can't change while the store has
+    // translations, and that refusal is the API's to give. Naming markets would send the
+    // merchant after a fix that wouldn't let the change through.
     startTransition(async () => {
       await send(change);
     });
