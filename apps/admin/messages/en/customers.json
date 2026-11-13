@@ -15,6 +15,7 @@
   "detail_first_order": "First order",
   "detail_last_order": "Last order",
   "detail_since": "Customer since",
+  "detail_language_default": "The store's content language",
   "detail_last_changed": "Last changed",
   "edit_title": "Edit customer",
   "edit_subtitle": "What the shop knows about them. Orders keep the details they were placed with.",

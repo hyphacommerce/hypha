@@ -35,6 +35,7 @@
   "detail_summary_items": "Stavke",
   "detail_column_shipped": "Poslato",
   "detail_line_shipped": "{fulfilled, number} od {quantity, number}",
+  "detail_line_localized": "Kupcu prikazano kao „{title}“",
   "detail_line_cost": "Nabavna cena {cost}",
   "detail_line_cost_margin": "Nabavna cena {cost} · marža {margin}",
   "detail_line_cost_margin_share": "Nabavna cena {cost} · marža {margin} ({share})",
