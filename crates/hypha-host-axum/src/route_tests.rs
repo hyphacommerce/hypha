@@ -37,6 +37,8 @@ mod addresses;
 mod agents;
 // Checkout rules and the messages they put on carts.
 mod checkout_rules;
+// Translations of the store's content.
+mod translations;
 // Apps installed through OAuth, and personal data.
 mod app_extensions;
 // Apps' custom fields, synced with their manifests.

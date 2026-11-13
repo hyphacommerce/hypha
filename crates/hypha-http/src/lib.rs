@@ -40,6 +40,7 @@ pub mod session_token;
 pub mod shipping;
 pub mod spores;
 pub mod state;
+pub mod translations;
 pub mod webhooks;
 
 /// What the macros' expansions (`spore_routes!`) name, so a spore or host crate needs no

@@ -270,6 +270,12 @@ impl ApiError {
         )
     }
 
+    /// A URL segment that parses as text but isn't what the route takes there (an ID of
+    /// another kind than the path names).
+    pub fn invalid_path(message: impl std::fmt::Display) -> Self {
+        Self::new(StatusCode::BAD_REQUEST, "invalid_path", message)
+    }
+
     /// A query string that doesn't parse, or has parameters the route doesn't take.
     pub fn invalid_query(message: impl std::fmt::Display) -> Self {
         Self::new(
@@ -845,6 +851,7 @@ impl From<hypha_stores::CommandError> for ApiError {
             | E::Language(_)
             | E::Currency(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::CurrencyLocked
+            | E::DefaultLanguageInUse
             | E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
             ) => StatusCode::CONFLICT,
@@ -2013,6 +2020,47 @@ fn checkout_rule_details(e: &hypha_checkout_rules::CommandError) -> Option<Value
             Some(json!({ "app": app.as_str() }))
         }
         _ => None,
+    }
+}
+
+/// A resource kind in a URL that isn't one.
+impl From<hypha_translations::UnknownKind> for ApiError {
+    fn from(e: hypha_translations::UnknownKind) -> Self {
+        Self::domain(StatusCode::NOT_FOUND, e)
+    }
+}
+
+impl From<hypha_translations::CommandError> for ApiError {
+    fn from(e: hypha_translations::CommandError) -> Self {
+        use hypha_translations::{CommandError as E, TranslationError as T};
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // The resource and the translation only arrive in URLs.
+            E::ResourceNotFound(_) | E::NotFound { .. } => StatusCode::NOT_FOUND,
+            E::Translation(T::Invalid(_))
+            | E::Language(_)
+            | E::DefaultLanguage(_)
+            | E::LanguageNotListed(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        let details = match &e {
+            // `invalid_translation`: `{"problems": [{"key", "code", "message"}]}`, every
+            // field that breaks a rule.
+            E::Translation(T::Invalid(problems)) => Some(json!({
+                "problems": problems
+                    .iter()
+                    .map(|p| json!({"key": p.key, "code": p.code, "message": p.message}))
+                    .collect::<Vec<_>>()
+            })),
+            E::ResourceNotFound(resource) => {
+                Some(json!({"kind": resource.kind.as_str(), "id": resource.id_string()}))
+            }
+            _ => None,
+        };
+        Self::domain(status, e).with_details(details)
     }
 }
 

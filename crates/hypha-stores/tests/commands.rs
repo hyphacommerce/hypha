@@ -643,6 +643,70 @@ fn the_default_and_another_language_swap_in_one_update() {
 }
 
 #[test]
+fn the_default_language_is_fixed_while_the_store_has_translations() {
+    let repo = InMemoryStoreRepo::default();
+    let store = store_in_three_languages(&repo);
+    let update = |input: UpdateStore| {
+        block_on(update_store(
+            &Ctx::system(),
+            &repo,
+            &clock(),
+            store.id(),
+            UpdateStore {
+                has_translations: true,
+                ..input
+            },
+        ))
+    };
+    // Alone.
+    assert_eq!(
+        update(UpdateStore {
+            default_language: Some("es".to_string()),
+            ..UpdateStore::default()
+        }),
+        Err(CommandError::DefaultLanguageInUse)
+    );
+    // Swapped with a language on the list.
+    assert_eq!(
+        update(UpdateStore {
+            default_language: Some("de".to_string()),
+            languages: Some(vec![listed("en", true), listed("fr", false)]),
+            ..UpdateStore::default()
+        }),
+        Err(CommandError::DefaultLanguageInUse)
+    );
+    let stored = block_on(get_store(&Ctx::system(), &repo, store.id())).unwrap();
+    assert_eq!(stored.default_language(), &lang("en"));
+
+    // The same default again, and the other languages, change freely.
+    let kept = update(UpdateStore {
+        default_language: Some("EN".to_string()),
+        languages: Some(vec![listed("de", true)]),
+        ..UpdateStore::default()
+    })
+    .unwrap();
+    assert_eq!(kept.offered_languages(), vec![lang("en"), lang("de")]);
+}
+
+#[test]
+fn translations_alone_change_nothing() {
+    let repo = InMemoryStoreRepo::default();
+    let store = store_in_three_languages(&repo);
+    let same = block_on(update_store(
+        &Ctx::system(),
+        &repo,
+        &clock(),
+        store.id(),
+        UpdateStore {
+            has_translations: true,
+            ..UpdateStore::default()
+        },
+    ))
+    .unwrap();
+    assert_eq!(same.version(), store.version());
+}
+
+#[test]
 fn a_language_a_market_offers_stays_offered() {
     let repo = InMemoryStoreRepo::default();
     let store = store_in_three_languages(&repo);
