@@ -4,7 +4,9 @@
 // cart: this reads it once the page is here (`loadCart`, only when the
 // `has_cart_<country>` cookie says there is one, `lib/cart-flag.ts`) and keeps it while
 // the shopper adds, changes and removes lines, for the header's count, the drawer and the
-// cart page. Every change answers with the cart, so nothing reloads.
+// cart page. Every change answers with the cart, so nothing reloads, except a page that
+// shows the cart from the server (checkout, `FollowCart`): it re-renders in the change's
+// answer.
 
 import {
   createContext,
@@ -58,6 +60,9 @@ type CartContext = {
   /** Reads the cart again from the cookies: after something outside the provider
    * changed it (placing the order forgets the cart, `ReloadCart`). */
   reload: () => Promise<void>;
+  /** Makes every change re-render the page too, until the returned function is called
+   * (`FollowCart`). */
+  follow: () => () => void;
 };
 
 /** Where the change queue starts: nothing to wait for. */
@@ -88,6 +93,17 @@ export function CartProvider({
   // version. A read waits its turn too: it may write (`loadCart` moves a cart in
   // another language to the page's).
   const queue = useRef(SETTLED);
+
+  // How many parts of the page show the cart as the server rendered it (`FollowCart`):
+  // while any does, each change asks its action to re-render the page in its answer. A
+  // ref, read when a change is sent: following changes nothing shown.
+  const followers = useRef(0);
+  const follow = useCallback(() => {
+    followers.current += 1;
+    return () => {
+      followers.current -= 1;
+    };
+  }, []);
 
   // Which read is the latest: an older one answering late is dropped.
   const reads = useRef(0);
@@ -124,7 +140,9 @@ export function CartProvider({
 
   const add = useCallback(
     async (variant: string, quantity: number) => {
-      const run = queue.current.then(() => addToCart({ locale, variant, quantity }));
+      const run = queue.current.then(() =>
+        addToCart({ locale, variant, quantity, rerender: followers.current > 0 }),
+      );
       queue.current = run.catch(() => undefined);
       const result = await run;
       // Within the page: the caller's transition would otherwise start a view
@@ -142,8 +160,8 @@ export function CartProvider({
 
   // Each change answers with the cart, shown as it comes; the error is the caller's to
   // place.
-  const write = useCallback(async (send: () => Promise<CartResult>) => {
-    const run = queue.current.then(send);
+  const write = useCallback(async (send: (rerender: boolean) => Promise<CartResult>) => {
+    const run = queue.current.then(() => send(followers.current > 0));
     queue.current = run.catch(() => undefined);
     const result = await run;
     startTransition(() => {
@@ -155,19 +173,21 @@ export function CartProvider({
   const change = useCallback(
     (variant: string, quantity: number) =>
       startTransition(async () => {
-        const failed = await write(() => setQuantity({ locale, variant, quantity }));
+        const failed = await write((rerender) =>
+          setQuantity({ locale, variant, quantity, rerender }),
+        );
         startTransition(() => setError(failed));
       }),
     [locale, write],
   );
   const applyCode = useCallback(
-    (code: string) => write(() => applyDiscountCode({ locale, code })),
+    (code: string) => write((rerender) => applyDiscountCode({ locale, code, rerender })),
     [locale, write],
   );
   const removeCode = useCallback(
     (code: string) =>
       startTransition(async () => {
-        const failed = await write(() => removeDiscountCode({ locale, code }));
+        const failed = await write((rerender) => removeDiscountCode({ locale, code, rerender }));
         startTransition(() => setError(failed));
       }),
     [locale, write],
@@ -191,6 +211,7 @@ export function CartProvider({
       applyCode,
       removeCode,
       reload,
+      follow,
     }),
     [
       country,
@@ -206,6 +227,7 @@ export function CartProvider({
       applyCode,
       removeCode,
       reload,
+      follow,
     ],
   );
 
@@ -228,6 +250,17 @@ export function ReloadCart() {
   useEffect(() => {
     void reload();
   }, [reload]);
+  return null;
+}
+
+/**
+ * Rendered by a page that shows the cart as the server rendered it (checkout's summary
+ * and steps): a change made through the provider (the drawer's lines and codes) then
+ * re-renders the page in the change's answer, so it never shows an old total.
+ */
+export function FollowCart() {
+  const { follow } = useCart();
+  useEffect(() => follow(), [follow]);
   return null;
 }
 

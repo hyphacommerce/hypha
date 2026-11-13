@@ -172,24 +172,36 @@ function regionOf(tag: string): string | undefined {
   }
 }
 
+/** The `hreflang` set (`hreflangSet`): the places named, each with the tag it's named
+ * by, and the places left out, each with the segment of the page that won its tag. */
+type HreflangSet = {
+  places: { tag: string; segment: string }[];
+  duplicates: Map<string, string>;
+};
+
 /**
- * The places to name as `hreflang` alternates: `alternatePlaces`, each tag once, except
- * in a single tree whose countries' default languages differ, where none. There the
- * unprefixed URL is each shopper's country's default language, so no one tag is true of
- * it.
+ * The `hreflang` set: `alternatePlaces`, each tag once, except in a single tree whose
+ * countries' default languages differ, where none. There the unprefixed URL is each
+ * shopper's country's default language, so no one tag is true of it.
  *
  * Two places can come to one tag: `de` and `de-AT` offered in Austria are both `de-AT`
  * (and so is `de-AT` offered in Germany). A tag names one URL, so one of them keeps it:
  * the page in the tag's own country, then the one whose language names its region (the
- * merchant offered `de-AT` for it on purpose), then the first listed. The others are in
- * no `hreflang` set, not even their own (they name none): they stay in the sitemap, with
- * their canonical pointing at themselves like any page's.
+ * merchant offered `de-AT` for it on purpose), then the first listed. A page that loses
+ * its tag and whose language names no region (Austria's `de`) is named by the language
+ * alone (`de`) instead, unless another page has that tag already: the first such page
+ * listed keeps it. A page left with no tag (the bare tag was taken, or its language
+ * names a region) whose tag went to a page in its own country is a duplicate of that
+ * page: the same products, prices and availability, so its canonical points there, it
+ * names no `hreflang` set and the sitemap leaves it out. One whose tag went to another
+ * country (`de-AT` offered in Germany, the tag Austria's) can't point there, since that
+ * country may not sell what it shows: it stays its own canonical, in the sitemap, but
+ * in no `hreflang` set.
  */
-export function hreflangPlaces(
-  mode: Routing,
-  countries: readonly Offer[],
-): { tag: string; segment: string }[] {
-  if (mode === "single" && new Set(countries.map(defaultLanguage)).size > 1) return [];
+function hreflangSet(mode: Routing, countries: readonly Offer[]): HreflangSet {
+  if (mode === "single" && new Set(countries.map(defaultLanguage)).size > 1) {
+    return { places: [], duplicates: new Map() };
+  }
   const places = tagged(mode, countries);
   const claim = (place: Locale & { tag: string }) =>
     (regionOf(place.tag) === place.country ? 2 : 0) + (regionOf(place.language) ? 1 : 0);
@@ -199,9 +211,50 @@ export function hreflangPlaces(
     const held = kept.get(key);
     if (held === undefined || claim(place) > claim(held)) kept.set(key, place);
   }
-  return places
-    .filter((place) => kept.get(place.tag.toLowerCase()) === place)
-    .map(({ tag, segment }) => ({ tag, segment }));
+  // Every tag named so far, the winners' first, so a bare tag never takes one of theirs.
+  const taken = new Set(kept.keys());
+  const named = new Map<Locale & { tag: string }, string>();
+  const duplicates = new Map<string, string>();
+  for (const place of places) {
+    const winner = kept.get(place.tag.toLowerCase());
+    if (winner === place) {
+      named.set(place, place.tag);
+      continue;
+    }
+    const bare = regionOf(place.language) === undefined ? localeOf(place.language) : undefined;
+    if (bare !== undefined && !taken.has(bare.toLowerCase())) {
+      taken.add(bare.toLowerCase());
+      named.set(place, bare);
+    } else if (winner !== undefined && winner.country === place.country) {
+      duplicates.set(place.segment, winner.segment);
+    }
+  }
+  return {
+    places: places.flatMap((place) => {
+      const tag = named.get(place);
+      return tag === undefined ? [] : [{ tag, segment: place.segment }];
+    }),
+    duplicates,
+  };
+}
+
+/** The places to name as `hreflang` alternates, each by its tag (`hreflangSet`). */
+export function hreflangPlaces(
+  mode: Routing,
+  countries: readonly Offer[],
+): { tag: string; segment: string }[] {
+  return hreflangSet(mode, countries).places;
+}
+
+/** The segment of the page a place (`segment`) duplicates, for its canonical: the one
+ * that won the `hreflang` tag it lost and couldn't replace (`hreflangSet`). `undefined`
+ * for a page that is its own canonical. */
+export function duplicateOf(
+  mode: Routing,
+  countries: readonly Offer[],
+  segment: string,
+): string | undefined {
+  return hreflangSet(mode, countries).duplicates.get(segment.toLowerCase());
 }
 
 /**

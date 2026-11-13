@@ -9,6 +9,7 @@ import {
   previousPage,
   readListing,
   searchKey,
+  sortFacetValues,
   toMinor,
   withOnSale,
 } from "./listing.ts";
@@ -98,5 +99,41 @@ test("one search written in another order is one cache entry", () => {
   assert.deepEqual(
     searchKey({ country: "DE", language: "de", cursor: undefined }),
     searchKey({ country: "DE", language: "de" }),
+  );
+});
+
+test("facet values keep the most results first, ties by what they show in the page's language", () => {
+  const values = [
+    { value: "blue", label: "Blau", count: 2 },
+    { value: "green", label: "Grün", count: 5 },
+    { value: "oyster", label: "Austernpilz", count: 2 },
+    { value: "red", label: "Rot", count: 2 },
+  ];
+  assert.deepEqual(
+    sortFacetValues(values, "de-DE").map((v) => v.value),
+    ["green", "oyster", "blue", "red"],
+  );
+  // The API's answer is left as it came.
+  assert.deepEqual(
+    values.map((v) => v.value),
+    ["blue", "green", "oyster", "red"],
+  );
+});
+
+test("facet values without a label sort by their value, numbers by size, letters by language", () => {
+  const values = [
+    { value: "10 ml", count: 1 },
+    { value: "5 ml", count: 1 },
+    { value: "Zebra", label: null, count: 1 },
+    { value: "Äpfel", count: 1 },
+  ];
+  assert.deepEqual(
+    sortFacetValues(values, "de-DE").map((v) => v.value),
+    ["5 ml", "10 ml", "Äpfel", "Zebra"],
+  );
+  // Swedish sorts Ä after Z.
+  assert.deepEqual(
+    sortFacetValues(values, "sv-SE").map((v) => v.value),
+    ["5 ml", "10 ml", "Zebra", "Äpfel"],
   );
 });

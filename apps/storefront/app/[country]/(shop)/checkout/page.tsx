@@ -9,6 +9,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 import { CartMessages } from "@/components/cart-messages";
+import { FollowCart } from "@/components/cart/cart-provider";
 import { CodeStates } from "@/components/discounts";
 import { lineImage } from "@/components/line-image";
 import { SummaryLine, Totals } from "@/components/totals";
@@ -137,6 +138,8 @@ export default async function CheckoutPage({
   const total = { amount: cart.total.amount, currency: cart.total.currency };
   return (
     <CheckoutPayment total={total} attempt={attempt}>
+      {/* The drawer changes the cart too: this page re-renders with what it did. */}
+      <FollowCart />
       <VStack gap={6}>
         <Heading level={1} type="display-2">
           {t("checkout.title")}

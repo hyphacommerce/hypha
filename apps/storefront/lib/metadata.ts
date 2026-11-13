@@ -4,32 +4,40 @@ import { localeOf } from "@hyphacommerce/i18n";
 import type { Metadata } from "next";
 
 import { loadCountries, loadStore, pageLocale } from "./api";
-import { hreflangPlaces } from "./routing";
+import { duplicateOf, hreflangPlaces } from "./routing";
 import { localeAlternates } from "./seo";
 import { link, mode, siteUrl } from "./site";
 
 type Image = { url: string; width?: number | null; height?: number | null; alt?: string | null };
 
 /**
- * A page's alternates by `hreflang`: its copy in every country and language
- * (`hreflangPlaces`), `path` being its path inside a place (`/p/mug`). None on a page
- * (`segment`) that set leaves out, since a page in a set names itself in it.
+ * A page's canonical URL and its alternates by `hreflang`, `path` being its path inside
+ * a place (`/p/mug`): its own URL and its copy in every country and language
+ * (`hreflangPlaces`), or, for a page (`segment`) whose tag another won
+ * (`duplicateOf`), that page's URL and none, since a page in a set names itself in it.
  */
-export async function alternatesOf(
+export async function linksOf(
   segment: string,
   path: string,
-): Promise<Record<string, string> | undefined> {
+): Promise<{ canonical: string; languages?: Record<string, string> }> {
   const countries = await loadCountries();
+  const duplicate = duplicateOf(mode(), countries, segment);
+  if (duplicate !== undefined) return { canonical: link(duplicate, path) };
+  const canonical = link(segment, path);
   const places = hreflangPlaces(mode(), countries);
-  if (!places.some((p) => p.segment === segment.toLowerCase())) return undefined;
-  return localeAlternates(places.map((p) => ({ tag: p.tag, href: link(p.segment, path) })));
+  if (!places.some((p) => p.segment === segment.toLowerCase())) return { canonical };
+  const languages = localeAlternates(
+    places.map((p) => ({ tag: p.tag, href: link(p.segment, path) })),
+  );
+  return { canonical, languages };
 }
 
 /**
  * A shop page's metadata: its title (the layout's template adds the store's name),
- * description, its own URL as canonical with its copy in every country and language as
- * alternates, and the Open Graph and Twitter previews with `image`. `segment` is the
- * page's locale segment (`params.country`), `path` its path inside it (`/p/mug`).
+ * description, its canonical URL (its own, or the page it duplicates) with its copy in
+ * every country and language as alternates (`linksOf`), and the Open Graph and Twitter
+ * previews with `image`. `segment` is the page's locale segment (`params.country`),
+ * `path` its path inside it (`/p/mug`).
  */
 export async function pageMetadata(input: {
   segment: string;
@@ -40,13 +48,14 @@ export async function pageMetadata(input: {
   type?: "website" | "article";
 }): Promise<Metadata> {
   const place = await pageLocale(input.segment);
-  const [store, languages] = await Promise.all([
+  const [store, links] = await Promise.all([
     loadStore(place.country, place.language),
-    siteUrl() ? alternatesOf(place.segment, input.path) : undefined,
+    siteUrl() ? linksOf(place.segment, input.path) : undefined,
   ]);
   const description = input.description ?? store.description ?? undefined;
   const title = input.title ? `${input.title} · ${store.name}` : store.name;
-  const url = link(place.segment, input.path);
+  const url = links?.canonical ?? link(place.segment, input.path);
+  const languages = links?.languages;
   const images = input.image
     ? [
         {
