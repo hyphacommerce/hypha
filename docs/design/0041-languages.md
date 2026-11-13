@@ -167,11 +167,15 @@ A resource's children live in its translation, addressed by their IDs:
 | `discount` | `title` |
 | `checkout_rule` | `message` |
 | `asset` | `alt` |
-| `store` | `description`, the email footer |
-| `search_facet` | `label` |
+| `store` | `description`, `email_footer` |
+| `search_facet` (one per store, under the store's ID) | `facets.<facet key>.label` |
 
 Variant titles aren't stored: they're joined from option value labels, so they come out
 translated.
+
+The search facets live in one settings record, so their labels are one resource. A
+facet's key names its option (`option.Color`), so renaming the option orphans the
+label's translation.
 
 ### 3.2 Rules
 
@@ -201,7 +205,10 @@ translated.
 - Events `translation.updated` (resource, language, field keys) and
   `translation.deleted`, routed to apps with `translations:read`.
 - A `TranslationCleanup` handler removes a deleted resource's translations (there's no
-  foreign key from a generic table).
+  foreign key from a generic table). Payment methods and shipping options record no
+  `deleted` event yet, so their delete routes remove the translations themselves.
+- A language taken off the store's list loses its translations (a handler on
+  `store.updated`). The admin confirms before it sends that change.
 - The storefront's webhook subscribes to both and expires the resource's cache tags.
 
 ## 4. Reading (ML5, ML6)
@@ -212,7 +219,9 @@ translated.
   1. No `language`: the market's default (so today's clients see no change).
   2. A language the market doesn't offer or the store hasn't published: the market's
      default. Never an error, so a stale link still renders.
-  3. Per field: the exact tag, then the tag without its region, then the source.
+  3. Per field: the exact tag, then the tag without its region, then the source. An
+     unpublished language is never served, as a fallback either: with `de-AT` published
+     and `de` not, a `de-AT` read skips `de`.
 - **Answer:** the same DTOs. `Content-Language` names the language resolved in step 1
   or 2 (not whether each field had a translation).
 - **Where it's applied:** the host loads the overlays for the resources in a response
