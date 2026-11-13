@@ -35,6 +35,7 @@ import { type Format, getFormat } from "@/lib/get-format";
 import {
   channelNames,
   loadCountries,
+  loadStore,
   loaded,
   requireStaff,
   sessionClient,
@@ -258,6 +259,11 @@ function DiscountsList({ order, t, format }: { order: Order; t: T; format: Forma
                 {d.title}
               </Text>
             </Link>
+            {d.localized && (
+              <Text type="supporting" color="secondary">
+                {t("orders.detail_discount_localized", { title: d.localized.title })}
+              </Text>
+            )}
             <Text type="supporting" color="secondary">
               {[
                 d.code
@@ -334,8 +340,9 @@ async function Order({ id }: { id: string }) {
   // The address check names an app and a staff member by ID: their names, when it does
   // (IDs stay where the role can't read apps or users).
   const check = order.address_check;
-  const [countries, addressFormat, people, apps] = await Promise.all([
+  const [countries, store, addressFormat, people, apps] = await Promise.all([
     loadCountries(),
+    loadStore(),
     order.shipping_address
       ? client
           .GET("/admin/address-formats/{country}", {
@@ -351,6 +358,10 @@ async function Order({ id }: { id: string }) {
       : new Map<string, string>(),
   ]);
   const canWriteOrders = me.scopes.includes("orders:write");
+  // The language the buyer read the order in, when it isn't the one content is written
+  // in (none when the store can't be read: there's nothing to compare with).
+  const buyerLanguage =
+    order.language && store && order.language !== store.default_language ? order.language : null;
   const listNames = priceListNames(client, order.lines);
 
   const fulfillments = shipments.data?.items ?? [];
@@ -486,6 +497,13 @@ async function Order({ id }: { id: string }) {
                       <TableCell>
                         <VStack gap={0.5}>
                           <Text>{t("orders.detail_shipping_line", { name: shipping.name })}</Text>
+                          {shipping.localized && (
+                            <Text type="supporting" color="secondary">
+                              {t("orders.detail_shipping_localized", {
+                                name: shipping.localized.name,
+                              })}
+                            </Text>
+                          )}
                           {shipping.provider && (
                             <Text type="supporting" color="secondary">
                               {[shipping.provider, shipping.service, shipping.reference]
@@ -533,7 +551,13 @@ async function Order({ id }: { id: string }) {
             </VStack>
           </Card>
 
-          <PaymentCard order={order} format={format} extensions={extensions} t={t} />
+          <PaymentCard
+            order={order}
+            buyerLanguage={buyerLanguage}
+            format={format}
+            extensions={extensions}
+            t={t}
+          />
 
           {fulfillments.length > 0 && (
             <ShipmentsCard order={order} fulfillments={fulfillments} places={places} />
@@ -711,11 +735,14 @@ type Order = AdminSchemas["AdminOrderResponse"];
 /** How the order is paid for: each payment, newest first. */
 function PaymentCard({
   order,
+  buyerLanguage,
   format,
   extensions,
   t,
 }: {
   order: Order;
+  /** The order's language when it isn't the store's default: the buyer read another copy. */
+  buyerLanguage: string | null;
   format: Format;
   extensions: Extensions;
   t: T;
@@ -771,12 +798,26 @@ function PaymentCard({
                     </MetadataListItem>
                   )}
                 </MetadataList>
+                {/* The admin's payment answers its method's name and instructions in the
+                    source language only, not the buyer's copy in the order's language:
+                    for an order in another language they're labelled as the source. */}
                 {payment.instructions && (
                   <VStack gap={1}>
-                    <Text type="label">{t("orders.detail_payment_instructions")}</Text>
+                    <Text type="label">
+                      {buyerLanguage
+                        ? t("orders.detail_payment_instructions_source")
+                        : t("orders.detail_payment_instructions")}
+                    </Text>
                     <Text type="supporting" color="secondary">
                       <span style={{ whiteSpace: "pre-wrap" }}>{payment.instructions}</span>
                     </Text>
+                    {buyerLanguage && (
+                      <Text type="supporting" color="secondary">
+                        {t("orders.detail_payment_instructions_source_note", {
+                          language: format.languageName(buyerLanguage),
+                        })}
+                      </Text>
+                    )}
                   </VStack>
                 )}
                 <AppActions
