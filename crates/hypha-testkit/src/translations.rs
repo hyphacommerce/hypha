@@ -10,9 +10,9 @@ use hypha_core::{
     Language, Page, PageRequest, Recorded, RepoError, Versioned, stamp_insert, stamp_update,
 };
 use hypha_translations::{
-    FieldCounts, LanguageProgress, QueuedSource, ResourceKind, ResourceRef, SourceDigest,
-    Translation, TranslationFilter, TranslationKey, TranslationRepo, TranslationSourceRepo,
-    WorkItem, WorklistFilter, keys,
+    FieldCounts, LanguageProgress, ProgressLanguage, QueuedSource, ResourceKind, ResourceRef,
+    SourceDigest, Translation, TranslationFilter, TranslationKey, TranslationRepo,
+    TranslationSourceRepo, WorkItem, WorklistFilter, keys,
 };
 
 use crate::{
@@ -209,7 +209,17 @@ impl TranslationSourceRepo for InMemoryTranslations {
                     language: filter.language.clone(),
                 })
                 .cloned();
-            let counts = FieldCounts::of(&digests, translation.as_ref());
+            let base = filter.inherits.base().and_then(|base| {
+                rows.get(&TranslationKey {
+                    resource,
+                    language: base.clone(),
+                })
+            });
+            let counts = FieldCounts::of(
+                &digests,
+                translation.as_ref(),
+                filter.inherits.fallback(base),
+            );
             if !filter.keeps(resource, &counts) {
                 continue;
             }
@@ -228,28 +238,37 @@ impl TranslationSourceRepo for InMemoryTranslations {
     async fn progress(
         &self,
         kinds: &[ResourceKind],
-        languages: &[Language],
+        languages: &[ProgressLanguage],
     ) -> Result<Vec<LanguageProgress>, RepoError> {
         let sources = self.sources.lock().unwrap();
         let rows = self.rows.lock().unwrap();
         Ok(languages
             .iter()
-            .map(|language| {
+            .map(|counted| {
                 let mut progress = LanguageProgress {
-                    language: language.clone(),
+                    language: counted.language.clone(),
                     total: 0,
                     translated: 0,
                     outdated: 0,
+                    inherited: 0,
                 };
                 for (resource, digests) in sources.iter().filter(|(r, _)| kinds.contains(&r.kind)) {
-                    let translation = rows.get(&TranslationKey {
-                        resource: *resource,
-                        language: language.clone(),
-                    });
-                    let counts = FieldCounts::of(digests, translation);
+                    let of = |language: &Language| {
+                        rows.get(&TranslationKey {
+                            resource: *resource,
+                            language: language.clone(),
+                        })
+                    };
+                    let base = counted.inherits.base().and_then(of);
+                    let counts = FieldCounts::of(
+                        digests,
+                        of(&counted.language),
+                        counted.inherits.fallback(base),
+                    );
                     progress.total += u64::from(counts.total);
                     progress.translated += u64::from(counts.translated());
                     progress.outdated += u64::from(counts.outdated);
+                    progress.inherited += u64::from(counts.inherited);
                 }
                 progress
             })

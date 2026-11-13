@@ -6,7 +6,9 @@ use uuid::Uuid;
 use crate::{
     catalog::{ResourceKind, ResourceRef},
     translation::Translation,
-    worklist::{LanguageProgress, QueuedSource, SourceDigest, WorkItem, WorklistFilter},
+    worklist::{
+        LanguageProgress, ProgressLanguage, QueuedSource, SourceDigest, WorkItem, WorklistFilter,
+    },
 };
 
 /// Uniqueness rules the translations repo enforces, reported as
@@ -162,7 +164,8 @@ pub trait TranslationSourceRepo {
         resources: &[ResourceRef],
     ) -> Result<Vec<(ResourceRef, SourceDigest)>, RepoError>;
     /// A page of the resources with digests that `filter` keeps (`WorklistFilter::keeps`,
-    /// counted by `FieldCounts::of` against the translation into its language), in
+    /// counted by `FieldCounts::of` against the translation into its language, and the
+    /// one into its base for `inherits`), in
     /// `ResourceRef` order: the catalog's order of kinds, then the ID's bytes. One read.
     async fn worklist(
         &self,
@@ -170,11 +173,12 @@ pub trait TranslationSourceRepo {
         page: PageRequest<ResourceRef>,
     ) -> Result<Page<WorkItem>, RepoError>;
     /// For each of `languages`, in the order given, how its translations cover the digests
-    /// of `kinds`' resources, in fields. One read.
+    /// of `kinds`' resources, in fields, by `FieldCounts::of`'s rule (`inherited` by what
+    /// it `inherits`). One read.
     async fn progress(
         &self,
         kinds: &[ResourceKind],
-        languages: &[Language],
+        languages: &[ProgressLanguage],
     ) -> Result<Vec<LanguageProgress>, RepoError>;
     /// Queues `resources` to have their digests read again; one queued already moves to
     /// the back of the queue (a later `mark`).

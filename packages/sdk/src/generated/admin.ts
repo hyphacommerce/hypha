@@ -4208,7 +4208,7 @@ export interface paths {
         get?: never;
         /**
          * Sets a resource's translation into one of the store's other languages, replacing the
-         *     fields it had. Answers the resource's translations as they are then. Beside
+         *     fields it had: a field left out is removed (to change a few, PATCH them). Answers the resource's translations as they are then. Beside
          *     `translations:write` it takes the resource's own read scope.
          */
         put: operations["admin.translations.put"];
@@ -4217,7 +4217,14 @@ export interface paths {
         delete: operations["admin.translations.remove"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Changes some fields of a resource's translation into one of the store's other
+         *     languages, keeping the rest: what to send when translating a field or a few, since
+         *     a PUT replaces the whole language. Creates the translation when there's none, and
+         *     deletes it when no field is left. Answers the resource's translations as they are
+         *     then. Beside `translations:write` it takes the resource's own read scope.
+         */
+        patch: operations["admin.translations.patch"];
         trace?: never;
     };
     "/admin/uploads": {
@@ -6965,6 +6972,7 @@ export interface components {
          * @enum {string}
          */
         FieldStatus: string;
+        FieldTranslationPatch: components["schemas"]["FieldTranslationRequest"] | null;
         /** @description One field of a translation being written. */
         FieldTranslationRequest: {
             /**
@@ -7275,13 +7283,24 @@ export interface components {
         Language: string;
         /**
          * @description How far one language's translations cover the store's text, in fields with source
-         *     text: `translated` + `missing` = `total`, and `outdated` are among `translated`.
+         *     text: `translated` + `missing` = `total`, `outdated` are among `translated` and
+         *     `inherited` among `missing`.
          */
         LanguageProgressResponse: {
+            /**
+             * Format: int64
+             * @description Of those missing, the ones shoppers still read in the language without its
+             *     region (`de` for `de-AT`), as storefronts fall back to it: the base language's
+             *     translation when it's another of the store's languages (published or not), or
+             *     the source when it's the default (then every missing field is inherited). 0 for
+             *     a language without a region. `missing` − `inherited` are the fields a regional
+             *     language's shoppers read in the default language.
+             */
+            inherited: number;
             language: components["schemas"]["Language"];
             /**
              * Format: int64
-             * @description Without a translation.
+             * @description Without a translation in exactly this language.
              */
             missing: number;
             /**
@@ -8083,6 +8102,16 @@ export interface components {
         };
         PasswordResetRequest: {
             email: string;
+        };
+        PatchTranslationRequest: {
+            /**
+             * @description The fields to change, by key (JSON Merge Patch): a field given an object is set,
+             *     by the same rules as a PUT's (blank removes it); `null` removes it; a field left
+             *     out keeps its translation.
+             */
+            fields: {
+                [key: string]: components["schemas"]["FieldTranslationPatch"];
+            };
         };
         /**
          * @description The provider took the action. Unless it said it's done already (`completed`), nothing
@@ -8951,7 +8980,8 @@ export interface components {
         PutTranslationRequest: {
             /**
              * @description Every translated field of this language, by key. A field left out is removed, so
-             *     send the whole language; no fields at all deletes the translation.
+             *     send the whole language (a PATCH changes only the fields it names); no fields at
+             *     all deletes the translation.
              */
             fields: {
                 [key: string]: components["schemas"]["FieldTranslationRequest"];
@@ -10504,10 +10534,21 @@ export interface components {
              *     included, until the translation is next written); empty when it has none yet.
              */
             fields: string[];
+            /**
+             * Format: int32
+             * @description Of those missing, the ones shoppers still read in the language without its
+             *     region (`de` for `de-AT`), as storefronts fall back to it: the base language's
+             *     translation when it's another of the store's languages, or the source when it's
+             *     the default (then every missing field is inherited). 0 for a language without a
+             *     region. `missing` − `inherited` are the fields a regional language's shoppers read
+             *     in the default language.
+             */
+            inherited: number;
             language: components["schemas"]["Language"];
             /**
              * Format: int32
-             * @description Of those, the ones without a translation in `language`.
+             * @description Of those, the ones without a translation in exactly `language`. For a regional
+             *     language (`de-AT`) some of them may be `inherited`.
              */
             missing: number;
             /**
@@ -39265,6 +39306,132 @@ export interface operations {
                 };
             };
             /** @description A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A server failure (`internal_error`). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "admin.translations.patch": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description `1` previews the write: it runs for real and is rolled back, and the answer is `200` with what it would have done (`#/components/responses/Preview`) instead of its own. A write that fails answers its failure as without the header. `0`, or no header, runs the write. */
+                "Hypha-Preview"?: components["parameters"]["HyphaPreview"];
+                /** @description A preview's `token` (`hypha_pv_…`): sent with the same request by the same caller, the write runs with the preview's IDs and commits only if it records the same events, over records as they were when previewed (else `409 preview_stale`, nothing written). Once (`409 preview_used`); a retry sends the `Idempotency-Key` alone. */
+                "Hypha-Preview-Token"?: components["parameters"]["HyphaPreviewToken"];
+            };
+            path: {
+                /**
+                 * @description The kind of resource.
+                 * @example product
+                 */
+                kind: string;
+                /**
+                 * @description The resource's ID; the store's for `store` and `search_facet`.
+                 * @example prod_00000000000000000000000000000000
+                 */
+                id: string;
+                /**
+                 * @description A language on the store's list, published or not; never its default.
+                 * @example de
+                 */
+                language: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchTranslationRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranslationsResponse"];
+                };
+            };
+            /** @description A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No credentials (`unauthenticated`), or unknown, expired or revoked ones (`invalid_token`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing scope (`missing_scope`, see `x-hypha-scopes`), or credentials for the other API (`admin_credentials_required`, `publishable_key_required`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The resource in the path doesn't exist (`<resource>_not_found`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description With `Hypha-Preview-Token`: the token already applied its write (`preview_used`), or the write would no longer record what was previewed (`preview_stale`, nothing written, `details.preview` is what it would do now). Conflicts with existing data or the resource's state, or a concurrent change (`concurrent_modification`, safe to retry). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A body over the size limit, 2 MiB unless configured (`body_too_large`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No `Content-Type: application/json` (`missing_content_type`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid input: unknown fields (`invalid_body`), values that break a rule (`field_required`, `field_too_long`, …), or IDs in the body that don't exist. A `Hypha-Preview-Token` that is unknown, expired, another caller's or another request's (`preview_token_invalid`). */
             422: {
                 headers: {
                     [name: string]: unknown;

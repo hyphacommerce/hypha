@@ -82,28 +82,106 @@ impl FromStr for TranslationState {
     }
 }
 
+/// Where a language's fields without a translation of their own are served from: the
+/// language without its region (`de` for `de-AT`), when the store has it. What a reader
+/// of the language sees, so counts tell an untranslated field shoppers still read in the
+/// base language from one they read in the default language.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum Inheritance {
+    /// A language without a region, or one whose base isn't among the store's
+    /// languages: an untranslated field shows the default language.
+    #[default]
+    Nothing,
+    /// Its base is the store's default language (`en` for `en-GB`): the source text.
+    Source,
+    /// Its base is another of the store's languages, published or not: that
+    /// language's translation, where it has one.
+    Translation(Language),
+}
+
+impl Inheritance {
+    /// What `language` inherits in a store whose content is in `default`, with `others`
+    /// beside it.
+    pub fn of(language: &Language, default: &Language, others: &[Language]) -> Self {
+        match language.without_region() {
+            Some(base) if base == *default => Inheritance::Source,
+            Some(base) if others.contains(&base) => Inheritance::Translation(base),
+            _ => Inheritance::Nothing,
+        }
+    }
+
+    /// The language whose translations are read beside this one's: `Translation`'s.
+    pub fn base(&self) -> Option<&Language> {
+        match self {
+            Inheritance::Translation(base) => Some(base),
+            Inheritance::Nothing | Inheritance::Source => None,
+        }
+    }
+
+    /// For one resource: what its untranslated fields fall back to, given its
+    /// translation into `base()` (`None` without one).
+    pub fn fallback<'a>(&self, base: Option<&'a Translation>) -> Fallback<'a> {
+        match self {
+            Inheritance::Nothing => Fallback::Nothing,
+            Inheritance::Source => Fallback::Source,
+            Inheritance::Translation(_) => Fallback::Translation(base),
+        }
+    }
+}
+
+/// What one resource's fields without a translation in a language fall back to:
+/// `Inheritance` with the base language's translation read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fallback<'a> {
+    Nothing,
+    Source,
+    /// The base language's translation of the resource; `None` when it has none.
+    Translation(Option<&'a Translation>),
+}
+
 /// How one language's translation of a resource covers the fields it has text in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct FieldCounts {
     /// The resource's fields with text.
     pub total: u32,
-    /// Of those, the ones the language has no translation of.
+    /// Of those, the ones the language has no translation of: in exactly its tag.
     pub missing: u32,
     /// Of those translated, the ones whose source changed since (the stored
     /// `source_digest` isn't the digest now).
     pub outdated: u32,
+    /// Of those missing, the ones served from the language's base (`Inheritance`): its
+    /// translation, or the source when the base is the default language. 0 for a
+    /// language without a region.
+    pub inherited: u32,
 }
 
 impl FieldCounts {
-    /// `translation`'s coverage of `sources` (a resource's `source_digests`): the rule
-    /// every store's worklist follows. A translated field whose key isn't among them (its
-    /// child is gone, or its source emptied) counts for nothing.
-    pub fn of(sources: &[SourceDigest], translation: Option<&Translation>) -> Self {
+    /// `translation`'s coverage of `sources` (a resource's `source_digests`), with what
+    /// its untranslated fields fall back to: the rule every store's worklist follows. A
+    /// translated field whose key isn't among them (its child is gone, or its source
+    /// emptied) counts for nothing.
+    pub fn of(
+        sources: &[SourceDigest],
+        translation: Option<&Translation>,
+        fallback: Fallback<'_>,
+    ) -> Self {
         let mut counts = Self::default();
         for source in sources {
             counts.total += 1;
             match translation.and_then(|t| t.fields().get(&source.key)) {
-                None => counts.missing += 1,
+                None => {
+                    counts.missing += 1;
+                    let inherited = match fallback {
+                        Fallback::Nothing => false,
+                        Fallback::Source => true,
+                        Fallback::Translation(base) => {
+                            base.is_some_and(|b| b.fields().contains_key(&source.key))
+                        }
+                    };
+                    if inherited {
+                        counts.inherited += 1;
+                    }
+                }
                 Some(field) if field.source_digest != source.digest => counts.outdated += 1,
                 Some(_) => {}
             }
@@ -135,6 +213,8 @@ pub struct WorklistFilter {
     pub kinds: Vec<crate::catalog::ResourceKind>,
     /// Their state in this language.
     pub language: Language,
+    /// What its untranslated fields are served from, for `FieldCounts::inherited`.
+    pub inherits: Inheritance,
     /// In this state only; `None` is every state.
     pub state: Option<TranslationState>,
 }
@@ -166,6 +246,16 @@ pub struct LanguageProgress {
     pub translated: u64,
     /// Of those translated, the ones whose source changed since.
     pub outdated: u64,
+    /// Of those not translated into the language, the ones served from its base
+    /// (`Inheritance`). 0 for a language without a region.
+    pub inherited: u64,
+}
+
+/// A language whose progress is counted, and what its untranslated fields inherit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProgressLanguage {
+    pub language: Language,
+    pub inherits: Inheritance,
 }
 
 impl LanguageProgress {
@@ -278,17 +368,22 @@ mod tests {
     #[test]
     fn untranslated_fields_are_missing() {
         let sources = source_digests(&source());
-        let none = FieldCounts::of(&sources, None);
+        let none = FieldCounts::of(&sources, None, Fallback::Nothing);
         assert_eq!(
             none,
             FieldCounts {
                 total: 2,
                 missing: 2,
-                outdated: 0
+                outdated: 0,
+                inherited: 0,
             }
         );
         assert_eq!(none.state(), TranslationState::Missing);
-        let part = FieldCounts::of(&sources, Some(&translated(&[("title", "Tasse")])));
+        let part = FieldCounts::of(
+            &sources,
+            Some(&translated(&[("title", "Tasse")])),
+            Fallback::Nothing,
+        );
         assert_eq!((part.missing, part.translated()), (1, 1));
         assert_eq!(part.state(), TranslationState::Missing);
     }
@@ -298,14 +393,14 @@ mod tests {
         let t = translated(&[("title", "Tasse"), ("options.opt_1.name", "Farbe")]);
         let sources = source_digests(&source());
         assert_eq!(
-            FieldCounts::of(&sources, Some(&t)).state(),
+            FieldCounts::of(&sources, Some(&t), Fallback::Nothing).state(),
             TranslationState::Complete
         );
         let changed = source_digests(&Source::new(vec![
             SourceField::new("title", Some("Cup")),
             SourceField::new("options.opt_1.name", Some("Colour")),
         ]));
-        let counts = FieldCounts::of(&changed, Some(&t));
+        let counts = FieldCounts::of(&changed, Some(&t), Fallback::Nothing);
         assert_eq!((counts.missing, counts.outdated), (0, 1));
         assert_eq!(counts.state(), TranslationState::Outdated);
     }
@@ -317,7 +412,7 @@ mod tests {
             SourceField::new("title", Some("Cup")),
             SourceField::new("options.opt_1.name", Some("Colour")),
         ]));
-        let counts = FieldCounts::of(&changed, Some(&t));
+        let counts = FieldCounts::of(&changed, Some(&t), Fallback::Nothing);
         assert_eq!((counts.missing, counts.outdated), (1, 1));
         assert_eq!(counts.state(), TranslationState::Missing);
     }
@@ -327,13 +422,51 @@ mod tests {
         let t = translated(&[("title", "Tasse"), ("options.opt_1.name", "Farbe")]);
         let fewer = source_digests(&Source::new(vec![SourceField::new("title", Some("Mug"))]));
         assert_eq!(
-            FieldCounts::of(&fewer, Some(&t)),
+            FieldCounts::of(&fewer, Some(&t), Fallback::Nothing),
             FieldCounts {
                 total: 1,
                 missing: 0,
-                outdated: 0
+                outdated: 0,
+                inherited: 0,
             }
         );
+    }
+
+    #[test]
+    fn a_regional_language_inherits_from_its_base_when_the_store_has_it() {
+        let lang = |tag: &str| Language::new(tag).unwrap();
+        let others = [lang("de"), lang("de-AT"), lang("en-GB"), lang("fr-CA")];
+        let of = |tag: &str| Inheritance::of(&lang(tag), &lang("en"), &others);
+        assert_eq!(of("de-AT"), Inheritance::Translation(lang("de")));
+        assert_eq!(of("en-GB"), Inheritance::Source);
+        // `fr` isn't the store's: a Canadian reader falls back to the default.
+        assert_eq!(of("fr-CA"), Inheritance::Nothing);
+        assert_eq!(of("de"), Inheritance::Nothing);
+    }
+
+    #[test]
+    fn a_missing_field_is_inherited_where_the_base_translates_it() {
+        let sources = source_digests(&source());
+        let de = translated(&[("title", "Tasse")]);
+        let base = Inheritance::Translation(Language::new("de").unwrap());
+        let counts = FieldCounts::of(&sources, None, base.fallback(Some(&de)));
+        assert_eq!((counts.missing, counts.inherited), (2, 1));
+        // An exact translation isn't inherited, nor anything without a base translation.
+        let at = translated(&[("title", "Häferl")]);
+        let counts = FieldCounts::of(&sources, Some(&at), base.fallback(Some(&de)));
+        assert_eq!((counts.missing, counts.inherited), (1, 0));
+        let counts = FieldCounts::of(&sources, None, base.fallback(None));
+        assert_eq!((counts.missing, counts.inherited), (2, 0));
+        // State is by the exact tag still.
+        assert_eq!(counts.state(), TranslationState::Missing);
+    }
+
+    #[test]
+    fn a_language_based_on_the_default_inherits_every_missing_field() {
+        let sources = source_digests(&source());
+        let t = translated(&[("title", "Mug")]);
+        let counts = FieldCounts::of(&sources, Some(&t), Inheritance::Source.fallback(None));
+        assert_eq!((counts.missing, counts.inherited), (1, 1));
     }
 
     #[test]
@@ -367,12 +500,13 @@ mod tests {
         let filter = WorklistFilter {
             kinds: vec![ResourceKind::Product],
             language: Language::new("de").unwrap(),
+            inherits: Inheritance::Nothing,
             state: Some(TranslationState::Missing),
         };
         let missing = FieldCounts {
             total: 1,
             missing: 1,
-            outdated: 0,
+            ..FieldCounts::default()
         };
         assert!(filter.keeps(resource, &missing));
         assert!(!filter.keeps(resource, &FieldCounts::default()));

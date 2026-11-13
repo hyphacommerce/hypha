@@ -724,6 +724,7 @@ async fn translations_are_listed_by_kind_and_language_in_pages() {
             "total": 1,
             "missing": 0,
             "outdated": 0,
+            "inherited": 0,
             "fields": ["description"],
             "created_at": all["items"][3]["created_at"],
             "updated_at": all["items"][3]["updated_at"],
@@ -967,6 +968,7 @@ async fn the_worklist_lists_each_resource_by_its_state_in_a_language() {
         ),
         (&json!("complete"), &json!(1), &json!(0), &json!(0))
     );
+    assert_eq!(item["inherited"], 0);
     assert_eq!(item["language"], "de");
     assert_eq!(item["fields"], json!(["title"]));
     assert!(item["created_at"].is_string());
@@ -1129,9 +1131,10 @@ async fn progress_counts_each_languages_fields() {
         json!({
             "default_language": "en",
             "languages": [
-                {"language": "de", "total": 3, "translated": 2, "outdated": 1, "missing": 1},
-                {"language": "de-AT", "total": 3, "translated": 0, "outdated": 0, "missing": 3},
-                {"language": "fr", "total": 3, "translated": 1, "outdated": 0, "missing": 2},
+                {"language": "de", "total": 3, "translated": 2, "outdated": 1, "missing": 1, "inherited": 0},
+                // Untranslated, but shoppers read German's two titles.
+                {"language": "de-AT", "total": 3, "translated": 0, "outdated": 0, "missing": 3, "inherited": 2},
+                {"language": "fr", "total": 3, "translated": 1, "outdated": 0, "missing": 2, "inherited": 0},
             ],
             "pending": 0,
         })
@@ -1172,6 +1175,177 @@ async fn progress_counts_each_languages_fields() {
         (status, code(&body)),
         (StatusCode::BAD_REQUEST, "invalid_query")
     );
+}
+
+#[tokio::test]
+async fn a_patch_changes_only_the_fields_it_names() {
+    let app = app().await;
+    in_four_languages(&app).await;
+    let product = create_product(&app, "mug").await;
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/admin/products/{product}"),
+        Some(r#"{"description":"<p>A mug.</p>"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let path = format!("/admin/translations/product/{product}/de");
+    let patch = |body: Value| {
+        let (app, path) = (&app, &path);
+        async move { send(app, "PATCH", path, Some(&body.to_string())).await }
+    };
+
+    // The first patch creates the translation; the next keeps what it leaves out.
+    let (status, view) = patch(json!({"fields": {"title": {"value": "Tasse"}}})).await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    assert_eq!(view["translations"][0]["translated"], 1);
+    let (status, view) = patch(json!({"fields": {
+        "description": {"value": "<p>Eine Tasse.</p>"},
+    }}))
+    .await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    assert_eq!(
+        field(&view, "title")["translations"]["de"]["value"],
+        "Tasse"
+    );
+    assert_eq!(view["translations"][0]["translated"], 2);
+    let event = outbox_events(&app).await.pop().unwrap();
+    assert_eq!(
+        (event.event_type.as_str(), &event.data["fields"]),
+        ("translation.updated", &json!(["description"]))
+    );
+
+    // A digest that isn't the source's now is refused, and nothing changes.
+    let stale = "0".repeat(64);
+    let (status, refused) = patch(json!({"fields": {
+        "title": {"value": "Becher", "source_digest": stale},
+    }}))
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(problems(&refused), [("title", "source_changed")]);
+    let (status, refused) = patch(json!({"fields": {"name": null}})).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(problems(&refused), [("name", "unknown_field")]);
+
+    // `null` removes a field; removing the last deletes the translation.
+    let (status, view) = patch(json!({"fields": {"title": null}})).await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    assert_eq!(field(&view, "title")["translations"], json!({}));
+    assert_eq!(
+        field(&view, "description")["translations"]["de"]["value"],
+        "<p>Eine Tasse.</p>"
+    );
+    let event = outbox_events(&app).await.pop().unwrap();
+    assert_eq!(event.data["fields"], json!(["title"]));
+    let (status, view) = patch(json!({"fields": {"description": null}})).await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    assert_eq!(view["translations"], json!([]));
+    let event = outbox_events(&app).await.pop().unwrap();
+    assert_eq!(event.event_type, "translation.deleted");
+
+    // The languages a PUT takes, and the body's shape.
+    let (status, body) = send(
+        &app,
+        "PATCH",
+        &format!("/admin/translations/product/{product}/en"),
+        Some(r#"{"fields":{"title":{"value":"Mug"}}}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "translation_into_default_language"
+        )
+    );
+    let (status, body) = patch(json!({"fields": {"title": "Tasse"}})).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let reader = key(
+        &app,
+        json!({"kind": "secret", "name": "Reader", "scopes": ["products:read", "translations:read"]}),
+    )
+    .await;
+    let (status, body) = send_as(
+        &app,
+        &reader,
+        "PATCH",
+        &path,
+        Some(r#"{"fields":{"title":{"value":"Tasse"}}}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&body)),
+        (StatusCode::FORBIDDEN, "missing_scope")
+    );
+}
+
+#[tokio::test]
+async fn a_regional_language_counts_what_it_inherits_from_its_base() {
+    let app = app().await;
+    let body = r#"{"languages":[{"language":"de","published":true},{"language":"de-AT"},{"language":"en-GB"}]}"#;
+    let (status, store) = send(&app, "PATCH", "/admin/store", Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{store}");
+    let mug = create_product(&app, "mug").await;
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/admin/products/{mug}"),
+        Some(r#"{"description":"<p>A mug.</p>"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let path = format!("/admin/translations/product/{mug}");
+    let german = fields(&[("title", "Tasse"), ("description", "<p>Eine Tasse.</p>")]);
+    let (status, _) = translate(&app, &path, "de", &german).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = translate(&app, &path, "de-AT", &fields(&[("title", "Häferl")])).await;
+    assert_eq!(status, StatusCode::OK);
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+
+    // Austrian German misses the description, which shoppers read in German; British
+    // English inherits the source, every field it lacks.
+    let (status, progress) = send(
+        &app,
+        "GET",
+        "/admin/translations/progress?kind=product",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{progress}");
+    assert_eq!(
+        progress["languages"],
+        json!([
+            {"language": "de", "total": 2, "translated": 2, "outdated": 0, "missing": 0, "inherited": 0},
+            {"language": "de-AT", "total": 2, "translated": 1, "outdated": 0, "missing": 1, "inherited": 1},
+            {"language": "en-GB", "total": 2, "translated": 0, "outdated": 0, "missing": 2, "inherited": 2},
+        ])
+    );
+    let counts = |page: &Value| {
+        let item = &page["items"][0];
+        (item["missing"].clone(), item["inherited"].clone())
+    };
+    let missing = worklist(&app, "kind=product&language=de-AT&state=missing").await;
+    assert_eq!(ids(&missing), [mug.as_str()]);
+    assert_eq!(counts(&missing), (json!(1), json!(1)));
+    // `missing` is by the exact tag: the state stays missing.
+    assert_eq!(missing["items"][0]["state"], "missing");
+    let listed = worklist(&app, "kind=product&language=de-AT").await;
+    assert_eq!(counts(&listed), (json!(1), json!(1)));
+    let british = worklist(&app, "kind=product&language=en-GB&state=missing").await;
+    assert_eq!(counts(&british), (json!(2), json!(2)));
+
+    // German losing its description leaves Austrian German nothing to inherit there.
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("{path}/de"),
+        Some(r#"{"fields":{"description":null}}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let missing = worklist(&app, "kind=product&language=de-AT&state=missing").await;
+    assert_eq!(counts(&missing), (json!(1), json!(0)));
 }
 
 #[tokio::test]

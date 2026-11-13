@@ -8,10 +8,10 @@ use hypha_core::{
     HasOutbox, Language, OutboxRepo, PageLimit, PageRequest, RepoError, Stamped, Version, Versioned,
 };
 use hypha_translations::{
-    FieldCounts, FieldInput, HasTranslations, LanguageProgress, Overlay, ResourceKind, ResourceRef,
-    Source, SourceDigest, SourceField, Translation, TranslationFilter, TranslationKey,
-    TranslationRepo, TranslationSourceRepo, TranslationState, WorklistFilter, keys, source_digest,
-    source_digests,
+    FieldCounts, FieldInput, HasTranslations, Inheritance, LanguageProgress, Overlay,
+    ProgressLanguage, ResourceKind, ResourceRef, Source, SourceDigest, SourceField, Translation,
+    TranslationFilter, TranslationKey, TranslationRepo, TranslationSourceRepo, TranslationState,
+    WorklistFilter, keys, source_digest, source_digests,
 };
 use uuid::Uuid;
 
@@ -113,6 +113,8 @@ where
     worklist_pages(&make().await).await;
     scenario("translation sources: progress counts each language's fields");
     progress(&make().await).await;
+    scenario("translation sources: a regional language counts what it inherits from its base");
+    inherits(&make().await).await;
     scenario(
         "translation sources: the queue, longest waiting first, queued again survives, counted",
     );
@@ -220,6 +222,7 @@ async fn worklist_states<S: HasTranslations>(ports: &S) {
         let filter = WorklistFilter {
             kinds: ResourceKind::ALL.to_vec(),
             language: lang("de"),
+            inherits: Inheritance::Nothing,
             state,
         };
         repo.worklist(&filter, PageRequest::default())
@@ -234,6 +237,7 @@ async fn worklist_states<S: HasTranslations>(ports: &S) {
         total: 3,
         missing,
         outdated,
+        inherited: 0,
     };
     assert_eq!(
         list(Some(TranslationState::Missing)).await,
@@ -256,6 +260,7 @@ async fn worklist_states<S: HasTranslations>(ports: &S) {
     let filter = WorklistFilter {
         kinds: vec![ResourceKind::Product],
         language: lang("de"),
+        inherits: Inheritance::Nothing,
         state: Some(TranslationState::Outdated),
     };
     let page = repo
@@ -294,6 +299,7 @@ async fn worklist_pages<S: HasTranslations>(ports: &S) {
     let filter = WorklistFilter {
         kinds: ResourceKind::ALL.to_vec(),
         language: lang("de"),
+        inherits: Inheritance::Nothing,
         state: Some(TranslationState::Missing),
     };
     let in_order = [product(1), product(2), category, asset];
@@ -362,9 +368,10 @@ async fn progress<S: HasTranslations>(ports: &S) {
         total,
         translated,
         outdated,
+        inherited: 0,
     };
     assert_eq!(
-        repo.progress(&ResourceKind::ALL, &[lang("fr"), lang("de"), lang("it")])
+        repo.progress(&ResourceKind::ALL, &plain(&["fr", "de", "it"]))
             .await,
         // In the order asked, languages without translations too.
         Ok(vec![
@@ -374,16 +381,121 @@ async fn progress<S: HasTranslations>(ports: &S) {
         ])
     );
     assert_eq!(
-        repo.progress(&[ResourceKind::Category], &[lang("de")])
+        repo.progress(&[ResourceKind::Category], &plain(&["de"]))
             .await,
         Ok(vec![of("de", 1, 1, 0)])
     );
     assert_eq!(
-        repo.progress(&[], &[lang("de")]).await,
+        repo.progress(&[], &plain(&["de"])).await,
         Ok(vec![of("de", 0, 0, 0)])
     );
     assert_eq!(repo.progress(&ResourceKind::ALL, &[]).await, Ok(vec![]));
     assert_eq!(of("de", 6, 3, 1).missing(), 3);
+}
+
+/// Languages counted with nothing to inherit.
+fn plain(tags: &[&str]) -> Vec<ProgressLanguage> {
+    tags.iter()
+        .map(|tag| ProgressLanguage {
+            language: lang(tag),
+            inherits: Inheritance::Nothing,
+        })
+        .collect()
+}
+
+async fn inherits<S: HasTranslations>(ports: &S) {
+    let repo = ports.translations();
+    let category = resource(ResourceKind::Category, 1);
+    for n in 1..=3 {
+        repo.replace_sources(product(n), &product_sources())
+            .await
+            .unwrap();
+    }
+    repo.replace_sources(category, &[digest("name", "Mugs")])
+        .await
+        .unwrap();
+    // German translates product 1 whole, product 2's title and the category; Austrian
+    // German has product 1's title of its own and product 3's option, which German lacks.
+    let all = [
+        ("title", "Tasse"),
+        ("description", "<p>Eine Tasse.</p>"),
+        ("options.opt_1.name", "Farbe"),
+    ];
+    translated(ports, product(1), "de", &all).await;
+    translated(ports, product(2), "de", &all[..1]).await;
+    translated(ports, category, "de", &[("name", "Tassen")]).await;
+    translated(ports, product(1), "de-AT", &[("title", "Häferl")]).await;
+    translated(
+        ports,
+        product(3),
+        "de-AT",
+        &[("options.opt_1.name", "Farbe")],
+    )
+    .await;
+
+    let from_german = Inheritance::Translation(lang("de"));
+    let counted = |tag: &str, inherits: Inheritance| ProgressLanguage {
+        language: lang(tag),
+        inherits,
+    };
+    let progress = repo
+        .progress(
+            &ResourceKind::ALL,
+            &[
+                counted("de-AT", from_german.clone()),
+                counted("en-GB", Inheritance::Source),
+                counted("de", Inheritance::Nothing),
+            ],
+        )
+        .await
+        .unwrap();
+    let inherited: Vec<(u64, u64)> = progress
+        .iter()
+        .map(|p| (p.missing(), p.inherited))
+        .collect();
+    // 10 fields. de-AT: 2 its own, of the 8 missing German has product 1's other two,
+    // product 2's title and the category's name. en-GB inherits all it lacks.
+    assert_eq!(inherited, [(8, 4), (10, 10), (5, 0)]);
+    assert_eq!(
+        repo.progress(
+            &[ResourceKind::Category],
+            &[counted("de-AT", from_german.clone())]
+        )
+        .await
+        .unwrap()[0]
+            .inherited,
+        1
+    );
+
+    let filter = WorklistFilter {
+        kinds: vec![ResourceKind::Product],
+        language: lang("de-AT"),
+        inherits: from_german,
+        state: None,
+    };
+    let items: Vec<(ResourceRef, u32, u32)> = repo
+        .worklist(&filter, PageRequest::default())
+        .await
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|i| (i.resource, i.counts.missing, i.counts.inherited))
+        .collect();
+    assert_eq!(
+        items,
+        [(product(1), 2, 2), (product(2), 3, 1), (product(3), 2, 0)]
+    );
+    let from_source = WorklistFilter {
+        inherits: Inheritance::Source,
+        language: lang("en-GB"),
+        ..filter
+    };
+    let first = &repo
+        .worklist(&from_source, PageRequest::default())
+        .await
+        .unwrap()
+        .items[0];
+    assert_eq!((first.counts.missing, first.counts.inherited), (3, 3));
 }
 
 async fn queue<S: HasTranslations>(ports: &S) {
