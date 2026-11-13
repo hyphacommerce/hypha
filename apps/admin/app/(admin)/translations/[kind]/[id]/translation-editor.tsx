@@ -27,14 +27,16 @@ import {
   type FieldName,
   type FieldProblem,
   type Kind,
-  SINGLE_LINE_MAX,
   type TranslatableField,
   type Translations,
+  byVariant,
   draftOf,
   grouped,
   isDirty,
+  isSingleLine,
   isTranslatable,
   lengthOf,
+  oneLine,
   putBody,
   translateHref,
 } from "@/lib/translations";
@@ -62,7 +64,50 @@ function fieldLabel(t: EditorT, name: FieldName): string {
       return t("translations.field_choice", { name: name.source });
     case "facet":
       return t("translations.field_facet", { name: name.source });
+    case "custom_field":
+      return name.name;
   }
+}
+
+type Section = ReturnType<typeof grouped<TranslatableField>>[number];
+
+/** A section's parts: the custom fields by variant, any other section whole. */
+function partsOf(section: Section) {
+  return section.group === "custom_fields"
+    ? byVariant(section.fields)
+    : [{ variant: undefined, entries: section.fields }];
+}
+
+type PartVariant = { title: string | null } | undefined;
+
+/**
+ * Whether a section's parts get headings: whenever a variant's values are among them, so
+ * a variant's value is never taken for the resource's own. Only products have variants,
+ * so the own part's heading names a product.
+ */
+function hasPartHeadings(parts: readonly { variant?: PartVariant }[]): boolean {
+  return parts.some((part) => part.variant !== undefined);
+}
+
+/** The heading of a custom fields part: the resource's own values, or a variant's. */
+function partTitle(t: EditorT, variant: PartVariant): string {
+  if (variant === undefined) return t("translations.custom_fields_own");
+  return variant.title === null || variant.title.trim() === ""
+    ? t("translations.custom_fields_variant_untitled")
+    : t("translations.custom_fields_variant", { title: variant.title });
+}
+
+/**
+ * A field's name for its input: a variant's custom field value names the variant too,
+ * since the same definition's inputs repeat for each variant.
+ */
+function inputName(t: EditorT, name: FieldName, label: string): string {
+  if (name.type !== "custom_field" || name.variant === undefined) return label;
+  const title = name.variant.title?.trim();
+  return t("translations.field_custom_field_variant", {
+    name: label,
+    variant: title || t("translations.custom_fields_variant_untitled"),
+  });
 }
 
 /** A refused field's problem in the reader's language; the API's own for an unknown code. */
@@ -243,20 +288,30 @@ export function TranslationEditor({
                     {languageLabel(format, language)}
                   </Text>
                 </div>
-                {section.fields.map(({ field, name }) => (
-                  <FieldRow
-                    key={field.key}
-                    t={t}
-                    field={field}
-                    label={fieldLabel(t, name)}
-                    sourceLanguage={data.default_language}
-                    language={language}
-                    languageName={languageName}
-                    entry={draft[field.key] ?? { value: "", reviewed: false }}
-                    problem={problems[field.key]}
-                    canWrite={canWrite}
-                    onChange={(change) => edit(field, change)}
-                  />
+                {partsOf(section).map((part, _index, parts) => (
+                  <VStack gap={4} key={part.variant?.id ?? "own"}>
+                    {hasPartHeadings(parts) && (
+                      <Text type="large" as="h3">
+                        {partTitle(t, part.variant)}
+                      </Text>
+                    )}
+                    {part.entries.map(({ field, name }) => (
+                      <FieldRow
+                        key={field.key}
+                        t={t}
+                        field={field}
+                        name={name}
+                        label={fieldLabel(t, name)}
+                        sourceLanguage={data.default_language}
+                        language={language}
+                        languageName={languageName}
+                        entry={draft[field.key] ?? { value: "", reviewed: false }}
+                        problem={problems[field.key]}
+                        canWrite={canWrite}
+                        onChange={(change) => edit(field, change)}
+                      />
+                    ))}
+                  </VStack>
                 ))}
               </VStack>
             </Card>
@@ -286,6 +341,7 @@ export function TranslationEditor({
 function FieldRow({
   t,
   field,
+  name,
   label,
   sourceLanguage,
   language,
@@ -297,6 +353,7 @@ function FieldRow({
 }: {
   t: EditorT;
   field: TranslatableField;
+  name: FieldName;
   label: string;
   sourceLanguage: string;
   language: string;
@@ -308,7 +365,10 @@ function FieldRow({
 }) {
   const stored = field.translations[language];
   const isHtml = field.format === "html";
-  const inputLabel = t("translations.translation_label", { field: label, language: languageName });
+  const inputLabel = t("translations.translation_label", {
+    field: inputName(t, name, label),
+    language: languageName,
+  });
 
   return (
     <div className="translation-row">
@@ -328,6 +388,7 @@ function FieldRow({
         <TranslationInput
           t={t}
           field={field}
+          isOneLine={isSingleLine(field, name)}
           inputLabel={inputLabel}
           language={language}
           entry={entry}
@@ -360,6 +421,7 @@ function FieldRow({
 function TranslationInput({
   t,
   field,
+  isOneLine,
   inputLabel,
   language,
   entry,
@@ -370,6 +432,8 @@ function TranslationInput({
 }: {
   t: EditorT;
   field: TranslatableField;
+  /** A one-line input, which keeps line breaks out; a text area otherwise. */
+  isOneLine: boolean;
   inputLabel: string;
   language: string;
   entry: DraftField;
@@ -407,19 +471,19 @@ function TranslationInput({
             onChange={(value) => onChange({ value })}
             isOptional
           />
-        ) : field.max_length > SINGLE_LINE_MAX ? (
-          <TextArea
+        ) : isOneLine ? (
+          <TextInput
             label={inputLabel}
-            rows={4}
             value={entry.value}
-            onChange={(value) => onChange({ value })}
+            onChange={(value) => onChange({ value: oneLine(value) })}
             isReadOnly={!canWrite}
             placeholder={canWrite ? undefined : t("translations.not_translated")}
             status={status}
           />
         ) : (
-          <TextInput
+          <TextArea
             label={inputLabel}
+            rows={4}
             value={entry.value}
             onChange={(value) => onChange({ value })}
             isReadOnly={!canWrite}

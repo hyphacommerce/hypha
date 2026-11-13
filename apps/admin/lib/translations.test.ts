@@ -3,6 +3,8 @@ import { test } from "node:test";
 
 import {
   type TranslatableField,
+  type TranslatedValue,
+  byVariant,
   canReadTranslations,
   canWriteTranslations,
   describeField,
@@ -10,8 +12,10 @@ import {
   grouped,
   isDirty,
   isKind,
+  isSingleLine,
   isTranslatable,
   lengthOf,
+  oneLine,
   problemsOf,
   putBody,
   resourceHref,
@@ -151,6 +155,142 @@ test("fields are grouped in the sections' order, keeping the API's order within"
       ["option_values", ["option_values.optval_1.label", "option_values.optval_2.label"]],
     ],
   );
+});
+
+const OWN_KEY = "custom_fields.cfdef_1.value";
+const VARIANT_KEY = "variant_custom_fields.var_1.cfdef_2.value";
+
+function valueOf(
+  name: string,
+  type: string,
+  variant?: { id: string; title: string | null },
+): TranslatedValue {
+  return {
+    definition: name === "Material" ? "cfdef_1" : "cfdef_2",
+    key: `custom.${name.toLowerCase()}`,
+    name,
+    type,
+    variant: variant?.id ?? null,
+    variant_title: variant?.title ?? null,
+  };
+}
+
+function custom(key: string, cf: TranslatedValue, format = "text", max = 255): TranslatableField {
+  return { ...field(key, "Source", {}, format), max_length: max, custom_field: cf };
+}
+
+test("a custom field value is labelled by its definition's name", () => {
+  assert.deepEqual(describeField(OWN_KEY, "Cotton", undefined, valueOf("Material", "text")), {
+    group: "custom_fields",
+    name: { type: "custom_field", name: "Material", valueType: "text" },
+  });
+});
+
+test("a variant's custom field value names its variant and the variant's title", () => {
+  const cf = valueOf("Care", "multiline_text", { id: "var_1", title: "M / Blue" });
+  assert.deepEqual(describeField(VARIANT_KEY, "Wash cold", undefined, cf), {
+    group: "custom_fields",
+    name: {
+      type: "custom_field",
+      name: "Care",
+      valueType: "multiline_text",
+      variant: { id: "var_1", title: "M / Blue" },
+    },
+  });
+});
+
+test("a custom field value the API didn't describe is named from its key", () => {
+  assert.deepEqual(describeField(OWN_KEY, "Cotton"), {
+    group: "custom_fields",
+    name: { type: "custom_field", name: "cfdef_1" },
+  });
+  assert.deepEqual(describeField(VARIANT_KEY, "Wash cold", undefined, null), {
+    group: "custom_fields",
+    name: { type: "custom_field", name: "cfdef_2", variant: { id: "var_1", title: null } },
+  });
+});
+
+test("a definition without a name is labelled by its key", () => {
+  const unnamed = { ...valueOf("Material", "text"), name: " " };
+  assert.deepEqual(describeField(OWN_KEY, "Cotton", undefined, unnamed).name, {
+    type: "custom_field",
+    name: "custom.material",
+    valueType: "text",
+  });
+});
+
+test("custom fields come last, the product's own first, then each variant's", () => {
+  const blue = { id: "var_1", title: "M / Blue" };
+  const red = { id: "var_2", title: null };
+  const sections = grouped([
+    custom("variant_custom_fields.var_1.cfdef_2.value", valueOf("Care", "text", blue)),
+    custom("variant_custom_fields.var_2.cfdef_2.value", valueOf("Care", "text", red)),
+    field("title", "Shirt"),
+    custom(OWN_KEY, valueOf("Material", "text")),
+    custom("variant_custom_fields.var_1.cfdef_1.value", valueOf("Material", "text", blue)),
+  ]);
+  assert.deepEqual(
+    sections.map((s) => s.group),
+    ["details", "custom_fields"],
+  );
+  const parts = byVariant(sections[1]?.fields ?? []);
+  assert.deepEqual(
+    parts.map((p) => [p.variant, p.entries.map((e) => e.field.key)]),
+    [
+      [undefined, [OWN_KEY]],
+      [
+        blue,
+        ["variant_custom_fields.var_1.cfdef_2.value", "variant_custom_fields.var_1.cfdef_1.value"],
+      ],
+      [red, ["variant_custom_fields.var_2.cfdef_2.value"]],
+    ],
+  );
+});
+
+test("a category's custom fields are one part, its own", () => {
+  const sections = grouped([custom(OWN_KEY, valueOf("Material", "text"))]);
+  assert.deepEqual(
+    byVariant(sections[0]?.fields ?? []).map((p) => p.variant),
+    [undefined],
+  );
+});
+
+const name = (valueType: string) => ({ type: "custom_field", name: "X", valueType }) as const;
+
+test("a text value takes one line, a multiline one a text area, whatever their limits", () => {
+  const short = { format: "text", max_length: 40 };
+  const long = { format: "text", max_length: 16384 };
+  assert.equal(isSingleLine(short, name("text")), true);
+  assert.equal(isSingleLine({ format: "text", max_length: 1000 }, name("text")), true);
+  assert.equal(isSingleLine(short, name("multiline_text")), false);
+  assert.equal(isSingleLine(long, name("multiline_text")), false);
+  assert.equal(isSingleLine(long, name("short_text")), true);
+  assert.equal(isSingleLine({ format: "html", max_length: 16384 }, name("rich_text")), false);
+});
+
+test("a plain field takes one line up to 255 characters", () => {
+  const plain = { type: "plain", name: "title" } as const;
+  assert.equal(isSingleLine({ format: "text", max_length: 255 }, plain), true);
+  assert.equal(isSingleLine({ format: "text", max_length: 256 }, plain), false);
+  assert.equal(isSingleLine({ format: "html", max_length: 100 }, plain), false);
+});
+
+test("a one-line field turns each line break into a space", () => {
+  assert.equal(oneLine("a\nb\r\nc\rd"), "a b c d");
+  assert.equal(oneLine("plain"), "plain");
+});
+
+test("the new problem codes are read like the others", () => {
+  const details = {
+    problems: [
+      { key: OWN_KEY, code: "not_single_line", message: "one line, without line breaks" },
+      { key: VARIANT_KEY, code: "too_short", message: "at least 3 characters" },
+    ],
+  };
+  assert.deepEqual(problemsOf(details), {
+    [OWN_KEY]: { code: "not_single_line", message: "one line, without line breaks" },
+    [VARIANT_KEY]: { code: "too_short", message: "at least 3 characters" },
+  });
 });
 
 test("a draft starts from the language's saved values, blank where there are none", () => {
