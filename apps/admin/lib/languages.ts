@@ -114,6 +114,21 @@ export function languageLabel(format: { languageName(tag: string): string }, tag
   return name === tag ? tag : `${name} (${tag})`;
 }
 
+/**
+ * A market's list with `tag` added at the end. An empty list stands for the store's
+ * default language alone, so the first language added comes after that default rather
+ * than replacing it: a market offering German besides English stays English first.
+ */
+export function addedLanguage(
+  list: readonly string[],
+  tag: string,
+  storeDefault: string,
+): string[] {
+  if (list.includes(tag)) return [...list];
+  if (list.length === 0 && tag !== storeDefault) return [storeDefault, tag];
+  return [...list, tag];
+}
+
 /** A store's language as the API lists it. */
 export type StoreLanguage = { language: string; published: boolean };
 

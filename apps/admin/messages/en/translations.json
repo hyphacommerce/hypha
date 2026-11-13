@@ -40,7 +40,7 @@
   "problem_unknown_field": "This field can't be translated.",
   "problem_unknown_child": "What this translates no longer exists. Reload the page.",
   "problem_too_long": "The translation is too long.",
-  "problem_source_changed": "The original changed while you were translating. Check it against the text now shown, then save again.",
+  "problem_source_changed": "The original changed while you were translating. Check the translation against the text now shown: edit it, or keep it as it is.",
   "problem_source_empty": "The original has no text, so there's nothing to translate.",
   "language_label": "Translate into",
   "language_unpublished": "{language} · not published",
@@ -68,6 +68,7 @@
   "mark_reviewed_tooltip": "The original changed since this was translated. Mark it reviewed if the translation still fits.",
   "reviewed": "Reviewed",
   "undo_reviewed": "Undo",
+  "keep_translation": "Keep translation",
   "too_long": "At most {max, number} characters.",
   "too_long_html": "The translation is too long.",
   "counter": "{count, number} / {max, number}"

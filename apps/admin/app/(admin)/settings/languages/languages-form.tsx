@@ -79,8 +79,11 @@ export function LanguagesForm({
     return result.error === undefined;
   };
 
-  // The default language: one of the common tags, or the stored one if it isn't among them.
-  const defaultOptions = [...new Set([defaultLanguage, ...COMMON_LANGUAGES])]
+  // The default language: a common tag, the stored one, or one of the store's others (a
+  // typed tag among them).
+  const defaultOptions = [
+    ...new Set([defaultLanguage, ...languages.map((l) => l.language), ...COMMON_LANGUAGES]),
+  ]
     .map(option)
     .toSorted(byLabel);
   const changeDefault = () =>
@@ -116,11 +119,15 @@ export function LanguagesForm({
     });
   };
 
-  const publish = async (language: string, published: boolean) => {
-    await send({
-      languages: languages.map((l) => (l.language === language ? { ...l, published } : l)),
+  // Each change sends the whole list built from the saved one, so a second change made
+  // before the first's answer came back would undo it: every control waits while one is
+  // in flight (the transition lasts until the page holds the saved list).
+  const publish = (language: string, published: boolean) =>
+    startTransition(async () => {
+      await send({
+        languages: languages.map((l) => (l.language === language ? { ...l, published } : l)),
+      });
     });
-  };
 
   const remove = (language: string) =>
     startTransition(async () => {
@@ -223,8 +230,8 @@ export function LanguagesForm({
                         isLabelHidden
                         size="sm"
                         value={language.published}
-                        isDisabled={!canWrite}
-                        changeAction={(published) => publish(language.language, published)}
+                        isDisabled={!canWrite || isPending}
+                        onChange={(published) => publish(language.language, published)}
                       />
                     </TableCell>
                     <TableCell>
@@ -235,6 +242,7 @@ export function LanguagesForm({
                             icon={<TrashIcon />}
                             size="sm"
                             variant="ghost"
+                            isDisabled={isPending}
                             onClick={() => setRemoving(language)}
                           />
                         </HStack>
@@ -257,7 +265,7 @@ export function LanguagesForm({
                   value={common}
                   onChange={setCommon}
                   hasSearch
-                  isDisabled={isFull || typed.trim() !== ""}
+                  isDisabled={isFull || isPending || typed.trim() !== ""}
                   width={280}
                 />
                 <TextInput
@@ -266,14 +274,14 @@ export function LanguagesForm({
                   value={typed}
                   onChange={setTyped}
                   onEnter={add}
-                  isDisabled={isFull}
+                  isDisabled={isFull || isPending}
                   status={typedProblem ? { type: "error", message: typedProblem } : undefined}
                   width={200}
                 />
                 <Button
                   label={t("languages.add_action")}
                   isLoading={isPending && removing === undefined}
-                  isDisabled={!adding || isListed(adding) || isFull}
+                  isDisabled={!adding || isListed(adding) || isFull || isPending}
                   onClick={add}
                 />
               </HStack>

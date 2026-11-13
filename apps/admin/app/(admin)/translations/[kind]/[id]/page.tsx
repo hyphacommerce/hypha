@@ -10,7 +10,7 @@ import { DetailSkeleton } from "@/components/skeletons";
 import { getFormat } from "@/lib/get-format";
 import { loadStore, sessionClient } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
-import { languageLabel } from "@/lib/languages";
+import { languageLabel, sameTag } from "@/lib/languages";
 import { type Kind, isKind, resourceHref } from "@/lib/translations";
 import { loadTranslations, mayTranslate } from "@/lib/translations-server";
 
@@ -122,7 +122,9 @@ async function Translations({
     );
   }
 
-  const language = data.languages.find((tag) => tag === asked) ?? data.languages[0];
+  // The API answers tags in canonical case; a link may not have written them so.
+  const language =
+    data.languages.find((tag) => asked !== undefined && sameTag(tag, asked)) ?? data.languages[0];
   const state = data.translations.find((s) => s.language === language);
   return (
     <>

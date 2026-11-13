@@ -4,6 +4,8 @@
 
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
+import { hasScope } from "./navigation.ts";
+
 export type Translations = AdminSchemas["TranslationsResponse"];
 export type TranslatableField = AdminSchemas["TranslatableFieldResponse"];
 export type PutTranslation = AdminSchemas["PutTranslationRequest"];
@@ -42,18 +44,11 @@ const READ_SCOPES: Record<Kind, readonly string[]> = {
   store: ["stores:read", "notifications:read"],
 };
 
-/** A write scope implies its read scope, as in the API. */
-function holds(scopes: readonly string[], scope: string): boolean {
-  return (
-    scopes.includes(scope) ||
-    (scope.endsWith(":read") && scopes.includes(scope.replace(/:read$/, ":write")))
-  );
-}
-
 /** Whether a staff member with `scopes` can open the translations of a `kind`. */
 export function canReadTranslations(scopes: readonly string[], kind: Kind): boolean {
   return (
-    holds(scopes, "translations:read") && READ_SCOPES[kind].every((scope) => holds(scopes, scope))
+    hasScope(scopes, "translations:read") &&
+    READ_SCOPES[kind].every((scope) => hasScope(scopes, scope))
   );
 }
 
@@ -168,6 +163,12 @@ export type DraftField = {
   value: string;
   /** Marked "reviewed": the translation still fits the source as it is now. */
   reviewed: boolean;
+  /**
+   * The source's digest when the translator last typed in the field or marked it
+   * reviewed: what the save says was translated. A source that changed since makes the
+   * API refuse it (`source_changed`) until the translator deals with the new text.
+   */
+  against?: string;
 };
 
 export type Draft = Partial<Record<string, DraftField>>;
@@ -239,7 +240,7 @@ export function putBody(
     if (!entry || isBlank(entry.value) || !isTranslatable(field)) continue;
     const touched = entry.reviewed || isEdited(field, language, entry);
     body.fields[field.key] = touched
-      ? { value: entry.value, source_digest: field.digest }
+      ? { value: entry.value, source_digest: entry.against ?? field.digest }
       : { value: entry.value };
   }
   return body;

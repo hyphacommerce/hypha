@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   COMMON_LANGUAGES,
+  addedLanguage,
   canonicalTag,
   marketsInUse,
   moved,
@@ -55,6 +56,17 @@ test("moving answers a new list", () => {
   const list = ["de", "en"];
   assert.notEqual(moved(list, 0, 1), list);
   assert.deepEqual(list, ["de", "en"]);
+});
+
+test("the first language added to an empty list comes after the store's default", () => {
+  // Empty means the store's default alone: adding German keeps English, first.
+  assert.deepEqual(addedLanguage([], "de", "en"), ["en", "de"]);
+  assert.deepEqual(addedLanguage([], "en", "en"), ["en"]);
+});
+
+test("a language added to a list goes at its end, once", () => {
+  assert.deepEqual(addedLanguage(["de"], "fr", "en"), ["de", "fr"]);
+  assert.deepEqual(addedLanguage(["de", "en"], "de", "en"), ["de", "en"]);
 });
 
 test("a market is offered the default language and the published ones", () => {

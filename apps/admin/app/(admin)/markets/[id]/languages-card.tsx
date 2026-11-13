@@ -10,7 +10,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { ArrowDownIcon, ArrowUpIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import type { ReactNode } from "react";
 
-import { languageLabel, moved } from "@/lib/languages";
+import { addedLanguage as added, languageLabel, moved } from "@/lib/languages";
 import { useFormat } from "@/lib/use-format";
 import { useT } from "@/lib/use-t";
 
@@ -110,7 +110,7 @@ export function LanguagesCard({
             label={t("markets.languages_add_label")}
             placeholder={t("markets.languages_add_placeholder")}
             options={remaining.map((tag) => ({ value: tag, label: languageLabel(format, tag) }))}
-            onChange={(tag) => onChange([...value, tag])}
+            onChange={(tag) => onChange(added(value, tag, storeDefault))}
             hasSearch={remaining.length > 8}
           />
         )}

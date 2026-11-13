@@ -194,6 +194,16 @@ test("an edited field is sent with the source's digest as the translator saw it"
   });
 });
 
+test("an edit is sent with the digest of the source it was made against", () => {
+  // Typed against the old source; the page then read the new one (`digest-of-title`).
+  const fields = [field("title", "Mug", { de: upToDate("Becher", "title") })];
+  const draft = { title: { value: "Tasse", reviewed: false, against: "digest-before" } };
+  // So the API still refuses it as `source_changed` until the translator deals with it.
+  assert.deepEqual(putBody(fields, "de", draft), {
+    fields: { title: { value: "Tasse", source_digest: "digest-before" } },
+  });
+});
+
 test("a field marked reviewed is sent with the digest though its value is the same", () => {
   const fields = [field("title", "Mug", { de: outdated("Becher") })];
   const draft = { title: { value: "Becher", reviewed: true } };

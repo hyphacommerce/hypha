@@ -118,11 +118,19 @@ export function TranslationEditor({
     return () => window.removeEventListener("beforeunload", warn);
   }, [isChanged]);
 
-  const edit = (key: string, change: Partial<DraftField>) => {
+  const edit = (field: TranslatableField, change: Partial<DraftField>) => {
+    // Whatever the translator does to a field, they did it against the source shown now.
     setDraft((before) => ({
       ...before,
-      [key]: { value: "", reviewed: false, ...before[key], ...change },
+      [field.key]: {
+        value: "",
+        reviewed: false,
+        ...before[field.key],
+        ...change,
+        against: field.digest,
+      },
     }));
+    const key = field.key;
     setProblems(({ [key]: _fixed, ...rest }) => rest);
   };
   const discard = () => {
@@ -188,7 +196,7 @@ export function TranslationEditor({
               <Text type="supporting">
                 {t("translations.progress", {
                   translated: saved?.translated ?? 0,
-                  total: data.fields.length,
+                  total: data.fields.filter(isTranslatable).length,
                 })}
               </Text>
               {saved !== undefined && saved.outdated > 0 && (
@@ -247,7 +255,7 @@ export function TranslationEditor({
                     entry={draft[field.key] ?? { value: "", reviewed: false }}
                     problem={problems[field.key]}
                     canWrite={canWrite}
-                    onChange={(change) => edit(field.key, change)}
+                    onChange={(change) => edit(field, change)}
                   />
                 ))}
               </VStack>
@@ -453,6 +461,14 @@ function TranslationInput({
                 {problemText(t, problem)}
               </Text>
             </span>
+          )}
+          {problem?.code === "source_changed" && canWrite && (
+            <Button
+              label={t("translations.keep_translation")}
+              variant="ghost"
+              size="sm"
+              onClick={() => onChange({ reviewed: true })}
+            />
           )}
           {!problem && isOver && (
             <span className="translation-problem">
