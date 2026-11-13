@@ -216,7 +216,10 @@ export function LanguagesForm({
                   label={t("common.discard")}
                   variant="ghost"
                   isDisabled={isPending}
-                  onClick={() => setChosenDefault(defaultLanguage)}
+                  onClick={() => {
+                    setChosenDefault(defaultLanguage);
+                    setFailure({});
+                  }}
                 />
               </>
             )}
