@@ -1914,6 +1914,26 @@
           }
         ]
       },
+      "LocalizedPaymentResponse": {
+        "description": "A payment's method name and instructions as the buyer read them, in the order's\nlanguage.",
+        "properties": {
+          "instructions": {
+            "description": "`null` where the instructions read the same.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "method_name": {
+            "description": "`null` where the name reads the same.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "LocalizedTitleResponse": {
         "description": "A title as the buyer read it, in the order's language.",
         "properties": {
@@ -2710,10 +2730,21 @@
             "$ref": "#/components/schemas/PaymentId"
           },
           "instructions": {
-            "description": "The method's instructions at checkout, as the shopper was shown them.",
+            "description": "The method's instructions at checkout, in the store's default language (the\nsource text); `localized` has the buyer's copy when they read another.",
             "type": [
               "string",
               "null"
+            ]
+          },
+          "localized": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LocalizedPaymentResponse",
+                "description": "`method_name` and `instructions` as the buyer read them, in the order's\n`language`, where they read differently; `null` otherwise."
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "method": {

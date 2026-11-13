@@ -281,6 +281,20 @@ async fn an_order_is_read_in_its_language_by_the_buyer_and_in_the_stores_by_staf
         (&line["product_title"], &line["localized"]["product_title"]),
         (&json!("Mug"), &json!("Tasse"))
     );
+    // Its payment too: the method's own words, and what the buyer was told.
+    let payment = &admin["payments"][0];
+    assert_eq!(
+        (&payment["method_name"], &payment["instructions"]),
+        (&json!("Cash on delivery"), &json!("Pay the courier."))
+    );
+    assert_eq!(
+        payment["localized"],
+        json!({"method_name": "Nachnahme", "instructions": "Zahlen Sie beim Boten."})
+    );
+    let path = format!("/admin/payments/{}", payment["id"].as_str().unwrap());
+    let (status, alone) = send(&app, "GET", &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{alone}");
+    assert_eq!(alone["localized"], payment["localized"]);
 
     // The buyer reads German now.
     let customer = admin["customer"].as_str().unwrap();
@@ -325,6 +339,14 @@ async fn an_order_from_before_languages_reads_as_the_stores_default() {
     assert_eq!(status, StatusCode::CREATED, "{placed}");
     assert_eq!(placed["language"], "en");
     let order = placed["id"].as_str().unwrap();
+    // An order in the store's own language has no buyer's copy of its payment.
+    let (status, admin) = send(&app, "GET", &format!("/admin/orders/{order}"), None).await;
+    assert_eq!(status, StatusCode::OK, "{admin}");
+    let payment = &admin["payments"][0];
+    assert_eq!(
+        (&payment["instructions"], &payment["localized"]),
+        (&json!("Pay the courier."), &Value::Null)
+    );
     // As a row written before the columns existed.
     sql(
         &app,

@@ -423,7 +423,8 @@ pub struct PaymentResponse {
     /// text or a capture's own ID never replace it. Null: none yet, and reports aren't
     /// checked.
     attempt: Option<String>,
-    /// The method's instructions at checkout, as the shopper was shown them.
+    /// The method's instructions at checkout, in the store's default language (the
+    /// source text); `localized` has the buyer's copy when they read another.
     instructions: Option<String>,
     /// When the money was collected, RFC 3339 in UTC.
     paid_at: Option<String>,
@@ -433,6 +434,19 @@ pub struct PaymentResponse {
     created_at: String,
     /// When it last changed, RFC 3339 in UTC.
     updated_at: String,
+    /// `method_name` and `instructions` as the buyer read them, in the order's
+    /// `language`, where they read differently; `null` otherwise.
+    localized: Option<LocalizedPaymentResponse>,
+}
+
+/// A payment's method name and instructions as the buyer read them, in the order's
+/// language.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct LocalizedPaymentResponse {
+    /// `null` where the name reads the same.
+    method_name: Option<String>,
+    /// `null` where the instructions read the same.
+    instructions: Option<String>,
 }
 
 impl PaymentResponse {
@@ -455,6 +469,13 @@ impl PaymentResponse {
             voided_at: p.voided_at().map(rfc3339).transpose()?,
             created_at,
             updated_at,
+            localized: p
+                .localized()
+                .filter(|l| l.method_name.is_some() || l.instructions.is_some())
+                .map(|l| LocalizedPaymentResponse {
+                    method_name: l.method_name.clone(),
+                    instructions: l.instructions.clone(),
+                }),
         })
     }
 

@@ -1548,6 +1548,16 @@ export interface components {
             /** @enum {string} */
             status: "unavailable";
         };
+        /**
+         * @description A payment's method name and instructions as the buyer read them, in the order's
+         *     language.
+         */
+        LocalizedPaymentResponse: {
+            /** @description `null` where the instructions read the same. */
+            instructions?: string | null;
+            /** @description `null` where the name reads the same. */
+            method_name?: string | null;
+        };
         /** @description A title as the buyer read it, in the order's language. */
         LocalizedTitleResponse: {
             title: string;
@@ -1863,8 +1873,12 @@ export interface components {
             /** @description When it was created, RFC 3339 in UTC. */
             created_at: string;
             id: components["schemas"]["PaymentId"];
-            /** @description The method's instructions at checkout, as the shopper was shown them. */
+            /**
+             * @description The method's instructions at checkout, in the store's default language (the
+             *     source text); `localized` has the buyer's copy when they read another.
+             */
             instructions?: string | null;
+            localized?: components["schemas"]["LocalizedPaymentResponse"] | null;
             method?: components["schemas"]["PaymentMethodId"] | null;
             /** @description The method's name when the payment was made. */
             method_name?: string | null;
