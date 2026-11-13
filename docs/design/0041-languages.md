@@ -128,6 +128,8 @@ options and their values, and Astryx's own catalogs in 31 languages.
   - An unpublished language can be translated and previewed but no storefront read
     serves it.
   - At most 20 besides the default.
+  - A language a market still offers can't be unpublished or removed
+    (`409 language_in_use`, naming the markets): take it off the markets first.
   - The default language can change only while the store has no translations
     (`409 default_language_in_use`): every overlay is "a translation from it".
 - **Market:** `languages: [Language]`, ordered, each one the store's default or a
@@ -397,8 +399,9 @@ is about 150 lines and has no framework in it (Q4).
   `PUT /storefront/carts/{id}/language`; `languages` on countries.
 - Admin: the translation routes (§4), store and market `languages`, `users.language`,
   `language` on orders and customers.
-- Events: `translation.updated`, `translation.deleted`; `store.updated` and
-  `market.updated` gain `languages` among their fields; `order.placed` gains
+- Events: `translation.updated`, `translation.deleted`; `store.updated` (new: the
+  store recorded no events before) and `market.changed` list `languages` among their
+  fields; `order.placed` gains
   `language`.
 - Migrations: `translations`; `stores.languages`; `markets.languages`;
   `carts.language`, `orders.language` and the `localized` snapshot columns;
