@@ -3023,6 +3023,14 @@ step "rename myself, no users:write needed" 200 - -X PATCH "$BASE/admin/me" -H "
     -d '{"name":"Owner Two"}'
 contains "the new name" '"name":"Owner Two"'
 step "and back" 200 - -X PATCH "$BASE/admin/me" -H "$JSON" -d '{"name":"Owner"}'
+step "read the admin in Serbian, any tag" 200 - -X PATCH "$BASE/admin/me" -H "$JSON" \
+    -d '{"language":"sr-latn"}'
+contains "my language, in canonical case" '"language":"sr-Latn"'
+step "a language that isn't a tag" 422 invalid_language -X PATCH "$BASE/admin/me" -H "$JSON" \
+    -d '{"language":"Serbian please"}'
+step "back to the browser's languages" 200 - -X PATCH "$BASE/admin/me" -H "$JSON" \
+    -d '{"language":null}'
+contains "no language kept" '"language":null'
 step "sign in on a second device" 200 - -X POST "$BASE/admin/auth/login" -H "$JSON" \
     -H "user-agent: E2E second device" \
     -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"$OWNER_PASSWORD\"}"

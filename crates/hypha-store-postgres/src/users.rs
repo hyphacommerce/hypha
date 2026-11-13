@@ -1,7 +1,9 @@
 //! `hypha-users`'s repositories: users, roles and invites.
 
 use hypha_auth::TokenHash;
-use hypha_core::{Email, InviteId, RepoError, RoleId, Timestamp, UserId, Version, Versioned};
+use hypha_core::{
+    Email, InviteId, Language, RepoError, RoleId, Timestamp, UserId, Version, Versioned,
+};
 use hypha_users::{
     Invite, InviteRepo, InviteSnapshot, Role, RoleRepo, RoleScopes, RoleSnapshot,
     StaffSessionRecord, StaffSessionRepo, User, UserRepo, UserSnapshot, UserStatus,
@@ -12,8 +14,8 @@ use uuid::Uuid;
 use crate::{
     auth::{session_columns_as, session_from},
     columns::{
-        Prefixed, actor_from_db, actor_to_db, col, micros, prefixed_columns, scopes_from_db,
-        scopes_to_db, token_hash_from_db, ts, version_from_db, version_to_db,
+        Prefixed, actor_from_db, actor_to_db, col, language_from_db, micros, prefixed_columns,
+        scopes_from_db, scopes_to_db, token_hash_from_db, ts, version_from_db, version_to_db,
     },
     error::{corrupt, repo_error},
     store::Queries,
@@ -22,7 +24,9 @@ use crate::{
 
 // ---------- users ----------
 
-const USER_PLAIN: &[&str] = &["id", "version", "email", "name", "role_id", "status"];
+const USER_PLAIN: &[&str] = &[
+    "id", "version", "email", "name", "role_id", "status", "language",
+];
 const USER_TIMESTAMPS: &[&str] = &["created_at"];
 
 fn user_columns() -> String {
@@ -44,6 +48,7 @@ fn user_from(row: Prefixed<'_>) -> Result<User, RepoError> {
         role: RoleId::from_uuid(row.col("role_id")?),
         status: UserStatus::parse(&status)
             .ok_or_else(|| corrupt(format!("unknown user status {status:?}")))?,
+        language: language_from_db(row.col("language")?)?,
         created_at: Timestamp::from_unix_micros(row.col("created_at")?),
     })
     .map_err(corrupt)
@@ -136,7 +141,7 @@ pub(crate) async fn update_user(
     let row = client
         .query_typed_opt(
             "UPDATE users SET version = version + 1, email = $3, name = $4, role_id = $5,
-                 status = $6
+                 status = $6, language = $7
              WHERE id = $1 AND version = $2 RETURNING version",
             &[
                 (&s.id.as_uuid(), Type::UUID),
@@ -145,6 +150,7 @@ pub(crate) async fn update_user(
                 (&s.name, Type::TEXT),
                 (&s.role.as_uuid(), Type::UUID),
                 (&s.status.as_str(), Type::TEXT),
+                (&s.language.as_ref().map(Language::as_str), Type::TEXT),
             ],
         )
         .await
@@ -159,9 +165,10 @@ pub(crate) async fn insert_user(client: &impl Queries, s: &UserSnapshot) -> Resu
     client
         .query_typed(
             &format!(
-                "INSERT INTO users (id, version, email, name, role_id, status, created_at)
-                 VALUES ($1, 1, $2, $3, $4, $5, {})",
-                ts(6)
+                "INSERT INTO users (id, version, email, name, role_id, status, language,
+                     created_at)
+                 VALUES ($1, 1, $2, $3, $4, $5, $6, {})",
+                ts(7)
             ),
             &[
                 (&s.id.as_uuid(), Type::UUID),
@@ -169,6 +176,7 @@ pub(crate) async fn insert_user(client: &impl Queries, s: &UserSnapshot) -> Resu
                 (&s.name, Type::TEXT),
                 (&s.role.as_uuid(), Type::UUID),
                 (&s.status.as_str(), Type::TEXT),
+                (&s.language.as_ref().map(Language::as_str), Type::TEXT),
                 (&s.created_at.unix_micros(), Type::INT8),
             ],
         )
