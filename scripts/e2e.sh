@@ -99,6 +99,19 @@ replayed() {
     fi
 }
 
+# in_language NAME TAG CURL_ARGS...: asserts the response's `Content-Language` is TAG.
+in_language() {
+    local name=$1 tag=$2
+    shift 2
+    pick_creds "$@"
+    if curl -s -o /dev/null -D - ${CREDS[@]+"${CREDS[@]}"} "$@" | tr -d '\r' | grep -qi "^content-language: $tag\$"; then
+        echo "ok   $name"
+    else
+        echo "FAIL $name: no Content-Language: $tag"
+        FAILED=$((FAILED + 1))
+    fi
+}
+
 # fresh NAME CURL_ARGS...: asserts the response does NOT carry `Idempotent-Replayed`.
 fresh() {
     local name=$1
@@ -711,6 +724,17 @@ step "a page without a country has no prices" 200 - "$BASE/storefront/products/b
 contains "none" '"price":null,"available":null'
 step "an unknown handle" 404 product_not_found "$BASE/storefront/products/by-handle/no-such-thing?country=HR"
 step "an unknown parameter" 400 invalid_query "$BASE/storefront/products/by-handle/mug?currency=EUR"
+step "the mug in German" 200 - -X PUT "$BASE/admin/translations/product/$MUG/de" -H "$JSON" \
+    -d '{"fields":{"title":{"value":"Tasse"}}}'
+step "its page in German" 200 - "$BASE/storefront/products/by-handle/mug?country=HR&language=de"
+contains "the translated title" '"title":"Tasse"'
+in_language "named in Content-Language" de "$BASE/storefront/products/by-handle/mug?country=HR&language=DE"
+step "a language the store hasn't published" 200 - "$BASE/storefront/products/by-handle/mug?country=HR&language=fr"
+lacks "is the market's default, not an error" '"title":"Tasse"'
+in_language "English, the market's first" en "$BASE/storefront/products/by-handle/mug?country=HR&language=fr"
+in_language "as without a language" en "$BASE/storefront/products/$MUG?country=HR"
+in_language "the categories take it too" de "$BASE/storefront/categories?language=de"
+step "back to the source alone" 204 - -X DELETE "$BASE/admin/translations/product/$MUG/de"
 step "where the store sells" 200 - "$BASE/storefront/countries"
 contains "Croatia, in euros" "{\"country\":\"HR\",\"name\":\"Croatia\",\"market\":\"$MARKET\",\"currency\":\"EUR\",\"minor_units\":2"
 contains "in the market's languages" '"languages":["en","de"]'
