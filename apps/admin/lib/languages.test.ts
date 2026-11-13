@@ -157,7 +157,10 @@ const names: Record<string, string> = {
   "sr-Latn": "Serbian (Latin)",
   "zh-Hant": "中文（繁體）",
 };
-const named = { languageName: (tag: string) => names[tag] ?? tag };
+const named = {
+  languageName: (tag: string) => names[tag] ?? tag,
+  languageNameInSentence: (tag: string) => (names[tag] ?? tag).toLowerCase(),
+};
 
 test("a language is labelled by its name with the tag in parentheses", () => {
   assert.equal(languageLabel(named, "de"), "German (de)");
@@ -170,6 +173,17 @@ test("a name with parentheses of its own gets the tag after a dot", () => {
 
 test("a language without a name is labelled by its tag alone", () => {
   assert.equal(languageLabel(named, "x-unknown"), "x-unknown");
+});
+
+test("a label inside a sentence takes the name written for there", () => {
+  assert.equal(languageLabel(named, "de", "in_sentence"), "german (de)");
+  assert.equal(languageLabel(named, "sr-Latn", "in_sentence"), "serbian (latin) · sr-Latn");
+});
+
+test("Serbian labels a language alone with a capital, and in a sentence without", () => {
+  const format = createFormat("sr-Latn");
+  assert.equal(languageLabel(format, "sr-Latn"), "Srpski (latinica) · sr-Latn");
+  assert.equal(languageLabel(format, "de", "in_sentence"), "nemački (de)");
 });
 
 test("Intl's own name for Serbian (Latin) isn't bracketed twice", () => {

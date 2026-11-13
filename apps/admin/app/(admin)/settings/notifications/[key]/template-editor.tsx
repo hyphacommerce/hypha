@@ -220,7 +220,8 @@ export function TemplateEditor({
 
   const canSend = sender !== "log";
   const textEditor = draft.text !== null;
-  const languageName = (tag: string) => format.languageName(tag);
+  // Each message puts the name inside its sentence.
+  const languageName = (tag: string) => format.languageNameInSentence(tag);
   const contentName = languages ? languageName(languages.content) : undefined;
   const shownFrom = sourcesLine(t, from, languageName);
 

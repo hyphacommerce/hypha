@@ -208,7 +208,9 @@ export function TranslationEditor({
       setIsRemoving(false);
     });
 
+  // Shown alone in each field's label; the messages put it inside their sentence.
   const languageName = format.languageName(language);
+  const inSentence = format.languageNameInSentence(language);
 
   return (
     <VStack gap={4}>
@@ -269,7 +271,7 @@ export function TranslationEditor({
       {unpublished.includes(language) && (
         <Banner
           status="info"
-          title={t("translations.unpublished_title", { language: languageName })}
+          title={t("translations.unpublished_title", { language: inSentence })}
           description={t("translations.unpublished_description")}
         />
       )}
@@ -330,8 +332,8 @@ export function TranslationEditor({
           onOpenChange={(isOpen) => {
             if (!isOpen) setIsRemoving(false);
           }}
-          title={t("translations.remove_title", { language: languageName })}
-          description={t("translations.remove_description", { language: languageName })}
+          title={t("translations.remove_title", { language: inSentence })}
+          description={t("translations.remove_description", { language: inSentence })}
           actionLabel={t("translations.remove_action")}
           cancelLabel={t("common.cancel")}
           isActionLoading={isSaving}

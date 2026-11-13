@@ -84,7 +84,8 @@ function LanguageRow({
   // What a regional language reads where it has no translation of its own: `de` for
   // `de-AT`. Named only when something is inherited from it.
   const base = withoutRegion(tag);
-  const inheritedFrom = base !== null && parts.inherited > 0 ? languageLabel(format, base) : null;
+  const inheritedFrom =
+    base !== null && parts.inherited > 0 ? languageLabel(format, base, "in_sentence") : null;
   return (
     <VStack gap={2}>
       <HStack gap={3} vAlign="center" hAlign="between" wrap="wrap">

@@ -85,7 +85,7 @@ async function Translations({
       title={named || t(`translations.kind_${kind}`)}
       back={back}
       description={t("translations.description", {
-        language: languageLabel(format, data.default_language),
+        language: languageLabel(format, data.default_language, "in_sentence"),
       })}
     />
   );

@@ -300,8 +300,17 @@ export interface Format {
   countryName(code: string): string;
   /** "Euro" for "EUR"; `undefined` when `Intl` has no name. */
   currencyName(code: string): string | undefined;
-  /** "Serbian (Latin)" for "sr-Latn"; the tag itself when `Intl` has no name. */
+  /**
+   * "Serbian (Latin)" for "sr-Latn", as a name shown alone (a list, a select, a label, a
+   * badge): its first letter capitalised, so Serbian reads "Srpski (latinica)". The tag
+   * itself when `Intl` has no name.
+   */
   languageName(tag: string): string;
+  /**
+   * The name as `Intl` writes it for the middle of a sentence ("srpski (latinica)" in
+   * Serbian, "allemand" in French): for a message that puts it there, never at its start.
+   */
+  languageNameInSentence(tag: string): string;
   /** Orders two strings as the locale sorts them, for `toSorted`. */
   compare(a: string, b: string): number;
 }
@@ -335,6 +344,18 @@ export function displayName(
     // Not a well-formed code: the caller shows it as it is.
     return undefined;
   }
+}
+
+/**
+ * `text` with its first letter capitalised as `locale` writes capitals: a name shown
+ * alone, where `Intl` answers the form for the middle of a sentence (Serbian and French
+ * write language names in lower case). Only the first character changes: a combining
+ * mark after it has no case.
+ */
+export function capitalized(text: string, locale: string): string {
+  const [first] = text;
+  if (first === undefined) return text;
+  return `${first.toLocaleUpperCase(withEnglish(locale))}${text.slice(first.length)}`;
 }
 
 /** Orders two strings as `locale` sorts them. */
@@ -378,7 +399,11 @@ export function createFormat(locale: string, context: FormatContext = {}): Forma
     bytes: (bytes) => formatBytes(bytes, locale),
     countryName: (code) => displayName("region", code, locale) ?? code,
     currencyName: (code) => displayName("currency", code, locale),
-    languageName: (tag) => displayName("language", tag, locale) ?? tag,
+    languageName: (tag) => {
+      const name = displayName("language", tag, locale);
+      return name === undefined ? tag : capitalized(name, locale);
+    },
+    languageNameInSentence: (tag) => displayName("language", tag, locale) ?? tag,
     compare: (a, b) => compareIn(locale, a, b),
   };
 }

@@ -76,6 +76,8 @@ export function LanguagesForm({
   const [removing, setRemoving] = useState<StoreLanguage>();
 
   const name = (tag: string) => format.languageName(tag);
+  // Messages put a language inside their sentence.
+  const inSentence = (tag: string) => format.languageNameInSentence(tag);
   const option = (tag: string) => ({ value: tag, label: languageLabel(format, tag) });
   const byLabel = (a: { label: string }, b: { label: string }) => format.compare(a.label, b.label);
   const isListed = (tag: string) =>
@@ -164,8 +166,7 @@ export function LanguagesForm({
   // Removing deletes translations for good: what's in its way is said before it's
   // confirmed, not after.
   const askToRemove = (language: StoreLanguage) => {
-    if (isBlocked({ languages: languages.filter((l) => l.language !== language.language) }))
-      return;
+    if (isBlocked({ languages: languages.filter((l) => l.language !== language.language) })) return;
     setRemoving(language);
   };
 
@@ -269,7 +270,9 @@ export function LanguagesForm({
                     </TableCell>
                     <TableCell>
                       <Switch
-                        label={t("languages.publish_named", { name: name(language.language) })}
+                        label={t("languages.publish_named", {
+                          name: inSentence(language.language),
+                        })}
                         isLabelHidden
                         size="sm"
                         value={language.published}
@@ -281,7 +284,9 @@ export function LanguagesForm({
                       {canWrite && (
                         <HStack gap={1} hAlign="end">
                           <IconButton
-                            label={t("common.remove_named", { name: name(language.language) })}
+                            label={t("common.remove_named", {
+                              name: inSentence(language.language),
+                            })}
                             icon={<TrashIcon />}
                             size="sm"
                             variant="ghost"
@@ -367,8 +372,8 @@ export function LanguagesForm({
           onOpenChange={(isOpen) => {
             if (!isOpen) setRemoving(undefined);
           }}
-          title={t("languages.remove_title", { name: name(removing.language) })}
-          description={t("languages.remove_description", { name: name(removing.language) })}
+          title={t("languages.remove_title", { name: inSentence(removing.language) })}
+          description={t("languages.remove_description", { name: inSentence(removing.language) })}
           actionLabel={t("languages.remove_action")}
           cancelLabel={t("common.cancel")}
           isActionLoading={isPending}
@@ -396,7 +401,7 @@ function BlockingMarkets({ markets }: { markets: BlockingMarket[] }) {
             ),
             market: market.name,
             languages: format.list(
-              market.languages.map((tag) => format.languageName(tag)),
+              market.languages.map((tag) => format.languageNameInSentence(tag)),
               "conjunction",
             ),
           })}

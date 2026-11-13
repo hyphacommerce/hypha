@@ -152,7 +152,7 @@ function TemplateRow({
             <Badge
               key={tag}
               label={t("notifications.template_customized_in", {
-                language: format.languageName(tag),
+                language: format.languageNameInSentence(tag),
               })}
               variant="info"
             />

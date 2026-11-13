@@ -814,7 +814,7 @@ function PaymentCard({
                     {buyerLanguage && (
                       <Text type="supporting" color="secondary">
                         {t("orders.detail_payment_instructions_source_note", {
-                          language: format.languageName(buyerLanguage),
+                          language: format.languageNameInSentence(buyerLanguage),
                         })}
                       </Text>
                     )}
