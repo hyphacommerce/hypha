@@ -540,15 +540,14 @@ impl<S: Storage> AppState<S> {
             + hypha_extensions::HasExtensionCalls
             + hypha_checkout_rules::HasCheckoutSettings,
     {
-        let (Some(cart), None) = (payment.cart(), payment.order()) else {
-            return Ok(None);
-        };
-        if !payment.status().committed() {
+        // Nothing to complete: no need to read the store.
+        if payment.cart().is_none() || payment.order().is_some() || !payment.status().committed() {
             return Ok(None);
         }
         // The store's languages, which the order's is resolved against: read through
-        // the directory (this runs on any ports, a spore's webhook's too). A failure is a
-        // storage one, worth trying again like the rest.
+        // the directory, as these ports may be any (a spore's webhook's). A caller holding
+        // the request's own ports reads them there instead (`complete_paid_checkout_in`),
+        // not taking a second connection. A failure is a storage one, worth trying again.
         let languages = match self.storage.directory().await {
             Ok(directory) => {
                 hypha_stores::get_store(&hypha_core::Ctx::system(), &directory, self.store)
@@ -558,6 +557,34 @@ impl<S: Storage> AppState<S> {
             }
             Err(e) => return Err(hypha_core::RepoError::Backend(format!("{e:?}")).into()),
         };
+        self.complete_paid_checkout_in(ports, ctx, payment, languages)
+            .await
+    }
+
+    /// `complete_paid_checkout` with the store's languages already read
+    /// (`language::content_languages`).
+    pub async fn complete_paid_checkout_in<P>(
+        &self,
+        ports: &P,
+        ctx: &hypha_core::Ctx,
+        payment: &hypha_payments::Payment,
+        languages: hypha_checkout::ContentLanguages,
+    ) -> Result<Option<hypha_core::OrderId>, hypha_checkout::CommandError>
+    where
+        P: hypha_checkout::CheckoutPorts
+            + hypha_shipping::HasAppProviders
+            + hypha_apps::HasApps
+            + hypha_apps::HasExtensionEndpoints
+            + hypha_apps::HasSporeSettings
+            + hypha_extensions::HasExtensionCalls
+            + hypha_checkout_rules::HasCheckoutSettings,
+    {
+        let (Some(cart), None) = (payment.cart(), payment.order()) else {
+            return Ok(None);
+        };
+        if !payment.status().committed() {
+            return Ok(None);
+        }
         let rates = self.cart_rates(ports, cart);
         let providers = self.payments(ports);
         let placed = hypha_checkout::complete_paid_checkout(

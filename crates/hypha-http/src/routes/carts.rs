@@ -1,9 +1,4 @@
-use axum::{
-    Json,
-    extract::State,
-    http::{HeaderValue, StatusCode},
-    response::{IntoResponse, Response},
-};
+use axum::{Json, extract::State, http::StatusCode, response::Response};
 use hypha_cart::{
     AddLine, CreateCart, GroupOffers, LineStatus, PricedCart, PricedShippingGroup, PricingPorts,
     SetLineQuantity, add_discount_code, add_line, create_cart, remove_cart_line,
@@ -36,7 +31,7 @@ use super::{
 use crate::{
     client_ip::ClientIp,
     error::{ApiError, ApiErrorBody},
-    extract::{Caller, JsonBody, KeyedJson, PathId, REPLAYED_HEADER, Storefront},
+    extract::{Caller, JsonBody, KeyedJson, PathId, Storefront, idempotent_response},
     language::{self, Localized, ServedLanguage},
     media::Media,
     rate_limit::{self, Rule},
@@ -789,21 +784,34 @@ pub(crate) async fn storefront_cart<S: Storage>(
     checks: &impl CartChecks,
 ) -> Result<Localized<CartResponse>, ApiError> {
     let store = super::stores::store_as_system(state, ports).await?;
-    let served = ServedLanguage::of_cart(cart, &store);
-    let response =
-        cart_response(cart, ports, checks, state.media.as_deref(), Some(&served)).await?;
+    let (served, response) = cart_answer(state, ports, cart, checks, &store).await?;
     Ok(served.respond(response))
 }
 
-/// `body` as a keyed write's answer: `Idempotent-Replayed` when it replays one.
-fn keyed<T: serde::Serialize>(status: StatusCode, body: Localized<T>, replayed: bool) -> Response {
-    let mut response = (status, body).into_response();
-    if replayed {
-        response
-            .headers_mut()
-            .insert(REPLAYED_HEADER, HeaderValue::from_static("true"));
-    }
-    response
+/// The storefront's answer about `cart` and the language it's in, the store read already.
+async fn cart_answer<S: Storage>(
+    state: &crate::state::AppState<S>,
+    ports: &S::Ports<'_>,
+    cart: &PricedCart,
+    checks: &impl CartChecks,
+    store: &hypha_stores::Store,
+) -> Result<(ServedLanguage, CartResponse), ApiError> {
+    let served = ServedLanguage::of_cart(cart, store);
+    let response =
+        cart_response(cart, ports, checks, state.media.as_deref(), Some(&served)).await?;
+    Ok((served, response))
+}
+
+/// A keyed write's answer about a cart: `Idempotent-Replayed` when it replays one, and
+/// `Content-Language`.
+fn keyed_cart(
+    status: StatusCode,
+    (served, response): (ServedLanguage, CartResponse),
+    replayed: bool,
+) -> Response {
+    let mut answer = idempotent_response(status, response, replayed);
+    language::name_language(&mut answer, served.language());
+    answer
 }
 
 /// Takes an `Idempotency-Key` header: a retry returns the cart the first request made.
@@ -834,13 +842,13 @@ pub async fn create<S: Storage>(
     };
     // Held to what the country's market offers; a country no market sells to is the
     // command's to refuse.
+    let store = super::stores::store_as_system(&state, &ports).await?;
     let language = match req.body.language.as_deref() {
         Some(asked) => {
             let market = match CountryCode::new(&req.body.country) {
                 Ok(country) => ports.markets().get_by_country(country).await?,
                 Err(_) => None,
             };
-            let store = super::stores::store_as_system(&state, &ports).await?;
             language::chosen(Some(asked), &store, market.as_ref())
         }
         None => None,
@@ -852,11 +860,9 @@ pub async fn create<S: Storage>(
         language,
     };
     let created = create_cart(&ctx, &ports, &state.ids, &state.clock, input).await?;
-    Ok(keyed(
-        StatusCode::CREATED,
-        storefront_cart(&state, &ports, &created.value, &state.cart_checks(&ports)).await?,
-        created.replayed,
-    ))
+    let checks = state.cart_checks(&ports);
+    let answer = cart_answer(&state, &ports, &created.value, &checks, &store).await?;
+    Ok(keyed_cart(StatusCode::CREATED, answer, created.replayed))
 }
 
 /// A cart, priced for its market and country.
@@ -901,11 +907,10 @@ pub async fn add<S: Storage>(
         idempotency: req.idempotency,
     };
     let added = add_line(&ctx, &ports, &state.clock, input).await?;
-    Ok(keyed(
-        StatusCode::OK,
-        storefront_cart(&state, &ports, &added.value, &state.cart_checks(&ports)).await?,
-        added.replayed,
-    ))
+    let checks = state.cart_checks(&ports);
+    let store = super::stores::store_as_system(&state, &ports).await?;
+    let answer = cart_answer(&state, &ports, &added.value, &checks, &store).await?;
+    Ok(keyed_cart(StatusCode::OK, answer, added.replayed))
 }
 
 /// Sets the buyer's email; checkout finds or creates the customer from it.
@@ -948,17 +953,19 @@ pub async fn set_language<S: Storage>(
 ) -> Result<Localized<CartResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let req = body.parse()?;
+    let store = super::stores::store_as_system(&state, &ports).await?;
     let language = match req.language.as_deref() {
         Some(asked) => {
             let cart = hypha_cart::find_cart(&ctx, &ports, id).await?;
             let market = ports.markets().get(cart.market()).await?;
-            let store = super::stores::store_as_system(&state, &ports).await?;
             language::chosen(Some(asked), &store, market.as_ref())
         }
         None => None,
     };
     let priced = set_cart_language(&ctx, &ports, id, language).await?;
-    storefront_cart(&state, &ports, &priced, &state.cart_checks(&ports)).await
+    let checks = state.cart_checks(&ports);
+    let (served, response) = cart_answer(&state, &ports, &priced, &checks, &store).await?;
+    Ok(served.respond(response))
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -1253,6 +1260,65 @@ pub async fn shipping_options<S: Storage>(
         }
     }
     Ok(served.respond(response))
+}
+
+/// `e` as the shopper is told it: a refusal listing the cart's errors (`checkout_blocked`)
+/// names checkout rules' messages in the language the cart reads in, as the cart shows
+/// them. Anything else is answered as it is.
+pub(crate) async fn shopper_error<S: Storage>(
+    state: &crate::state::AppState<S>,
+    ports: &S::Ports<'_>,
+    ctx: &hypha_core::Ctx,
+    id: CartId,
+    e: hypha_checkout::CommandError,
+) -> ApiError {
+    let hypha_checkout::CommandError::CheckoutBlocked { cart, messages } = e else {
+        return e.into();
+    };
+    let rules: Vec<ResourceRef> = messages
+        .iter()
+        .filter_map(|m| match m.source() {
+            MessageSource::Rule { rule } => {
+                Some(ResourceRef::new(ResourceKind::CheckoutRule, rule.as_uuid()))
+            }
+            _ => None,
+        })
+        .collect();
+    let translated = async {
+        if rules.is_empty() {
+            return Ok(messages.clone());
+        }
+        let served = served_for(state, ports, ctx, id).await?;
+        let overlay = served.overlay(ports, &rules).await?;
+        Ok::<_, ApiError>(
+            messages
+                .iter()
+                .map(|m| {
+                    let MessageSource::Rule { rule } = m.source() else {
+                        return m.clone();
+                    };
+                    let of_rule = ResourceRef::new(ResourceKind::CheckoutRule, rule.as_uuid());
+                    overlay
+                        .text(of_rule, keys::checkout_rule::MESSAGE)
+                        .and_then(|text| {
+                            Message::new(
+                                m.severity(),
+                                m.code().clone(),
+                                m.path(),
+                                text,
+                                m.source().clone(),
+                            )
+                            .ok()
+                        })
+                        .unwrap_or_else(|| m.clone())
+                })
+                .collect(),
+        )
+    }
+    .await;
+    // Failing to translate shouldn't hide the refusal: it's answered in the source.
+    let messages = translated.unwrap_or(messages);
+    hypha_checkout::CommandError::CheckoutBlocked { cart, messages }.into()
 }
 
 /// The language the cart `id` reads in now, for a read about it that isn't the cart

@@ -169,6 +169,7 @@ async fn start_once<
         email,
         language: Some(localizer.language().clone()),
     };
+    let localized = localizer.payment(&method);
     let reusable = existing
         .iter()
         .find(|p| {
@@ -177,6 +178,9 @@ async fn start_once<
                 && p.status() == PaymentStatus::Pending
                 && p.method() == Some(method.id())
                 && p.amount() == priced.total
+                // Started while the cart read in another language: a new one, so the
+                // order's payment names its method as the buyer reads it now.
+                && p.localized() == localized.as_ref()
         })
         .cloned();
     let reused = reusable.is_some();
@@ -184,7 +188,7 @@ async fn start_once<
         Some(payment) => payment,
         None => {
             let mut payment = Payment::new(NewPayment {
-                localized: localizer.payment(&method),
+                localized: localized.clone(),
                 ..NewPayment::by(
                     &method,
                     PaymentId::from_uuid(ids.new_uuid()),

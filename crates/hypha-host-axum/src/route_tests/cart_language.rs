@@ -352,3 +352,50 @@ async fn staff_set_a_customers_language_held_to_the_stores() {
     let (_, updated) = send(&app, "PATCH", &path, Some(r#"{"language":null}"#)).await;
     assert_eq!(updated["language"], Value::Null);
 }
+
+#[tokio::test]
+async fn a_refused_checkout_names_the_rules_in_the_carts_language() {
+    let app = app().await;
+    let (pk, cart_path, _) = cart_for_three_mugs(&app).await;
+    german_beside_english(&app).await;
+    let body = json!({
+        "name": "No example addresses",
+        "conditions": [{"type": "field_contains", "field": "email", "values": ["example.hr"]}],
+        "outcome": {"severity": "error", "message": "Use a real address.", "code": "example_email"}
+    });
+    let (status, rule) = send(
+        &app,
+        "POST",
+        "/admin/checkout-rules",
+        Some(&body.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{rule}");
+    let rule = rule["id"].as_str().unwrap();
+    in_german(
+        &app,
+        "checkout_rule",
+        rule,
+        &[("message", "Nutzen Sie eine echte Adresse.")],
+    )
+    .await;
+    pay_on_delivery(&app, &pk, &cart_path).await;
+    let path = format!("{cart_path}/language");
+    storefront(&app, &pk, "PUT", &path, Some(r#"{"language":"de"}"#)).await;
+    let (status, _, refused) = storefront(
+        &app,
+        &pk,
+        "POST",
+        &format!("{cart_path}/checkout"),
+        Some("{}"),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&refused)),
+        (StatusCode::CONFLICT, "checkout_blocked")
+    );
+    assert_eq!(
+        refused["details"]["messages"][0]["message"],
+        "Nutzen Sie eine echte Adresse."
+    );
+}

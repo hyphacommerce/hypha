@@ -869,7 +869,7 @@ pub async fn checkout_handler<S: Storage>(
     };
     let rates = state.cart_rates(&ports, cart);
     let providers = state.payments(&ports);
-    let placed = checkout(
+    let placed = match checkout(
         &ctx,
         &ports,
         &state.ids,
@@ -879,7 +879,11 @@ pub async fn checkout_handler<S: Storage>(
         &state.cart_checks(&ports),
         input,
     )
-    .await?;
+    .await
+    {
+        Ok(placed) => placed,
+        Err(e) => return Err(super::carts::shopper_error(&state, &ports, &ctx, cart, e).await),
+    };
     let order = &placed.value.order;
     // A cart checked out already answers with its order and access token for an hour (the
     // shopper's browser after the provider's webhook placed it; a retry), then only says
@@ -1022,7 +1026,7 @@ pub async fn start_cart_payment<S: Storage>(
     };
     let rates = state.cart_rates(&ports, cart);
     let providers = state.payments(&ports);
-    let started = hypha_checkout::start_cart_payment(
+    let started = match hypha_checkout::start_cart_payment(
         &ctx,
         &ports,
         &state.ids,
@@ -1032,7 +1036,11 @@ pub async fn start_cart_payment<S: Storage>(
         &state.cart_checks(&ports),
         input,
     )
-    .await?;
+    .await
+    {
+        Ok(started) => started,
+        Err(e) => return Err(super::carts::shopper_error(&state, &ports, &ctx, cart, e).await),
+    };
     let payment = &started.payment;
     let (next_action, payment_error) = match &started.next_action {
         Ok(action) => (Some(NextActionResponse::from(action)), None),

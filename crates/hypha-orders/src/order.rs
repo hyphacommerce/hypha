@@ -1122,9 +1122,6 @@ fn line_in(lines: &mut [OrderLine], id: OrderLineId) -> Result<&mut OrderLine, O
         .ok_or(OrderError::UnknownLine(id))
 }
 
-/// Text copied from a product that the product doesn't cap (option labels joined into a
-/// variant title, a SKU): trimmed and blank as `None`, but no length limit. An order must
-/// accept whatever the cart could sell, or checkout would fail on every retry.
 /// A localized copy of `source`, trimmed: `None` when it's blank or reads the same, so
 /// a copy is only ever kept where the buyer read something else.
 fn localized_text(value: Option<String>, source: &str) -> Option<String> {
@@ -1152,6 +1149,9 @@ fn localized_line(
     })
 }
 
+/// Text copied from a product that the product doesn't cap (option labels joined into a
+/// variant title, a SKU): trimmed and blank as `None`, but no length limit. An order must
+/// accept whatever the cart could sell, or checkout would fail on every retry.
 fn copied_text(value: Option<String>) -> Option<String> {
     value
         .map(|v| v.trim().to_string())

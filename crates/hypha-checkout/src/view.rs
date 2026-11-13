@@ -133,9 +133,10 @@ fn as_charged(cart: &Cart, order: &Order) -> PricedCart {
         tax_total: order.tax_total(),
         total: order.total(),
         payment_method: cart.payment_method(),
-        language: order.language().or(cart.language()).cloned(),
-        // The order's language is what it was placed in: nothing to choose from.
-        market_languages: Vec::new(),
+        language: cart.language().cloned(),
+        // Its order's language is the only one it reads in now (none for an order from
+        // before languages: the store's default).
+        market_languages: order.language().cloned().into_iter().collect(),
     }
 }
 

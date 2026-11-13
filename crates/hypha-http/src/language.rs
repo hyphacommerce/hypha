@@ -72,14 +72,9 @@ impl ServedLanguage {
     /// The language `cart` is read in: the one it was given, held to what its market
     /// offers now (`ContentLanguages::of`, the rule checkout places its order by), else
     /// the market's default. A checked-out cart reads in its order's language, whatever
-    /// the market offers since.
+    /// the market offers since (the only one its priced form offers).
     pub fn of_cart(cart: &PricedCart, store: &Store) -> Self {
-        let languages = content_languages(store);
-        let language = match (cart.order, &cart.language) {
-            (Some(_), Some(placed)) => placed.clone(),
-            _ => languages.of(cart),
-        };
-        Self::fixed(language, store)
+        Self::fixed(content_languages(store).of(cart), store)
     }
 
     /// `language` as it is, for what was written in it already (an order); `None`, an

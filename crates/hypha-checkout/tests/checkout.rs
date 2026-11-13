@@ -3012,6 +3012,12 @@ fn a_language_the_market_stopped_offering_places_the_order_in_its_default() {
 #[test]
 fn a_known_buyer_takes_the_language_of_their_latest_checkout() {
     let (world, _) = german_world();
+    // Three carts of two mugs.
+    let mut mugs = block_on(world.inventory_items.get_by_variant(vid("mug")))
+        .unwrap()
+        .unwrap();
+    mugs.set_on_hand(warehouse(), 10, None, None).unwrap();
+    block_on(world.inventory_items.update(&mut mugs)).unwrap();
     let first = world.checkout(world.cart()).unwrap();
     let buyer = || {
         block_on(world.customers.get(first.customer()))
@@ -3022,10 +3028,54 @@ fn a_known_buyer_takes_the_language_of_their_latest_checkout() {
         buyer().language(),
         Some(&hypha_core::Language::new("en").unwrap())
     );
+    // A guest typing their email changes nothing of theirs.
     let cart = world.cart();
     read_in(&world, cart, Some(de()));
     world.checkout(cart).unwrap();
+    assert_eq!(
+        buyer().language(),
+        Some(&hypha_core::Language::new("en").unwrap())
+    );
+    // Their own cart (signed in, or linked by staff) does.
+    let cart = world.cart();
+    block_on(set_cart_customer(
+        &Ctx::system(),
+        &world.ports,
+        cart,
+        Some(first.customer()),
+    ))
+    .unwrap();
+    read_in(&world, cart, Some(de()));
+    world.checkout(cart).unwrap();
     assert_eq!(buyer().language(), Some(&de()));
+}
+
+#[test]
+fn a_cart_payment_started_in_another_language_is_not_reused() {
+    let (world, _) = german_world();
+    let cart = world.cart();
+    pay_by_card(&world, cart);
+    let app = CardApp::default();
+    let english = start_paying(&world, cart, &app).unwrap().payment;
+    read_in(&world, cart, Some(de()));
+    let card = PaymentMethodId::from_uuid(Uuid::from_u128(1300));
+    in_german(
+        &world,
+        hypha_translations::ResourceRef::new(
+            hypha_translations::ResourceKind::PaymentMethod,
+            card.as_uuid(),
+        ),
+        &[(
+            hypha_translations::fields::payment_method::NAME,
+            "Card",
+            "Karte",
+        )],
+    );
+    let german = start_paying(&world, cart, &app).unwrap().payment;
+    assert_ne!(german.id(), english.id());
+    assert_eq!(german.buyer_method_name(), Some("Karte"));
+    let voided = block_on(world.payments.get(english.id())).unwrap().unwrap();
+    assert_eq!(voided.status(), PaymentStatus::Voided);
 }
 
 #[test]

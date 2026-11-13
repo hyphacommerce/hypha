@@ -1078,7 +1078,7 @@ pub async fn group_offers<P: RateProvider, R: PromotionReading>(
             destination: destination.clone(),
             items,
             subtotal,
-            language: reading.priced.spoken_language().cloned(),
+            language: reading.priced.spoken_language(),
         };
         let offered = offers(zone, rates, &request).await;
         let after_discounts = offered

@@ -881,8 +881,11 @@ async fn attempt<
             )?;
         }
     }
-    // The language they last checked out in: what emails not about one order use.
-    if let Some(buyer) = &mut known_customer
+    // The language they last checked out in: what emails not about one order use. Only
+    // for the customer the cart is linked to (signed in, or linked by staff): a guest who
+    // types a customer's email doesn't change what that customer reads.
+    if priced.customer.is_some()
+        && let Some(buyer) = &mut known_customer
         && !buyer.is_erased()
     {
         buyer_changed |= buyer.set_language(Some(language.clone()))?;
