@@ -554,6 +554,11 @@ pub const CORE: MigrationSet = MigrationSet {
             name: "user_language",
             sql: include_str!("../migrations/0106_user_language.sql"),
         },
+        Migration {
+            version: 107,
+            name: "translation_sources",
+            sql: include_str!("../migrations/0107_translation_sources.sql"),
+        },
     ],
 };
 

@@ -13,6 +13,7 @@ pub mod overlay;
 pub mod repo;
 pub mod source;
 pub mod translation;
+pub mod worklist;
 
 pub use catalog::{
     FieldRule, FieldSpec, MAX_KEY_LEN, ResourceKind, ResourceRef, UnknownKind, ValueFormat,
@@ -20,7 +21,8 @@ pub use catalog::{
 };
 pub use commands::{
     CommandError, StoreLanguages, delete_translation, get_translations, list_translations,
-    put_translation, require_read, require_write,
+    put_translation, require_read, require_write, sync_sources, translation_progress,
+    translation_worklist,
 };
 pub use error::{Problem, TranslationError};
 pub use events::{TRANSLATION, TranslatedResource, TranslationDeleted, TranslationUpdated};
@@ -28,7 +30,12 @@ pub use handler::TranslationCleanup;
 pub use overlay::Overlay;
 pub use repo::{
     HasTranslations, InvalidTranslationKey, TranslationFilter, TranslationKey, TranslationRepo,
-    keys,
+    TranslationSourceRepo, keys,
 };
 pub use source::{Source, SourceField, source_digest};
 pub use translation::{FieldInput, TranslatedField, Translation, TranslationSnapshot};
+pub use worklist::{
+    FieldCounts, InvalidWorkPosition, LanguageProgress, QueuedSource, SourceDigest,
+    SourceSyncSettings, TranslationState, UnknownState, WorkItem, WorkPosition, WorklistFilter,
+    source_digests,
+};
