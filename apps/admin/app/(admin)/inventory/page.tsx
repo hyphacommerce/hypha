@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import { type SearchParams, one } from "@/components/resource-table/params";
 import { listPage, pageQuery } from "@/components/resource-table/server";
 import { locationNames, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import { InventoryTable } from "@/resources/inventory";
 
 /**
@@ -18,13 +19,13 @@ export default async function InventoryPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const params = await searchParams;
+  const [params, t] = await Promise.all([searchParams, getT()]);
   return (
     <Section padding={6}>
       <VStack gap={5}>
         <PageHeader
-          title="Inventory"
-          description="Stock of every variant. Open one for its history, or to adjust it."
+          title={t("inventory.list_title")}
+          description={t("inventory.list_description")}
         />
         <Suspense fallback={<InventoryTable />}>
           <InventoryRows params={params} />
@@ -55,7 +56,7 @@ async function InventoryRows({ params }: { params: SearchParams }) {
   ]);
   return (
     <InventoryTable
-      page={listPage(result, "/inventory", params)}
+      page={await listPage(result, "/inventory", params)}
       locations={Object.fromEntries(locations)}
       location={location}
     />

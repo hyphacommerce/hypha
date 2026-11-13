@@ -3,8 +3,9 @@
 // What the discount form's variant and customer pickers read: a page of each, searched
 // as the API searches them, as rows with a label and a line under it.
 
-import { customerName, formatMoney } from "@/lib/format";
-import { loadCurrencies, sessionClient } from "@/lib/hypha";
+import { createFormat, customerName } from "@/lib/format";
+import { describe, loadCurrencies, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 
 /** A row a picker shows: what's picked (its ID) and how it reads. */
 export type PickerRow = { id: string; label: string; detail: string };
@@ -14,20 +15,27 @@ export type PickerRows = { items: PickerRow[]; nextCursor: string | null; error?
 /** Variants whose product's title or handle, or own SKU, contains `q`. */
 export async function searchVariants(q: string, cursor?: string): Promise<PickerRows> {
   const client = await sessionClient();
-  const [{ data, error }, currencies] = await Promise.all([
+  const [{ data, error }, currencies, t] = await Promise.all([
     client.GET("/admin/variants", {
       params: { query: { q: q.trim() || undefined, cursor, limit: 25 } },
     }),
     loadCurrencies(),
+    getT(),
   ]);
   if (!data) {
-    return { items: [], nextCursor: null, error: error?.error ?? "Couldn't load variants." };
+    return {
+      items: [],
+      nextCursor: null,
+      error: error ? await describe(error) : t("discounts.picker_load_variants_failed"),
+    };
   }
+  // Money alone: no need for the store's time zone here.
+  const format = createFormat(t.locale, { currencies });
   return {
     items: data.items.map((v) => ({
       id: v.id,
       label: v.title ? `${v.product.title} – ${v.title}` : v.product.title,
-      detail: [v.sku, formatMoney(v.price, currencies)].filter(Boolean).join(" · "),
+      detail: [v.sku, format.money(v.price)].filter(Boolean).join(" · "),
     })),
     nextCursor: data.next_cursor ?? null,
   };
@@ -40,7 +48,13 @@ export async function searchCustomers(q: string, cursor?: string): Promise<Picke
     params: { query: { q: q.trim() || undefined, cursor, limit: 25 } },
   });
   if (!data) {
-    return { items: [], nextCursor: null, error: error?.error ?? "Couldn't load customers." };
+    return {
+      items: [],
+      nextCursor: null,
+      error: error
+        ? await describe(error)
+        : (await getT())("discounts.picker_load_customers_failed"),
+    };
   }
   return {
     items: data.items.map((c) => {

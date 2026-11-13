@@ -13,7 +13,7 @@ export type StorePatch = AdminSchemas["UpdateStoreRequest"];
 export async function updateStore(_previous: FormState, patch: StorePatch): Promise<FormState> {
   const client = await sessionClient();
   const { error } = await client.PATCH("/admin/store", { body: patch });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   // The name shows in the shell, and the setup checklist reads the details.
   revalidatePath("/", "layout");
   return { saved: true };

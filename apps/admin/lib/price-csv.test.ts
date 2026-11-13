@@ -12,6 +12,7 @@ import {
   toCsv,
 } from "./price-csv.ts";
 import type { PriceGridProduct, PriceGridVariant } from "./price-grid/types.ts";
+import { t } from "./price-grid/testing.ts";
 
 const eur = (amount: number) => ({ amount, currency: "EUR" });
 const currencies = { EUR: 2, JPY: 0 };
@@ -87,6 +88,7 @@ test("export: text a spreadsheet would run as a formula is quoted, and read back
   const csv = exportPriceCsv(sneaky, currencies);
   assert.ok(csv.includes(",'@sku,var_x,'=HYPERLINK(1),"));
   const preview = previewPriceImport(
+    t,
     csv.replace("var_x", ""),
     [{ ...products[1], variants: [variant("var_x", "=HYPERLINK(1)", "@sku")] }],
     "EUR",
@@ -97,6 +99,7 @@ test("export: text a spreadsheet would run as a formula is quoted, and read back
 
 test("an export imports back unchanged", () => {
   const preview = previewPriceImport(
+    t,
     exportPriceCsv(products, currencies),
     products,
     "EUR",
@@ -136,7 +139,7 @@ test("rows match by variant ID, then SKU, then handle and options", () => {
     ',,grow-kit,"large, BLUE",12',
   ].join("\n");
   // Each later row finds the same variant its own way, so it's refused as a repeat.
-  const preview = previewPriceImport(csv, products, "EUR", currencies);
+  const preview = previewPriceImport(t, csv, products, "EUR", currencies);
   assert.deepEqual(
     preview.rows.map((r) => [r.status, r.variant]),
     [
@@ -150,7 +153,7 @@ test("rows match by variant ID, then SKU, then handle and options", () => {
 
 test("a handle without options finds a product without options", () => {
   const single: PriceGridProduct[] = [{ ...products[1], variants: [variant("var_x", null, null)] }];
-  const preview = previewPriceImport("handle,fixed_price\nscalpel,5", single, "EUR", currencies);
+  const preview = previewPriceImport(t, "handle,fixed_price\nscalpel,5", single, "EUR", currencies);
   assert.deepEqual(preview.diff.upserts, [
     { variant: "var_x", price: eur(500), compare_at: null, breaks: [] },
   ]);
@@ -165,7 +168,7 @@ test("unmatched rows say why", () => {
     ",,grow-kit,Huge,1",
     ",,grow-kit,,1",
   ].join("\n");
-  const preview = previewPriceImport(csv, products, "EUR", currencies);
+  const preview = previewPriceImport(t, csv, products, "EUR", currencies);
   assert.deepEqual(
     preview.rows.map((r) => [r.status, r.reasons[0]]),
     [
@@ -180,7 +183,7 @@ test("unmatched rows say why", () => {
 });
 
 test("a SKU on several variants needs the variant ID", () => {
-  const preview = previewPriceImport("sku,fixed_price\nDUP,1", products, "EUR", currencies);
+  const preview = previewPriceImport(t, "sku,fixed_price\nDUP,1", products, "EUR", currencies);
   assert.deepEqual(preview.rows[0], {
     line: 2,
     status: "invalid",
@@ -196,7 +199,7 @@ test("invalid rows list every problem by column", () => {
     "var_x,10,9,,,,",
     "var_y,10,,5,,x,1",
   ].join("\n");
-  const preview = previewPriceImport(csv, products, "EUR", currencies);
+  const preview = previewPriceImport(t, csv, products, "EUR", currencies);
   assert.deepEqual(
     preview.rows.map((r) => r.reasons),
     [
@@ -210,6 +213,7 @@ test("invalid rows list every problem by column", () => {
 
 test("breaks are checked against the row's fixed price", () => {
   const preview = previewPriceImport(
+    t,
     "variant_id,fixed_price,break_1_qty,break_1_price\nvar_l,10,5,10",
     products,
     "EUR",
@@ -227,7 +231,7 @@ test("changes and removals become the grid's diff, decimal commas and all", () =
     "var_l;12,50;15;3;11,00",
     "var_x;;;;",
   ].join("\r\n");
-  const preview = previewPriceImport(csv, products, "EUR", currencies);
+  const preview = previewPriceImport(t, csv, products, "EUR", currencies);
   assert.deepEqual(preview.counts, { changed: 2, unchanged: 1, unmatched: 0, invalid: 0 });
   assert.deepEqual(preview.diff, {
     upserts: [
@@ -245,7 +249,7 @@ test("changes and removals become the grid's diff, decimal commas and all", () =
 });
 
 test("columns the file doesn't have keep what the variant has", () => {
-  const preview = previewPriceImport("sku,fixed_price\nGK-S,19", products, "EUR", currencies);
+  const preview = previewPriceImport(t, "sku,fixed_price\nGK-S,19", products, "EUR", currencies);
   assert.deepEqual(preview.diff.upserts, [
     {
       variant: "var_s",
@@ -257,12 +261,13 @@ test("columns the file doesn't have keep what the variant has", () => {
       ],
     },
   ]);
-  const removed = previewPriceImport("sku,fixed_price\nGK-S,", products, "EUR", currencies);
+  const removed = previewPriceImport(t, "sku,fixed_price\nGK-S,", products, "EUR", currencies);
   assert.deepEqual(removed.diff.clears, [{ variant: "var_s" }]);
 });
 
 test("break columns may skip numbers", () => {
   const preview = previewPriceImport(
+    t,
     "variant_id,fixed_price,break_1_qty,break_1_price,break_3_qty,break_3_price\nvar_l,10,5,9,10,8",
     products,
     "EUR",
@@ -296,23 +301,24 @@ test("a step of an import reads only its lines' variants", () => {
 });
 
 test("a file it can't read says why", () => {
-  assert.equal(previewPriceImport("", products, "EUR", currencies).error, "The file is empty.");
+  assert.equal(previewPriceImport(t, "", products, "EUR", currencies).error, "The file is empty.");
   assert.equal(
-    previewPriceImport("variant_id\nvar_s", products, "EUR", currencies).error,
+    previewPriceImport(t, "variant_id\nvar_s", products, "EUR", currencies).error,
     "The file has no fixed_price column.",
   );
   assert.equal(
-    previewPriceImport("options,fixed_price\nx,1", products, "EUR", currencies).error,
+    previewPriceImport(t, "options,fixed_price\nx,1", products, "EUR", currencies).error,
     "The file needs a variant_id, sku or handle column to find each variant.",
   );
   assert.equal(
-    previewPriceImport("sku,fixed_price", products, "XYZ", currencies).error,
+    previewPriceImport(t, "sku,fixed_price", products, "XYZ", currencies).error,
     'Unknown currency "XYZ".',
   );
 });
 
 test("column names are matched ignoring case and spaces", () => {
   const preview = previewPriceImport(
+    t,
     " Variant_ID ,FIXED_PRICE\nvar_l,9",
     products,
     "EUR",

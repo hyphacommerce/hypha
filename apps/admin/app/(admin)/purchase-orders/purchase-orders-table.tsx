@@ -8,7 +8,6 @@ import { type TableColumn, pixel, proportional } from "@astryxdesign/core/Table"
 import { Text } from "@astryxdesign/core/Text";
 import { ClipboardDocumentListIcon } from "@heroicons/react/24/outline";
 
-import { useCurrencies } from "@/components/currencies";
 import { CalendarDate } from "@/components/date-time";
 import {
   type FilterDef,
@@ -16,46 +15,13 @@ import {
   type SortOption,
   type View,
 } from "@/components/resource-table/resource-table";
-import { PurchaseOrderStatusBadge, ReceiptStatusBadge } from "@/components/status";
-import { formatMoney } from "@/lib/format";
+import { PurchaseOrderStatusBadge, ReceiptStatusBadge, statusOptions } from "@/components/status";
 import { type PurchaseOrderSummary, poNumber } from "@/lib/purchasing";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
-const FILTERS: FilterDef[] = [
-  {
-    kind: "select",
-    param: "status",
-    label: "Status",
-    options: [
-      { value: "draft", label: "Draft" },
-      { value: "ordered", label: "Ordered" },
-      { value: "closed", label: "Closed" },
-      { value: "cancelled", label: "Cancelled" },
-    ],
-  },
-  {
-    kind: "select",
-    param: "receipt_status",
-    label: "Received",
-    options: [
-      { value: "none", label: "Not received" },
-      { value: "partial", label: "Partly received" },
-      { value: "received", label: "Received" },
-    ],
-  },
-];
-
-const VIEWS: View[] = [
-  { label: "All", params: {} },
-  { label: "Drafts", params: { status: ["draft"] } },
-  { label: "Open", params: { status: ["ordered"] } },
-  { label: "Closed", params: { status: ["closed"] } },
-];
-
-const SORTS: SortOption[] = [
-  { value: "number_desc", label: "Newest first" },
-  { value: "number_asc", label: "Oldest first" },
-  { value: "expected_at", label: "Due soonest" },
-];
+const STATUSES = ["draft", "ordered", "closed", "cancelled"] as const;
+const RECEIPTS = ["none", "partial", "received"] as const;
 
 const NO_LOCATIONS: Record<string, string> = {};
 
@@ -70,11 +36,37 @@ export function PurchaseOrdersTable({
   locations?: Record<string, string>;
   canWrite: boolean;
 }) {
-  const currencies = useCurrencies();
+  const t = useT<"purchasing">();
+  const format = useFormat();
+  const filters: FilterDef[] = [
+    {
+      kind: "select",
+      param: "status",
+      label: t("common.status"),
+      options: statusOptions("purchase_order", STATUSES, t),
+    },
+    {
+      kind: "select",
+      param: "receipt_status",
+      label: t("purchasing.received"),
+      options: statusOptions("receipt", RECEIPTS, t),
+    },
+  ];
+  const views: View[] = [
+    { label: t("common.all"), params: {} },
+    { label: t("purchasing.view_drafts"), params: { status: ["draft"] } },
+    { label: t("purchasing.view_open"), params: { status: ["ordered"] } },
+    { label: t("purchasing.view_closed"), params: { status: ["closed"] } },
+  ];
+  const sorts: SortOption[] = [
+    { value: "number_desc", label: t("purchasing.sort_newest") },
+    { value: "number_asc", label: t("purchasing.sort_oldest") },
+    { value: "expected_at", label: t("purchasing.sort_due") },
+  ];
   const columns: TableColumn<PurchaseOrderSummary>[] = [
     {
       key: "number",
-      header: "Order",
+      header: t("common.order"),
       width: pixel(120),
       renderCell: (po) => (
         <Link href={`/purchase-orders/${po.id}`} weight="semibold" color="primary">
@@ -84,40 +76,42 @@ export function PurchaseOrdersTable({
     },
     {
       key: "supplier",
-      header: "Supplier",
+      header: t("common.supplier"),
       width: proportional(2, { minWidth: 180 }),
       renderCell: (po) => <Text>{po.supplier_name}</Text>,
     },
     {
       key: "destination",
-      header: "Goes to",
+      header: t("purchasing.goes_to"),
       width: proportional(1, { minWidth: 140 }),
       renderCell: (po) => (
         <Text color={po.destination ? undefined : "secondary"}>
-          {po.destination ? (locations[po.destination] ?? "A location") : "Not set"}
+          {po.destination
+            ? (locations[po.destination] ?? t("purchasing.a_location"))
+            : t("common.not_set")}
         </Text>
       ),
     },
     {
       key: "status",
-      header: "Status",
+      header: t("common.status"),
       width: pixel(120),
-      renderCell: (po) => <PurchaseOrderStatusBadge status={po.status} />,
+      renderCell: (po) => <PurchaseOrderStatusBadge status={po.status} t={t} />,
     },
     {
       key: "receipt",
-      header: "Received",
+      header: t("purchasing.received"),
       width: pixel(150),
       renderCell: (po) =>
         po.status === "draft" || po.status === "cancelled" ? (
           <Text color="secondary">—</Text>
         ) : (
-          <ReceiptStatusBadge status={po.receipt_status} />
+          <ReceiptStatusBadge status={po.receipt_status} t={t} />
         ),
     },
     {
       key: "expected",
-      header: "Expected",
+      header: t("purchasing.expected"),
       width: pixel(140),
       renderCell: (po) =>
         po.expected_at ? (
@@ -128,10 +122,10 @@ export function PurchaseOrdersTable({
     },
     {
       key: "total",
-      header: "Total",
+      header: t("common.total"),
       width: pixel(130),
       align: "end",
-      renderCell: (po) => <Text>{po.total ? formatMoney(po.total, currencies) : "—"}</Text>,
+      renderCell: (po) => <Text>{po.total ? format.money(po.total) : "—"}</Text>,
     },
   ];
   return (
@@ -143,19 +137,19 @@ export function PurchaseOrdersTable({
       idKey="id"
       rowHref={(po) => `/purchase-orders/${po.id}`}
       isSelectable={false}
-      filters={FILTERS}
-      views={VIEWS}
-      sortOptions={SORTS}
+      filters={filters}
+      views={views}
+      sortOptions={sorts}
       defaultSort="number_desc"
       error={page?.error}
       empty={{
         icon: <ClipboardDocumentListIcon width={32} />,
-        title: "No purchase orders yet",
+        title: t("purchasing.list_empty_title"),
         description: canWrite
-          ? "Order stock from a supplier: lines start from their catalogue's prices."
-          : "Orders placed with suppliers show here.",
+          ? t("purchasing.list_empty_description_write")
+          : t("purchasing.list_empty_description_read"),
       }}
-      noResults={{ title: "No purchase orders match these filters" }}
+      noResults={{ title: t("purchasing.list_no_results_title") }}
     />
   );
 }

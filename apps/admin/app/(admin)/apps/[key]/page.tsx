@@ -16,17 +16,16 @@ import { Text } from "@astryxdesign/core/Text";
 import { type ReactNode, Suspense } from "react";
 
 import { DateTime } from "@/components/date-time";
-import { type Crumb, PageHeader } from "@/components/page-header";
+import { PageHeader } from "@/components/page-header";
 import { FormSkeleton } from "@/components/skeletons";
-import {
-  actorLabel,
-  appState,
-  isBuiltIn,
-  isPersonalDataScope,
-  personalDataLabel,
-} from "@/lib/apps";
+import { appState, isBuiltIn, isPersonalDataScope, personalDataLabel } from "@/lib/apps";
 import { loadExtensions } from "@/lib/app-extensions";
+import { getFormat } from "@/lib/get-format";
+import { labelOr } from "@/lib/keys";
 import { loaded, requireStaff, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
+import type { T } from "@/lib/messages";
+import { appsCrumb } from "@/lib/navigation";
 
 import { AppActions } from "./app-actions";
 import { AppPageTabs } from "./app-pages";
@@ -34,14 +33,17 @@ import { ReduceAccess } from "./reduce-access";
 import { SporeSettingsForm } from "./spore-settings";
 import { SporeSwitch } from "./spore-switch";
 
-const HISTORY_STATUS: Record<string, { label: string; variant: "success" | "warning" | "error" }> =
-  {
-    pending: { label: "Waiting", variant: "warning" },
-    approved: { label: "Approved", variant: "success" },
-    denied: { label: "Denied", variant: "error" },
-  };
+const HISTORY_VARIANT: Record<string, "success" | "warning" | "error"> = {
+  pending: "warning",
+  approved: "success",
+  denied: "error",
+};
 
-const BACK: Crumb = { label: "Apps", href: "/apps" };
+/** An authorization's status in words; one the admin doesn't know shows as it is. */
+function historyStatus(t: T, status: string): string {
+  const key = `apps.history_status_${status}`;
+  return labelOr(t, key, status);
+}
 
 function Panel({
   title,
@@ -83,14 +85,14 @@ function Panel({
  * once; the app streams in behind a skeleton of the page.
  */
 export default async function AppPage({ params }: { params: Promise<{ key: string }> }) {
-  const { key } = await params;
+  const [{ key }, t] = await Promise.all([params, getT()]);
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={960}>
         <Suspense
           fallback={
             <>
-              <PageHeader back={BACK} />
+              <PageHeader back={appsCrumb(t)} />
               <FormSkeleton cards={2} />
             </>
           }
@@ -103,7 +105,9 @@ export default async function AppPage({ params }: { params: Promise<{ key: strin
 }
 
 async function App({ appKey: key }: { appKey: string }) {
-  const [client, me, extensions] = await Promise.all([
+  const [t, format, client, me, extensions] = await Promise.all([
+    getT(),
+    getFormat(),
     sessionClient(),
     requireStaff(),
     loadExtensions(),
@@ -114,7 +118,7 @@ async function App({ appKey: key }: { appKey: string }) {
   const settings = builtIn
     ? (await client.GET("/admin/apps/{key}/settings", { params: { path: { key } } })).data
     : undefined;
-  const state = appState(app);
+  const state = appState(t, app);
   const scopes = app.grant?.scopes ?? [];
   const personal = scopes.filter(isPersonalDataScope);
   const other = scopes.filter((scope) => !isPersonalDataScope(scope));
@@ -124,7 +128,7 @@ async function App({ appKey: key }: { appKey: string }) {
     <>
       <PageHeader
         title={app.name}
-        back={BACK}
+        back={appsCrumb(t)}
         badges={<Badge label={state.label} variant={state.variant} />}
         description={`${app.key} · ${state.description}`}
         actions={
@@ -143,13 +147,14 @@ async function App({ appKey: key }: { appKey: string }) {
         }
       />
 
-      <AppPageTabs appKey={app.key} pages={extensions.pages.filter((p) => p.app === app.key)} />
+      <AppPageTabs
+        t={t}
+        appKey={app.key}
+        pages={extensions.pages.filter((p) => p.app === app.key)}
+      />
 
       {settings && (
-        <Panel
-          title="Settings"
-          description="What this store sets for it. Secret fields are kept sealed and never shown again."
-        >
+        <Panel title={t("common.settings")} description={t("apps.detail_settings_description")}>
           <SporeSettingsForm
             appKey={app.key}
             schema={settings.schema}
@@ -160,13 +165,13 @@ async function App({ appKey: key }: { appKey: string }) {
       )}
 
       <Panel
-        title="Access"
+        title={t("apps.detail_access_title")}
         description={
           builtIn
-            ? "What it acts with, as declared in the build. Turn it off to stop it; its access can't be narrowed."
+            ? t("apps.detail_access_built_in")
             : app.grant
-              ? "What the app's tokens may do, at most: approved by staff when it was installed."
-              : "This app has no OAuth grant: it can't call the API, only receive webhooks."
+              ? t("apps.detail_access_granted")
+              : t("apps.detail_access_none")
         }
         action={
           canWrite &&
@@ -181,41 +186,39 @@ async function App({ appKey: key }: { appKey: string }) {
           <VStack gap={3}>
             <HStack gap={1} wrap="wrap">
               {other.length === 0 ? (
-                <Text color="secondary">No store scopes.</Text>
+                <Text color="secondary">{t("apps.detail_no_store_scopes")}</Text>
               ) : (
                 other.map((scope) => <Badge key={scope} label={scope} />)
               )}
             </HStack>
             <Text type="supporting" color="secondary">
-              Approved by {actorLabel(app.grant.approved_by)},{" "}
-              <DateTime value={app.grant.approved_at} short />.
+              {t.rich("apps.detail_approved_by", {
+                actor: app.grant.approved_by?.type ?? "unknown",
+                time: <DateTime key="time" value={app.grant.approved_at} short />,
+              })}
             </Text>
           </VStack>
         ) : (
-          <Text color="secondary">
-            Custom apps are set up under Settings → Developers → Webhooks and custom apps.
-          </Text>
+          <Text color="secondary">{t("apps.detail_custom_hint")}</Text>
         )}
       </Panel>
 
       <Panel
-        title="Customers' personal data"
+        title={t("apps.detail_personal_title")}
         description={
-          builtIn
-            ? "A built-in app runs inside the API and reads what it needs there, personal data included: these are the kinds it declares it uses."
-            : "Without these scopes Hypha leaves names, emails, phone numbers and addresses out of everything the app reads or receives."
+          builtIn ? t("apps.detail_personal_built_in") : t("apps.detail_personal_granted")
         }
       >
         {personal.length === 0 ? (
           <Text color="secondary">
-            {builtIn ? "It declares no use of personal data." : "This app sees no personal data."}
+            {builtIn ? t("apps.detail_personal_none_built_in") : t("apps.detail_personal_none")}
           </Text>
         ) : (
           <VStack gap={2}>
             {personal.map((scope) => (
               <HStack key={scope} gap={2} vAlign="center">
                 <Badge label={scope} variant="warning" />
-                <Text>{personalDataLabel(scope)}</Text>
+                <Text>{personalDataLabel(t, scope)}</Text>
               </HStack>
             ))}
           </VStack>
@@ -224,14 +227,16 @@ async function App({ appKey: key }: { appKey: string }) {
 
       {!builtIn && (
         <Panel
-          title="Webhooks"
+          title={t("apps.detail_webhooks")}
           description={
-            app.webhook ? `Events go to ${app.webhook.url}.` : "This app takes no webhooks."
+            app.webhook
+              ? t("apps.detail_webhooks_to", { url: app.webhook.url })
+              : t("apps.detail_webhooks_none")
           }
           action={
             app.webhook && (
               <Button
-                label="See deliveries"
+                label={t("apps.detail_see_deliveries")}
                 variant="secondary"
                 href={`/apps/${app.key}/deliveries`}
               />
@@ -240,7 +245,7 @@ async function App({ appKey: key }: { appKey: string }) {
         >
           {app.webhook &&
             (app.subscriptions.length === 0 ? (
-              <Badge label="No events" variant="warning" />
+              <Badge label={t("apps.dev_no_events")} variant="warning" />
             ) : (
               <HStack gap={1} wrap="wrap">
                 {app.subscriptions.map((pattern) => (
@@ -252,49 +257,57 @@ async function App({ appKey: key }: { appKey: string }) {
       )}
 
       {app.manifest && (
-        <MetadataList title="Installed from">
-          <MetadataListItem label="Manifest">
+        <MetadataList title={t("apps.detail_installed_from")}>
+          <MetadataListItem label={t("apps.detail_manifest")}>
             <Text type="code">{app.manifest.url}</Text>
           </MetadataListItem>
-          <MetadataListItem label="Read">
+          <MetadataListItem label={t("apps.detail_manifest_read")}>
             <DateTime value={app.manifest.fetched_at} short />
           </MetadataListItem>
-          <MetadataListItem label="Added">
+          <MetadataListItem label={t("apps.detail_added")}>
             <DateTime value={app.created_at} short />
           </MetadataListItem>
         </MetadataList>
       )}
 
       {app.history.length > 0 && (
-        <Panel title="Authorization history" description="Each time the app asked for access.">
+        <Panel
+          title={t("apps.detail_history_title")}
+          description={t("apps.detail_history_description")}
+        >
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHeaderCell>Asked</TableHeaderCell>
-                <TableHeaderCell>Scopes</TableHeaderCell>
-                <TableHeaderCell>Answer</TableHeaderCell>
+                <TableHeaderCell>{t("apps.detail_history_asked")}</TableHeaderCell>
+                <TableHeaderCell>{t("common.scopes")}</TableHeaderCell>
+                <TableHeaderCell>{t("apps.detail_history_answer")}</TableHeaderCell>
               </TableRow>
             </TableHeader>
             <TableBody>
               {app.history.map((entry) => {
-                const status = HISTORY_STATUS[entry.status] ?? {
-                  label: entry.status,
-                  variant: "warning" as const,
-                };
                 return (
                   <TableRow key={entry.id}>
                     <TableCell>
                       <DateTime value={entry.created_at} short />
                     </TableCell>
                     <TableCell>
-                      <Text type="supporting">{entry.scopes.join(", ") || "None"}</Text>
+                      <Text type="supporting">
+                        {entry.scopes.length > 0
+                          ? format.list(entry.scopes, "unit")
+                          : t("common.none")}
+                      </Text>
                     </TableCell>
                     <TableCell>
                       <VStack gap={0}>
-                        <Badge label={status.label} variant={status.variant} />
+                        <Badge
+                          label={historyStatus(t, entry.status)}
+                          variant={HISTORY_VARIANT[entry.status] ?? "warning"}
+                        />
                         {entry.decided_at && (
                           <Text type="supporting" color="secondary">
-                            by {actorLabel(entry.decided_by)}
+                            {t("apps.detail_history_by", {
+                              actor: entry.decided_by?.type ?? "unknown",
+                            })}
                           </Text>
                         )}
                       </VStack>

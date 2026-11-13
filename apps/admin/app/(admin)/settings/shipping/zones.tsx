@@ -26,6 +26,7 @@ import { ArrowDownIcon, ArrowUpIcon, PencilIcon, TrashIcon } from "@heroicons/re
 import { useState, useTransition } from "react";
 
 import { useCurrencies } from "@/components/currencies";
+import { TranslateButton } from "@/components/translate-button";
 import { currencyCodes } from "@/lib/format";
 import {
   RATE_KINDS,
@@ -35,6 +36,8 @@ import {
   fromDraft,
   toDraft,
 } from "@/lib/shipping-rates";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import {
   addOption,
@@ -52,27 +55,41 @@ type Option = AdminSchemas["ShippingOptionResponse"];
 type Provider = RateApp;
 type Currency = AdminSchemas["Currency"];
 
-export function ZonesSection({ zones, providers }: { zones: Zone[]; providers: Provider[] }) {
+export function ZonesSection({
+  zones,
+  providers,
+  canTranslate,
+}: {
+  zones: Zone[];
+  providers: Provider[];
+  /** Whether each option offers "Translate" (its name). */
+  canTranslate: boolean;
+}) {
+  const t = useT<"shipping">();
   const [isAdding, setIsAdding] = useState(false);
 
   return (
     <VStack gap={4}>
       <HStack gap={2} hAlign="between" vAlign="center">
         <Text type="display-3" as="h2">
-          Zones
+          {t("shipping.zones_title")}
         </Text>
-        <Button label="Add zone" variant="secondary" onClick={() => setIsAdding(true)} />
+        <Button
+          label={t("shipping.zones_add")}
+          variant="secondary"
+          onClick={() => setIsAdding(true)}
+        />
       </HStack>
       {zones.length === 0 && (
         <Card>
           <EmptyState
-            title="No shipping zones yet"
-            description="Carts to a country outside every zone can't choose shipping, so physical products can't be checked out there."
+            title={t("shipping.zones_empty_title")}
+            description={t("shipping.zones_empty_description")}
           />
         </Card>
       )}
       {zones.map((zone) => (
-        <ZoneCard key={zone.id} zone={zone} providers={providers} />
+        <ZoneCard key={zone.id} zone={zone} providers={providers} canTranslate={canTranslate} />
       ))}
       {isAdding && <ZoneDialog onClose={() => setIsAdding(false)} />}
     </VStack>
@@ -81,6 +98,7 @@ export function ZonesSection({ zones, providers }: { zones: Zone[]; providers: P
 
 /** A new zone, or `zone`'s name and countries. */
 function ZoneDialog({ zone, onClose }: { zone?: Zone; onClose: () => void }) {
+  const t = useT<"shipping">();
   const [name, setName] = useState(zone?.name ?? "");
   const [countries, setCountries] = useState(() => zone?.countries.join(", ") ?? "");
   const [error, setError] = useState<string>();
@@ -98,30 +116,30 @@ function ZoneDialog({ zone, onClose }: { zone?: Zone; onClose: () => void }) {
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={480} purpose="form">
       <DialogHeader
-        title={zone ? "Edit zone" : "Add zone"}
+        title={zone ? t("shipping.zone_edit") : t("shipping.zone_dialog_title_add")}
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
         <TextInput
-          label="Name"
-          placeholder="Europe"
+          label={t("common.name")}
+          placeholder={t("shipping.zone_name_placeholder")}
           value={name}
           onChange={setName}
           onEnter={submit}
         />
         <TextInput
-          label="Countries"
-          description="Two-letter codes, separated by commas. A country is in one zone at most."
-          placeholder="HR, SI, DE"
+          label={t("common.countries")}
+          description={t("shipping.zone_countries_description")}
+          placeholder={t("shipping.zone_countries_placeholder")}
           value={countries}
           onChange={setCountries}
           onEnter={submit}
         />
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label={zone ? "Save" : "Add zone"}
+            label={zone ? t("common.save") : t("shipping.zone_dialog_submit_add")}
             variant="primary"
             isLoading={isPending}
             isDisabled={!name.trim() || !countries.trim()}
@@ -133,7 +151,16 @@ function ZoneDialog({ zone, onClose }: { zone?: Zone; onClose: () => void }) {
   );
 }
 
-function ZoneCard({ zone, providers }: { zone: Zone; providers: Provider[] }) {
+function ZoneCard({
+  zone,
+  providers,
+  canTranslate,
+}: {
+  zone: Zone;
+  providers: Provider[];
+  canTranslate: boolean;
+}) {
+  const t = useT<"shipping">();
   const [isEditing, setIsEditing] = useState(false);
   const [isAddingOption, setIsAddingOption] = useState(false);
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
@@ -164,13 +191,13 @@ function ZoneCard({ zone, providers }: { zone: Zone; providers: Provider[] }) {
             {isConfirmingDelete ? (
               <>
                 <Button
-                  label="Cancel"
+                  label={t("common.cancel")}
                   size="sm"
                   variant="ghost"
                   onClick={() => setIsConfirmingDelete(false)}
                 />
                 <Button
-                  label="Delete zone"
+                  label={t("shipping.zone_delete")}
                   size="sm"
                   variant="destructive"
                   isLoading={isPending}
@@ -186,14 +213,19 @@ function ZoneCard({ zone, providers }: { zone: Zone; providers: Provider[] }) {
             ) : (
               <>
                 <Button
-                  label="Add option"
+                  label={t("shipping.option_add")}
                   size="sm"
                   variant="secondary"
                   onClick={() => setIsAddingOption(true)}
                 />
-                <Button label="Edit" size="sm" variant="ghost" onClick={() => setIsEditing(true)} />
                 <Button
-                  label="Delete"
+                  label={t("common.edit")}
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setIsEditing(true)}
+                />
+                <Button
+                  label={t("common.delete")}
                   size="sm"
                   variant="ghost"
                   onClick={() => setIsConfirmingDelete(true)}
@@ -204,15 +236,15 @@ function ZoneCard({ zone, providers }: { zone: Zone; providers: Provider[] }) {
         </HStack>
         {error && <Banner status="error" title={error} />}
         {zone.options.length === 0 ? (
-          <Text color="secondary">No options yet: carts here can't choose shipping.</Text>
+          <Text color="secondary">{t("shipping.zone_no_options")}</Text>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHeaderCell>Option</TableHeaderCell>
-                <TableHeaderCell>Rate</TableHeaderCell>
-                <TableHeaderCell>Delivery</TableHeaderCell>
-                <TableHeaderCell>On</TableHeaderCell>
+                <TableHeaderCell>{t("shipping.options_column_option")}</TableHeaderCell>
+                <TableHeaderCell>{t("shipping.options_column_rate")}</TableHeaderCell>
+                <TableHeaderCell>{t("shipping.options_column_delivery")}</TableHeaderCell>
+                <TableHeaderCell>{t("common.on")}</TableHeaderCell>
                 <TableHeaderCell>
                   <span />
                 </TableHeaderCell>
@@ -225,6 +257,7 @@ function ZoneCard({ zone, providers }: { zone: Zone; providers: Provider[] }) {
                   zone={zone}
                   option={option}
                   providers={providers}
+                  canTranslate={canTranslate}
                   canMoveUp={index > 0}
                   canMoveDown={index < zone.options.length - 1}
                   onMove={(by) => move(index, by)}
@@ -247,6 +280,7 @@ function OptionRow({
   zone,
   option,
   providers,
+  canTranslate,
   canMoveUp,
   canMoveDown,
   onMove,
@@ -255,11 +289,14 @@ function OptionRow({
   zone: Zone;
   option: Option;
   providers: Provider[];
+  canTranslate: boolean;
   canMoveUp: boolean;
   canMoveDown: boolean;
   onMove: (by: -1 | 1) => void;
   onError: (error?: string) => void;
 }) {
+  const t = useT<"shipping">();
+  const format = useFormat();
   const currencies = useCurrencies();
   const [isEditing, setIsEditing] = useState(false);
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
@@ -271,7 +308,7 @@ function OptionRow({
         <VStack gap={0}>
           <HStack gap={1} vAlign="center">
             <Text>{option.name}</Text>
-            {option.is_backup && <Badge label="Backup" variant="warning" />}
+            {option.is_backup && <Badge label={t("shipping.option_backup")} variant="warning" />}
           </HStack>
           <Text type="supporting" color="secondary">
             {option.code}
@@ -279,16 +316,21 @@ function OptionRow({
         </VStack>
       </TableCell>
       <TableCell>
-        <Text>{describeRate(option.rate, currencies)}</Text>
+        <Text>{describeRate(t, format, option.rate, currencies)}</Text>
       </TableCell>
       <TableCell>
         <Text color="secondary">
-          {option.estimate ? `${option.estimate.min_days}–${option.estimate.max_days} days` : "—"}
+          {option.estimate
+            ? t("shipping.option_delivery_days", {
+                min: option.estimate.min_days,
+                max: option.estimate.max_days,
+              })
+            : t("common.empty_value")}
         </Text>
       </TableCell>
       <TableCell>
         <Switch
-          label={`Offer ${option.name}`}
+          label={t("shipping.option_offer", { name: option.name })}
           isLabelHidden
           size="sm"
           value={option.enabled}
@@ -302,13 +344,13 @@ function OptionRow({
           {isConfirmingDelete ? (
             <>
               <Button
-                label="Cancel"
+                label={t("common.cancel")}
                 size="sm"
                 variant="ghost"
                 onClick={() => setIsConfirmingDelete(false)}
               />
               <Button
-                label="Delete option"
+                label={t("shipping.option_delete_confirm")}
                 size="sm"
                 variant="destructive"
                 isLoading={isPending}
@@ -322,8 +364,11 @@ function OptionRow({
             </>
           ) : (
             <>
+              {canTranslate && (
+                <TranslateButton t={t} kind="shipping_option" id={option.id} isCompact />
+              )}
               <IconButton
-                label={`Move ${option.name} up`}
+                label={t("common.move_up_named", { name: option.name })}
                 icon={<ArrowUpIcon />}
                 size="sm"
                 variant="ghost"
@@ -331,7 +376,7 @@ function OptionRow({
                 onClick={() => onMove(-1)}
               />
               <IconButton
-                label={`Move ${option.name} down`}
+                label={t("common.move_down_named", { name: option.name })}
                 icon={<ArrowDownIcon />}
                 size="sm"
                 variant="ghost"
@@ -339,14 +384,14 @@ function OptionRow({
                 onClick={() => onMove(1)}
               />
               <IconButton
-                label={`Edit ${option.name}`}
+                label={t("common.edit_named", { name: option.name })}
                 icon={<PencilIcon />}
                 size="sm"
                 variant="ghost"
                 onClick={() => setIsEditing(true)}
               />
               <IconButton
-                label={`Delete ${option.name}`}
+                label={t("common.delete_named_label", { name: option.name })}
                 icon={<TrashIcon />}
                 size="sm"
                 variant="ghost"
@@ -389,6 +434,7 @@ function OptionDialog({
   providers: Provider[];
   onClose: () => void;
 }) {
+  const t = useT<"shipping">();
   const currencies = useCurrencies();
   const [name, setName] = useState(option?.name ?? "");
   const [code, setCode] = useState(option?.code);
@@ -403,14 +449,14 @@ function OptionDialog({
   const shownCode = code ?? codeFrom(name);
 
   const submit = () => {
-    const built = fromDraft(draft, currencies);
+    const built = fromDraft(t, draft, currencies);
     if ("error" in built) return setError(built.error);
     let estimate = null;
     if (minDays.trim() || maxDays.trim()) {
       const min = Number(minDays.trim() || maxDays.trim());
       const max = Number(maxDays.trim() || minDays.trim());
       if (!Number.isInteger(min) || !Number.isInteger(max) || min < 0 || max < 0) {
-        return setError("Enter delivery days as whole numbers, like 2 and 4.");
+        return setError(t("shipping.option_delivery_invalid"));
       }
       estimate = { min_days: min, max_days: max };
     }
@@ -427,7 +473,11 @@ function OptionDialog({
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={600} purpose="form">
       <DialogHeader
-        title={option ? `Edit ${option.name}` : `Add an option to ${zone.name}`}
+        title={
+          option
+            ? t("shipping.option_dialog_title_edit", { name: option.name })
+            : t("shipping.option_add_to", { zone: zone.name })
+        }
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       {/* The fields scroll (tier lists grow); the buttons stay in view below them. A flex
@@ -436,30 +486,30 @@ function OptionDialog({
         <VStack gap={4} padding={4}>
           <HStack gap={3}>
             <TextInput
-              label="Name"
-              description="What shoppers see."
-              placeholder="Standard"
+              label={t("common.name")}
+              description={t("shipping.option_name_description")}
+              placeholder={t("shipping.option_name_placeholder")}
               value={name}
               onChange={setName}
             />
             <TextInput
-              label="Code"
-              description="Stable, for apps and reports."
+              label={t("common.code")}
+              description={t("shipping.option_code_description")}
               value={shownCode}
               onChange={setCode}
             />
           </HStack>
           <Selector
-            label="Price"
+            label={t("common.price")}
             options={RATE_KINDS.map((kind) => ({
-              value: kind.value,
-              label: kind.label,
-              description: kind.description,
-              disabled: kind.value === "provider" && providers.length === 0,
+              value: kind,
+              label: t(`shipping.rate_kind_${kind}`),
+              description: t(`shipping.rate_kind_${kind}_description`),
+              disabled: kind === "provider" && providers.length === 0,
             }))}
             value={draft.kind}
             onChange={(value) => {
-              const kind = RATE_KINDS.find((k) => k.value === value)?.value;
+              const kind = RATE_KINDS.find((k) => k === value);
               if (kind) {
                 setDraft(emptyDraft(kind, "prices" in draft ? draft.prices[0].currency : "EUR"));
               }
@@ -468,14 +518,14 @@ function OptionDialog({
           <RateEditor draft={draft} providers={providers} onChange={setDraft} />
           <HStack gap={3}>
             <TextInput
-              label="Delivery, days from"
+              label={t("shipping.option_days_from")}
               placeholder="2"
               value={minDays}
               onChange={setMinDays}
               width={180}
             />
             <TextInput
-              label="Days to"
+              label={t("shipping.option_days_to")}
               placeholder="4"
               value={maxDays}
               onChange={setMaxDays}
@@ -483,8 +533,8 @@ function OptionDialog({
             />
           </HStack>
           <CheckboxInput
-            label="Backup"
-            description="Offered only when every rate app option of this zone fails, so an outage doesn't stop sales."
+            label={t("shipping.option_backup_label")}
+            description={t("shipping.option_backup_description")}
             value={isBackup}
             onChange={setIsBackup}
           />
@@ -493,9 +543,9 @@ function OptionDialog({
       <VStack gap={3} padding={4}>
         {error && <Banner status="error" title={error} />}
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label={option ? "Save" : "Add option"}
+            label={option ? t("common.save") : t("shipping.option_dialog_submit_add")}
             variant="primary"
             isLoading={isPending}
             isDisabled={!name.trim() || !shownCode}
@@ -517,21 +567,22 @@ function RateEditor({
   providers: Provider[];
   onChange: (draft: RateDraft) => void;
 }) {
+  const t = useT<"shipping">();
   const currencies = useCurrencies();
   if (draft.kind === "provider") {
     return (
       <HStack gap={3}>
         <Selector
-          label="Rate app"
-          placeholder="Choose an app"
+          label={t("shipping.rate_app_label")}
+          placeholder={t("shipping.rate_app_placeholder")}
           options={providers.map((p) => ({ value: p.key, label: p.name, description: p.key }))}
           value={draft.provider || undefined}
           onChange={(provider) => onChange({ ...draft, provider })}
         />
         <TextInput
-          label="Service"
-          description="The code the app quotes it under."
-          placeholder="express"
+          label={t("shipping.rate_service_label")}
+          description={t("shipping.rate_service_description")}
+          placeholder={t("shipping.rate_service_placeholder")}
           value={draft.service}
           onChange={(service) => onChange({ ...draft, service })}
         />
@@ -543,7 +594,7 @@ function RateEditor({
   const used =
     draft.kind === "flat"
       ? draft.prices.map((p) => p.currency)
-      : draft.tables.map((t) => t.currency);
+      : draft.tables.map((table) => table.currency);
   const unused = currencyCodes(currencies).filter((c) => !used.includes(c));
   const addCurrency = () => {
     const currency = unused[0];
@@ -561,7 +612,7 @@ function RateEditor({
   };
   const currencyPicker = (currency: Currency, set: (currency: Currency) => void) => (
     <Selector
-      label="Currency"
+      label={t("common.currency")}
       isLabelHidden
       size="sm"
       options={currencyCodes(currencies)
@@ -586,7 +637,7 @@ function RateEditor({
             <HStack key={row.currency} gap={2} vAlign="end">
               {currencyPicker(row.currency, (currency) => set({ currency }))}
               <TextInput
-                label={`Price (${row.currency})`}
+                label={t("shipping.rate_price_in", { currency: row.currency })}
                 placeholder="4.90"
                 value={row.price}
                 onChange={(price) => set({ price })}
@@ -605,13 +656,13 @@ function RateEditor({
             <HStack key={row.currency} gap={2} vAlign="end">
               {currencyPicker(row.currency, (currency) => set({ currency }))}
               <TextInput
-                label={`Price (${row.currency})`}
+                label={t("shipping.rate_price_in", { currency: row.currency })}
                 placeholder="4.90"
                 value={row.price}
                 onChange={(price) => set({ price })}
               />
               <TextInput
-                label={`Free from (${row.currency})`}
+                label={t("shipping.rate_free_from_in", { currency: row.currency })}
                 placeholder="50"
                 value={row.freeFrom}
                 onChange={(freeFrom) => set({ freeFrom })}
@@ -624,9 +675,8 @@ function RateEditor({
           const setTable = (patch: Partial<typeof table>) =>
             onChange({
               ...draft,
-              tables: draft.tables.map((t, j) => (j === i ? { ...t, ...patch } : t)),
+              tables: draft.tables.map((other, j) => (j === i ? { ...other, ...patch } : other)),
             });
-          const unit = draft.kind === "weight" ? "g" : table.currency;
           return (
             <VStack key={table.currency} gap={2}>
               {currencyPicker(table.currency, (currency) => setTable({ currency }))}
@@ -634,7 +684,9 @@ function RateEditor({
                 const isLast = k === table.tiers.length - 1;
                 const setTier = (patch: Partial<typeof tier>) =>
                   setTable({
-                    tiers: table.tiers.map((t, n) => (n === k ? { ...t, ...patch } : t)),
+                    tiers: table.tiers.map((other, n) =>
+                      n === k ? { ...other, ...patch } : other,
+                    ),
                   });
                 return (
                   // Tiers have no ID of their own; their place is what they are, and their
@@ -642,10 +694,16 @@ function RateEditor({
                   // oxlint-disable-next-line react/no-array-index-key
                   <HStack key={k} gap={2} vAlign="end">
                     {isLast ? (
-                      <Text color="secondary">{k === 0 ? "Any" : "Above that"}</Text>
+                      <Text color="secondary">
+                        {k === 0 ? t("shipping.rate_tier_any") : t("shipping.rate_tier_above")}
+                      </Text>
                     ) : (
                       <TextInput
-                        label={`Below (${unit})`}
+                        label={
+                          draft.kind === "weight"
+                            ? t("shipping.rate_below_weight")
+                            : t("shipping.rate_below_amount", { currency: table.currency })
+                        }
                         placeholder={draft.kind === "weight" ? "1000" : "50"}
                         value={tier.upTo}
                         onChange={(upTo) => setTier({ upTo })}
@@ -653,7 +711,7 @@ function RateEditor({
                       />
                     )}
                     <TextInput
-                      label={`Price (${table.currency})`}
+                      label={t("shipping.rate_price_in", { currency: table.currency })}
                       placeholder="4.90"
                       value={tier.price}
                       onChange={(price) => setTier({ price })}
@@ -661,7 +719,7 @@ function RateEditor({
                     />
                     {table.tiers.length > 1 && !isLast && (
                       <Button
-                        label="Remove"
+                        label={t("common.remove")}
                         size="sm"
                         variant="ghost"
                         onClick={() => setTable({ tiers: table.tiers.filter((_, n) => n !== k) })}
@@ -672,7 +730,7 @@ function RateEditor({
               })}
               <HStack>
                 <Button
-                  label="Add tier"
+                  label={t("shipping.rate_tier_add")}
                   size="sm"
                   variant="ghost"
                   onClick={() =>
@@ -691,7 +749,12 @@ function RateEditor({
         })}
       {unused.length > 0 && (
         <HStack>
-          <Button label="Add a currency" size="sm" variant="ghost" onClick={addCurrency} />
+          <Button
+            label={t("shipping.rate_currency_add")}
+            size="sm"
+            variant="ghost"
+            onClick={addCurrency}
+          />
         </HStack>
       )}
     </VStack>

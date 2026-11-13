@@ -25,7 +25,7 @@ export async function createCategory(input: {
 }): Promise<Result> {
   const client = await sessionClient();
   const { data, error } = await client.POST("/admin/categories", { body: input });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   redirect(`/products/categories/${data.id}`);
 }
@@ -40,7 +40,7 @@ export async function updateCategory(
     params: { path: { id } },
     body,
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(id);
   return {};
 }
@@ -49,7 +49,7 @@ export async function updateCategory(
 export async function deleteCategory(id: string): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.DELETE("/admin/categories/{id}", { params: { path: { id } } });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   redirect("/products/categories");
 }
@@ -60,7 +60,7 @@ export async function addCategoryProducts(id: string, products: string[]): Promi
     params: { path: { id } },
     body: { products },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(id);
   return {};
 }
@@ -71,7 +71,7 @@ export async function removeCategoryProduct(id: string, product: string): Promis
     params: { path: { id } },
     body: { products: [product] },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(id);
   return {};
 }
@@ -83,7 +83,7 @@ export async function setCategoryImage(id: string, image: string | null): Promis
     params: { path: { id } },
     body: { image },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(id);
   revalidatePath("/media");
   return {};

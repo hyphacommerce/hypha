@@ -15,7 +15,7 @@ export async function retryDelivery(key: string, id: string): Promise<Result> {
   const { error } = await client.POST("/admin/apps/{key}/deliveries/{id}/retry", {
     params: { path: { key, id } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/apps/${key}/deliveries`);
   return {};
 }
@@ -28,7 +28,7 @@ export async function retryDelivery(key: string, id: string): Promise<Result> {
 export async function removeApp(key: string, isDelete: boolean): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.DELETE("/admin/apps/{key}", { params: { path: { key } } });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath("/apps");
   if (isDelete) redirect("/apps");
   revalidatePath(`/apps/${key}`);
@@ -44,7 +44,7 @@ export async function narrowGrant(key: string, scopes: AdminSchemas["Scope"][]):
     params: { path: { key } },
     body: { scopes },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/apps/${key}`);
   return {};
 }
@@ -81,7 +81,7 @@ export async function saveSporeSettings(
     body: { settings },
   });
   if (error) {
-    return { error: describe(error), fields: fieldProblems(error.details) };
+    return { error: await describe(error), fields: fieldProblems(error.details) };
   }
   revalidatePath(`/apps/${key}`);
   return {};
@@ -94,7 +94,7 @@ export async function setAppEnabled(key: string, enabled: boolean): Promise<Resu
     params: { path: { key } },
     body: { enabled },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/apps/${key}`);
   revalidatePath("/apps");
   return {};

@@ -10,6 +10,8 @@ import { Text } from "@astryxdesign/core/Text";
 import { Token } from "@astryxdesign/core/Token";
 import { UsersIcon } from "@heroicons/react/24/outline";
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
+
+import type { KeyIn } from "@/lib/messages";
 import { useState } from "react";
 
 import { customFieldFilters } from "@/components/custom-fields/filters";
@@ -22,6 +24,8 @@ import {
 } from "@/components/resource-table/resource-table";
 import { type Definition, filterParam } from "@/lib/custom-fields";
 import { customerName } from "@/lib/format";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 import { textItems } from "@/lib/well-known-fields";
 
 import type { Group } from "@/app/(admin)/customers/groups/groups";
@@ -38,29 +42,20 @@ const SHOWN_LABELS = 3;
 
 type Customer = AdminSchemas["CustomerSummaryResponse"];
 
-const SORT_OPTIONS: SortOption[] = [
-  { value: "newest", label: "Newest" },
-  { value: "oldest", label: "Oldest" },
-  { value: "name_asc", label: "Name A–Z" },
-  { value: "name_desc", label: "Name Z–A" },
-  { value: "email_asc", label: "Email A–Z" },
-  { value: "email_desc", label: "Email Z–A" },
+/** Every order the list offers, as the API names them. */
+const SORT_OPTIONS: { value: string; label: KeyIn<"common" | "customers"> }[] = [
+  { value: "newest", label: "common.sort_newest" },
+  { value: "oldest", label: "common.sort_oldest" },
+  { value: "name_asc", label: "customers.list_sort_name_asc" },
+  { value: "name_desc", label: "customers.list_sort_name_desc" },
+  { value: "email_asc", label: "customers.list_sort_email_asc" },
+  { value: "email_desc", label: "customers.list_sort_email_desc" },
 ];
-
 const SORTS: Record<string, SortDef> = {
   name: { asc: "name_asc", desc: "name_desc" },
   email: { asc: "email_asc", desc: "email_desc" },
   created: { asc: "oldest", desc: "newest" },
 };
-
-const FILTERS: FilterDef[] = [
-  {
-    kind: "search",
-    param: "q",
-    label: "Search",
-    placeholder: "Search customers by email, name or phone",
-  },
-];
 
 export function CustomersTable({
   page,
@@ -80,23 +75,35 @@ export function CustomersTable({
   /** `customers:write`: labels and groups can be changed on the selection. */
   canLabel?: boolean;
 }) {
+  const t = useT<"customers">();
+  const format = useFormat();
   const [outcome, setOutcome] = useState<BulkOutcome>();
+  const sortOptions: SortOption[] = SORT_OPTIONS.map(({ value, label }) => ({
+    value,
+    label: t(label),
+  }));
+  const search: FilterDef = {
+    kind: "search",
+    param: "q",
+    label: t("common.search"),
+    placeholder: t("customers.list_search_placeholder"),
+  };
   const groupFilter: FilterDef[] =
     groups.length > 0
       ? [
           {
             kind: "select",
             param: "group",
-            label: "Group",
+            label: t("customers.group"),
             options: groups.map((g) => ({ value: g.id, label: g.name })),
           },
         ]
       : [];
-  const filters = [...FILTERS, ...groupFilter, ...customFieldFilters(fieldFilters)];
+  const filters = [search, ...groupFilter, ...customFieldFilters(fieldFilters, t)];
   const columns: TableColumn<Customer>[] = [
     {
       key: "name",
-      header: "Customer",
+      header: t("common.customer"),
       width: proportional(2, { minWidth: 200 }),
       renderCell: (c) => (
         <VStack gap={0.5}>
@@ -119,7 +126,9 @@ export function CustomersTable({
             width: proportional(1, { minWidth: 160 }),
             renderCell: (c: Customer) => {
               const items = textItems(c.custom_fields?.[labels.field]);
-              if (items.length === 0) return <Text color="secondary">—</Text>;
+              if (items.length === 0) {
+                return <Text color="secondary">{t("common.empty_value")}</Text>;
+              }
               return (
                 <HStack gap={1} wrap="wrap">
                   {items.slice(0, SHOWN_LABELS).map((label) => (
@@ -132,7 +141,7 @@ export function CustomersTable({
                   ))}
                   {items.length > SHOWN_LABELS && (
                     <Text type="supporting" color="secondary">
-                      +{items.length - SHOWN_LABELS}
+                      +{format.number(items.length - SHOWN_LABELS)}
                     </Text>
                   )}
                 </HStack>
@@ -143,13 +152,18 @@ export function CustomersTable({
       : []),
     {
       key: "phone",
-      header: "Phone",
-      renderCell: (c) => c.phone ?? <Text color="secondary">—</Text>,
+      header: t("common.phone"),
+      renderCell: (c) => c.phone ?? <Text color="secondary">{t("common.empty_value")}</Text>,
     },
-    { key: "address_count", header: "Addresses", width: pixel(100), align: "end" },
+    {
+      key: "address_count",
+      header: t("customers.list_column_addresses"),
+      width: pixel(100),
+      align: "end",
+    },
     {
       key: "created",
-      header: "Since",
+      header: t("customers.list_column_since"),
       width: pixel(190),
       renderCell: (c) => <DateTime value={c.created_at} short />,
     },
@@ -157,13 +171,7 @@ export function CustomersTable({
   const bulk = canLabel && (labels !== undefined || groups.length > 0);
   return (
     <VStack gap={3}>
-      {outcome && (
-        <BulkOutcomeBanner
-          outcome={outcome}
-          noun="customer"
-          onClose={() => setOutcome(undefined)}
-        />
-      )}
+      {outcome && <BulkOutcomeBanner outcome={outcome} onClose={() => setOutcome(undefined)} />}
       <ResourceTable<Customer>
         rows={page?.items}
         nextCursor={page?.next_cursor}
@@ -188,17 +196,17 @@ export function CustomersTable({
         }
         filters={filters}
         sorts={SORTS}
-        sortOptions={SORT_OPTIONS}
+        sortOptions={sortOptions}
         defaultSort="newest"
         error={page?.error}
         empty={{
           icon: <UsersIcon width={32} />,
-          title: "No customers yet",
-          description: "Checkout adds a customer for each new email; they show up here.",
+          title: t("customers.list_empty_title"),
+          description: t("customers.list_empty_description"),
         }}
         noResults={{
-          title: "No customers match",
-          description: "Search looks at emails, names and phones.",
+          title: t("customers.list_no_results_title"),
+          description: t("customers.list_no_results_description"),
         }}
       />
     </VStack>

@@ -1,0 +1,74 @@
+{
+  "name": "@hyphacommerce/i18n",
+  "version": "0.1.0-beta.4",
+  "description": "Translations for Hypha's apps: ICU MessageFormat catalogs with typed keys, language matching and storefront locale segments, a React provider, a pseudo-language and a catalog check. Web APIs only, so it runs on Node, Workers and in browsers.",
+  "homepage": "https://hyphacommerce.com",
+  "bugs": "https://github.com/hyphacommerce/hypha/issues",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hyphacommerce/hypha.git",
+    "directory": "packages/i18n"
+  },
+  "bin": {
+    "hypha-i18n-check": "./scripts/check.ts"
+  },
+  "files": [
+    "dist",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "README.md"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./react": "./src/react.ts",
+    "./check": "./src/check.ts"
+  },
+  "publishConfig": {
+    "bin": {
+      "hypha-i18n-check": "./dist/bin.mjs"
+    },
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./react": {
+        "types": "./dist/react.d.ts",
+        "default": "./dist/react.js"
+      },
+      "./check": {
+        "types": "./dist/check.d.ts",
+        "default": "./dist/check.js"
+      }
+    },
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "test": "node --test src/*.test.ts scripts/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@formatjs/icu-messageformat-parser": "3.5.18",
+    "intl-messageformat": "11.2.15"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "typescript": "5.9.3"
+  },
+  "peerDependencies": {
+    "react": ">=19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  }
+}

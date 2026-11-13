@@ -15,52 +15,61 @@ import {
   ResourceTable,
   type View,
 } from "@/components/resource-table/resource-table";
+import type { DiscountsT } from "@/lib/discounts/validate";
 import { type Discount, methodLabel, usesLabel } from "@/lib/discounts/wire";
-import { PHASES } from "@/lib/price-lists";
+import type { Format } from "@/lib/format";
+import { phaseOptions } from "@/lib/price-lists";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { ListWindow } from "../markets/price-lists/price-lists-table";
 
-const FILTERS: FilterDef[] = [
-  { kind: "search", param: "q", label: "Search", placeholder: "Search titles and codes" },
+const filters = (t: DiscountsT): FilterDef[] => [
+  {
+    kind: "search",
+    param: "q",
+    label: t("common.search"),
+    placeholder: t("discounts.list_search_placeholder"),
+  },
   {
     kind: "select",
     param: "status",
-    label: "Status",
-    options: PHASES.map((p) => ({ value: p.value, label: p.label })),
+    label: t("common.status"),
+    options: phaseOptions(t),
   },
   {
     kind: "select",
     param: "method",
-    label: "Method",
+    label: t("discounts.list_filter_method"),
     options: [
-      { value: "codes", label: "Codes" },
-      { value: "automatic", label: "Automatic" },
+      { value: "codes", label: t("discounts.list_method_codes") },
+      { value: "automatic", label: t("discounts.list_method_automatic") },
     ],
   },
   {
     kind: "select",
     param: "class",
-    label: "Takes off",
+    label: t("discounts.list_filter_class"),
     options: [
-      { value: "product", label: "Products" },
-      { value: "order", label: "The order" },
-      { value: "shipping", label: "Shipping" },
+      { value: "product", label: t("common.products") },
+      { value: "order", label: t("discounts.list_class_order") },
+      { value: "shipping", label: t("common.shipping") },
     ],
   },
 ];
 
-const VIEWS: View[] = [
-  { label: "All", params: {} },
-  { label: "Active", params: { status: ["active"] } },
-  { label: "Scheduled", params: { status: ["scheduled"] } },
-  { label: "Codes", params: { method: ["codes"] } },
-  { label: "Automatic", params: { method: ["automatic"] } },
+const views = (t: DiscountsT): View[] => [
+  { label: t("common.all"), params: {} },
+  { label: t("common.active"), params: { status: ["active"] } },
+  { label: t("discounts.list_view_scheduled"), params: { status: ["scheduled"] } },
+  { label: t("discounts.list_view_codes"), params: { method: ["codes"] } },
+  { label: t("discounts.list_view_automatic"), params: { method: ["automatic"] } },
 ];
 
-const COLUMNS: TableColumn<Discount>[] = [
+const columns = (t: DiscountsT, format: Format): TableColumn<Discount>[] => [
   {
     key: "title",
-    header: "Discount",
+    header: t("discounts.list_column_discount"),
     width: proportional(2, { minWidth: 200 }),
     renderCell: (d) => (
       <Link href={`/discounts/${d.id}`} weight="semibold" color="primary">
@@ -70,13 +79,13 @@ const COLUMNS: TableColumn<Discount>[] = [
   },
   {
     key: "method",
-    header: "Method",
+    header: t("discounts.list_column_method"),
     width: pixel(130),
-    renderCell: (d) => <Text>{methodLabel(d)}</Text>,
+    renderCell: (d) => <Text>{methodLabel(d, t)}</Text>,
   },
   {
     key: "summary",
-    header: "Gives",
+    header: t("discounts.list_column_gives"),
     width: proportional(4, { minWidth: 260 }),
     renderCell: (d) => (
       <Text type="supporting" maxLines={2}>
@@ -86,22 +95,22 @@ const COLUMNS: TableColumn<Discount>[] = [
   },
   {
     key: "phase",
-    header: "Status",
+    header: t("common.status"),
     width: pixel(120),
-    renderCell: (d) => <DiscountStatusBadge phase={d.phase} />,
+    renderCell: (d) => <DiscountStatusBadge t={t} phase={d.phase} />,
   },
   {
     key: "window",
-    header: "When",
+    header: t("discounts.list_column_when"),
     width: pixel(170),
     renderCell: (d) => <ListWindow list={d} />,
   },
   {
     key: "used",
-    header: "Uses",
+    header: t("discounts.list_column_uses"),
     width: pixel(110),
     align: "end",
-    renderCell: (d) => <Text>{usesLabel(d)}</Text>,
+    renderCell: (d) => <Text>{usesLabel(d, t, format)}</Text>,
   },
 ];
 
@@ -113,26 +122,29 @@ export function DiscountsTable({
   page?: { items: Discount[]; next_cursor: string | null; error?: string };
   canWrite: boolean;
 }) {
+  const t = useT<"discounts">();
+  const format = useFormat();
   return (
     <ResourceTable<Discount>
       rows={page?.items}
       nextCursor={page?.next_cursor}
       isLoading={!page}
-      columns={COLUMNS}
+      columns={columns(t, format)}
       idKey="id"
       rowHref={(d) => `/discounts/${d.id}`}
       isSelectable={false}
-      filters={FILTERS}
-      views={VIEWS}
+      filters={filters(t)}
+      views={views(t)}
       error={page?.error}
       empty={{
         icon: <ReceiptPercentIcon width={32} />,
-        title: "No discounts yet",
-        description:
-          "A code for a newsletter, free shipping over an amount, buy one get one: start from a template.",
-        action: canWrite ? <Button label="Create discount" href="/discounts/new" /> : undefined,
+        title: t("discounts.list_empty_title"),
+        description: t("discounts.list_empty_description"),
+        action: canWrite ? (
+          <Button label={t("discounts.create")} href="/discounts/new" />
+        ) : undefined,
       }}
-      noResults={{ title: "No discounts match these filters" }}
+      noResults={{ title: t("discounts.list_no_results") }}
     />
   );
 }

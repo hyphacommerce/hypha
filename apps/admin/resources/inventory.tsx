@@ -18,16 +18,12 @@ import {
   type View,
 } from "@/components/resource-table/resource-table";
 import { LOW_STOCK } from "@/lib/inventory";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 type Item = AdminSchemas["InventoryItemSummaryResponse"];
 
 const NO_NAMES: Record<string, string> = {};
-
-const VIEWS: View[] = [
-  { label: "All", params: {} },
-  { label: "Running low", params: { below: [String(LOW_STOCK)] } },
-  { label: "Out of stock", params: { below: ["1"] } },
-];
 
 const BELOW = [1, LOW_STOCK, 10, 25, 100];
 
@@ -58,28 +54,41 @@ export function InventoryTable({
   /** The location the list is filtered by: the counts shown are that location's. */
   location?: string;
 }) {
+  const t = useT<"inventory">();
+  const format = useFormat();
+  const views: View[] = [
+    { label: t("common.all"), params: {} },
+    { label: t("inventory.view_low"), params: { below: [String(LOW_STOCK)] } },
+    { label: t("inventory.view_out"), params: { below: ["1"] } },
+  ];
   const filters: FilterDef[] = [
-    { kind: "search", param: "sku", label: "SKU", placeholder: "Find a variant by its exact SKU" },
+    {
+      kind: "search",
+      param: "sku",
+      label: t("common.sku"),
+      placeholder: t("inventory.filter_sku_placeholder"),
+    },
     {
       kind: "select",
       param: "below",
-      label: "Available",
+      label: t("inventory.filter_available"),
       options: BELOW.map((n) => ({
         value: String(n),
-        label: n === 1 ? "None available" : `Fewer than ${n}`,
+        label:
+          n === 1 ? t("inventory.filter_below_none") : t("inventory.filter_below", { count: n }),
       })),
     },
     {
       kind: "select",
       param: "location",
-      label: "Location",
+      label: t("common.location"),
       options: Object.entries(locations).map(([value, label]) => ({ value, label })),
     },
   ];
   const columns: TableColumn<Item>[] = [
     {
       key: "product",
-      header: "Product",
+      header: t("common.product"),
       renderCell: (item) => (
         <VStack gap={0.5} hAlign="start">
           {item.product ? (
@@ -87,7 +96,7 @@ export function InventoryTable({
               {item.product_title ?? item.product}
             </Link>
           ) : (
-            <Text color="secondary">Removed product</Text>
+            <Text color="secondary">{t("inventory.removed_product")}</Text>
           )}
           {item.variant_title && (
             <Text type="supporting" color="secondary">
@@ -99,34 +108,38 @@ export function InventoryTable({
     },
     {
       key: "sku",
-      header: "SKU",
+      header: t("common.sku"),
       width: pixel(160),
       renderCell: (item) =>
         item.sku ? <Text type="code">{item.sku}</Text> : <Text color="secondary">—</Text>,
     },
     {
       key: "on_hand",
-      header: "On hand",
+      header: t("inventory.on_hand"),
       width: pixel(100),
       align: "end",
-      renderCell: (item) => <Text hasTabularNumbers>{countsAt(item, location).on_hand}</Text>,
+      renderCell: (item) => (
+        <Text hasTabularNumbers>{format.number(countsAt(item, location).on_hand)}</Text>
+      ),
     },
     {
       key: "reserved",
-      header: "Reserved",
+      header: t("inventory.reserved"),
       width: pixel(100),
       align: "end",
-      renderCell: (item) => <Text hasTabularNumbers>{countsAt(item, location).reserved}</Text>,
+      renderCell: (item) => (
+        <Text hasTabularNumbers>{format.number(countsAt(item, location).reserved)}</Text>
+      ),
     },
     {
       key: "incoming",
-      header: "Incoming",
+      header: t("inventory.incoming"),
       width: pixel(100),
       align: "end",
       renderCell: (item) => {
         const incoming = incomingAt(item, location);
         return incoming > 0 ? (
-          <Text hasTabularNumbers>{incoming}</Text>
+          <Text hasTabularNumbers>{format.number(incoming)}</Text>
         ) : (
           <Text color="secondary">—</Text>
         );
@@ -134,22 +147,26 @@ export function InventoryTable({
     },
     {
       key: "available",
-      header: "Available",
+      header: t("inventory.available"),
       width: pixel(150),
       align: "end",
       renderCell: (item) => {
         const { available } = countsAt(item, location);
         return !item.tracked ? (
-          <Badge label="Not tracked" variant="neutral" />
+          <Badge label={t("inventory.not_tracked")} variant="neutral" />
         ) : available <= 0 ? (
           <Badge
-            label={item.continue_selling ? `${available}, still selling` : `${available}`}
+            label={
+              item.continue_selling
+                ? t("inventory.available_still_selling", { count: available })
+                : format.number(available)
+            }
             variant="error"
           />
         ) : available < LOW_STOCK ? (
-          <Badge label={String(available)} variant="warning" />
+          <Badge label={format.number(available)} variant="warning" />
         ) : (
-          <Text hasTabularNumbers>{available}</Text>
+          <Text hasTabularNumbers>{format.number(available)}</Text>
         );
       },
     },
@@ -165,17 +182,17 @@ export function InventoryTable({
         item.product ? `/inventory/${item.id}?product=${item.product}` : `/inventory/${item.id}`
       }
       isSelectable={false}
-      views={VIEWS}
+      views={views}
       filters={filters}
       error={page?.error}
       empty={{
         icon: <ArchiveBoxIcon width={32} />,
-        title: "No stock yet",
-        description: "Each variant's stock shows here once its product has variants.",
+        title: t("inventory.list_empty_title"),
+        description: t("inventory.list_empty_description"),
       }}
       noResults={{
-        title: "Nothing here",
-        description: "No variant matches: nothing is this low, or no SKU is exactly that.",
+        title: t("inventory.no_results_title"),
+        description: t("inventory.list_no_results_description"),
       }}
     />
   );

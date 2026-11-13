@@ -8,6 +8,7 @@ import { revalidatePath } from "next/cache";
 
 import { type FieldProblems, problemsOf } from "@/lib/address";
 import { describe, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import { WELL_KNOWN, type WellKnown, suggestionBody } from "@/lib/well-known-fields";
 
 /** The outcome of an edit: a message to show, if it failed, and an address's problems
@@ -28,7 +29,7 @@ function refresh(customer: string) {
 export async function updateCustomer(id: string, body: UpdateCustomerRequest): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.PATCH("/admin/customers/{id}", { params: { path: { id } }, body });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(id);
   return {};
 }
@@ -52,9 +53,10 @@ export async function saveAddress(
   if (error) {
     const problems = problemsOf(error);
     if (problems && Object.keys(problems).length > 0) {
-      return { error: "Check the highlighted fields.", problems };
+      const t = await getT();
+      return { error: t("common.check_highlighted_fields"), problems };
     }
-    return { error: describe(error) };
+    return { error: await describe(error) };
   }
   refresh(customer);
   return {};
@@ -74,7 +76,7 @@ export async function setConsent(
     params: { path: { id, channel } },
     body,
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(id);
   return { applied: data.applied };
 }
@@ -85,7 +87,7 @@ export async function revokeSessions(id: string): Promise<Result> {
   const { error } = await client.POST("/admin/customers/{id}/sessions/revoke", {
     params: { path: { id } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(id);
   return {};
 }
@@ -96,7 +98,7 @@ export async function requestErasure(id: string): Promise<Result> {
   const { error } = await client.POST("/admin/customers/{id}/erasure", {
     params: { path: { id } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(id);
   return {};
 }
@@ -107,7 +109,7 @@ export async function cancelErasure(id: string): Promise<Result> {
   const { error } = await client.DELETE("/admin/customers/{id}/erasure", {
     params: { path: { id } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(id);
   return {};
 }
@@ -116,7 +118,7 @@ export async function cancelErasure(id: string): Promise<Result> {
 export async function deleteCustomer(id: string): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.DELETE("/admin/customers/{id}", { params: { path: { id } } });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath("/customers");
   return {};
 }
@@ -126,7 +128,7 @@ export async function removeAddress(customer: string, address: string): Promise<
   const { error } = await client.DELETE("/admin/customers/{id}/addresses/{address_id}", {
     params: { path: { id: customer, address_id: address } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(customer);
   return {};
 }
@@ -150,22 +152,20 @@ export async function labelsInUse(definition: string): Promise<string[]> {
  * Custom fields would.
  */
 export async function addWellKnownField(which: WellKnown): Promise<Result> {
-  const client = await sessionClient();
+  const [client, t] = await Promise.all([sessionClient(), getT()]);
   const suggestions = await client.GET("/admin/custom-field-definitions/suggestions", {
     params: { query: { owner_type: "customer" } },
   });
-  if (suggestions.error) return { error: describe(suggestions.error) };
+  if (suggestions.error) return { error: await describe(suggestions.error) };
   const suggestion = suggestions.data.items.find((s) => s.key === WELL_KNOWN[which].key);
-  if (!suggestion) return { error: "The API doesn't offer this field." };
+  if (!suggestion) return { error: t("customers.well_known_not_offered") };
   if (suggestion.existing) {
-    return {
-      error: `A field ${suggestion.field} exists already, with another shape. Find it under Settings → Custom fields.`,
-    };
+    return { error: t("customers.well_known_exists", { field: suggestion.field }) };
   }
   const { error } = await client.POST("/admin/custom-field-definitions", {
     body: suggestionBody(suggestion),
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   // Definitions shape every customer page and the list's filters.
   revalidatePath("/", "layout");
   return {};

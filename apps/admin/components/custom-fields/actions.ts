@@ -9,6 +9,7 @@ import { flatten } from "@/lib/categories";
 import { type FieldsResponse, type OwnerType, jsonObject, problemsOf } from "@/lib/custom-fields";
 import { customerName } from "@/lib/format";
 import { describe, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 
 export type FieldsResult = {
   fields?: FieldsResponse;
@@ -55,7 +56,7 @@ async function read(
 export async function loadCustomFields(owner: OwnerType, id: string): Promise<FieldsResult> {
   const client = await sessionClient();
   const { data, error } = await read(client, owner, id);
-  return error ? { error: describe(error) } : { fields: data };
+  return error ? { error: await describe(error) } : { fields: data };
 }
 
 /** Writes `patch` (a JSON Merge Patch of the values) to the owner's fields. */
@@ -87,8 +88,8 @@ export async function saveCustomFields(
   if (page) revalidatePath(page);
   if (result.error) {
     return {
-      error: describe(result.error),
-      problems: problemsOf(result.error.code, result.error.details),
+      error: await describe(result.error),
+      problems: problemsOf(result.error.code, result.error.details, await getT()),
     };
   }
   return { fields: result.data };
@@ -99,9 +100,9 @@ export async function lookupReference(
   kind: string,
   id: string,
 ): Promise<{ label?: string; error?: string }> {
-  const client = await sessionClient();
+  const [client, t] = await Promise.all([sessionClient(), getT()]);
   const path = { params: { path: { id } } };
-  const missing = { error: "Nothing with that ID." };
+  const missing = { error: t("custom_fields.lookup_missing") };
   switch (kind) {
     case "product": {
       const { data } = await client.GET("/admin/products/{id}", path);
@@ -109,7 +110,7 @@ export async function lookupReference(
     }
     case "variant": {
       const { data } = await client.GET("/admin/variants/{id}/inventory", path);
-      return data ? { label: "A variant of a product" } : missing;
+      return data ? { label: t("custom_fields.lookup_variant") } : missing;
     }
     case "category": {
       const { data } = await client.GET("/admin/categories/{id}", path);

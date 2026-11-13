@@ -7,7 +7,7 @@ use hypha_auth::{
     list_sessions, regenerate_recovery_codes, revoke_other_sessions, revoke_session, start_totp,
 };
 use hypha_core::{RoleId, Scope, SessionId};
-use hypha_users::{HasUsers, StaffSession, rename_me, require_unlocked};
+use hypha_users::{HasUsers, StaffSession, UpdateMe, require_unlocked, update_me};
 use serde::{Deserialize, Serialize};
 
 use super::{rfc3339, staff::UserResponse};
@@ -77,10 +77,16 @@ pub struct UpdateMeRequest {
     // Optional, but `null` is refused (`patch::non_null`): not nullable in the spec.
     #[schema(value_type = String, required = false)]
     name: Option<String>,
+    /// The language to read the admin in (a BCP 47 tag, `invalid_language` otherwise),
+    /// or `null` to go by the browser's languages. Any tag: the admin matches it against
+    /// its own translations, so it needn't be one of the store's languages.
+    #[serde(default, deserialize_with = "patch::nullable")]
+    language: Option<Option<String>>,
 }
 
-/// Changes the caller's own name. Needs no scope: everyone may name themselves
-/// (changing someone else is `PATCH /admin/users/{id}`, with `users:write`).
+/// Changes the caller's own name or language. Needs no scope: everyone may name
+/// themselves and pick their language (changing someone else is
+/// `PATCH /admin/users/{id}`, with `users:write`).
 #[utoipa::path(
     patch,
     path = "/admin/me",
@@ -96,9 +102,11 @@ pub async fn update<S: Storage>(
     let (ports, mut staff) = staff.authenticate(&state).await?;
     require_unlocked(&staff, state.env.staff_settings())?;
     let req = body.parse()?;
-    if let Some(name) = &req.name {
-        staff.user = rename_me(ports.users(), staff.user.id(), name).await?;
-    }
+    let input = UpdateMe {
+        name: req.name,
+        language: req.language,
+    };
+    staff.user = update_me(ports.users(), staff.user.id(), input).await?;
     me_response(&ports, &staff).await.map(Json)
 }
 

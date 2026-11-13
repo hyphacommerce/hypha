@@ -2469,6 +2469,9 @@ async function main() {
         "discount.deleted",
         "discount.started",
         "discount.ended",
+        "translation.updated",
+        "translation.deleted",
+        "store.updated",
       ],
       webhook: { url: `${STOREFRONT_URL}/api/revalidate` },
     });

@@ -108,6 +108,11 @@
             "2h",
             "6h"
           ]
+        },
+        "translation_sources": {
+          "batch": 100,
+          "enabled": true,
+          "interval": "1m"
         }
       }
     },
@@ -602,6 +607,14 @@
               "2h",
               "6h"
             ]
+          }
+        },
+        "translation_sources": {
+          "$ref": "#/$defs/TranslationSourcesJob",
+          "default": {
+            "batch": 100,
+            "enabled": true,
+            "interval": "1m"
           }
         }
       },
@@ -1121,6 +1134,28 @@
           "const": "cloudflare"
         }
       ]
+    },
+    "TranslationSourcesJob": {
+      "description": "Keeping the translation worklist's sources up to date for the resources queued as a\nwhole: every resource there was when it was first set up, and every product or\ncategory when a custom field definition's access changes. Single changes follow by\nevent, without it. A Workers host runs it on the minute's ticks that have work.",
+      "type": "object",
+      "properties": {
+        "batch": {
+          "description": "Resources read again per step (1 to 1,000).",
+          "type": "integer",
+          "format": "uint32",
+          "default": 100,
+          "minimum": 0
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "interval": {
+          "$ref": "#/$defs/Duration",
+          "default": "1m"
+        }
+      },
+      "additionalProperties": false
     },
     "Webhooks": {
       "description": "When failed deliveries (webhooks and in-process handlers) are tried again.",

@@ -30,6 +30,8 @@ import {
   unitsOf,
 } from "@/lib/custom-fields";
 import { currencyCodes } from "@/lib/format";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { ReferenceInput, ReferenceListPicker } from "./reference-input";
 
@@ -76,6 +78,8 @@ export function CustomFieldInput({
   /** What's wrong with the value, from the form or the API. */
   error?: string;
 }) {
+  const t = useT<"custom_fields">();
+  const format = useFormat();
   const currencies = useCurrencies();
   const { base, isList } = parseType(definition.type);
   const label = definition.name;
@@ -101,15 +105,21 @@ export function CustomFieldInput({
     } else {
       const unit =
         base === "measurement"
-          ? `Each with its unit: ${unitsOf(v.dimension).join(", ")}.`
+          ? t("custom_fields.input_list_units", {
+              units: format.list(unitsOf(v.dimension), "unit"),
+            })
           : undefined;
-      const money = base === "money" ? "Each amount with its currency, like 12.50 EUR." : undefined;
+      const money = base === "money" ? t("custom_fields.input_list_money") : undefined;
       control = (
         <VStack gap={1}>
           <Tokenizer
             {...common}
             description={descriptionOf(definition, unit ?? money)}
-            placeholder={PLACEHOLDERS[base] ? `Add, like ${PLACEHOLDERS[base]}` : "Add…"}
+            placeholder={
+              PLACEHOLDERS[base]
+                ? t("custom_fields.input_list_add_like", { example: PLACEHOLDERS[base] })
+                : t("custom_fields.input_list_add")
+            }
             searchSource={noSuggestions}
             hasCreate
             debounceMs={0}
@@ -154,7 +164,7 @@ export function CustomFieldInput({
           onChange={(amount) => onChange({ ...input, amount })}
         />
         <Selector
-          label={`Currency of ${label}`}
+          label={t("custom_fields.input_currency_of", { field: label })}
           isLabelHidden
           options={allowed.map((c) => ({ value: c, label: c }))}
           value={input.currency}
@@ -177,7 +187,7 @@ export function CustomFieldInput({
           onChange={(value) => onChange({ ...input, value })}
         />
         <Selector
-          label={`Unit of ${label}`}
+          label={t("custom_fields.input_unit_of", { field: label })}
           isLabelHidden
           options={units.map((u) => ({ value: u, label: u.replace("_", " ") }))}
           value={input.unit}
@@ -224,7 +234,7 @@ export function CustomFieldInput({
         control = (
           <TextArea
             {...common}
-            description={descriptionOf(definition, "JSON, checked when saving.")}
+            description={descriptionOf(definition, t("custom_fields.input_json_hint"))}
             value={text}
             onChange={set}
             rows={5}
@@ -237,7 +247,7 @@ export function CustomFieldInput({
           <Selector
             {...common}
             description={descriptionOf(definition)}
-            placeholder="None"
+            placeholder={t("common.none")}
             options={(v.choices ?? []).map((c) => ({ value: c.key, label: c.label }))}
             value={text || null}
             hasClear
@@ -263,7 +273,7 @@ export function CustomFieldInput({
         control = (
           <DateTimeInput
             {...common}
-            description={descriptionOf(definition, "In UTC.")}
+            description={descriptionOf(definition, t("custom_fields.input_utc_hint"))}
             value={isMinute(text) ? text : undefined}
             hasClear
             hourFormat="24h"
@@ -298,11 +308,13 @@ export function CustomFieldInput({
     }
   }
 
-  const manager = managerLabel(definition);
+  const manager = managerLabel(t, definition);
   const marks = [
-    definition.personal && <Badge key="personal" label="Personal" variant="warning" />,
+    definition.personal && (
+      <Badge key="personal" label={t("custom_fields.badge_personal")} variant="warning" />
+    ),
     manager && <Badge key="manager" label={manager} variant="info" />,
-    isDisabled && <Badge key="read" label="Read-only" />,
+    isDisabled && <Badge key="read" label={t("custom_fields.badge_read_only")} />,
   ].filter(Boolean);
 
   return (
@@ -313,7 +325,7 @@ export function CustomFieldInput({
           {marks}
           {isList && input.kind === "list" && input.items.length > 0 && (
             <Text type="supporting" color="secondary">
-              {input.items.length} {input.items.length === 1 ? "item" : "items"}
+              {t("common.items_count", { count: input.items.length })}
             </Text>
           )}
         </HStack>

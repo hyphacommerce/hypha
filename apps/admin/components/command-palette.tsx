@@ -19,6 +19,8 @@ import {
   visibleSections,
   visibleSettings,
 } from "@/lib/navigation";
+import type { SharedNamespace, TFor } from "@/lib/messages";
+import { useT } from "@/lib/use-t";
 
 type Command = SearchableItem<{ group: string; icon?: NavIcon; hint?: string; keywords: string[] }>;
 
@@ -33,37 +35,45 @@ function command(
   return { id: href, label, auxiliaryData: { group, icon, hint, keywords } };
 }
 
-/** Every page `scopes` can open. */
-function commands(scopes: readonly string[]): Command[] {
+/** Every page `scopes` can open, named in `t`'s language. */
+function commands(scopes: readonly string[], t: TFor<SharedNamespace>): Command[] {
+  const goTo = t("shell.command_group_go_to");
   return [
     ...visibleSections(scopes)
       .flatMap((section) => section.items)
       .flatMap((item) => [
-        command("Go to", item.label, item.href, item.icon),
+        command(goTo, t(item.label), item.href, item.icon),
         ...(item.children ?? []).map((child) =>
-          command("Go to", child.label, child.href, item.icon, item.label),
+          command(goTo, t(child.label), child.href, item.icon, t(item.label)),
         ),
       ]),
-    command("Go to", ACCOUNT_NAV.label, ACCOUNT_NAV.href, ACCOUNT_NAV.icon, undefined, [
-      "password",
-      "two-factor",
-      "2fa",
-      "profile",
-    ]),
+    command(
+      goTo,
+      t(ACCOUNT_NAV.label),
+      ACCOUNT_NAV.href,
+      ACCOUNT_NAV.icon,
+      undefined,
+      // Words someone might type for the page, separated by commas in the catalog.
+      t("shell.command_account_keywords").split(","),
+    ),
     ...visibleSettings(scopes).flatMap((group) =>
       group.pages.map((page) =>
-        command("Settings", page.label, page.href, page.icon, group.title, [
-          group.title,
-          page.description,
-        ]),
+        command(
+          t("shell.command_group_settings"),
+          t(page.label),
+          page.href,
+          page.icon,
+          t(group.title),
+          [t(group.title), t(page.description)],
+        ),
       ),
     ),
     ...[
-      { label: "New product", href: "/products/new", scope: "products:write" },
-      { label: "New market", href: "/markets/new", scope: "markets:write" },
+      { label: t("shell.command_new_product"), href: "/products/new", scope: "products:write" },
+      { label: t("shell.command_new_market"), href: "/markets/new", scope: "markets:write" },
     ]
       .filter((page) => canOpen(page, scopes))
-      .map((page) => command("Create", page.label, page.href, PlusIcon)),
+      .map((page) => command(t("shell.command_group_create"), page.label, page.href, PlusIcon)),
   ];
 }
 
@@ -87,12 +97,13 @@ function CommandRow({ item }: { item: Command }) {
 export function CommandMenu({ scopes }: { scopes: readonly string[] }) {
   const [isOpen, setIsOpen] = useState(false);
   const router = useRouter();
+  const t = useT();
   const source = useMemo(
     () =>
-      createStaticSource(commands(scopes), {
+      createStaticSource(commands(scopes, t), {
         keywords: (item) => item.auxiliaryData?.keywords ?? [],
       }),
-    [scopes],
+    [scopes, t],
   );
 
   useEffect(() => {
@@ -109,8 +120,8 @@ export function CommandMenu({ scopes }: { scopes: readonly string[] }) {
   return (
     <>
       <IconButton
-        label="Search the admin"
-        tooltip="Go to… (⌘K)"
+        label={t("shell.command_open")}
+        tooltip={t("shell.command_tooltip")}
         variant="ghost"
         size="sm"
         icon={<MagnifyingGlassIcon width={18} />}
@@ -120,9 +131,9 @@ export function CommandMenu({ scopes }: { scopes: readonly string[] }) {
         <CommandPalette
           isOpen
           onOpenChange={setIsOpen}
-          label="Go to"
+          label={t("shell.command_group_go_to")}
           searchSource={source}
-          emptyBootstrapText="Type a page's name"
+          emptyBootstrapText={t("shell.command_empty")}
           renderItem={(item) => <CommandRow item={item} />}
           onValueChange={(href) => {
             setIsOpen(false);

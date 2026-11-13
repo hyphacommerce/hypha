@@ -8,16 +8,26 @@ import { Card } from "@astryxdesign/core/Card";
 import { Divider } from "@astryxdesign/core/Divider";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
+import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
-import { type FormEvent, type ReactNode, startTransition, useState, useTransition } from "react";
+import { type SubmitEvent, type ReactNode, startTransition, useState, useTransition } from "react";
 
 import { DateTime } from "@/components/date-time";
 import { NewPasswordFields, fieldText, newPasswordProblem } from "@/components/new-password";
+import type { TFor } from "@/lib/messages";
+import { PSEUDO } from "@/lib/pseudo";
+import { useT } from "@/lib/use-t";
 
 import { logout } from "../../login/actions";
-import { changePassword, revokeOtherSessions, revokeSession, updateName } from "./actions";
+import {
+  changePassword,
+  chooseLanguage,
+  revokeOtherSessions,
+  revokeSession,
+  updateName,
+} from "./actions";
 
 export function AccountCard({
   title,
@@ -56,6 +66,7 @@ export function AccountCard({
 
 /** Who you are to the team; anyone may change their own name. */
 export function ProfileCard({ name, email, role }: { name: string; email: string; role: string }) {
+  const t = useT<"account">();
   const [draft, setDraft] = useState<string>();
   const [error, setError] = useState<string>();
   const [isPending, startSaving] = useTransition();
@@ -63,7 +74,7 @@ export function ProfileCard({ name, email, role }: { name: string; email: string
   const save = () => {
     const next = draft?.trim() ?? "";
     if (!next) {
-      setError("Enter a name.");
+      setError(t("account.profile_name_required"));
       return;
     }
     startSaving(async () => {
@@ -75,34 +86,50 @@ export function ProfileCard({ name, email, role }: { name: string; email: string
 
   return (
     <AccountCard
-      title="Profile"
-      description="Your name shows to your team. Your email is how you sign in; it can't change."
+      title={t("account.profile_title")}
+      description={t("account.profile_description")}
       action={
         draft === undefined && (
-          <Button label="Edit name" variant="secondary" size="sm" onClick={() => setDraft(name)} />
+          <Button
+            label={t("account.profile_edit_name")}
+            variant="secondary"
+            size="sm"
+            onClick={() => setDraft(name)}
+          />
         )
       }
     >
       {error && <Banner status="error" title={error} />}
       {draft === undefined ? (
         <MetadataList>
-          <MetadataListItem label="Name">{name}</MetadataListItem>
-          <MetadataListItem label="Email">{email}</MetadataListItem>
-          <MetadataListItem label="Role">{role}</MetadataListItem>
+          <MetadataListItem label={t("common.person_name")}>{name}</MetadataListItem>
+          <MetadataListItem label={t("common.email")}>{email}</MetadataListItem>
+          <MetadataListItem label={t("common.role")}>{role}</MetadataListItem>
         </MetadataList>
       ) : (
         <VStack gap={3}>
-          <TextInput label="Name" value={draft} onChange={setDraft} onEnter={save} hasAutoFocus />
+          <TextInput
+            label={t("common.person_name")}
+            value={draft}
+            onChange={setDraft}
+            onEnter={save}
+            hasAutoFocus
+          />
           <HStack gap={2} hAlign="end">
             <Button
-              label="Cancel"
+              label={t("common.cancel")}
               variant="ghost"
               onClick={() => {
                 setDraft(undefined);
                 setError(undefined);
               }}
             />
-            <Button label="Save" variant="primary" isLoading={isPending} onClick={save} />
+            <Button
+              label={t("common.save")}
+              variant="primary"
+              isLoading={isPending}
+              onClick={save}
+            />
           </HStack>
         </VStack>
       )}
@@ -110,22 +137,83 @@ export function ProfileCard({ name, email, role }: { name: string; email: string
   );
 }
 
+/** A language's name in that language ("Deutsch"), or the tag when `Intl` has none. */
+function ownName(tag: string): string {
+  try {
+    // Not the reader's `Format`: a language is offered under its own name, so someone who
+    // can't read the current one still finds theirs.
+    return new Intl.DisplayNames(tag, { type: "language" }).of(tag) ?? tag;
+  } catch {
+    return tag;
+  }
+}
+
+/**
+ * The language the admin speaks to this staff member. Choosing one renders the whole
+ * admin again in it.
+ */
+export function LanguageCard({
+  languages,
+  current,
+}: {
+  languages: readonly string[];
+  current: string;
+}) {
+  const t = useT<"account">();
+  const [error, setError] = useState<string>();
+  // Why the choice was kept on this browser alone (an account that can't change itself).
+  const [note, setNote] = useState<string>();
+  // The choice while it's being saved, so the select doesn't jump back meanwhile.
+  const [chosen, setChosen] = useState<string>();
+  const [isPending, startSaving] = useTransition();
+
+  const choose = (language: string) => {
+    if (language === current) return;
+    setChosen(language);
+    startSaving(async () => {
+      const result = await chooseLanguage(language);
+      setError(result.error);
+      setNote(result.note);
+      setChosen(undefined);
+    });
+  };
+
+  return (
+    <AccountCard title={t("common.language")} description={t("account.language_description")}>
+      {error && <Banner status="error" title={error} onDismiss={() => setError(undefined)} />}
+      {note && <Banner status="info" title={note} onDismiss={() => setNote(undefined)} />}
+      <Selector
+        label={t("common.language")}
+        isLabelHidden
+        options={languages.map((tag) => ({
+          value: tag,
+          label: tag === PSEUDO ? t("account.language_pseudo") : ownName(tag),
+        }))}
+        value={chosen ?? current}
+        onChange={choose}
+        isDisabled={isPending}
+      />
+    </AccountCard>
+  );
+}
+
 /** A new password, with the current one; other devices are signed out. */
 export function PasswordCard() {
+  const t = useT<"account">();
   const [current, setCurrent] = useState("");
   const [message, setMessage] = useState<{ text: string; isError: boolean }>();
   const [isPending, startSaving] = useTransition();
   // Bumped after a change, so the fields start empty again.
   const [round, setRound] = useState(0);
 
-  const submit = (e: FormEvent<HTMLFormElement>) => {
+  const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     const fields = new FormData(e.currentTarget);
     const currentPassword = fieldText(fields, "current-password");
     const password = fieldText(fields, "new-password");
     const problem = currentPassword
-      ? newPasswordProblem(password, fieldText(fields, "repeat-password"))
-      : "Enter your current password.";
+      ? newPasswordProblem(password, fieldText(fields, "repeat-password"), t)
+      : t("account.password_current_required");
     if (problem) {
       setMessage({ text: problem, isError: true });
       return;
@@ -139,20 +227,14 @@ export function PasswordCard() {
         setMessage({ text: result.error, isError: true });
         return;
       }
-      setMessage({
-        text: "Password changed. Every other device signed in to your account was signed out.",
-        isError: false,
-      });
+      setMessage({ text: t("account.password_changed"), isError: false });
       setCurrent("");
       setRound((n) => n + 1);
     });
   };
 
   return (
-    <AccountCard
-      title="Password"
-      description="Changing it signs you out everywhere else, and ends any reset link sent before."
-    >
+    <AccountCard title={t("common.password")} description={t("account.password_description")}>
       {message && (
         <Banner
           status={message.isError ? "error" : "success"}
@@ -163,7 +245,7 @@ export function PasswordCard() {
       <form onSubmit={submit} noValidate key={round}>
         <VStack gap={3}>
           <TextInput
-            label="Current password"
+            label={t("account.password_current")}
             type="password"
             htmlName="current-password"
             autoComplete="current-password"
@@ -172,7 +254,12 @@ export function PasswordCard() {
           />
           <NewPasswordFields size="md" />
           <HStack hAlign="end">
-            <Button label="Change password" type="submit" variant="primary" isLoading={isPending} />
+            <Button
+              label={t("account.password_change")}
+              type="submit"
+              variant="primary"
+              isLoading={isPending}
+            />
           </HStack>
         </VStack>
       </form>
@@ -183,7 +270,10 @@ export function PasswordCard() {
 type Session = AdminSchemas["MySessionResponse"];
 
 /** "Firefox on macOS" from a `User-Agent`, or `undefined` when it names neither. */
-export function deviceName(userAgent: string | null | undefined): string | undefined {
+export function deviceName(
+  t: TFor<"account">,
+  userAgent: string | null | undefined,
+): string | undefined {
   if (!userAgent) return undefined;
   // Order matters: Edge and Opera say Chrome too, Chrome says Safari.
   const browsers: [RegExp, string][] = [
@@ -204,7 +294,7 @@ export function deviceName(userAgent: string | null | undefined): string | undef
   ];
   const browser = browsers.find(([pattern]) => pattern.test(userAgent))?.[1];
   const system = systems.find(([pattern]) => pattern.test(userAgent))?.[1];
-  if (browser && system) return `${browser} on ${system}`;
+  if (browser && system) return t("account.sessions_device", { browser, system });
   return browser ?? system;
 }
 
@@ -213,6 +303,7 @@ export function deviceName(userAgent: string | null | undefined): string | undef
  * signing one out, or every other one at once.
  */
 export function SessionsCard({ sessions }: { sessions: Session[] }) {
+  const t = useT<"account">();
   const [error, setError] = useState<string>();
   const [isConfirming, setIsConfirming] = useState(false);
   const [busy, setBusy] = useState<string>();
@@ -238,12 +329,12 @@ export function SessionsCard({ sessions }: { sessions: Session[] }) {
 
   return (
     <AccountCard
-      title="Sessions"
-      description="Where your account is signed in. Sign out a device you don't recognise, then change your password."
+      title={t("account.sessions_title")}
+      description={t("account.sessions_description")}
       action={
         others.length > 0 && (
           <Button
-            label="Sign out everywhere else"
+            label={t("account.sessions_sign_out_others")}
             variant="secondary"
             size="sm"
             onClick={() => setIsConfirming(true)}
@@ -259,24 +350,28 @@ export function SessionsCard({ sessions }: { sessions: Session[] }) {
             <HStack gap={3} hAlign="between" vAlign="center">
               <VStack gap={1}>
                 <HStack gap={2} vAlign="center">
-                  <Text weight="medium">{deviceName(session.user_agent) ?? "Unknown device"}</Text>
-                  {session.current && <Badge label="This device" variant="success" />}
+                  <Text weight="medium">
+                    {deviceName(t, session.user_agent) ?? t("account.sessions_unknown_device")}
+                  </Text>
+                  {session.current && (
+                    <Badge label={t("account.sessions_this_device")} variant="success" />
+                  )}
                 </HStack>
                 <Text type="supporting" color="secondary">
                   {session.ip ? `${session.ip} · ` : ""}
-                  {session.current ? (
-                    "Active now"
-                  ) : (
-                    <>
-                      Last active <DateTime value={session.last_used_at} short />
-                    </>
-                  )}
-                  {" · Signed in "}
-                  <DateTime value={session.created_at} short />
+                  {session.current
+                    ? t("account.sessions_active_now")
+                    : t.rich("account.sessions_last_active", {
+                        time: <DateTime key="time" value={session.last_used_at} short />,
+                      })}
+                  {" · "}
+                  {t.rich("account.sessions_signed_in", {
+                    time: <DateTime key="time" value={session.created_at} short />,
+                  })}
                 </Text>
               </VStack>
               <Button
-                label="Sign out"
+                label={t("account.sessions_sign_out")}
                 variant={session.current ? "secondary" : "ghost"}
                 size="sm"
                 isLoading={isPending && busy === session.id}
@@ -289,9 +384,9 @@ export function SessionsCard({ sessions }: { sessions: Session[] }) {
       <AlertDialog
         isOpen={isConfirming}
         onOpenChange={setIsConfirming}
-        title="Sign out everywhere else?"
-        description={`${others.length === 1 ? "The other device" : `The ${others.length} other devices`} must sign in again. This one stays signed in.`}
-        actionLabel="Sign out others"
+        title={t("account.sessions_confirm_title")}
+        description={t("account.sessions_confirm_description", { count: others.length })}
+        actionLabel={t("account.sessions_confirm_action")}
         isActionLoading={isPending}
         onAction={signOutOthers}
       />

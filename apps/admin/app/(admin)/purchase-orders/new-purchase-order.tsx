@@ -8,6 +8,8 @@ import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
 import { useState, useTransition } from "react";
 
+import { useT } from "@/lib/use-t";
+
 import { createPurchaseOrder } from "./actions";
 import { purchaseOrderChoices } from "./choices";
 
@@ -17,13 +19,8 @@ type Choices = Awaited<ReturnType<typeof purchaseOrderChoices>>;
  * Starts a draft: the supplier (active ones) and where the goods go. Lines, costs and
  * dates are added on its page. `supplier` preselects one (from a supplier's page).
  */
-export function NewPurchaseOrder({
-  supplier: preset,
-  label = "New purchase order",
-}: {
-  supplier?: string;
-  label?: string;
-}) {
+export function NewPurchaseOrder({ supplier: preset }: { supplier?: string }) {
+  const t = useT<"purchasing">();
   const [isOpen, setIsOpen] = useState(false);
   const [choices, setChoices] = useState<Choices>();
   const [supplier, setSupplier] = useState(preset ?? "");
@@ -55,44 +52,44 @@ export function NewPurchaseOrder({
   };
   return (
     <>
-      <Button label={label} variant="primary" onClick={open} />
+      <Button label={t("purchasing.new_button")} variant="primary" onClick={open} />
       <Dialog isOpen={isOpen} onOpenChange={(o) => !o && close()} width={460} purpose="form">
         <DialogHeader
-          title="New purchase order"
-          subtitle="Lines, extra costs and dates come next, on its page."
+          title={t("purchasing.new_title")}
+          subtitle={t("purchasing.new_subtitle")}
           onOpenChange={(o) => !o && close()}
         />
         <VStack gap={4} padding={4}>
           {error && <Banner status="error" title={error} />}
           {choices && choices.suppliers.length === 0 ? (
             <Text type="supporting" color="secondary">
-              Add a supplier first: purchase orders are placed with one.
+              {t("purchasing.new_no_suppliers")}
             </Text>
           ) : (
             <Selector
-              label="Supplier"
+              label={t("common.supplier")}
               options={(choices?.suppliers ?? []).map((s) => ({
                 value: s.id,
                 label: `${s.name} · ${s.currency}`,
               }))}
               value={supplier || undefined}
               onChange={setSupplier}
-              placeholder={choices ? "Choose a supplier" : "Loading…"}
+              placeholder={choices ? t("purchasing.choose_supplier") : t("common.loading")}
               hasSearch
             />
           )}
           <Selector
-            label="Goes to"
-            description="The location the goods are received at."
+            label={t("purchasing.goes_to")}
+            description={t("purchasing.goes_to_description")}
             options={(choices?.locations ?? []).map((l) => ({ value: l.id, label: l.name }))}
             value={destination || undefined}
             onChange={setDestination}
-            placeholder={choices ? "Choose a location" : "Loading…"}
+            placeholder={choices ? t("common.choose_location") : t("common.loading")}
           />
           <HStack gap={2} hAlign="end">
-            <Button label="Cancel" variant="ghost" onClick={close} />
+            <Button label={t("common.cancel")} variant="ghost" onClick={close} />
             <Button
-              label="Write draft"
+              label={t("purchasing.write_draft")}
               variant="primary"
               isLoading={isPending && !!choices}
               isDisabled={!canSave}

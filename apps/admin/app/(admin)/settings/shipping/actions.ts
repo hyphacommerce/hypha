@@ -23,7 +23,7 @@ export async function createZone(input: { name: string; countries: string }): Pr
   const { error } = await client.POST("/admin/shipping-zones", {
     body: { name: input.name, countries: countries(input.countries) },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(PAGE);
   return {};
 }
@@ -37,7 +37,7 @@ export async function updateZone(
     params: { path: { id } },
     body: { name: input.name, countries: countries(input.countries) },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(PAGE);
   return {};
 }
@@ -47,7 +47,7 @@ export async function deleteZone(id: string): Promise<Result> {
   const { error } = await client.DELETE("/admin/shipping-zones/{id}", {
     params: { path: { id } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(PAGE);
   return {};
 }
@@ -66,7 +66,7 @@ export async function addOption(zone: string, input: OptionInput): Promise<Resul
     params: { path: { id: zone } },
     body: input,
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(PAGE);
   return {};
 }
@@ -81,7 +81,7 @@ export async function updateOption(
     params: { path: { id: zone, option_id: option } },
     body: input,
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(PAGE);
   return {};
 }
@@ -91,7 +91,7 @@ export async function removeOption(zone: string, option: string): Promise<Result
   const { error } = await client.DELETE("/admin/shipping-zones/{id}/options/{option_id}", {
     params: { path: { id: zone, option_id: option } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(PAGE);
   return {};
 }
@@ -102,7 +102,7 @@ export async function reorderOptions(zone: string, options: string[]): Promise<R
     params: { path: { id: zone } },
     body: { options },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(PAGE);
   return {};
 }
@@ -123,7 +123,7 @@ export async function createProvider(input: {
 }): Promise<SecretResult> {
   const client = await sessionClient();
   const app = await client.POST("/admin/apps", { body: { key: input.key, name: input.name } });
-  if (app.error && app.error.code !== "app_exists") return { error: describe(app.error) };
+  if (app.error && app.error.code !== "app_exists") return { error: await describe(app.error) };
   const { error } = await client.POST("/admin/shipping-providers", {
     body: { key: input.key, callback_url: input.callbackUrl, timeout_ms: input.timeoutMs },
   });
@@ -131,7 +131,7 @@ export async function createProvider(input: {
     if (app.data) {
       await client.DELETE("/admin/apps/{key}", { params: { path: { key: input.key } } });
     }
-    return { error: describe(error) };
+    return { error: await describe(error) };
   }
   revalidatePath(PAGE);
   return { secret: app.data?.secret };
@@ -144,7 +144,7 @@ export async function setAppEnabled(key: string, enabled: boolean): Promise<Resu
     params: { path: { key } },
     body: { enabled },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(PAGE);
   return {};
 }
@@ -154,7 +154,7 @@ export async function rotateSecret(key: string): Promise<SecretResult> {
   const { data, error } = await client.POST("/admin/apps/{key}/secret", {
     params: { path: { key } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   return { secret: data.secret };
 }
 
@@ -164,7 +164,7 @@ export async function deleteProvider(key: string): Promise<Result> {
   const { error } = await client.DELETE("/admin/shipping-providers/{key}", {
     params: { path: { key } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(PAGE);
   return {};
 }
@@ -177,6 +177,6 @@ export async function testProvider(
   const { data, error } = await client.GET("/admin/shipping-providers/{key}/services", {
     params: { path: { key } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   return { services: data.items };
 }

@@ -24,7 +24,7 @@ export async function createApiKey(
         ? { kind: "secret", name: input.name, scopes: input.scopes }
         : { kind: "publishable", name: input.name, channel: input.channel },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath("/settings/api-keys");
   return { token: data.token };
 }
@@ -33,7 +33,7 @@ export async function createApiKey(
 export async function revokeApiKey(id: string): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.POST("/admin/api-keys/{id}/revoke", { params: { path: { id } } });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath("/settings/api-keys");
   return {};
 }

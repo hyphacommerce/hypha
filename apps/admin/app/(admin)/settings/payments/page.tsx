@@ -6,21 +6,26 @@ import { Suspense } from "react";
 import { PageHeader } from "@/components/page-header";
 import { CardSkeleton } from "@/components/skeletons";
 import { channelNames, loadPaymentMethods, requireStaff, sessionClient } from "@/lib/hypha";
-import { SETTINGS_CRUMB } from "@/lib/navigation";
+import { getStoreDefaults } from "@/lib/get-store-t";
+import { getT } from "@/lib/i18n";
+import { settingsCrumb } from "@/lib/navigation";
 import type { PaymentApp } from "@/lib/payments";
+import { offersTranslate } from "@/lib/translations-server";
+import { PAYMENT_NAME_DEFAULTS } from "@/lib/store-defaults";
 
 import { PaymentMethodsCard } from "./methods";
 
 /** Settings → Payments: how shoppers can pay, in the order they see the methods at
  * checkout. The header renders at once; the methods stream in. */
-export default function PaymentsSettingsPage() {
+export default async function PaymentsSettingsPage() {
+  const t = await getT();
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={960}>
         <PageHeader
-          back={SETTINGS_CRUMB}
-          title="Payments"
-          description="How shoppers pay at checkout. With manual methods, like cash on delivery or a bank transfer, you collect the money yourself and mark the order paid."
+          back={settingsCrumb(t)}
+          title={t("payments.settings_title")}
+          description={t("payments.settings_description")}
         />
         <Suspense fallback={<CardSkeleton lines={5} />}>
           <PaymentMethods />
@@ -32,29 +37,32 @@ export default function PaymentsSettingsPage() {
 
 async function PaymentMethods() {
   const client = await sessionClient();
-  const [me, methods, markets, channelName, paymentApps] = await Promise.all([
+  const [t, me, methods, markets, channelName, paymentApps, presetNames] = await Promise.all([
+    getT(),
     requireStaff(),
     loadPaymentMethods(),
     client.GET("/admin/markets"),
     channelNames(client),
     loadPaymentApps(client),
+    getStoreDefaults(PAYMENT_NAME_DEFAULTS),
   ]);
   if (methods === null) {
     return (
       <Banner
         status="info"
-        title="Your role can't see payment methods"
-        description="Ask the store owner for the payments:read scope."
+        title={t("payments.settings_no_access_title")}
+        description={t("payments.settings_no_access_description")}
       />
     );
   }
+  const canTranslate = await offersTranslate("payment_method");
   return (
     <>
       {!methods.some((m) => m.enabled) && (
         <Banner
           status="warning"
-          title="Checkout is refused until a payment method is enabled"
-          description="Carts with something to pay can't be checked out. Add a method below, or turn one on."
+          title={t("payments.settings_none_enabled_title")}
+          description={t("payments.settings_none_enabled_description")}
         />
       )}
       <PaymentMethodsCard
@@ -64,7 +72,9 @@ async function PaymentMethods() {
         markets={(markets.data?.items ?? []).map((m) => ({ value: m.id, label: m.name }))}
         channels={[...channelName].map(([value, label]) => ({ value, label }))}
         paymentApps={paymentApps}
+        presetNames={presetNames}
         canWrite={me.scopes.includes("payments:write")}
+        canTranslate={canTranslate}
       />
     </>
   );

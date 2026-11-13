@@ -4,8 +4,8 @@
 // every way of editing (typing, paste, fill, bulk actions) is a list of `CellChange`s
 // applied by `applyChanges`.
 
-import { type BreakAmount, breakProblems, formatBreaks, parseBreaks } from "./breaks.ts";
-import { adjustAmount, formatAmount, parseAmount } from "./money.ts";
+import { type BreakAmount, breakProblems, breaksOf, formatBreaks, parseBreaks } from "./breaks.ts";
+import { adjustAmount, amountOf, formatAmount, parseAmount } from "./money.ts";
 import type { Cell, Rect } from "./selection.ts";
 import type { Placed } from "./tsv.ts";
 import type {
@@ -15,6 +15,7 @@ import type {
   Money,
   PriceGridDiff,
   PriceGridVariant,
+  PriceT,
 } from "./types.ts";
 import { EDITABLE_COLUMNS } from "./types.ts";
 
@@ -64,11 +65,11 @@ export function normalizeCell(
   const trimmed = text.trim();
   if (trimmed === "") return "";
   if (column === "breaks") {
-    const breaks = parseBreaks(trimmed, digits, currency);
-    return breaks.ok ? formatBreaks(breaks.value, digits) : trimmed;
+    const breaks = breaksOf(trimmed, digits, currency);
+    return breaks ? formatBreaks(breaks, digits) : trimmed;
   }
-  const amount = parseAmount(trimmed, digits, currency);
-  return amount.ok ? formatAmount(amount.value, digits) : trimmed;
+  const amount = amountOf(trimmed, digits, currency);
+  return amount === null ? trimmed : formatAmount(amount, digits);
 }
 
 function sameDraft(a: Draft, b: Draft, digits: number, currency: string): boolean {
@@ -112,8 +113,8 @@ export type Checked =
   | { kind: "none" }
   | { kind: "invalid"; errors: Partial<Record<EditableColumn, string>> };
 
-/** A draft checked against the API's rules for a fixed price. */
-export function checkDraft(draft: Draft, currency: string, digits: number): Checked {
+/** A draft checked against the API's rules for a fixed price, its problems in `t`'s language. */
+export function checkDraft(t: PriceT, draft: Draft, currency: string, digits: number): Checked {
   const errors: Partial<Record<EditableColumn, string>> = {};
   const priceText = draft.fixed_price.trim();
   const compareText = draft.fixed_compare_at.trim();
@@ -122,28 +123,28 @@ export function checkDraft(draft: Draft, currency: string, digits: number): Chec
 
   let price: number | null = null;
   if (priceText === "") {
-    errors.fixed_price = "Needs a fixed price, or clear the row.";
+    errors.fixed_price = t("price_lists.draft_needs_fixed_price");
   } else {
-    const parsed = parseAmount(priceText, digits, currency);
+    const parsed = parseAmount(priceText, digits, currency, t);
     if (parsed.ok) price = parsed.value;
     else errors.fixed_price = parsed.error;
   }
 
   let compareAt: number | null = null;
   if (compareText !== "") {
-    const parsed = parseAmount(compareText, digits, currency);
+    const parsed = parseAmount(compareText, digits, currency, t);
     if (!parsed.ok) errors.fixed_compare_at = parsed.error;
     else if (price !== null && parsed.value <= price) {
-      errors.fixed_compare_at = "Must be above the fixed price.";
+      errors.fixed_compare_at = t("price_lists.draft_compare_at_not_above");
     } else compareAt = parsed.value;
   }
 
   let breaks: BreakAmount[] = [];
   if (breaksText !== "") {
-    const parsed = parseBreaks(breaksText, digits, currency);
+    const parsed = parseBreaks(breaksText, digits, currency, t);
     if (!parsed.ok) errors.breaks = parsed.error;
     else {
-      const [problem] = breakProblems(parsed.value, price);
+      const [problem] = breakProblems(t, parsed.value, price);
       // Without a parsable price the price cell already says so.
       if (problem && price !== null) errors.breaks = problem;
       breaks = parsed.value;
@@ -192,8 +193,9 @@ export type Review = {
   changedVariants: number;
 };
 
-/** The drafts as the save sees them. */
+/** The drafts as the save sees them, the cells' errors in `t`'s language. */
 export function review(
+  t: PriceT,
   variants: ReadonlyMap<string, PriceGridVariant>,
   drafts: Drafts,
   currency: string,
@@ -214,7 +216,7 @@ export function review(
         dirty.add(cellKey(id, column));
       }
     }
-    const checked = checkDraft(draft, currency, digits);
+    const checked = checkDraft(t, draft, currency, digits);
     if (checked.kind === "invalid") {
       changedVariants++;
       for (const column of EDITABLE_COLUMNS) {

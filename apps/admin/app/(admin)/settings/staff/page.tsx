@@ -7,19 +7,21 @@ import { Suspense } from "react";
 import { PageHeader } from "@/components/page-header";
 import { TableSkeleton } from "@/components/skeletons";
 import { loaded, requireStaff, sessionClient } from "@/lib/hypha";
-import { SETTINGS_CRUMB } from "@/lib/navigation";
+import { getT } from "@/lib/i18n";
+import { settingsCrumb } from "@/lib/navigation";
 
 import { Staff } from "./staff";
 
 /** Settings → Staff: the header renders at once; the team, invites and roles stream in. */
-export default function StaffPage() {
+export default async function StaffPage() {
+  const t = await getT();
   return (
     <Section padding={6}>
       <VStack gap={5}>
         <PageHeader
-          back={SETTINGS_CRUMB}
-          title="Staff and roles"
-          description="Who can sign in, and what their roles allow."
+          back={settingsCrumb(t)}
+          title={t("staff.page_title")}
+          description={t("staff.page_description")}
         />
         <Suspense
           fallback={
@@ -39,7 +41,8 @@ export default function StaffPage() {
 
 async function Team() {
   const client = await sessionClient();
-  const [me, users, invites, roles] = await Promise.all([
+  const [t, me, users, invites, roles] = await Promise.all([
+    getT(),
     requireStaff(),
     client.GET("/admin/users"),
     client.GET("/admin/invites"),
@@ -56,9 +59,9 @@ async function Team() {
     return (
       <Banner
         status="info"
-        title="Your role can't see the team"
-        description="Ask the store owner for the users:read scope. Your own account is under Your account."
-        endContent={<Button label="Your account" variant="secondary" href="/account" />}
+        title={t("staff.no_access_title")}
+        description={t("staff.no_access_description", { scope: "users:read" })}
+        endContent={<Button label={t("common.your_account")} variant="secondary" href="/account" />}
       />
     );
   }

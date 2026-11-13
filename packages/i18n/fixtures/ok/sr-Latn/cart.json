@@ -1,0 +1,5 @@
+{
+  "title": "Vaša korpa",
+  "items_count": "{count, plural, one {# artikal} few {# artikla} other {# artikala}}",
+  "terms": "Poručivanjem prihvatate naše <link>uslove</link>."
+}

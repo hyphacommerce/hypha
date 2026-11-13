@@ -1,6 +1,7 @@
 // Uploading from the browser, shared by the Media page and the product page's Media
 // section. Client code: it sends the file itself; the server actions only sign and check.
 
+import type { TFor } from "@/lib/messages";
 import { sendToStorage } from "@/lib/storage-upload";
 
 import { completeUpload, startUpload } from "./actions";
@@ -20,13 +21,15 @@ export const MAX_BYTES = 1024 * 1024 * 1024;
 /**
  * Sends one file straight to storage with the request Hypha signed for it, then has
  * Hypha check it. The file never passes through the admin's server. The new asset's ID,
- * or a message for the person at the screen.
+ * or a message for the person at the screen, in the translator's language.
  */
-export async function uploadFile(file: File): Promise<{ id: string } | { error: string }> {
+export async function uploadFile(
+  file: File,
+  t: TFor<"media">,
+): Promise<{ id: string } | { error: string }> {
   const started = await startUpload({ name: file.name, type: file.type, size: file.size });
   if ("error" in started) return started;
-  if (!(await sendToStorage(started.upload, file)))
-    return { error: "The upload didn't reach storage. Check your connection and retry." };
+  if (!(await sendToStorage(started.upload, file))) return { error: t("media.upload_not_stored") };
   const completed = await completeUpload(started.id);
   return completed.error ? { error: completed.error } : { id: started.id };
 }

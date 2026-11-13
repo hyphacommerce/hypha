@@ -1,9 +1,10 @@
 "use client";
 
 // An address form's fields as the country lays them out (`GET
-// /admin/address-formats/{country}`): its order, rows, labels and required fields,
-// the region as a select where the country lists regions. Problems come from the API's
-// `invalid_address` (`details.problems`), each under its field. Where the store has an
+// /admin/address-formats/{country}`): its order, rows, labels (in the staff member's
+// language, by the format's `label_keys`) and required fields, the region as a select
+// where the country lists regions. Problems come from the API's `invalid_address`
+// (`details.problems`), each under its field, worded from its code. Where the store has an
 // autocomplete app, line 1 offers addresses as staff type, and picking one fills the
 // form (`onFill`).
 
@@ -20,7 +21,10 @@ import {
   type AddressValues,
   type FieldProblems,
   asField,
+  addressFieldLabel,
+  wordAddressMessage,
 } from "@/lib/address";
+import { useT } from "@/lib/use-t";
 
 /** The fields a form sends, `country` apart (it's the page's). */
 type Field = Exclude<AddressField, "country">;
@@ -46,17 +50,20 @@ export function AddressFields({
    * offers no suggestions. */
   onFill?: (values: Partial<AddressValues>, problems: FieldProblems) => void;
 }) {
+  const t = useT();
   const required = new Set(format.required);
   const status = (field: Field) => {
     const problem = problems?.[field];
-    if (problem) return { type: "error" as const, message: problem };
+    if (problem) {
+      return { type: "error" as const, message: wordAddressMessage(t, problem, format) };
+    }
     if (tried && required.has(field) && values[field].trim() === "") {
-      return { type: "error" as const, message: "Required" };
+      return { type: "error" as const, message: t("common.required") };
     }
     return undefined;
   };
   const input = (field: Field) => {
-    const label = format.labels[field] ?? field;
+    const label = addressFieldLabel(t, format, field);
     const isRequired = required.has(field);
     if (field === "line1" && format.autocomplete && onFill) {
       return (
@@ -93,7 +100,7 @@ export function AddressFields({
           value={values.province || undefined}
           onChange={(value) => onChange("province", value)}
           hasSearch={format.regions.length > 12}
-          placeholder={`Choose a ${label.toLowerCase()}`}
+          placeholder={t("components.address_choose_region")}
           status={status(field)}
         />
       );

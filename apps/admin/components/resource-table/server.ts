@@ -28,7 +28,7 @@ export type ListPage<T> = {
  * refused filter (`422`) shows its reason with an empty table, and a list the user's
  * role can't read (`403 missing_scope`) the no-access notice.
  */
-export function listPage<T>(
+export async function listPage<T>(
   result: {
     data?: { items: T[]; next_cursor?: string | null };
     error?: ApiError;
@@ -36,7 +36,7 @@ export function listPage<T>(
   },
   path: string,
   params: SearchParams,
-): ListPage<T> {
+): Promise<ListPage<T>> {
   if (result.data) {
     return { items: result.data.items, next_cursor: result.data.next_cursor ?? null };
   }
@@ -48,7 +48,7 @@ export function listPage<T>(
     redirect(path);
   }
   if (status === 422 && result.error) {
-    return { items: [], next_cursor: null, error: describe(result.error) };
+    return { items: [], next_cursor: null, error: await describe(result.error) };
   }
   // The user's role can't read the list: the no-access notice, as `loaded` does.
   if (isMissingScope(result)) forbidden();

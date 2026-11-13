@@ -5,12 +5,15 @@ import { Button } from "@astryxdesign/core/Button";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
 import { TextInput } from "@astryxdesign/core/TextInput";
-import { type FormEvent, useActionState, useState, startTransition } from "react";
+import { type SubmitEvent, useActionState, useState, startTransition } from "react";
+
+import { useT } from "@/lib/use-t";
 
 import { login } from "./actions";
 import { AuthCard } from "./auth-card";
 
 export function LoginForm({ notice }: { notice?: string }) {
+  const t = useT<"auth">();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isIncomplete, setIsIncomplete] = useState(false);
@@ -22,7 +25,7 @@ export function LoginForm({ notice }: { notice?: string }) {
   // credentials into the fields without the change events React's state follows, so
   // the state alone would send nothing (or what was there before) while the fields
   // show the saved login.
-  const submit = (e: FormEvent<HTMLFormElement>) => {
+  const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     const fields = new FormData(e.currentTarget);
     const emailField = fields.get("email");
@@ -41,9 +44,9 @@ export function LoginForm({ notice }: { notice?: string }) {
   };
 
   return (
-    <AuthCard title="Welcome back" subtitle="Sign in to your store's admin">
+    <AuthCard title={t("auth.login_title")} subtitle={t("auth.login_subtitle")}>
       {isIncomplete ? (
-        <Banner status="error" title="Enter your email and password." />
+        <Banner status="error" title={t("auth.login_incomplete")} />
       ) : state.error ? (
         <Banner status="error" title={state.error} />
       ) : (
@@ -53,33 +56,39 @@ export function LoginForm({ notice }: { notice?: string }) {
         <VStack gap={4}>
           <VStack gap={2}>
             <TextInput
-              label="Email"
+              label={t("common.email")}
               type="email"
               htmlName="email"
               autoComplete="username"
-              placeholder="name@company.com"
+              placeholder={t("auth.email_placeholder")}
               value={email}
               onChange={setEmail}
               size="lg"
               hasAutoFocus
             />
             <TextInput
-              label="Password"
+              label={t("common.password")}
               type="password"
               htmlName="password"
               autoComplete="current-password"
-              placeholder="Your password"
+              placeholder={t("auth.login_password_placeholder")}
               value={password}
               onChange={setPassword}
               size="lg"
             />
             <HStack hAlign="end">
               <Link href="/forgot-password" size="sm" type="supporting">
-                Forgot password?
+                {t("auth.login_forgot_password")}
               </Link>
             </HStack>
           </VStack>
-          <Button label="Sign in" type="submit" variant="primary" size="lg" isLoading={isPending} />
+          <Button
+            label={t("common.sign_in")}
+            type="submit"
+            variant="primary"
+            size="lg"
+            isLoading={isPending}
+          />
         </VStack>
       </form>
     </AuthCard>

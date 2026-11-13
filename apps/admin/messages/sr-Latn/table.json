@@ -1,0 +1,20 @@
+{
+  "first_page": "Prva stranica",
+  "next_page": "Sledeća stranica",
+  "date_range": "{start} – {end}",
+  "filter_value": "{label}: {value}",
+  "sort_by": "Sortiranje: {label}",
+  "sort_by_unavailable": "Sortiranje: {label} ({reason})",
+  "clear_filters": "Ukloni filtere",
+  "clear_all": "Ukloni sve",
+  "clear_search": "Obriši pretragu",
+  "no_match_filters": "Ništa ne odgovara ovim filterima",
+  "no_match_search": "Ništa ne odgovara upitu „{query}“",
+  "no_more": "Nema više stavki",
+  "view_label": "Prikaz",
+  "view_custom": "Prilagođeno",
+  "filters": "Filteri",
+  "filters_count": "Filteri ({count, number})",
+  "filters_refused": "Ovi filteri se ne mogu koristiti",
+  "page_status": "Stranica {page, number} · prikazano: {count, number}"
+}

@@ -6,7 +6,9 @@ import { PageHeader } from "@/components/page-header";
 import { CardSkeleton } from "@/components/skeletons";
 import { type OwnerType, isOwnerType } from "@/lib/custom-fields";
 import { loaded, requireStaff, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import { hasScope } from "@/lib/navigation";
+import { offersTranslate } from "@/lib/translations-server";
 
 import { DefinitionsCard } from "./definitions";
 import { OwnerTabs } from "./owner-tabs";
@@ -22,7 +24,7 @@ export default async function CustomFieldsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const query = await searchParams;
+  const [query, t] = await Promise.all([searchParams, getT()]);
   const owner =
     typeof query.owner === "string" && isOwnerType(query.owner) ? query.owner : "product";
 
@@ -30,8 +32,8 @@ export default async function CustomFieldsPage({
     <Section padding={6}>
       <VStack gap={5} maxWidth={1100}>
         <PageHeader
-          title="Custom fields"
-          description="Your own data on products, variants, categories, customers and orders: each field has a type, rules for its values, and a place on its record's page. Apps add fields of their own."
+          title={t("custom_fields.title")}
+          description={t("custom_fields.page_description")}
         />
         <OwnerTabs owner={owner}>
           <Suspense fallback={<CardSkeleton lines={4} />}>
@@ -64,6 +66,7 @@ async function Definitions({ owner }: { owner: OwnerType }) {
       definitions={definitions.items.toSorted((a, b) => a.position - b.position)}
       suggestions={suggestions.items.filter((s) => !s.existing)}
       canWrite={hasScope(me.scopes, "custom_fields:write")}
+      canTranslate={await offersTranslate("custom_field_definition")}
     />
   );
 }

@@ -23,6 +23,19 @@ const generated = [
   "spores/*/element/*.js",
   // Astro's generated content types (apps/site).
   "**/.astro/**",
+  // The catalogs' index (`apps/admin/scripts/i18n-index.mjs`).
+  "apps/*/messages/*.generated.ts",
+];
+
+/**
+ * The admin's files: every word they show comes from its catalogs
+ * (`apps/admin/messages/`), so literal text in their JSX is an error
+ * (`i18n/no-literal-text`), and so is calling anything deprecated.
+ */
+const adminTranslated = [
+  "apps/admin/app/**",
+  "apps/admin/components/**",
+  "apps/admin/resources/**",
 ];
 
 export default defineConfig({
@@ -71,12 +84,49 @@ export default defineConfig({
         },
       },
       {
+        // The storefront's words come from its catalogs (`messages/<language>/*.json`,
+        // through `t`): literal text in JSX would be English in every language.
+        files: ["apps/storefront/app/**/*.tsx", "apps/storefront/components/**/*.tsx"],
+        // Oxlint has no `react/jsx-no-literals`: the rule is ours (text between tags and
+        // in the props people read; punctuation and symbols pass).
+        plugins: ["react", "jsx-a11y", "nextjs"],
+        jsPlugins: ["./scripts/oxlint-i18n.mjs"],
+        rules: {
+          "i18n/no-literal-text": "error",
+          // A message's tags are given as functions (`t.rich(key, { link: (chunks, key) =>
+          // <a key={key}>…</a> })`): called while rendering, never mounted as components.
+          "react/no-unstable-nested-components": ["warn", { allowAsProps: true }],
+        },
+      },
+      {
+        // The admin's words come from its catalogs (`apps/admin/messages/`, through `t`):
+        // literal text in JSX would be English in every language. The rule is ours
+        // (`scripts/oxlint-i18n.mjs`: text between tags and in the props people read;
+        // punctuation and symbols pass), shared with the storefront. It sees JSX only: a
+        // sentence built in an object or an action isn't caught; the pseudo-language
+        // shows those.
+        files: adminTranslated,
+        plugins: ["react", "jsx-a11y", "nextjs"],
+        jsPlugins: ["./scripts/oxlint-i18n.mjs"],
+        rules: {
+          "i18n/no-literal-text": "error",
+          // An interim overload (a helper kept in English for callers not moved yet) is
+          // marked `@deprecated`: nothing here may call one.
+          "typescript/no-deprecated": "error",
+          // A message's tags are given as functions (`t.rich(key, { link: (chunks, key) =>
+          // <a key={key}>…</a> })`): called while rendering, never mounted as components.
+          "react/no-unstable-nested-components": ["warn", { allowAsProps: true }],
+        },
+      },
+      },
+      {
         files: [
           "packages/cli/**",
           "packages/emails/**",
           "scripts/**",
           "packages/sdk/scripts/**",
           "packages/app/scripts/**",
+          "packages/i18n/scripts/**",
           "apps/*/scripts/**",
         ],
         plugins: ["node"],
@@ -84,8 +134,9 @@ export default defineConfig({
       },
       {
         // The apps platform's packages run in browsers (the bridge, blocks and
-        // elements) and on Workers (the SDK): Web APIs only.
+        // elements) and on Workers (the SDK), the translations in both: Web APIs only.
         files: [
+          "packages/i18n/src/**",
           "packages/app/src/**",
           "packages/app-bridge/src/**",
           "packages/app-bridge-host/src/**",
@@ -114,6 +165,7 @@ export default defineConfig({
       {
         files: [
           "packages/app*/src/**/*.test.ts",
+          "packages/i18n/src/**/*.test.ts",
           "packages/app-bridge/src/testing.ts",
           "packages/storefront-elements/src/**/*.test.ts",
         ],

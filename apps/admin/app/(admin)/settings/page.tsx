@@ -9,6 +9,7 @@ import { Text } from "@astryxdesign/core/Text";
 
 import { PageHeader } from "@/components/page-header";
 import { requireStaff } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import { visibleSettings } from "@/lib/navigation";
 
 /**
@@ -16,21 +17,23 @@ import { visibleSettings } from "@/lib/navigation";
  * needs only one entry.
  */
 export default async function SettingsPage() {
-  const me = await requireStaff();
+  const [me, t] = await Promise.all([requireStaff(), getT()]);
   const groups = visibleSettings(me.scopes);
   return (
     <Section padding={6}>
       <VStack gap={6} maxWidth={960}>
         <PageHeader
-          title="Settings"
-          description="How the store runs, who works on it, and what connects to it."
+          title={t("settings.index_title")}
+          description={t("settings.index_description")}
         />
         {groups.length === 0 && (
           <Banner
             status="info"
-            title="Your role has no settings to open"
-            description="Ask the store owner if you need access. Your own account is always under Your account."
-            endContent={<Button label="Your account" variant="secondary" href="/account" />}
+            title={t("settings.index_empty_title")}
+            description={t("settings.index_empty_description")}
+            endContent={
+              <Button label={t("common.your_account")} variant="secondary" href="/account" />
+            }
           />
         )}
         {groups.map((group) => (
@@ -38,23 +41,29 @@ export default async function SettingsPage() {
             <VStack gap={4}>
               <VStack gap={1}>
                 <Text type="display-3" as="h2">
-                  {group.title}
+                  {t(group.title)}
                 </Text>
                 <Text type="supporting" color="secondary">
-                  {group.description}
+                  {t(group.description)}
                 </Text>
               </VStack>
               <Grid columns={{ minWidth: 240, repeat: "fill" }} gap={3}>
                 {group.pages.map(({ label, href, icon: Icon, description }) => (
-                  <ClickableCard key={href} label={label} href={href} variant="muted" padding={4}>
+                  <ClickableCard
+                    key={href}
+                    label={t(label)}
+                    href={href}
+                    variant="muted"
+                    padding={4}
+                  >
                     <HStack gap={3} vAlign="start">
                       <Text color="secondary">
                         <Icon width={20} aria-hidden />
                       </Text>
                       <VStack gap={1}>
-                        <Text weight="medium">{label}</Text>
+                        <Text weight="medium">{t(label)}</Text>
                         <Text type="supporting" color="secondary">
-                          {description}
+                          {t(description)}
                         </Text>
                       </VStack>
                     </HStack>

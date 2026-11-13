@@ -1,11 +1,15 @@
-// Countries as the admin shows them: a flag and the local name (`Intl.DisplayNames`),
-// falling back to the API's English name. Shared by server and client components.
+// Countries as the admin shows them: a flag and the name as the staff member's locale
+// has it (`Intl.DisplayNames`), falling back to the API's English name. Shared by server
+// and client components: each passes its `Format`'s locale (`format.locale`).
 
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
+import { compareIn, displayName } from "./format.ts";
+import type { KeyIn } from "./messages";
+
 export type Country = AdminSchemas["CountryResponse"];
 
-const regionNames = new Intl.DisplayNames("en", { type: "region", fallback: "none" });
+type Option = { value: string; label: string };
 
 /** The flag emoji of a two-letter code (its regional indicator symbols). */
 export function flag(code: string): string {
@@ -14,33 +18,43 @@ export function flag(code: string): string {
   return String.fromCodePoint(symbol(0), symbol(1));
 }
 
-/** "Croatia": `Intl`'s name, else the API's, else the code itself. */
-export function countryName(code: string, countries?: Country[]): string {
-  return regionNames.of(code) ?? countries?.find((c) => c.code === code)?.name ?? code;
+/** "Croatia": `Intl`'s name in `locale`, else the API's, else the code itself. */
+export function countryName(
+  code: string,
+  countries: Country[] | undefined,
+  locale: string,
+): string {
+  return (
+    displayName("region", code, locale) ?? countries?.find((c) => c.code === code)?.name ?? code
+  );
 }
 
 /** "🇭🇷 Croatia", for selects and lists. */
-export function countryLabel(code: string, countries?: Country[]): string {
-  return `${flag(code)} ${countryName(code, countries)}`;
+export function countryLabel(
+  code: string,
+  countries: Country[] | undefined,
+  locale: string,
+): string {
+  return `${flag(code)} ${countryName(code, countries, locale)}`;
 }
 
-const currencyNames = new Intl.DisplayNames("en", { type: "currency", fallback: "none" });
-
 /** "EUR · Euro" for each code, as select options. */
-export function currencyOptions(codes: string[]): { value: string; label: string }[] {
+export function currencyOptions(codes: string[], locale: string): Option[] {
   return codes.map((code) => {
-    const name = currencyNames.of(code);
+    const name = displayName("currency", code, locale);
     return { value: code, label: name ? `${code} · ${name}` : code };
   });
 }
 
-/** Every country as a select option, sorted by name. */
-export function countryOptions(countries: Country[]): { value: string; label: string }[] {
+/** Every country as a select option, sorted by name as `locale` orders them. */
+export function countryOptions(countries: Country[], locale: string): Option[] {
   return countries
-    .map((c) => ({ value: c.code, label: countryLabel(c.code, countries) }))
-    .toSorted((a, b) =>
-      countryName(a.value, countries).localeCompare(countryName(b.value, countries)),
-    );
+    .map((c) => ({
+      value: c.code,
+      name: countryName(c.code, countries, locale),
+    }))
+    .toSorted((a, b) => compareIn(locale, a.name, b.name))
+    .map(({ value, name }) => ({ value, label: `${flag(value)} ${name}` }));
 }
 
 /** The countries `markets` sell to, each with its market's name, leaving out `except`. */
@@ -53,11 +67,11 @@ export function takenCountries(
   );
 }
 
-/** Groups of countries for picking many at once. */
-export const REGIONS: { key: string; label: string; codes: string[] }[] = [
+/** Groups of countries for picking many at once; `label` is a message key (`t(region.label)`). */
+export const REGIONS: { key: string; label: KeyIn<"components">; codes: string[] }[] = [
   {
     key: "eu",
-    label: "European Union",
+    label: "components.region_eu",
     codes: [
       "AT",
       "BE",
@@ -90,7 +104,7 @@ export const REGIONS: { key: string; label: string; codes: string[] }[] = [
   },
   {
     key: "europe",
-    label: "Europe",
+    label: "components.region_europe",
     codes: [
       "AL",
       "AD",
@@ -143,5 +157,5 @@ export const REGIONS: { key: string; label: string; codes: string[] }[] = [
       "VA",
     ],
   },
-  { key: "north-america", label: "North America", codes: ["US", "CA", "MX"] },
+  { key: "north-america", label: "components.region_north_america", codes: ["US", "CA", "MX"] },
 ];

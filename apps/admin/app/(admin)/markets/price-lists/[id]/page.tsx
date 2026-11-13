@@ -15,9 +15,17 @@ import { type Crumb, PageHeader } from "@/components/page-header";
 import { type SearchParams, one } from "@/components/resource-table/params";
 import { CardSkeleton, DetailSkeleton } from "@/components/skeletons";
 import { flatten } from "@/lib/categories";
+import { getFormat } from "@/lib/get-format";
 import { loaded, perRequest, requireStaff, sessionClient } from "@/lib/hypha";
+import { type T, getT } from "@/lib/i18n";
 import { hasScope } from "@/lib/navigation";
-import { type PriceList, adjustmentLabel, kindLabel, phaseBadge } from "@/lib/price-lists";
+import {
+  MAX_LISTS_PER_CATALOG,
+  type PriceList,
+  adjustmentLabel,
+  kindLabel,
+  phaseBadge,
+} from "@/lib/price-lists";
 
 import { pricesHref } from "@/lib/price-editor";
 
@@ -28,10 +36,13 @@ import { DeletePriceList } from "./delete-list";
 import { ListTabs, type ListTab } from "./list-tabs";
 import { WhereCard } from "./where-card";
 
-const BACK: Crumb[] = [
-  { label: "Markets", href: "/markets" },
-  { label: "Price lists", href: "/markets/price-lists" },
-];
+/** The way back: the markets, then the price lists. */
+function backOf(t: T): Crumb[] {
+  return [
+    { label: t("common.markets"), href: "/markets" },
+    { label: t("price_lists.title"), href: "/markets/price-lists" },
+  ];
+}
 
 /** The lists this request read, by ID: the header and the tab share one read. */
 const listReads = perRequest(async () => new Map<string, Promise<PriceList>>());
@@ -60,7 +71,7 @@ export default async function PriceListPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<SearchParams>;
 }) {
-  const [{ id }, query] = await Promise.all([params, searchParams]);
+  const [{ id }, query, t] = await Promise.all([params, searchParams, getT()]);
   const tab: ListTab = one(query, "tab") === "prices" ? "prices" : "settings";
   // The grid used to live in this tab: its old addresses open the editor where they were.
   if (tab === "prices" && ["q", "category", "fixed", "cursor"].some((key) => one(query, key))) {
@@ -79,7 +90,7 @@ export default async function PriceListPage({
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={1320}>
-        <Suspense fallback={<PageHeader back={BACK} />}>
+        <Suspense fallback={<PageHeader back={backOf(t)} />}>
           <ListHeader id={id} attachFailed={one(query, "attach") === "failed"} />
         </Suspense>
         <ListTabs id={id} tab={tab}>
@@ -99,26 +110,35 @@ export default async function PriceListPage({
 }
 
 async function ListHeader({ id, attachFailed }: { id: string; attachFailed: boolean }) {
-  const list = await loadList(id);
-  const phase = phaseBadge(list.phase);
+  const [list, t, format] = await Promise.all([loadList(id), getT(), getFormat()]);
+  const phase = phaseBadge(list.phase, t);
   return (
     <>
       <PageHeader
         title={list.name}
-        back={BACK}
+        back={backOf(t)}
         badges={
           <>
-            <Badge label={kindLabel(list.kind)} variant={list.kind === "sale" ? "pink" : "blue"} />
+            <Badge
+              label={kindLabel(t, list.kind)}
+              variant={list.kind === "sale" ? "pink" : "blue"}
+            />
             <Badge label={phase.label} variant={phase.variant} />
           </>
         }
-        description={`${list.currency} · ${adjustmentLabel(list.adjustment)} · ${list.fixed_price_count.toLocaleString("en")} fixed ${list.fixed_price_count === 1 ? "price" : "prices"}`}
+        description={[
+          list.currency,
+          adjustmentLabel(t, format, list.adjustment),
+          t("price_lists.fixed_prices_count", { count: list.fixed_price_count }),
+        ].join(" · ")}
       />
       {attachFailed && (
         <Banner
           status="warning"
-          title="The list was created, but not every market took it"
-          description="A market's catalog holds at most 50 lists, all in its currency. Add it to the markets missing under Markets below."
+          title={t("price_lists.detail_attach_failed_title")}
+          description={t("price_lists.detail_attach_failed_description", {
+            max: MAX_LISTS_PER_CATALOG,
+          })}
         />
       )}
     </>
@@ -127,7 +147,9 @@ async function ListHeader({ id, attachFailed }: { id: string; attachFailed: bool
 
 async function Settings({ id }: { id: string }) {
   const client = await sessionClient();
-  const [list, me, markets, categories, groups] = await Promise.all([
+  const [t, format, list, me, markets, categories, groups] = await Promise.all([
+    getT(),
+    getFormat(),
     loadList(id),
     requireStaff(),
     client.GET("/admin/markets"),
@@ -169,24 +191,24 @@ async function Settings({ id }: { id: string }) {
           canWrite={hasScope(me.scopes, "markets:write")}
         />
         <Card>
-          <MetadataList title="About">
-            <MetadataListItem label="When">
+          <MetadataList title={t("price_lists.detail_about")}>
+            <MetadataListItem label={t("price_lists.detail_when")}>
               <ListWindow list={list} />
             </MetadataListItem>
-            <MetadataListItem label="Fixed prices">
-              <Text>{list.fixed_price_count.toLocaleString("en")}</Text>
+            <MetadataListItem label={t("price_lists.detail_fixed_prices")}>
+              <Text>{format.number(list.fixed_price_count)}</Text>
             </MetadataListItem>
-            <MetadataListItem label="Price list ID">
+            <MetadataListItem label={t("price_lists.detail_id")}>
               <Text type="supporting" color="secondary">
                 {list.id}
               </Text>
             </MetadataListItem>
-            <MetadataListItem label="Created">
+            <MetadataListItem label={t("common.created")}>
               <Text type="supporting">
                 <DateTime value={list.created_at} />
               </Text>
             </MetadataListItem>
-            <MetadataListItem label="Last changed">
+            <MetadataListItem label={t("price_lists.detail_last_changed")}>
               <Text type="supporting">
                 <DateTime value={list.updated_at} />
               </Text>
@@ -204,7 +226,7 @@ async function Settings({ id }: { id: string }) {
  * window (`/markets/price-lists/{id}/prices`).
  */
 async function Prices({ id }: { id: string }) {
-  const [list, me] = await Promise.all([loadList(id), requireStaff()]);
+  const [list, me, t] = await Promise.all([loadList(id), requireStaff(), getT()]);
   const canWrite = hasScope(me.scopes, "pricing:write");
   const count = list.fixed_price_count;
   return (
@@ -213,17 +235,19 @@ async function Prices({ id }: { id: string }) {
         <VStack gap={1}>
           <Text weight="medium">
             {count === 0
-              ? "No fixed prices yet"
-              : `${count.toLocaleString("en")} fixed ${count === 1 ? "price" : "prices"} in ${list.currency}`}
+              ? t("price_lists.detail_prices_none")
+              : t("price_lists.detail_prices_count", { count, currency: list.currency })}
           </Text>
           <Text type="supporting" color="secondary">
             {canWrite
-              ? "The price editor shows every variant with its base price and the price this list gives it. Click a cell and type to set a fixed price, paste a column from a spreadsheet, or import a CSV."
-              : "The price editor shows every variant with its base price and the price this list gives it."}
+              ? t("price_lists.detail_editor_hint_write")
+              : t("price_lists.detail_editor_hint_read")}
           </Text>
         </VStack>
         <Button
-          label={canWrite ? "Open price editor" : "View prices"}
+          label={
+            canWrite ? t("price_lists.detail_open_editor") : t("price_lists.detail_view_prices")
+          }
           variant="primary"
           icon={<TableCellsIcon width={16} height={16} />}
           href={pricesHref(id, { fixedOnly: false })}

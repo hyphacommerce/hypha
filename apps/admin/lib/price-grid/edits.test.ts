@@ -15,6 +15,7 @@ import {
   setTo,
 } from "./edits.ts";
 import { isSingleRow, variantsById, visibleRows } from "./rows.ts";
+import { t } from "./testing.ts";
 import type { PriceGridProduct, PriceGridVariant } from "./types.ts";
 
 const eur = (amount: number) => ({ amount, currency: "EUR" });
@@ -50,7 +51,7 @@ test("a typed price is an upsert; the same price typed differently is nothing", 
     2,
     "EUR",
   );
-  assert.deepEqual(review(variants, drafts, "EUR", 2).diff, {
+  assert.deepEqual(review(t, variants, drafts, "EUR", 2).diff, {
     upserts: [{ variant: "var_b", price: eur(2250), compare_at: null, breaks: [] }],
     clears: [],
   });
@@ -72,7 +73,7 @@ test("emptying a stored fixed price clears it", () => {
     2,
     "EUR",
   );
-  const { diff, changedVariants, dirty } = review(variants, drafts, "EUR", 2);
+  const { diff, changedVariants, dirty } = review(t, variants, drafts, "EUR", 2);
   assert.deepEqual(diff, { upserts: [], clears: [{ variant: "var_a" }] });
   assert.equal(changedVariants, 1);
   assert.equal(dirty.has(cellKey("var_a", "fixed_price")), true);
@@ -107,7 +108,7 @@ test("errors stay on their cells and keep the variant out of the diff", () => {
     2,
     "EUR",
   );
-  const { diff, errors, changedVariants } = review(variants, drafts, "EUR", 2);
+  const { diff, errors, changedVariants } = review(t, variants, drafts, "EUR", 2);
   assert.deepEqual(diff, { upserts: [], clears: [] });
   assert.equal(changedVariants, 2);
   assert.equal(errors.get(cellKey("var_a", "fixed_price")), "At most 2 decimal places.");
@@ -119,23 +120,23 @@ test("errors stay on their cells and keep the variant out of the diff", () => {
 
 test("a compare-at price must be above the fixed price", () => {
   const draft = { fixed_price: "10", fixed_compare_at: "10", breaks: "" };
-  assert.deepEqual(checkDraft(draft, "EUR", 2), {
+  assert.deepEqual(checkDraft(t, draft, "EUR", 2), {
     kind: "invalid",
     errors: { fixed_compare_at: "Must be above the fixed price." },
   });
-  assert.equal(checkDraft({ ...draft, fixed_compare_at: "10.01" }, "EUR", 2).kind, "price");
+  assert.equal(checkDraft(t, { ...draft, fixed_compare_at: "10.01" }, "EUR", 2).kind, "price");
 });
 
 test("breaks are checked against the fixed price in the same draft", () => {
   assert.deepEqual(
-    checkDraft({ fixed_price: "10", fixed_compare_at: "", breaks: "5=10" }, "EUR", 2),
+    checkDraft(t, { fixed_price: "10", fixed_compare_at: "", breaks: "5=10" }, "EUR", 2),
     {
       kind: "invalid",
       errors: { breaks: "The price from 5 must be below the fixed price." },
     },
   );
   assert.deepEqual(
-    checkDraft({ fixed_price: "10", fixed_compare_at: "", breaks: "5=9; 10=8" }, "EUR", 2),
+    checkDraft(t, { fixed_price: "10", fixed_compare_at: "", breaks: "5=9; 10=8" }, "EUR", 2),
     {
       kind: "price",
       fixed: {
@@ -195,8 +196,8 @@ test("fill down copies the first editable cell, skipping the product row", () =>
 });
 
 test("fill down on one row takes the nearest editable cell above", () => {
-  const changes = fillDown({ top: 2, left: 0, bottom: 2, right: 1 }, targetAt, (t) =>
-    t.column === "fixed_price" ? "18.00" : "",
+  const changes = fillDown({ top: 2, left: 0, bottom: 2, right: 1 }, targetAt, (target) =>
+    target.column === "fixed_price" ? "18.00" : "",
   );
   assert.deepEqual(changes, [
     { variant: "var_b", column: "fixed_price", text: "18.00" },
