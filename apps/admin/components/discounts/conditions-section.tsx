@@ -183,7 +183,7 @@ export function ConditionsSection({
         />
         {c.minQuantity.enabled && (
           <TextInput
-            label={t("discounts.conditions_at_least")}
+            label={t("discounts.conditions_at_least_quantity")}
             value={c.minQuantity.quantity}
             onChange={(quantity) =>
               set({ minQuantity: { ...c.minQuantity, quantity } }, "minQuantity.quantity")

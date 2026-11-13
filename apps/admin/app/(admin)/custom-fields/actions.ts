@@ -3,7 +3,7 @@
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { revalidatePath } from "next/cache";
 
-import { getFormat } from "@/lib/get-format";
+import { createFormat } from "@/lib/format";
 import { describe, sessionClient } from "@/lib/hypha";
 import { type T, getT } from "@/lib/i18n";
 
@@ -38,13 +38,13 @@ export async function updateDefinition(id: string, body: UpdateRequest): Promise
     const details: unknown = error.details;
     const owners: unknown =
       typeof details === "object" && details !== null ? Reflect.get(details, "owners") : undefined;
-    const [t, format, described] = await Promise.all([getT(), getFormat(), describe(error)]);
+    const [t, described] = await Promise.all([getT(), describe(error)]);
     const names = Array.isArray(owners) ? await ownerNames(client, owners.slice(0, 5), t) : [];
     return {
       error: names.length
         ? t("custom_fields.values_invalid_starting_with", {
             error: described,
-            names: format.list(names, "unit"),
+            names: createFormat(t.locale).list(names, "unit"),
           })
         : described,
     };

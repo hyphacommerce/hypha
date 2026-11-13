@@ -103,7 +103,6 @@ export function parseAmounts(
   t: DiscountsT,
   options: { allowZero?: boolean } = {},
 ): { amounts: Record<string, number>; problems: Problem[] } {
-  const parsed: Record<string, number> = {};
   const problems: Problem[] = [];
   for (const market of markets) {
     const text = amounts[market.id]?.trim() ?? "";
@@ -121,9 +120,9 @@ export function parseAmounts(
     if (!amount.ok) problems.push({ path: at, message: amount.error });
     else if (amount.value === 0 && !options.allowZero) {
       problems.push({ path: at, message: t("discounts.problem_amount_zero") });
-    } else parsed[market.id] = amount.value;
+    }
   }
-  return { amounts: parsed, problems };
+  return { amounts: amountsOf(amounts, markets, currencies, options), problems };
 }
 
 function checkAmounts(

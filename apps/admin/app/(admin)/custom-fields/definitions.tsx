@@ -158,13 +158,13 @@ export function DefinitionsCard({
                         <HStack gap={1} wrap="wrap">
                           {manager && <Badge label={manager} variant="info" />}
                           {definition.access.storefront === "read" && (
-                            <Badge label={t("custom_fields.storefront")} variant="success" />
+                            <Badge label={t("custom_fields.badge_storefront")} variant="success" />
                           )}
                           {definition.capabilities.filterable && (
-                            <Badge label={t("custom_fields.filterable")} />
+                            <Badge label={t("custom_fields.badge_filterable")} />
                           )}
                           {definition.capabilities.unique && (
-                            <Badge label={t("custom_fields.unique")} />
+                            <Badge label={t("custom_fields.badge_unique")} />
                           )}
                           {definition.personal && (
                             <Badge label={t("custom_fields.badge_personal")} variant="warning" />
@@ -496,6 +496,9 @@ function validationsFrom(form: Form, t: FieldsT): Validations | { error: string 
   return out;
 }
 
+/** What stands for a key not typed yet: an identifier, the same in every language. */
+const KEY_EXAMPLE = "key";
+
 /** A key from a name: "Care instructions" → "care_instructions". */
 function keyFrom(name: string): string {
   return name
@@ -581,8 +584,8 @@ function DefinitionDialog({
       <DialogHeader
         title={
           isNew
-            ? t("custom_fields.add_field")
-            : t("custom_fields.edit_named", { name: definition.name })
+            ? t("custom_fields.dialog_add_title")
+            : t("custom_fields.dialog_edit_title", { name: definition.name })
         }
         subtitle={
           isNew
@@ -610,7 +613,7 @@ function DefinitionDialog({
             <TextInput
               label={t("common.key")}
               description={t("custom_fields.dialog_key_hint", {
-                key: form.key || t("custom_fields.choices_key_placeholder"),
+                key: form.key || KEY_EXAMPLE,
               })}
               value={form.key}
               onChange={(key) => {
@@ -663,7 +666,7 @@ function DefinitionDialog({
           <VStack gap={2}>
             <Text weight="medium">{t("custom_fields.dialog_access_title")}</Text>
             <Selector
-              label={t("custom_fields.storefront")}
+              label={t("custom_fields.dialog_storefront")}
               description={t("custom_fields.dialog_storefront_hint")}
               options={[
                 { value: "none", label: t("custom_fields.storefront_none") },
@@ -675,7 +678,7 @@ function DefinitionDialog({
             />
             {mayBeFilterable(type) && (
               <CheckboxInput
-                label={t("custom_fields.filterable")}
+                label={t("custom_fields.dialog_filterable")}
                 description={t("custom_fields.dialog_filterable_hint")}
                 value={form.filterable}
                 onChange={(filterable) => set({ filterable })}
@@ -683,7 +686,7 @@ function DefinitionDialog({
             )}
             {mayBeUnique(type) && (
               <CheckboxInput
-                label={t("custom_fields.unique")}
+                label={t("custom_fields.dialog_unique")}
                 description={t("custom_fields.dialog_unique_hint")}
                 value={form.unique}
                 onChange={(unique) => set({ unique })}
@@ -705,7 +708,7 @@ function DefinitionDialog({
         <HStack gap={2} hAlign="end">
           <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label={isNew ? t("custom_fields.add_field") : t("common.save")}
+            label={isNew ? t("custom_fields.dialog_add_submit") : t("common.save")}
             variant="primary"
             isLoading={isPending}
             onClick={submit}

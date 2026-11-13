@@ -52,7 +52,7 @@ const filters = (t: DiscountsT): FilterDef[] => [
   {
     kind: "text",
     param: "batch",
-    label: t("discounts.codes_batch"),
+    label: t("discounts.codes_filter_batch"),
     placeholder: t("discounts.codes_batch_placeholder"),
   },
   {
@@ -79,7 +79,7 @@ const columns = (t: DiscountsT, format: Format): TableColumn<Code>[] => [
   },
   {
     key: "used",
-    header: t("discounts.uses"),
+    header: t("discounts.codes_column_uses"),
     width: pixel(120),
     align: "end",
     renderCell: (c) => (
@@ -103,7 +103,7 @@ const columns = (t: DiscountsT, format: Format): TableColumn<Code>[] => [
   },
   {
     key: "batch",
-    header: t("discounts.codes_batch"),
+    header: t("discounts.codes_column_batch"),
     width: proportional(1, { minWidth: 120 }),
     renderCell: (c) => (
       <Text color={c.batch ? undefined : "secondary"}>{c.batch ?? t("common.none")}</Text>
@@ -158,14 +158,14 @@ function AddCodesDialog({ id, onClose }: { id: string; onClose: () => void }) {
   return (
     <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={520} purpose="form">
       <DialogHeader
-        title={t("discounts.codes_add")}
+        title={t("discounts.codes_add_title")}
         subtitle={t("discounts.codes_add_subtitle")}
         onOpenChange={(open) => !open && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
         <TextArea
-          label={t("discounts.codes")}
+          label={t("discounts.codes_add_label")}
           description={t("discounts.codes_add_hint")}
           rows={6}
           value={text}
@@ -287,7 +287,7 @@ function GenerateDialog({ id, onClose }: { id: string; onClose: () => void }) {
         <HStack gap={2} hAlign="end">
           <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label={t("discounts.codes_generate")}
+            label={t("discounts.codes_generate_submit")}
             variant="primary"
             isLoading={isPending}
             onClick={submit}
@@ -376,7 +376,9 @@ function ActivateDialog({
           ? t("discounts.codes_reactivate_description")
           : t("discounts.codes_deactivate_description"))
       }
-      actionLabel={active ? t("discounts.codes_reactivate") : t("discounts.codes_deactivate")}
+      actionLabel={
+        active ? t("discounts.codes_reactivate_action") : t("discounts.codes_deactivate_action")
+      }
       isActionLoading={isPending}
       onAction={() =>
         startTransition(async () => {

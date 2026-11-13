@@ -85,6 +85,8 @@ export function volumeTiers(): DiscountDraft {
 export function freeShipping(): DiscountDraft {
   return base({
     method: "automatic",
+    // Stored content: the title buyers see, in the store's language rather than the
+    // staff member's, so it isn't a message.
     title: "Free shipping",
     kind: {
       type: "standard",

@@ -33,37 +33,41 @@ export function generationProblem(
   prefix: string,
   t: TFor<"discounts">,
 ): string | null {
+  const taken = characters(normaliseCode(prefix));
+  switch (generationIssue(length, prefix)) {
+    case null:
+      return null;
+    case "length":
+      return t("discounts.codes_length_range", {
+        min: MIN_GENERATED_LENGTH,
+        max: MAX_GENERATED_LENGTH,
+      });
+    case "prefix":
+      return t("discounts.codes_prefix_too_long", {
+        taken,
+        longest: MAX_GENERATED_LENGTH - MIN_RANDOM_CHARACTERS,
+        random: MIN_RANDOM_CHARACTERS,
+      });
+    case "random":
+      return t("discounts.codes_need_random", {
+        random: MIN_RANDOM_CHARACTERS,
+        taken,
+        length: taken + MIN_RANDOM_CHARACTERS,
+      });
+  }
+}
+
+/**
+ * The one rule both `generationProblem` and `generateCode` go by: the length out of
+ * range, the prefix too long for any length, or too few random characters left.
+ */
+function generationIssue(length: number, prefix: string): "length" | "prefix" | "random" | null {
   if (!Number.isInteger(length) || length < MIN_GENERATED_LENGTH || length > MAX_GENERATED_LENGTH) {
-    return t("discounts.codes_length_range", {
-      min: MIN_GENERATED_LENGTH,
-      max: MAX_GENERATED_LENGTH,
-    });
+    return "length";
   }
   const taken = characters(normaliseCode(prefix));
   if (length - taken >= MIN_RANDOM_CHARACTERS) return null;
-  const longest = MAX_GENERATED_LENGTH - MIN_RANDOM_CHARACTERS;
-  if (taken > longest) {
-    return t("discounts.codes_prefix_too_long", {
-      taken,
-      longest,
-      random: MIN_RANDOM_CHARACTERS,
-    });
-  }
-  return t("discounts.codes_need_random", {
-    random: MIN_RANDOM_CHARACTERS,
-    taken,
-    length: taken + MIN_RANDOM_CHARACTERS,
-  });
-}
-
-/** Whether codes of `length` characters can be generated after `prefix`. */
-function canGenerate(length: number, prefix: string): boolean {
-  return (
-    Number.isInteger(length) &&
-    length >= MIN_GENERATED_LENGTH &&
-    length <= MAX_GENERATED_LENGTH &&
-    length - characters(normaliseCode(prefix)) >= MIN_RANDOM_CHARACTERS
-  );
+  return taken > MAX_GENERATED_LENGTH - MIN_RANDOM_CHARACTERS ? "prefix" : "random";
 }
 
 /**
@@ -95,7 +99,7 @@ export function generateCode(
   prefix = "",
   random: (bytes: Uint8Array) => Uint8Array = (bytes) => crypto.getRandomValues(bytes),
 ): string {
-  if (!canGenerate(length, prefix)) {
+  if (generationIssue(length, prefix) !== null) {
     throw new RangeError(`can't generate codes of ${length} characters after ${prefix}`);
   }
   const start = normaliseCode(prefix);

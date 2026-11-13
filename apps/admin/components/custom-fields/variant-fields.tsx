@@ -39,7 +39,7 @@ export function VariantFieldsCell({
         label={t("custom_fields.variant_button")}
         size="sm"
         variant="ghost"
-        tooltip={t("custom_fields.variant_dialog_title", { title })}
+        tooltip={t("custom_fields.variant_tooltip", { title })}
         onClick={() => setIsOpen(true)}
       />
       {isOpen && (

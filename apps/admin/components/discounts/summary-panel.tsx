@@ -76,7 +76,7 @@ export function SummaryPanel({
                   classes.map((c) => t(CLASS_LABELS[c])),
                   "unit",
                 )
-              : t("discounts.summary_nothing_yet")}
+              : t("discounts.panel_nothing_off")}
           </Text>
           <div aria-live="polite" style={{ opacity: isRefreshing ? 0.6 : 1 }}>
             <VStack gap={1}>

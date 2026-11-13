@@ -166,7 +166,7 @@ export function ValueFields({
   return (
     <VStack gap={3}>
       <SegmentedControl
-        label={t("discounts.value_title")}
+        label={t("discounts.value_label")}
         value={choice}
         onChange={choose}
         isDisabled={isReadOnly}
@@ -189,7 +189,7 @@ export function ValueFields({
       )}
       {(value.type === "amount" || value.type === "fixed_price") && (
         <AmountsByMarket
-          label={value.type === "amount" ? t("discounts.value_type_amount") : t("common.price")}
+          label={value.type === "amount" ? t("discounts.value_amount") : t("common.price")}
           description={
             value.type === "amount"
               ? t("discounts.value_amount_hint")

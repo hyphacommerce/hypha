@@ -9,7 +9,7 @@ export type DiscountTab = "settings" | "codes" | "usage";
 
 const TABS = [
   { value: "settings", label: "common.settings" },
-  { value: "codes", label: "discounts.codes" },
+  { value: "codes", label: "discounts.tab_codes" },
   { value: "usage", label: "discounts.tab_usage" },
 ] as const;
 

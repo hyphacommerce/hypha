@@ -46,7 +46,7 @@ export function DeleteDiscount({ id, title, used }: { id: string; title: string;
             ? t("discounts.delete_dialog_used", { count: used })
             : t("discounts.delete_dialog_unused")
         }
-        actionLabel={t("discounts.delete_action")}
+        actionLabel={t("discounts.delete_dialog_action")}
         isActionLoading={isPending}
         onAction={() =>
           startTransition(async () => {

@@ -42,10 +42,10 @@ const filters = (t: DiscountsT): FilterDef[] => [
   {
     kind: "select",
     param: "method",
-    label: t("discounts.method_title"),
+    label: t("discounts.list_filter_method"),
     options: [
-      { value: "codes", label: t("discounts.codes") },
-      { value: "automatic", label: t("discounts.method_automatic") },
+      { value: "codes", label: t("discounts.list_method_codes") },
+      { value: "automatic", label: t("discounts.list_method_automatic") },
     ],
   },
   {
@@ -64,8 +64,8 @@ const views = (t: DiscountsT): View[] => [
   { label: t("common.all"), params: {} },
   { label: t("common.active"), params: { status: ["active"] } },
   { label: t("discounts.list_view_scheduled"), params: { status: ["scheduled"] } },
-  { label: t("discounts.codes"), params: { method: ["codes"] } },
-  { label: t("discounts.method_automatic"), params: { method: ["automatic"] } },
+  { label: t("discounts.list_view_codes"), params: { method: ["codes"] } },
+  { label: t("discounts.list_view_automatic"), params: { method: ["automatic"] } },
 ];
 
 const columns = (t: DiscountsT, format: Format): TableColumn<Discount>[] => [
@@ -81,7 +81,7 @@ const columns = (t: DiscountsT, format: Format): TableColumn<Discount>[] => [
   },
   {
     key: "method",
-    header: t("discounts.method_title"),
+    header: t("discounts.list_column_method"),
     width: pixel(130),
     renderCell: (d) => <Text>{methodLabel(d, t)}</Text>,
   },
@@ -109,7 +109,7 @@ const columns = (t: DiscountsT, format: Format): TableColumn<Discount>[] => [
   },
   {
     key: "used",
-    header: t("discounts.uses"),
+    header: t("discounts.list_column_uses"),
     width: pixel(110),
     align: "end",
     renderCell: (d) => <Text>{usesLabel(d, t, format)}</Text>,

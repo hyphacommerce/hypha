@@ -37,6 +37,12 @@ const SEPARATOR = " · ";
 /** What stands for a number that doesn't parse yet. */
 const UNKNOWN = "?";
 
+/** A typed count as the language writes it ("1,200"), or "?" while it doesn't parse. */
+function countText(text: string, ctx: SummaryContext): string {
+  const count = parseCount(text);
+  return count === null ? UNKNOWN : ctx.format.number(count);
+}
+
 /** "€50", "€12.50", "JP¥500": whole amounts without their zeros. */
 export function shortMoney(
   amount: number,
@@ -195,10 +201,10 @@ function buyXGetY(kind: BuyXGetYDraft, markets: readonly MarketOption[], ctx: Su
   const uses = parseCount(kind.usesPerOrder);
   return ctx.t("discounts.summary_buy_x_get_y", {
     buy: kind.buy.type,
-    buy_quantity: parseCount(kind.buy.quantity) ?? UNKNOWN,
+    buy_quantity: countText(kind.buy.quantity, ctx),
     buy_amount: amountsPhrase(kind.buy.amounts, markets, ctx) ?? UNKNOWN,
     buys: itemsPhrase(kind.buys, ctx),
-    get_quantity: parseCount(kind.getQuantity) ?? UNKNOWN,
+    get_quantity: countText(kind.getQuantity, ctx),
     gets: itemsPhrase(kind.gets, ctx),
     reward:
       percent?.ok && percent.value === 10_000
@@ -208,7 +214,7 @@ function buyXGetY(kind: BuyXGetYDraft, markets: readonly MarketOption[], ctx: Su
           : "off",
     off: offPhrase(kind.value, markets, ctx) ?? UNKNOWN,
     limit: uses ? "some" : "none",
-    uses: uses ?? 0,
+    uses: ctx.format.number(uses ?? 0),
   });
 }
 
@@ -217,7 +223,7 @@ function tiered(kind: TieredDraft, markets: readonly MarketOption[], ctx: Summar
     ctx.t("discounts.summary_tier", {
       threshold:
         kind.measure === "quantity"
-          ? (parseCount(tier.quantity) ?? UNKNOWN)
+          ? countText(tier.quantity, ctx)
           : (amountsPhrase(tier.amounts, markets, ctx) ?? UNKNOWN),
       off: offPhrase(tier.value, markets, ctx) ?? UNKNOWN,
     }),

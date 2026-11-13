@@ -171,7 +171,7 @@ export function ReferenceListPicker({
       </HStack>
       {isPicking && (
         <ProductPicker
-          title={t("custom_fields.reference_pick_products")}
+          title={t("custom_fields.reference_pick_products_title")}
           onConfirm={async (products) => {
             onPick(products.map((p) => p.id));
             setIsPicking(false);

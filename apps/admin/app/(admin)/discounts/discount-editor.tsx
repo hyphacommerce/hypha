@@ -198,7 +198,7 @@ export function NewDiscount({
       <HStack gap={2} hAlign="end">
         <Button label={t("common.cancel")} variant="ghost" href="/discounts" />
         <Button
-          label={t("discounts.create")}
+          label={t("discounts.new_submit")}
           variant="primary"
           isLoading={isPending}
           onClick={create}

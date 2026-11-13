@@ -50,7 +50,7 @@ export function ItemSetFields({
   onNames: (names: Record<string, string>) => void;
 }) {
   const t = useT<"discounts">();
-  const label = given ?? t("discounts.applies_to");
+  const label = given ?? t("discounts.applies_to_label");
   const [picking, setPicking] = useState<"products" | "variants" | null>(null);
   const set = (change: Partial<ItemSetDraft>, field: string) =>
     onChange({ ...items, ...change }, [`${path}.${field}`]);

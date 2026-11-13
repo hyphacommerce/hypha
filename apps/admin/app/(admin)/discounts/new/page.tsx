@@ -26,7 +26,7 @@ export default async function NewDiscountPage({
     <Section padding={6}>
       <VStack gap={5} maxWidth={1320}>
         <PageHeader
-          title={t("discounts.create")}
+          title={t("discounts.new_title")}
           description={t("discounts.new_description")}
           back={[{ label: t("discounts.title"), href: "/discounts" }]}
         />

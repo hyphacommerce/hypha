@@ -84,7 +84,7 @@ export function CustomFieldsFrame({
       <VStack gap={3}>
         <VStack gap={1}>
           <Text type="display-3" as="h2">
-            {t("custom_fields.title")}
+            {t("custom_fields.card_title")}
           </Text>
           <Text type="supporting" color="secondary">
             {t.rich("custom_fields.card_hint", {

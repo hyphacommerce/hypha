@@ -86,7 +86,7 @@ export function MethodSection({
             />
             {!isReadOnly && (
               <Button
-                label={t("discounts.codes_generate")}
+                label={t("discounts.method_generate")}
                 variant="secondary"
                 onClick={() => onChange({ ...draft, code: generateCode() }, ["code"])}
               />
