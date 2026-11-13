@@ -191,9 +191,12 @@ type HreflangSet = {
  * its tag and whose language names no region (Austria's `de`) is named by the language
  * alone (`de`) instead, unless another page has that tag already: the first such page
  * listed keeps it. A page left with no tag (the bare tag was taken, or its language
- * names a region, like `de-AT` offered in Germany) is a duplicate of the page that won
- * its tag: its canonical points there, it names no `hreflang` set and the sitemap
- * leaves it out, so no live page is in no set while claiming to be its own.
+ * names a region) whose tag went to a page in its own country is a duplicate of that
+ * page: the same products, prices and availability, so its canonical points there, it
+ * names no `hreflang` set and the sitemap leaves it out. One whose tag went to another
+ * country (`de-AT` offered in Germany, the tag Austria's) can't point there, since that
+ * country may not sell what it shows: it stays its own canonical, in the sitemap, but
+ * in no `hreflang` set.
  */
 function hreflangSet(mode: Routing, countries: readonly Offer[]): HreflangSet {
   if (mode === "single" && new Set(countries.map(defaultLanguage)).size > 1) {
@@ -222,7 +225,7 @@ function hreflangSet(mode: Routing, countries: readonly Offer[]): HreflangSet {
     if (bare !== undefined && !taken.has(bare.toLowerCase())) {
       taken.add(bare.toLowerCase());
       named.set(place, bare);
-    } else if (winner !== undefined) {
+    } else if (winner !== undefined && winner.country === place.country) {
       duplicates.set(place.segment, winner.segment);
     }
   }

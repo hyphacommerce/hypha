@@ -247,16 +247,17 @@ test("a second plain loser finds the bare tag taken: it duplicates the page with
   assert.equal(duplicateOf("folders", [AT2, CH], "at"), undefined);
 });
 
-test("two countries offering de and de-AT: the other's de-AT page duplicates Austria's", () => {
+test("two countries offering de and de-AT: the other's de-AT page is its own, in no set", () => {
   const AT2 = { country: "AT", languages: ["de", "de-AT"] };
   const DE2 = { country: "DE", languages: ["de", "de-AT"] };
+  // Its language names a region, so it takes no bare tag.
   assert.deepEqual(hreflangPlaces("folders", [AT2, DE2]), [
     { tag: "de", segment: "at" },
     { tag: "de-AT", segment: "de-at-at" },
     { tag: "de-DE", segment: "de" },
   ]);
-  // Its language names a region, so it takes no bare tag.
-  assert.equal(duplicateOf("folders", [AT2, DE2], "de-at-de"), "de-at-at");
+  // Austria may not sell what Germany's page shows: no canonical points there.
+  assert.equal(duplicateOf("folders", [AT2, DE2], "de-at-de"), undefined);
 });
 
 test("a regional language offered elsewhere leaves its tag to the page in its country", () => {
@@ -265,7 +266,8 @@ test("a regional language offered elsewhere leaves its tag to the page in its co
     { tag: "de-DE", segment: "de" },
     { tag: "de-AT", segment: "at" },
   ]);
-  assert.equal(duplicateOf("folders", [DE2, AT], "de-at-de"), "at");
+  // The tag's winner is in another country: the page keeps its own canonical.
+  assert.equal(duplicateOf("folders", [DE2, AT], "de-at-de"), undefined);
 });
 
 test("no page duplicates another where every tag is its own, nor in a single tree", () => {
