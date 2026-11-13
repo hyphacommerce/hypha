@@ -9,6 +9,8 @@ import { hasScope } from "./navigation.ts";
 export type Translations = AdminSchemas["TranslationsResponse"];
 export type TranslatableField = AdminSchemas["TranslatableFieldResponse"];
 export type PutTranslation = AdminSchemas["PutTranslationRequest"];
+/** The custom field value a field is: its definition, and the variant whose it is. */
+export type TranslatedValue = AdminSchemas["TranslatedValue"];
 
 /** The kinds of resource with translatable text, as the API names them. */
 export const KINDS = [
@@ -89,7 +91,14 @@ export function resourceHref(kind: Kind, id: string): string {
 }
 
 /** The editor's sections, in the order they show. */
-export const GROUPS = ["details", "options", "option_values", "choices", "facets"] as const;
+export const GROUPS = [
+  "details",
+  "options",
+  "option_values",
+  "choices",
+  "facets",
+  "custom_fields",
+] as const;
 export type Group = (typeof GROUPS)[number];
 
 /**
@@ -106,26 +115,42 @@ export type FieldName =
   /** `choices.<key>.label`: "Choice: Cotton". */
   | { type: "choice"; source: string }
   /** `facets.<key>.label`: "Filter: Colour". */
-  | { type: "facet"; source: string };
+  | { type: "facet"; source: string }
+  /**
+   * `custom_fields.<cfdef_…>.value` (the resource's own value) or
+   * `variant_custom_fields.<var_…>.<cfdef_…>.value` (a variant's): named by its
+   * definition, under its variant (whose `title` is `null` for one without options).
+   */
+  | {
+      type: "custom_field";
+      name: string;
+      /** `text`, `multiline_text` or `rich_text`; absent when the API didn't say. */
+      valueType?: string;
+      variant?: { id: string; title: string | null };
+    };
 
 export type DescribedField = { group: Group; name: FieldName };
 
 /**
  * The section and name of the field under `key`. `source` is the field's own source
  * text; `optionOf` names the option an option value belongs to (the source name, by the
- * value's ID), where the page knows the product. A child whose source is blank is named
- * by its ID or key instead, so no label is ever empty.
+ * value's ID), where the page knows the product. `customField` is what the API says of a
+ * custom field value. A child whose source is blank is named by its ID or key instead,
+ * so no label is ever empty.
  */
 export function describeField(
   key: string,
   source: string,
   optionOf: (valueId: string) => string | undefined = () => undefined,
+  customField?: TranslatedValue | null,
 ): DescribedField {
   const first = key.indexOf(".");
   const last = key.lastIndexOf(".");
   if (first === -1 || first === last)
     return { group: "details", name: { type: "plain", name: key } };
   const collection = key.slice(0, first);
+  if (collection === "custom_fields" || collection === "variant_custom_fields")
+    return { group: "custom_fields", name: customFieldName(key, collection, customField) };
   // A facet's key has dots of its own (`option.Color`): the child is everything between.
   const child = key.slice(first + 1, last);
   const field = key.slice(last + 1);
@@ -144,18 +169,89 @@ export function describeField(
   return { group: "details", name: { type: "plain", name: key } };
 }
 
+/**
+ * A custom field value's name: its definition's and its variant, from what the API says,
+ * else read from the key (the definition's ID standing for its name).
+ */
+function customFieldName(
+  key: string,
+  collection: string,
+  customField: TranslatedValue | null | undefined,
+): FieldName {
+  const parts = key.split(".");
+  const isVariant = collection === "variant_custom_fields";
+  const variantId = customField?.variant ?? (isVariant ? parts[1] : undefined);
+  const name = customField?.name.trim() || customField?.key || parts[isVariant ? 2 : 1] || key;
+  return {
+    type: "custom_field",
+    name,
+    ...(customField?.type === undefined ? {} : { valueType: customField.type }),
+    ...(variantId === undefined || variantId === ""
+      ? {}
+      : { variant: { id: variantId, title: customField?.variant_title ?? null } }),
+  };
+}
+
 /** `fields` by section, in the sections' order, each keeping the API's order within. */
-export function grouped<F extends { key: string; source: string }>(
+export function grouped<
+  F extends { key: string; source: string; custom_field?: TranslatedValue | null },
+>(
   fields: readonly F[],
   optionOf?: (valueId: string) => string | undefined,
 ): { group: Group; fields: { field: F; name: FieldName }[] }[] {
   return GROUPS.map((group) => ({
     group,
     fields: fields.flatMap((field) => {
-      const described = describeField(field.key, field.source, optionOf);
+      const described = describeField(field.key, field.source, optionOf, field.custom_field);
       return described.group === group ? [{ field, name: described.name }] : [];
     }),
   })).filter((section) => section.fields.length > 0);
+}
+
+/**
+ * The custom fields section's parts: the resource's own values first, then each
+ * variant's, in the order its first value came; each part keeps the API's order.
+ * `variant` is absent for the resource's own.
+ */
+export function byVariant<E extends { name: FieldName }>(
+  entries: readonly E[],
+): { variant?: { id: string; title: string | null }; entries: E[] }[] {
+  const own: E[] = [];
+  const variants = new Map<
+    string,
+    { variant: { id: string; title: string | null }; entries: E[] }
+  >();
+  for (const entry of entries) {
+    const variant = entry.name.type === "custom_field" ? entry.name.variant : undefined;
+    if (variant === undefined) {
+      own.push(entry);
+      continue;
+    }
+    const part = variants.get(variant.id);
+    if (part) part.entries.push(entry);
+    else variants.set(variant.id, { variant, entries: [entry] });
+  }
+  return [...(own.length > 0 ? [{ entries: own }] : []), ...variants.values()];
+}
+
+/**
+ * Whether a field takes one line of text: a custom field value of type `text` (the API
+ * refuses a line break in one, `not_single_line`) whatever its limit, or a short plain
+ * field. A `multiline_text` value gets a text area whatever its limit.
+ */
+export function isSingleLine(
+  field: { format: string; max_length: number },
+  name: FieldName,
+): boolean {
+  if (field.format === "html") return false;
+  if (name.type === "custom_field" && name.valueType !== undefined)
+    return name.valueType === "text";
+  return field.max_length <= SINGLE_LINE_MAX;
+}
+
+/** What a one-line field keeps of the text it's given: each line break becomes a space. */
+export function oneLine(value: string): string {
+  return value.replace(/\r\n|[\r\n]/g, " ");
 }
 
 /** One field as the editor holds it. */
