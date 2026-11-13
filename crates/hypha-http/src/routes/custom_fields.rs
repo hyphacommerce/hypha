@@ -38,6 +38,7 @@ use super::{
 use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, PathId, Query, Storefront},
+    language::{self, Localized},
     patch,
     state::{SharedState, Storage},
 };
@@ -648,47 +649,85 @@ pub struct StorefrontCustomFieldDefinitionList {
     items: Vec<StorefrontCustomFieldDefinitionResponse>,
 }
 
+#[derive(Deserialize, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub struct StorefrontDefinitionFilters {
+    /// Only this owner type's.
+    #[param(inline)]
+    owner_type: Option<OwnerTypeDto>,
+    /// The language to answer in (a BCP 47 tag, `de`, `pt-BR`): the store's default or
+    /// one it has published, else the store's default answers. `Content-Language` names
+    /// the one served. Text without a translation stays in the store's default language.
+    language: Option<String>,
+}
+
 /// The custom fields storefronts read (`access.storefront: read`) on products, variants
-/// and categories, to name, order and label their values.
+/// and categories, to name, order and label their values, in `language`.
 #[utoipa::path(
     get,
     path = "/storefront/custom-field-definitions",
-    params(DefinitionFilters),
-    responses((status = 200, description = "OK", body = StorefrontCustomFieldDefinitionList)),
+    params(StorefrontDefinitionFilters),
+    responses((
+        status = 200,
+        description = "OK",
+        body = StorefrontCustomFieldDefinitionList,
+        headers(("Content-Language" = String, description = "The language the response is in.")),
+    )),
     extensions(("x-hypha-scopes" = json!(["products:read"]))),
 )]
 pub async fn list_storefront<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
-    query: Query<DefinitionFilters>,
-) -> Result<Json<StorefrontCustomFieldDefinitionList>, ApiError> {
+    query: Query<StorefrontDefinitionFilters>,
+) -> Result<Localized<StorefrontCustomFieldDefinitionList>, ApiError> {
+    use hypha_translations::{ResourceKind, ResourceRef, fields as keys};
     let (ports, ctx) = caller.authenticate(&state).await?;
     let filters = query.parse()?;
     let definitions =
         storefront_definitions(&ctx, &ports, filters.owner_type.map(Into::into)).await?;
-    Ok(Json(StorefrontCustomFieldDefinitionList {
+    let served = language::served(&state, &ports, filters.language.as_deref(), None).await?;
+    let resource = |d: &CustomFieldDefinition| {
+        ResourceRef::new(ResourceKind::CustomFieldDefinition, d.id().as_uuid())
+    };
+    let resources: Vec<ResourceRef> = definitions.iter().map(resource).collect();
+    let overlay = served.overlay(&ports, &resources).await?;
+    let list = StorefrontCustomFieldDefinitionList {
         items: definitions
             .iter()
-            .map(|d| StorefrontCustomFieldDefinitionResponse {
-                owner_type: d.owner_type().into(),
-                field: d.field_key().to_string(),
-                name: d.name().to_string(),
-                description: d.description().map(str::to_string),
-                field_type: d.field_type().to_string(),
-                position: d.position(),
-                choices: (d.field_type().base() == BaseType::Choice).then(|| {
-                    d.validations()
-                        .choices()
-                        .iter()
-                        .map(|c| ChoiceDto {
-                            key: c.key.clone(),
-                            label: c.label.clone(),
-                        })
-                        .collect()
-                }),
+            .map(|d| {
+                let text = |key: &str| overlay.text(resource(d), key);
+                StorefrontCustomFieldDefinitionResponse {
+                    owner_type: d.owner_type().into(),
+                    field: d.field_key().to_string(),
+                    name: text(keys::custom_field_definition::NAME)
+                        .unwrap_or(d.name())
+                        .to_string(),
+                    // Only a definition with a description has one to translate.
+                    description: d.description().map(|description| {
+                        text(keys::custom_field_definition::DESCRIPTION)
+                            .unwrap_or(description)
+                            .to_string()
+                    }),
+                    field_type: d.field_type().to_string(),
+                    position: d.position(),
+                    choices: (d.field_type().base() == BaseType::Choice).then(|| {
+                        d.validations()
+                            .choices()
+                            .iter()
+                            .map(|c| ChoiceDto {
+                                key: c.key.clone(),
+                                label: text(&keys::custom_field_definition::choice_label(&c.key))
+                                    .unwrap_or(&c.label)
+                                    .to_string(),
+                            })
+                            .collect()
+                    }),
+                }
             })
             .collect(),
-    }))
+    };
+    Ok(served.respond(list))
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]

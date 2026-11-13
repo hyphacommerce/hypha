@@ -39,6 +39,8 @@ mod agents;
 mod checkout_rules;
 // Translations of the store's content.
 mod translations;
+// The language storefront reads are answered in.
+mod languages;
 // Apps installed through OAuth, and personal data.
 mod app_extensions;
 // Apps' custom fields, synced with their manifests.

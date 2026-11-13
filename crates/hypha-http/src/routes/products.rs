@@ -4,27 +4,25 @@ use super::stamp_times;
 use axum::{Json, extract::State, http::StatusCode};
 use hypha_cart::{ProductOffer, price_product};
 use hypha_categories::categories_of_products;
-use hypha_channels::HasChannels;
 use hypha_channels::{channels_of_products, product_channels};
 use hypha_core::{
     AssetId, CategoryId, ChannelId, Ctx, Currency, Keyset, Money, OptionId, OptionValueId,
     ProductId, SortKey, VariantId, Weight,
 };
-use hypha_inventory::{HasInventoryItems, HasLocations};
-use hypha_markets::{HasCatalogs, HasMarkets, HasPriceLists};
 use hypha_media::{Asset, HasAssets};
 use hypha_merchandising::{
     ProductSummaryView, ProductView, delete_product, get_product_view, get_product_view_by_handle,
     list_product_views, set_product_media, set_variant_media,
 };
 use hypha_products::{
-    AddVariant, CreateSimpleProduct, HasProducts, ListProducts, OptionDraft, OptionValueDraft,
-    Product, ProductFilterInput, ProductOption, ProductSort, ProductStatus, SetProductOptions,
-    SetVariant, UpdateProduct, UpdateVariant, VariantFilterInput, VariantSummary,
-    add_product_variant, create_simple_product, list_variants as list_variant_summaries,
-    remove_product_variant, set_product_options, set_product_status, set_product_variants,
-    update_product, update_product_variant,
+    AddVariant, CreateSimpleProduct, HasProducts, ListProducts, OptionDraft, OptionValue,
+    OptionValueDraft, Product, ProductFilterInput, ProductOption, ProductSort, ProductStatus,
+    SetProductOptions, SetVariant, UpdateProduct, UpdateVariant, VariantFilterInput,
+    VariantSummary, add_product_variant, create_simple_product,
+    list_variants as list_variant_summaries, remove_product_variant, set_product_options,
+    set_product_status, set_product_variants, update_product, update_product_variant,
 };
+use hypha_translations::{Overlay, ResourceKind, ResourceRef, fields as keys};
 use serde::{Deserialize, Serialize};
 
 use hypha_custom_fields::{
@@ -39,6 +37,7 @@ use super::{
 use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, PathId, Query, Storefront},
+    language::{self, Localized},
     media::Media,
     patch,
     state::{AppState, SharedState, Storage},
@@ -152,6 +151,12 @@ impl ProductMediaResponse {
     }
 
     pub async fn new(asset: &Asset, media: &Media) -> Result<Self, ApiError> {
+        Self::translated(asset, media, &Overlay::none()).await
+    }
+
+    /// The item with the asset's alt text as `overlay` translates it.
+    async fn translated(asset: &Asset, media: &Media, overlay: &Overlay) -> Result<Self, ApiError> {
+        let of_asset = ResourceRef::new(ResourceKind::Asset, asset.id().as_uuid());
         Ok(Self {
             asset_id: asset.id(),
             kind: asset.kind().into(),
@@ -161,7 +166,13 @@ impl ProductMediaResponse {
                 ApiError::internal(format!("attached asset {} has no file", asset.id()))
             })?,
             thumbnail_url: media.thumbnail_url(asset).await?,
-            alt: asset.alt().map(str::to_string),
+            // Only an asset with alt text has one to translate.
+            alt: asset.alt().map(|alt| {
+                overlay
+                    .text(of_asset, keys::asset::ALT)
+                    .unwrap_or(alt)
+                    .to_string()
+            }),
             width: asset.width(),
             height: asset.height(),
         })
@@ -174,15 +185,31 @@ pub async fn media_items(
     assets: &[Asset],
     media: Option<&Media>,
 ) -> Result<Vec<ProductMediaResponse>, ApiError> {
+    media_items_in(assets, media, &Overlay::none()).await
+}
+
+/// `media_items` for a storefront read: alt texts as `overlay` translates them.
+pub(super) async fn media_items_in(
+    assets: &[Asset],
+    media: Option<&Media>,
+    overlay: &Overlay,
+) -> Result<Vec<ProductMediaResponse>, ApiError> {
     if assets.is_empty() {
         return Ok(Vec::new());
     }
     let media = media.ok_or_else(ApiError::media_not_configured)?;
     let mut items = Vec::with_capacity(assets.len());
     for asset in assets {
-        items.push(ProductMediaResponse::new(asset, media).await?);
+        items.push(ProductMediaResponse::translated(asset, media, overlay).await?);
     }
     Ok(items)
+}
+
+/// The assets' translatable resources, for a response's overlay.
+pub(super) fn asset_resources(assets: &[Asset]) -> impl Iterator<Item = ResourceRef> {
+    assets
+        .iter()
+        .map(|asset| ResourceRef::new(ResourceKind::Asset, asset.id().as_uuid()))
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -200,19 +227,79 @@ pub struct OptionValueResponse {
 
 impl From<&ProductOption> for OptionResponse {
     fn from(o: &ProductOption) -> Self {
+        Self::translated(o, &Translated::source())
+    }
+}
+
+impl OptionResponse {
+    fn translated(o: &ProductOption, text: &Translated<'_>) -> Self {
         Self {
             id: o.id(),
-            name: o.name().to_string(),
+            name: text.option_name(o).to_string(),
             values: o
                 .values()
                 .iter()
                 .map(|v| OptionValueResponse {
                     id: v.id(),
-                    label: v.label().to_string(),
+                    label: text.value_label(v).to_string(),
                 })
                 .collect(),
         }
     }
+}
+
+/// A product's text as a storefront read shows it: the overlay's translation of each
+/// field, else the product's own.
+struct Translated<'a> {
+    /// The product's translations; `None` for the text as stored.
+    overlay: Option<(&'a Overlay, ResourceRef)>,
+}
+
+impl<'a> Translated<'a> {
+    fn new(product: &Product, overlay: &'a Overlay) -> Self {
+        Self {
+            overlay: Some((overlay, product_resource(product.id()))),
+        }
+    }
+
+    /// The text as stored: what the admin reads.
+    fn source() -> Self {
+        Self { overlay: None }
+    }
+
+    fn text(&self, key: &str) -> Option<&'a str> {
+        let (overlay, product) = self.overlay?;
+        overlay.text(product, key)
+    }
+
+    fn title(&self, product: &'a Product) -> &'a str {
+        self.text(keys::product::TITLE).unwrap_or(product.title())
+    }
+
+    /// Only a product with a description has one to translate.
+    fn description(&self, product: &'a Product) -> Option<&'a str> {
+        let source = product.description()?.as_html();
+        Some(self.text(keys::product::DESCRIPTION).unwrap_or(source))
+    }
+
+    fn option_name(&self, option: &'a ProductOption) -> &'a str {
+        self.text(&keys::product::option_name(option.id()))
+            .unwrap_or(option.name())
+    }
+
+    fn value_label(&self, value: &'a OptionValue) -> &'a str {
+        self.text(&keys::product::option_value_label(value.id()))
+            .unwrap_or(value.label())
+    }
+
+    /// The variant's title, joined from its values' translated labels.
+    fn variant_title(&self, product: &'a Product, variant: VariantId) -> Option<String> {
+        product.variant_title_with(variant, |value| self.value_label(value))
+    }
+}
+
+pub(super) fn product_resource(product: ProductId) -> ResourceRef {
+    ResourceRef::new(ResourceKind::Product, product.as_uuid())
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -789,19 +876,26 @@ impl StorefrontProductResponse {
         offer: Option<&ProductOffer>,
         fields: &FieldsRead,
         media: Option<&Media>,
+        overlay: &Overlay,
+        promotions: Vec<super::discounts::PromotionResponse>,
     ) -> Result<Self, ApiError> {
         let p = &view.product;
+        let text = Translated::new(p, overlay);
         let sold = offer.map(ProductOffer::sold);
         let market = offer.filter(|o| o.sold()).and_then(|o| o.market.as_ref());
         Ok(Self {
             id: p.id(),
             handle: p.handle().as_str().to_string(),
-            title: p.title().to_string(),
-            description: p.description().map(|d| d.as_html().to_string()),
+            title: text.title(p).to_string(),
+            description: text.description(p).map(str::to_string),
             vendor: p.vendor().map(str::to_string),
             product_type: p.product_type().map(str::to_string),
             tags: p.tags().to_vec(),
-            options: p.options().iter().map(OptionResponse::from).collect(),
+            options: p
+                .options()
+                .iter()
+                .map(|o| OptionResponse::translated(o, &text))
+                .collect(),
             variants: p
                 .variants()
                 .iter()
@@ -812,7 +906,7 @@ impl StorefrontProductResponse {
                     let resolved = priced.and_then(|o| o.price.as_ref());
                     StorefrontVariantResponse {
                         id: v.id(),
-                        title: p.variant_title(v.id()),
+                        title: text.variant_title(p, v.id()),
                         selections: v.selections().to_vec(),
                         media_asset_id: v.media(),
                         price: resolved.map(|r| r.price.money()),
@@ -832,12 +926,15 @@ impl StorefrontProductResponse {
                     }
                 })
                 .collect(),
-            media: media_items(&view.media, media).await?,
+            media: media_items_in(&view.media, media, overlay).await?,
             sold_in_country: sold,
             currency: market.map(|m| m.currency()),
             prices_include_tax: market.map(|m| m.prices_include_tax()),
             custom_fields: fields.json_of(p.id().as_uuid()),
-            promotions: Vec::new(),
+            promotions: promotions
+                .into_iter()
+                .map(|p| p.translated(overlay))
+                .collect(),
         })
     }
 }
@@ -849,30 +946,25 @@ pub struct ProductCountryParams {
     /// Where the shopper is (ISO 3166-1 alpha-2): its market prices and stocks the
     /// variants. Without it, the product comes without prices.
     country: Option<String>,
+    /// The language to answer in (a BCP 47 tag, `de`, `pt-BR`), out of those
+    /// `country`'s market offers (`/storefront/countries`): without it, or with one the
+    /// market doesn't offer, the market's default answers. Without `country`, out of the
+    /// store's default and the languages it has published, the store's default
+    /// otherwise. `Content-Language` names the one served. Text without a translation
+    /// stays in the store's default language.
+    language: Option<String>,
 }
 
 /// The storefront's response for `view`, after the checks every storefront read makes: a
-/// draft, archived or unpublished product reads as missing.
-async fn storefront_product<P>(
-    state: &AppState<impl Storage>,
-    ports: &P,
+/// draft, archived or unpublished product reads as missing. Answered in the language
+/// `params` resolve to, in the country's market when it names one.
+async fn storefront_product<S: Storage>(
+    state: &AppState<S>,
+    ports: &S::Ports<'_>,
     ctx: &Ctx,
     view: ProductView,
-    country: Option<String>,
-) -> Result<Json<StorefrontProductResponse>, ApiError>
-where
-    P: HasChannels
-        + hypha_core::HasClock
-        + HasMarkets
-        + HasCatalogs
-        + HasPriceLists
-        + hypha_customers::HasCustomerGroups
-        + HasInventoryItems
-        + HasLocations
-        + HasCustomFieldDefinitions
-        + HasCustomFieldValues
-        + hypha_discounts::HasDiscounts,
-{
+    params: ProductCountryParams,
+) -> Result<Localized<StorefrontProductResponse>, ApiError> {
     let id = view.product.id();
     let published = match ctx.channel() {
         Some(channel) => hypha_channels::is_published(ports, channel, id).await?,
@@ -881,20 +973,14 @@ where
     if view.product.status() != ProductStatus::Active || !published {
         return Err(hypha_products::CommandError::ProductNotFound(id).into());
     }
-    let offer = match country {
+    let offer = match params.country {
         Some(country) => Some(price_product(ctx, ports, &view.product, &country).await?),
         None => None,
     };
-    let fields = product_fields(ctx, &CallerKind::Storefront, ports, &view.product).await?;
-    let mut response =
-        StorefrontProductResponse::new(&view, offer.as_ref(), &fields, state.media.as_deref())
-            .await?;
-    if let Some(market) = offer
-        .as_ref()
-        .filter(|o| o.sold())
-        .and_then(|o| o.market.as_ref())
-    {
-        response.promotions = super::discounts::promotions_of(
+    let market = offer.as_ref().and_then(|o| o.market.as_ref());
+    let served = language::served(state, ports, params.language.as_deref(), market).await?;
+    let promotions = match market.filter(|_| offer.as_ref().is_some_and(ProductOffer::sold)) {
+        Some(market) => super::discounts::promotions_of(
             ports,
             &[id],
             market.id(),
@@ -903,9 +989,29 @@ where
         )
         .await?
         .remove(&id)
-        .unwrap_or_default();
-    }
-    Ok(Json(response))
+        .unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let resources: Vec<ResourceRef> = std::iter::once(product_resource(id))
+        .chain(asset_resources(&view.media))
+        .chain(promotions.iter().map(|p| p.resource()))
+        .collect();
+    // The custom fields and the translations go out together: one round trip.
+    let (fields, overlay) = futures_util::future::try_join(
+        product_fields(ctx, &CallerKind::Storefront, ports, &view.product),
+        async { Ok(served.overlay(ports, &resources).await?) },
+    )
+    .await?;
+    let response = StorefrontProductResponse::new(
+        &view,
+        offer.as_ref(),
+        &fields,
+        state.media.as_deref(),
+        &overlay,
+        promotions,
+    )
+    .await?;
+    Ok(served.respond(response))
 }
 
 /// An active product sold through the caller's channel, priced in `country`; drafts,
@@ -914,7 +1020,12 @@ where
     get,
     path = "/storefront/products/{id}",
     params(("id" = ProductId, Path), ProductCountryParams),
-    responses((status = 200, description = "OK", body = StorefrontProductResponse)),
+    responses((
+        status = 200,
+        description = "OK",
+        body = StorefrontProductResponse,
+        headers(("Content-Language" = String, description = "The language the response is in.")),
+    )),
     extensions(("x-hypha-scopes" = json!(["products:read"]))),
 )]
 pub async fn fetch_storefront<S: Storage>(
@@ -922,11 +1033,11 @@ pub async fn fetch_storefront<S: Storage>(
     caller: Caller<Storefront>,
     PathId(id): PathId<ProductId>,
     query: Query<ProductCountryParams>,
-) -> Result<Json<StorefrontProductResponse>, ApiError> {
+) -> Result<Localized<StorefrontProductResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let params = query.parse()?;
     let view = get_product_view(&ctx, &ports, id).await?;
-    storefront_product(&state, &ports, &ctx, view, params.country).await
+    storefront_product(&state, &ports, &ctx, view, params).await
 }
 
 /// A product page in one read: the product by its handle, priced in `country`, with the
@@ -938,7 +1049,12 @@ pub async fn fetch_storefront<S: Storage>(
         ("handle" = String, Path, description = "The product's handle.", example = "ceramic-mug"),
         ProductCountryParams
     ),
-    responses((status = 200, description = "OK", body = StorefrontProductResponse)),
+    responses((
+        status = 200,
+        description = "OK",
+        body = StorefrontProductResponse,
+        headers(("Content-Language" = String, description = "The language the response is in.")),
+    )),
     extensions(("x-hypha-scopes" = json!(["products:read"]))),
 )]
 pub async fn fetch_by_handle_storefront<S: Storage>(
@@ -946,11 +1062,11 @@ pub async fn fetch_by_handle_storefront<S: Storage>(
     caller: Caller<Storefront>,
     PathId(handle): PathId<String>,
     query: Query<ProductCountryParams>,
-) -> Result<Json<StorefrontProductResponse>, ApiError> {
+) -> Result<Localized<StorefrontProductResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
     let params = query.parse()?;
     let view = get_product_view_by_handle(&ctx, &ports, &handle).await?;
-    storefront_product(&state, &ports, &ctx, view, params.country).await
+    storefront_product(&state, &ports, &ctx, view, params).await
 }
 
 /// Changes a product's status (draft, active, archived).

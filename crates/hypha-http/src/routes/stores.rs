@@ -15,7 +15,8 @@ use super::{
 };
 use crate::{
     error::ApiError,
-    extract::{Caller, JsonBody, Storefront},
+    extract::{Caller, JsonBody, Query, Storefront},
+    language::{LanguageParams, Localized, ServedLanguage},
     patch,
     state::{AppState, SharedState, Storage},
 };
@@ -310,25 +311,48 @@ pub struct StorefrontStoreResponse {
     default_language: Language,
 }
 
-/// The store's public details.
+/// The store's public details, its description in `language`.
 #[utoipa::path(
     get,
     path = "/storefront/store",
-    responses((status = 200, description = "OK", body = StorefrontStoreResponse)),
+    params(LanguageParams),
+    responses((
+        status = 200,
+        description = "OK",
+        body = StorefrontStoreResponse,
+        headers(("Content-Language" = String, description = "The language the response is in.")),
+    )),
     extensions(("x-hypha-scopes" = json!(["stores:read"]))),
 )]
 pub async fn fetch_storefront<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
-) -> Result<Json<StorefrontStoreResponse>, ApiError> {
+    query: Query<LanguageParams>,
+) -> Result<Localized<StorefrontStoreResponse>, ApiError> {
+    use hypha_translations::{ResourceKind, ResourceRef, fields as keys};
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let store = read_store(&state, &ctx, ports).await?;
-    Ok(Json(StorefrontStoreResponse {
+    let params = query.parse()?;
+    // Checks `stores:read`, as the read through `read_store` does.
+    let store = match state.storage.directory_in(&ports) {
+        Some(directory) => get_store(&ctx, directory, state.store).await?,
+        None => get_store(&ctx, &state.storage.directory().await?, state.store).await?,
+    };
+    let served = ServedLanguage::of(params.language.as_deref(), &store, None);
+    let of_store = ResourceRef::new(ResourceKind::Store, state.store.as_uuid());
+    let overlay = served.overlay(&ports, &[of_store]).await?;
+    let response = StorefrontStoreResponse {
         name: store.name().to_string(),
-        description: store.description().map(str::to_string),
+        // Only a store with a description has one to translate.
+        description: store.description().map(|description| {
+            overlay
+                .text(of_store, keys::store::DESCRIPTION)
+                .unwrap_or(description)
+                .to_string()
+        }),
         contact_email: store.contact_email().cloned(),
         default_language: store.default_language().clone(),
-    }))
+    };
+    Ok(served.respond(response))
 }
 
 /// The store's details: through the request's `ports` when the storage keeps the
