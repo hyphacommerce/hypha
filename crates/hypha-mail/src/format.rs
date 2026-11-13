@@ -61,14 +61,13 @@ pub struct Formats {
 }
 
 impl Formats {
-    /// The formats of `language`: its own, else the tag without its region (`de` for
-    /// `de-CH-1996`), else the language alone (`sr` for `sr-Cyrl`), else English.
+    /// The formats of `language`: its own, else the tag with its last subtags taken off
+    /// one by one (`de-CH` for `de-CH-1996`, then `de`; `sr` for `sr-Cyrl`), else English.
     pub fn of(language: &Language) -> &'static Formats {
-        let find = |tag: &str| FORMATS.iter().find(|f| f.tag == tag);
-        let primary = language.as_str().split('-').next().unwrap_or_default();
-        find(language.as_str())
-            .or_else(|| language.without_region().and_then(|l| find(l.as_str())))
-            .or_else(|| find(primary))
+        let tag = language.as_str();
+        std::iter::once(tag.len())
+            .chain(tag.rmatch_indices('-').map(|(i, _)| i))
+            .find_map(|end| FORMATS.iter().find(|f| f.tag == &tag[..end]))
             .unwrap_or_else(Self::english)
     }
 
@@ -485,6 +484,7 @@ mod tests {
     #[test]
     fn a_language_without_its_own_table_falls_back_to_its_tag_then_english() {
         assert_eq!(lang("de-DE").tag, "de");
+        assert_eq!(lang("de-CH-1996").tag, "de-CH");
         assert_eq!(lang("sr-Latn-RS").tag, "sr-Latn");
         assert_eq!(lang("sr-Cyrl").tag, "sr");
         assert_eq!(lang("en-US").tag, "en");

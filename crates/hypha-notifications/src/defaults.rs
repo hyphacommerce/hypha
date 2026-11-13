@@ -37,16 +37,19 @@ pub struct ContextStrings {
 }
 
 impl ContextStrings {
-    /// `language`'s: its own, else its tag without the region, else English.
+    /// `language`'s: its own, else its tag with its last subtags taken off one by one
+    /// (`sr-Latn` for `sr-Latn-RS`), else English. `sr-Cyrl` falls to `sr`, which has no
+    /// strings, so English: never another script's.
     pub fn of(language: &Language) -> &'static ContextStrings {
-        let find = |tag: &str| {
-            built::CONTEXT_STRINGS
-                .iter()
-                .find(|(t, _)| *t == tag)
-                .map(|(_, strings)| strings)
-        };
-        find(language.as_str())
-            .or_else(|| language.without_region().and_then(|l| find(l.as_str())))
+        let tag = language.as_str();
+        std::iter::once(tag.len())
+            .chain(tag.rmatch_indices('-').map(|(i, _)| i))
+            .find_map(|end| {
+                built::CONTEXT_STRINGS
+                    .iter()
+                    .find(|(t, _)| *t == &tag[..end])
+                    .map(|(_, strings)| strings)
+            })
             .unwrap_or_else(|| Self::english())
     }
 

@@ -2284,3 +2284,47 @@ fn a_login_code_is_written_in_the_customers_language() {
     assert_eq!(sent.subject, "Vaš kod za prijavu: Fern & Field");
     assert!(sent.text.contains("Kod važi 10 min."), "{}", sent.text);
 }
+
+#[test]
+fn a_login_code_in_a_language_the_store_no_longer_offers_is_in_the_default() {
+    let ports = world();
+    let env = TestEnv::new();
+    let now = hypha_core::Clock::now(env.clock());
+    let code = hypha_customer_accounts::CustomerEmail::LoginCode {
+        to: email("ana@example.hr"),
+        code: "481516".to_string(),
+        expires_at: now.plus_secs(600),
+        language: Some(sr()),
+    };
+    block_on(send_customer(&env, &ports, code)).unwrap();
+    assert_eq!(
+        env.sender.sent()[0].subject,
+        "Your Fern & Field sign-in code"
+    );
+}
+
+#[test]
+fn a_layout_is_checked_against_the_languages_that_would_send_in_it() {
+    let ports = world_in(Some("sr-Latn"));
+    let languages = [sr()];
+    let store_languages = TemplateLanguages {
+        default: &en(),
+        others: &languages,
+    };
+    // A layout that breaks only in Serbian: Serbian emails send in it too.
+    let layout = TemplateInput {
+        subject: String::new(),
+        html: r#"<html>{% block preheader %}{% endblock %}{% block content %}{% endblock %}{% if language == "sr-Latn" %}{{ order.nope }}{% endif %}</html>"#.to_string(),
+        text: None,
+    };
+    let saved = block_on(save_template(
+        &Ctx::system(),
+        &ports,
+        TemplateKey::Layout,
+        None,
+        store_languages,
+        layout,
+        None,
+    ));
+    assert!(matches!(saved, Err(CommandError::Render(_))), "{saved:?}");
+}

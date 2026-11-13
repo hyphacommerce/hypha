@@ -6829,6 +6829,50 @@ async fn templates_in_a_language_are_read_saved_listed_and_reverted() {
     assert_eq!(list["items"][1]["languages"], json!([]));
 }
 
+/// A template saved for another language fixes the default language like a translation,
+/// and goes with its language when the store drops it.
+#[tokio::test]
+async fn a_templates_language_is_held_to_the_stores() {
+    let app = app().await;
+    let languages = r#"{"languages":[{"language":"sr-Latn","published":true},{"language":"de"}]}"#;
+    let (status, _) = send(&app, "PATCH", "/admin/store", Some(languages)).await;
+    assert_eq!(status, StatusCode::OK);
+    let body = json!({
+        "subject": "Hvala: {{ order.number }}",
+        "html": "{% extends \"layout\" %}{% block content %}<p>x</p>{% endblock %}",
+    })
+    .to_string();
+    for language in ["sr-Latn", "de"] {
+        let path = format!("/admin/notification-templates/order_shipped?language={language}");
+        let (status, json) = send(&app, "PUT", &path, Some(&body)).await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+    }
+    let (status, json) = send(
+        &app,
+        "PATCH",
+        "/admin/store",
+        Some(r#"{"default_language":"sr-Latn","languages":[{"language":"en"},{"language":"de"}]}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "default_language_in_use")
+    );
+
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        "/admin/store",
+        Some(r#"{"languages":[{"language":"sr-Latn","published":true}]}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    let (_, list) = send(&app, "GET", "/admin/notification-templates", None).await;
+    assert_eq!(list["items"][2]["key"], "order_shipped");
+    assert_eq!(list["items"][2]["languages"], json!(["sr-Latn"]));
+}
+
 #[tokio::test]
 async fn a_template_is_turned_off_and_on_without_its_sources() {
     let app = app().await;

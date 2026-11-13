@@ -14,7 +14,7 @@ use hypha_media::{
 use hypha_notifications::{
     Colour, EffectiveTemplate, EmailSender, HasNotificationSettings, HasNotificationTemplates,
     HasNotifications, Mailbox, NewTemplate, Notification, NotificationRepo, NotificationSettings,
-    NotificationSettingsRepo, NotificationStatus, NotificationTemplateRepo, OrderUrl,
+    NotificationSettingsRepo, NotificationStatus, NotificationTemplateRepo, OrderUrl, Origin,
     OutgoingEmail, Rendered, StageNotificationSettings, Template, TemplateKey, TemplateLanguages,
     TemplateSources, keys, render, template_in_effect,
 };
@@ -236,15 +236,7 @@ pub async fn save_template<S: HasNotificationTemplates>(
         return Err(hypha_notifications::TemplateError::Required(key).into());
     }
     let written = locale.clone().unwrap_or_else(|| languages.default.clone());
-    check_against_samples(
-        ports,
-        key,
-        &sources,
-        locale.as_ref(),
-        languages.default,
-        &written,
-    )
-    .await?;
+    check_against_samples(ports, key, &sources, locale.as_ref(), languages, &written).await?;
     let sources = &sources;
     let locale = locale.as_ref();
     retry_on_conflict(
@@ -282,22 +274,38 @@ pub async fn save_template<S: HasNotificationTemplates>(
 
 /// Renders `sources` (of `key`, for `locale`, written in `written`) against the samples in
 /// that language (`MailContext::checks_in`): a message in the layout in effect for it, or
-/// the layout around every message template in effect for it.
+/// the layout around every message template in effect for it, and around those of the
+/// store's other languages that would send in this layout (having none of their own).
 async fn check_against_samples<S: HasNotificationTemplates>(
     ports: &S,
     key: TemplateKey,
     sources: &TemplateSources,
     locale: Option<&Language>,
-    default: &Language,
+    languages: TemplateLanguages<'_>,
     written: &Language,
 ) -> Result<(), CommandError> {
+    let default = languages.default;
     let reading = Locale::of(written.clone());
     let stored = ports.notification_templates().list().await?;
     if key.is_layout() {
-        for message in TemplateKey::ALL.into_iter().filter(|k| !k.is_layout()) {
-            let template = EffectiveTemplate::resolve(message, &stored, locale, default);
-            for context in MailContext::checks_in(message, &reading) {
-                render(sources.html(), &template.sending_sources(), &context)?;
+        let mut readers = vec![(locale.cloned(), reading)];
+        for other in languages.others.iter().filter(|l| Some(*l) != locale) {
+            let layout = EffectiveTemplate::resolve(key, &stored, Some(other), default);
+            let falls_back_here = match layout.origin() {
+                Origin::Merchant { locale: from } => from.as_ref() == locale,
+                Origin::Default { .. } => locale.is_none(),
+            };
+            if falls_back_here {
+                readers.push((Some(other.clone()), Locale::of(other.clone())));
+            }
+        }
+        for (reader, reading) in &readers {
+            for message in TemplateKey::ALL.into_iter().filter(|k| !k.is_layout()) {
+                let template =
+                    EffectiveTemplate::resolve(message, &stored, reader.as_ref(), default);
+                for context in MailContext::checks_in(message, reading) {
+                    render(sources.html(), &template.sending_sources(), &context)?;
+                }
             }
         }
     } else {
@@ -720,14 +728,15 @@ where
             (TemplateKey::CustomerErasureRequested, language)
         }
     };
-    let sources = Sources::load(
-        ports,
-        template,
-        language.as_ref().unwrap_or(default),
-        default,
-    )
-    .await
-    .map_err(|e| failed(e.into()))?;
+    // The customer's language while the store still offers it, else the default.
+    let offered = branding.store.offered_languages();
+    let language = language
+        .as_ref()
+        .filter(|l| offered.contains(l))
+        .unwrap_or(default);
+    let sources = Sources::load(ports, template, language, default)
+        .await
+        .map_err(|e| failed(e.into()))?;
     let locale = &sources.locale;
     let (to, context) = match message {
         CustomerEmail::LoginCode {
