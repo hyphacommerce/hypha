@@ -9,6 +9,9 @@
 pub mod commands;
 pub mod defaults;
 pub mod error;
+mod generated {
+    pub(crate) mod defaults;
+}
 pub mod key;
 pub mod notification;
 pub mod render;
@@ -19,12 +22,14 @@ pub mod settings;
 pub mod template;
 
 pub use commands::{
-    CommandError, EffectiveTemplate, get_notification, get_notification_settings,
-    get_notification_template, list_notification_templates, list_notifications,
-    revert_notification_template, set_notification_template_enabled, settings_or_default,
-    template_in_effect,
+    CommandError, EffectiveTemplate, ListedTemplate, Origin, Step, TemplateLanguages,
+    get_notification, get_notification_settings, get_notification_template,
+    list_notification_templates, list_notifications, lookup_chain, revert_notification_template,
+    set_notification_template_enabled, settings_or_default, template_in_effect,
 };
-pub use defaults::{DefaultTemplate, default_template};
+pub use defaults::{
+    ContextStrings, DefaultTemplate, default_languages, default_template, default_template_in,
+};
 pub use error::{
     NotificationError, RenderError, SettingsError, TemplateError, TemplatePart, TemplateProblem,
 };

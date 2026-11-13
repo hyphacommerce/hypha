@@ -2,6 +2,7 @@ use axum::{Json, extract::State};
 use hypha_core::{Ctx, Currency, Email, Language, Scope, StoreId, Timezone};
 use hypha_inventory::{HasStockMovements, StockMovementRepo};
 use hypha_markets::{HasMarkets, MarketRepo};
+use hypha_notifications::{HasNotificationTemplates, NotificationTemplateRepo};
 use hypha_purchasing::{HasPurchaseOrders, PurchaseOrderRepo};
 use hypha_stores::{
     LanguageInput, MarketLanguages, Store, StoreLanguage, UpdateStore, get_store, update_store,
@@ -253,7 +254,13 @@ pub async fn update<S: Storage>(
             };
             // An invalid tag is refused by the command.
             remaining.extend(Language::new(default).ok());
+            // A merchant's email template for another language is one too: the default
+            // language is the `''` row, so the new default's row would never be read.
+            let templates = ports.notification_templates().list().await?;
             ports.translations().any_in(&remaining).await?
+                || templates
+                    .iter()
+                    .any(|t| t.locale().is_some_and(|l| remaining.contains(l)))
         }
         None => false,
     };

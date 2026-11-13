@@ -1,0 +1,8 @@
+{
+  "cancel_customer": "Na vaš zahtev",
+  "cancel_inventory": "Artikli nisu dostupni",
+  "cancel_fraud": "Sumnja na prevaru",
+  "cancel_declined": "Plaćanje je odbijeno",
+  "cancel_staff": "Otkazala prodavnica",
+  "manual_payment": "Ručno evidentirana uplata"
+}

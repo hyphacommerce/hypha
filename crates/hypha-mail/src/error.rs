@@ -1,6 +1,6 @@
 use hypha_core::{
-    AssetId, AuthError, ErrorCode, FulfillmentId, NotificationId, OrderId, PurchaseOrderId,
-    RepoError, StoreId,
+    AssetId, AuthError, ErrorCode, FulfillmentId, Language, NotificationId, OrderId,
+    PurchaseOrderId, RepoError, StoreId,
 };
 use hypha_media::AssetKind;
 use hypha_notifications::{
@@ -71,6 +71,14 @@ pub enum CommandError {
     /// message can't be sent again.
     #[error("the customer was erased: the message can't be resent")]
     RecipientErased,
+    /// A template's language that isn't one of the store's.
+    #[error("{0} isn't one of the store's languages")]
+    LanguageNotListed(Language),
+    /// Whether a template is sent is set once for every language, with no language named.
+    #[error(
+        "whether a template is sent is set for every language at once: save it without a language to turn it on or off"
+    )]
+    EnabledNotPerLanguage,
     /// An event whose payload isn't what its type promises.
     #[error("event {event} ({event_type}) has an unexpected payload: {reason}")]
     BadEvent {
@@ -105,6 +113,8 @@ impl ErrorCode for CommandError {
             CommandError::StaffOnly => "staff_only",
             CommandError::NotResendable { .. } => "notification_not_resendable",
             CommandError::RecipientErased => "customer_erased",
+            CommandError::LanguageNotListed(_) => "language_not_listed",
+            CommandError::EnabledNotPerLanguage => "enabled_not_per_language",
             CommandError::BadEvent { .. } => "event_payload_invalid",
         }
     }

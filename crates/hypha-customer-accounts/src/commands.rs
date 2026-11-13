@@ -10,7 +10,7 @@ use hypha_auth::{
 use hypha_cart::{Cart, CartRepo, HasCarts, StageCarts};
 use hypha_core::{
     Actor, AuthError, CartId, ChannelId, Clock, Ctx, CustomerId, Email, ErrorCode, HasBatch,
-    IdentityId, Notifier, NotifyError, RepoError, Scope, Timestamp,
+    IdentityId, Language, Notifier, NotifyError, RepoError, Scope, Timestamp,
 };
 use hypha_customers::{Customer, CustomerRepo, HasCustomers, find_or_create_customer};
 use thiserror::Error;
@@ -25,10 +25,17 @@ pub enum CustomerEmail {
         to: Email,
         code: String,
         expires_at: Timestamp,
+        /// The customer's language, which the email is written in; `None`: the store's
+        /// default.
+        language: Option<Language>,
     },
     /// The person asked from their account for their data to be erased: when it runs, so
     /// they can still cancel.
-    ErasureRequested { to: Email, due_at: Timestamp },
+    ErasureRequested {
+        to: Email,
+        due_at: Timestamp,
+        language: Option<Language>,
+    },
 }
 
 /// The non-storage ports: auth's, the account settings and the sender.
@@ -189,10 +196,20 @@ pub async fn request_login_code<S: AccountPorts>(
             Err(RepoError::StaleVersion) => continue,
             Err(e) => return Err(e.into()),
         }
+        // Written in the customer's language (their latest checkout's or their profile's).
+        let language = match identity.principal() {
+            Principal::Customer(id) => ports
+                .customers()
+                .get(id)
+                .await?
+                .and_then(|c| c.language().cloned()),
+            _ => None,
+        };
         env.notify(CustomerEmail::LoginCode {
             to: email,
             code,
             expires_at,
+            language,
         })
         .await?;
         return Ok(());

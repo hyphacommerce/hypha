@@ -6681,6 +6681,199 @@ async fn templates_are_listed_read_saved_checked_and_reverted() {
 }
 
 #[tokio::test]
+async fn templates_in_a_language_are_read_saved_listed_and_reverted() {
+    let app = app().await;
+    let (status, store) = send(
+        &app,
+        "PATCH",
+        "/admin/store",
+        Some(r#"{"languages":[{"language":"sr-Latn","published":true}]}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{store}");
+    let path = "/admin/notification-templates/order_confirmation";
+    let serbian = format!("{path}?language=sr-Latn");
+
+    // Nothing saved for Serbian: the build's Serbian default, and its sample in Serbian.
+    let (status, template) = send(&app, "GET", &serbian, None).await;
+    assert_eq!(status, StatusCode::OK, "{template}");
+    assert_eq!(
+        (
+            &template["language"],
+            &template["customized"],
+            &template["sources_language"],
+            &template["sources_origin"]
+        ),
+        (
+            &json!("sr-Latn"),
+            &json!(false),
+            &json!("sr-Latn"),
+            &json!("default")
+        )
+    );
+    assert!(
+        template["subject"]
+            .as_str()
+            .unwrap()
+            .starts_with("Porudžbina"),
+        "{template}"
+    );
+    assert_eq!(template["variables"]["language"], "sr-Latn");
+    assert_eq!(
+        template["variables"]["order"]["total"]["formatted"],
+        "102,10\u{a0}€"
+    );
+    // Staff emails have English defaults only.
+    let (_, staff) = send(
+        &app,
+        "GET",
+        "/admin/notification-templates/staff_new_order?language=sr-Latn",
+        None,
+    )
+    .await;
+    assert_eq!(staff["sources_language"], "en", "{staff}");
+    // The default language named is the default language's template.
+    let (status, english) = send(&app, "GET", &format!("{path}?language=en"), None).await;
+    assert_eq!(
+        (status, &english["language"]),
+        (StatusCode::OK, &Value::Null)
+    );
+    for (query, status_code, error) in [
+        (
+            "fr",
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "language_not_listed",
+        ),
+        (
+            "not+a+tag",
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_language",
+        ),
+    ] {
+        let (status, json) = send(&app, "GET", &format!("{path}?language={query}"), None).await;
+        assert_eq!((status, code(&json)), (status_code, error), "{query}");
+    }
+    let (status, json) = send(&app, "GET", &format!("{path}?lang=sr-Latn"), None).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::BAD_REQUEST, "invalid_query")
+    );
+
+    let body = json!({
+        "subject": "Hvala: {{ order.number }}, {{ order.total.formatted }}",
+        "html": "{% extends \"layout\" %}{% block content %}<p>{{ order.number }}</p>{% endblock %}",
+    });
+    let mut with_enabled = body.clone();
+    with_enabled["enabled"] = json!(false);
+    let (status, json) = send(&app, "PUT", &serbian, Some(&with_enabled.to_string())).await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "enabled_not_per_language")
+    );
+    let (status, saved) = send(&app, "PUT", &serbian, Some(&body.to_string())).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(
+        (
+            &saved["customized"],
+            &saved["sources_origin"],
+            &saved["language"]
+        ),
+        (&json!(true), &json!("merchant"), &json!("sr-Latn"))
+    );
+    let (_, english) = send(&app, "GET", path, None).await;
+    assert_eq!(english["customized"], false, "the default language's stays");
+
+    let (_, list) = send(&app, "GET", "/admin/notification-templates", None).await;
+    assert_eq!(list["items"][1]["key"], "order_confirmation");
+    assert_eq!(list["items"][1]["languages"], json!(["sr-Latn"]));
+    assert_eq!(list["items"][1]["customized"], false);
+    assert_eq!(list["items"][2]["languages"], json!([]));
+
+    let mut preview = body.clone();
+    preview["language"] = json!("sr-Latn");
+    let (status, rendered) = send(
+        &app,
+        "POST",
+        &format!("{path}/preview"),
+        Some(&preview.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{rendered}");
+    assert_eq!(rendered["subject"], "Hvala: #1001, 102,10 €");
+    assert!(
+        rendered["html"]
+            .as_str()
+            .unwrap()
+            .contains(r#"lang="sr-Latn""#)
+    );
+    preview["language"] = json!("fr");
+    let (status, json) = send(
+        &app,
+        "POST",
+        &format!("{path}/preview"),
+        Some(&preview.to_string()),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "language_not_listed")
+    );
+
+    let (status, reverted) = send(&app, "DELETE", &serbian, None).await;
+    assert_eq!(status, StatusCode::OK, "{reverted}");
+    assert_eq!(
+        (&reverted["customized"], &reverted["sources_origin"]),
+        (&json!(false), &json!("default"))
+    );
+    let (_, list) = send(&app, "GET", "/admin/notification-templates", None).await;
+    assert_eq!(list["items"][1]["languages"], json!([]));
+}
+
+/// A template saved for another language fixes the default language like a translation,
+/// and goes with its language when the store drops it.
+#[tokio::test]
+async fn a_templates_language_is_held_to_the_stores() {
+    let app = app().await;
+    let languages = r#"{"languages":[{"language":"sr-Latn","published":true},{"language":"de"}]}"#;
+    let (status, _) = send(&app, "PATCH", "/admin/store", Some(languages)).await;
+    assert_eq!(status, StatusCode::OK);
+    let body = json!({
+        "subject": "Hvala: {{ order.number }}",
+        "html": "{% extends \"layout\" %}{% block content %}<p>x</p>{% endblock %}",
+    })
+    .to_string();
+    for language in ["sr-Latn", "de"] {
+        let path = format!("/admin/notification-templates/order_shipped?language={language}");
+        let (status, json) = send(&app, "PUT", &path, Some(&body)).await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+    }
+    let (status, json) = send(
+        &app,
+        "PATCH",
+        "/admin/store",
+        Some(r#"{"default_language":"sr-Latn","languages":[{"language":"en"},{"language":"de"}]}"#),
+    )
+    .await;
+    assert_eq!(
+        (status, code(&json)),
+        (StatusCode::CONFLICT, "default_language_in_use")
+    );
+
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        "/admin/store",
+        Some(r#"{"languages":[{"language":"sr-Latn","published":true}]}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    let (_, list) = send(&app, "GET", "/admin/notification-templates", None).await;
+    assert_eq!(list["items"][2]["key"], "order_shipped");
+    assert_eq!(list["items"][2]["languages"], json!(["sr-Latn"]));
+}
+
+#[tokio::test]
 async fn a_template_is_turned_off_and_on_without_its_sources() {
     let app = app().await;
     let path = "/admin/notification-templates/order_shipped";

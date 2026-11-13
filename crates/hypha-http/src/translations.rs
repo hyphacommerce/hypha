@@ -7,7 +7,7 @@ use hypha_categories::{Category, CategoryRepo, HasCategories};
 use hypha_checkout_rules::{CheckoutRule, CheckoutRuleRepo, HasCheckoutRules};
 use hypha_core::{
     AssetId, CategoryId, CheckoutRuleId, CustomFieldDefinitionId, DiscountId, EventHandler,
-    Language, PaymentMethodId, ProductId, ShippingOptionId, StoreId, StoredEvent,
+    Language, PaymentMethodId, ProductId, RepoError, ShippingOptionId, StoreId, StoredEvent,
 };
 use hypha_custom_fields::{
     CustomFieldDefinition, DefinitionRepo, HasCustomFieldDefinitions, StorefrontAccess,
@@ -15,7 +15,8 @@ use hypha_custom_fields::{
 use hypha_discounts::{Discount, DiscountRepo, HasDiscounts};
 use hypha_media::{Asset, AssetRepo, HasAssets};
 use hypha_notifications::{
-    HasNotificationSettings, NotificationSettings, NotificationSettingsRepo,
+    HasNotificationSettings, HasNotificationTemplates, NotificationSettings,
+    NotificationSettingsRepo, NotificationTemplateRepo,
 };
 use hypha_payments::{HasPaymentMethods, PaymentMethod, PaymentMethodRepo};
 use hypha_products::{HasProducts, Product, ProductRepo};
@@ -266,14 +267,17 @@ pub(crate) async fn forget<P: HasTranslations>(
     }
 }
 
-/// Removes the translations into languages the store no longer lists. A language is
+/// Removes the translations into languages the store no longer lists, and the email
+/// templates the merchant saved for them. A language is
 /// taken off the list by a write of the store, which may be on another connection than
 /// the translations, so it's followed by event: `store.updated` naming `languages`.
 /// Idempotent: it keeps what the list holds when it runs.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LanguageCleanup;
 
-impl<P: StoreRepo + HasTranslations> EventHandler<P> for LanguageCleanup {
+impl<P: StoreRepo + HasTranslations + HasNotificationTemplates> EventHandler<P>
+    for LanguageCleanup
+{
     fn name(&self) -> &'static str {
         "language_cleanup"
     }
@@ -306,7 +310,21 @@ impl<P: StoreRepo + HasTranslations> EventHandler<P> for LanguageCleanup {
             .translations()
             .retain_languages(&listed)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        let templates = ports.notification_templates();
+        let stored = templates.list().await.map_err(|e| e.to_string())?;
+        for template in stored
+            .iter()
+            .filter(|t| t.locale().is_some_and(|l| !listed.contains(l)))
+        {
+            match templates.delete(template).await {
+                // Changed or removed since it was read: another run's, or a save that
+                // a later run of this handler sees.
+                Ok(()) | Err(RepoError::StaleVersion) => {}
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+        Ok(())
     }
 }
 
