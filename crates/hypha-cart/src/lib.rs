@@ -1,6 +1,7 @@
 pub mod cart;
 pub mod commands;
 pub mod error;
+pub mod language;
 pub mod offer;
 pub mod pricing;
 pub mod promotions;
@@ -19,6 +20,7 @@ pub use commands::{
     shipping_offers,
 };
 pub use error::{CartError, LineError, RestoreError};
+pub use language::ContentLanguages;
 pub use offer::{MarketPrices, ProductOffer, VariantOffer, explain_product_prices, price_product};
 pub use pricing::{
     LineDetails, LineStatus, PricedCart, PricedLine, Publication, check_stock,

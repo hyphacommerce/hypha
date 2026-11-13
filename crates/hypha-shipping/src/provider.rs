@@ -101,8 +101,9 @@ pub struct RateRequest {
     pub items: Vec<RateItem>,
     /// The group's lines, as priced.
     pub subtotal: Money,
-    /// The language the cart's shopper reads, as far as the cart and its market say;
-    /// `None` when neither names one (the store's default language).
+    /// The language the cart is read in, as its caller decided (`hypha_cart`'s
+    /// `ContentLanguages::told`); `None` for the store's default where the market names no
+    /// language.
     pub language: Option<Language>,
 }
 

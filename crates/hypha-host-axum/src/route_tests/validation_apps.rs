@@ -150,8 +150,24 @@ async fn an_app_is_told_the_language_the_cart_is_in() {
     let path = format!("{cart_path}/language");
     send_as(&app, &pk, "PUT", &path, Some(r#"{"language":"de"}"#)).await;
     ship_to(&app, &pk, &cart_path, zagreb("Ilica 2", "10000")).await;
-    let saw = saw.lock().unwrap();
-    assert_eq!(saw.last().unwrap().3["cart"]["language"], "de");
+    assert_eq!(
+        saw.lock().unwrap().last().unwrap().3["cart"]["language"],
+        "de"
+    );
+
+    // The store stopped publishing German while the market still lists it (a race the
+    // store's check can't see): the app is told what the cart, and its order, are read
+    // in now.
+    sql(
+        &app,
+        r#"UPDATE stores SET languages = '[{"language": "de", "published": false}]'"#,
+    )
+    .await;
+    ship_to(&app, &pk, &cart_path, zagreb("Ilica 3", "10000")).await;
+    assert_eq!(
+        saw.lock().unwrap().last().unwrap().3["cart"]["language"],
+        "en"
+    );
 }
 
 #[tokio::test]
