@@ -9,6 +9,8 @@ use hypha_core::{
 };
 use uuid::Uuid;
 
+use crate::fields;
+
 /// A kind of resource with translatable text. The names are stored and are the API's:
 /// never renamed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -84,24 +86,49 @@ const fn child(collection: &'static str, name: &'static str, max_chars: usize) -
 }
 
 const PRODUCT: &[FieldSpec] = &[
-    text("title", MAX_TEXT_LEN),
-    html("description"),
-    child("options", "name", MAX_TEXT_LEN),
-    child("option_values", "label", MAX_TEXT_LEN),
+    text(fields::product::TITLE, MAX_TEXT_LEN),
+    html(fields::product::DESCRIPTION),
+    child(
+        fields::product::OPTIONS,
+        fields::product::OPTION_NAME,
+        MAX_TEXT_LEN,
+    ),
+    child(
+        fields::product::OPTION_VALUES,
+        fields::product::OPTION_VALUE_LABEL,
+        MAX_TEXT_LEN,
+    ),
 ];
-const CATEGORY: &[FieldSpec] = &[text("name", MAX_TEXT_LEN), html("description")];
+const CATEGORY: &[FieldSpec] = &[
+    text(fields::category::NAME, MAX_TEXT_LEN),
+    html(fields::category::DESCRIPTION),
+];
 const CUSTOM_FIELD_DEFINITION: &[FieldSpec] = &[
-    text("name", 255),
-    text("description", 1000),
-    child("choices", "label", MAX_TEXT_LEN),
+    text(fields::custom_field_definition::NAME, 255),
+    text(fields::custom_field_definition::DESCRIPTION, 1000),
+    child(
+        fields::custom_field_definition::CHOICES,
+        fields::custom_field_definition::CHOICE_LABEL,
+        MAX_TEXT_LEN,
+    ),
 ];
-const SHIPPING_OPTION: &[FieldSpec] = &[text("name", MAX_TEXT_LEN)];
-const PAYMENT_METHOD: &[FieldSpec] = &[text("name", MAX_TEXT_LEN), text("instructions", 2000)];
-const DISCOUNT: &[FieldSpec] = &[text("title", MAX_TEXT_LEN)];
-const CHECKOUT_RULE: &[FieldSpec] = &[text("message", 300)];
-const ASSET: &[FieldSpec] = &[text("alt", MAX_TEXT_LEN)];
-const STORE: &[FieldSpec] = &[text("description", 500), text("email_footer", 1000)];
-const SEARCH_FACET: &[FieldSpec] = &[child("facets", "label", MAX_TEXT_LEN)];
+const SHIPPING_OPTION: &[FieldSpec] = &[text(fields::shipping_option::NAME, MAX_TEXT_LEN)];
+const PAYMENT_METHOD: &[FieldSpec] = &[
+    text(fields::payment_method::NAME, MAX_TEXT_LEN),
+    text(fields::payment_method::INSTRUCTIONS, 2000),
+];
+const DISCOUNT: &[FieldSpec] = &[text(fields::discount::TITLE, MAX_TEXT_LEN)];
+const CHECKOUT_RULE: &[FieldSpec] = &[text(fields::checkout_rule::MESSAGE, 300)];
+const ASSET: &[FieldSpec] = &[text(fields::asset::ALT, MAX_TEXT_LEN)];
+const STORE: &[FieldSpec] = &[
+    text(fields::store::DESCRIPTION, 500),
+    text(fields::store::EMAIL_FOOTER, 1000),
+];
+const SEARCH_FACET: &[FieldSpec] = &[child(
+    fields::search_facet::FACETS,
+    fields::search_facet::FACET_LABEL,
+    MAX_TEXT_LEN,
+)];
 
 /// The longest field key, in bytes: room for a facet on an option whose name is the
 /// longest text there is, in any script.
@@ -206,11 +233,6 @@ impl ResourceKind {
             }
         })
     }
-}
-
-/// The key of `child`'s field `name` in `collection`: `options.<child>.name`.
-pub fn child_key(collection: &str, child: impl fmt::Display, name: &str) -> String {
-    format!("{collection}.{child}.{name}")
 }
 
 impl fmt::Display for ResourceKind {

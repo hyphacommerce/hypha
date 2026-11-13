@@ -21,7 +21,7 @@ use hypha_search_index::{HasSearchSettings, SearchSettings, SearchSettingsRepo};
 use hypha_shipping::{HasShippingZones, ShippingOption, ShippingZoneRepo};
 use hypha_stores::{Store, StoreRepo};
 use hypha_translations::{
-    HasTranslations, ResourceKind, ResourceRef, Source, SourceField, TranslationRepo, child_key,
+    HasTranslations, ResourceKind, ResourceRef, Source, SourceField, TranslationRepo, fields,
 };
 
 use crate::{
@@ -33,18 +33,21 @@ use crate::{
 /// each option value's label.
 pub fn product_source(product: &Product) -> Source {
     let mut fields = vec![
-        SourceField::new("title", Some(product.title())),
-        SourceField::new("description", product.description().map(|d| d.as_html())),
+        SourceField::new(fields::product::TITLE, Some(product.title())),
+        SourceField::new(
+            fields::product::DESCRIPTION,
+            product.description().map(|d| d.as_html()),
+        ),
     ];
     for option in product.options() {
         fields.push(SourceField::new(
-            child_key("options", option.id(), "name"),
+            fields::product::option_name(option.id()),
             Some(option.name()),
         ));
     }
     for value in product.options().iter().flat_map(|o| o.values()) {
         fields.push(SourceField::new(
-            child_key("option_values", value.id(), "label"),
+            fields::product::option_value_label(value.id()),
             Some(value.label()),
         ));
     }
@@ -53,20 +56,29 @@ pub fn product_source(product: &Product) -> Source {
 
 pub fn category_source(category: &Category) -> Source {
     Source::new(vec![
-        SourceField::new("name", Some(category.name())),
-        SourceField::new("description", category.description().map(|d| d.as_html())),
+        SourceField::new(fields::category::NAME, Some(category.name())),
+        SourceField::new(
+            fields::category::DESCRIPTION,
+            category.description().map(|d| d.as_html()),
+        ),
     ])
 }
 
 /// A definition's name and description, and each choice's label by the choice's key.
 pub fn definition_source(definition: &CustomFieldDefinition) -> Source {
     let mut fields = vec![
-        SourceField::new("name", Some(definition.name())),
-        SourceField::new("description", definition.description()),
+        SourceField::new(
+            fields::custom_field_definition::NAME,
+            Some(definition.name()),
+        ),
+        SourceField::new(
+            fields::custom_field_definition::DESCRIPTION,
+            definition.description(),
+        ),
     ];
     for choice in definition.validations().choices() {
         fields.push(SourceField::new(
-            child_key("choices", &choice.key, "label"),
+            fields::custom_field_definition::choice_label(&choice.key),
             Some(&choice.label),
         ));
     }
@@ -74,38 +86,47 @@ pub fn definition_source(definition: &CustomFieldDefinition) -> Source {
 }
 
 pub fn shipping_option_source(option: &ShippingOption) -> Source {
-    Source::new(vec![SourceField::new("name", Some(option.name()))])
+    Source::new(vec![SourceField::new(
+        fields::shipping_option::NAME,
+        Some(option.name()),
+    )])
 }
 
 pub fn payment_method_source(method: &PaymentMethod) -> Source {
     Source::new(vec![
-        SourceField::new("name", Some(method.name())),
-        SourceField::new("instructions", method.instructions()),
+        SourceField::new(fields::payment_method::NAME, Some(method.name())),
+        SourceField::new(fields::payment_method::INSTRUCTIONS, method.instructions()),
     ])
 }
 
 pub fn discount_source(discount: &Discount) -> Source {
-    Source::new(vec![SourceField::new("title", Some(discount.title()))])
+    Source::new(vec![SourceField::new(
+        fields::discount::TITLE,
+        Some(discount.title()),
+    )])
 }
 
 /// What the shopper is told when the rule holds.
 pub fn checkout_rule_source(rule: &CheckoutRule) -> Source {
     Source::new(vec![SourceField::new(
-        "message",
+        fields::checkout_rule::MESSAGE,
         Some(&rule.outcome().message),
     )])
 }
 
 pub fn asset_source(asset: &Asset) -> Source {
-    Source::new(vec![SourceField::new("alt", asset.alt())])
+    Source::new(vec![SourceField::new(fields::asset::ALT, asset.alt())])
 }
 
 /// The store's own text: its description, and its emails' footer from the notification
 /// settings (`None` until the merchant saves them).
 pub fn store_source(store: &Store, notifications: Option<&NotificationSettings>) -> Source {
     Source::new(vec![
-        SourceField::new("description", store.description()),
-        SourceField::new("email_footer", notifications.and_then(|n| n.footer())),
+        SourceField::new(fields::store::DESCRIPTION, store.description()),
+        SourceField::new(
+            fields::store::EMAIL_FOOTER,
+            notifications.and_then(|n| n.footer()),
+        ),
     ])
 }
 
@@ -119,7 +140,7 @@ pub fn search_facet_source(settings: Option<&SearchSettings>) -> Source {
             .iter()
             .map(|facet| {
                 SourceField::new(
-                    child_key("facets", &facet.key, "label"),
+                    fields::search_facet::facet_label(&facet.key),
                     facet.label.as_deref(),
                 )
             })

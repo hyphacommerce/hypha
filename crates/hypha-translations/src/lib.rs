@@ -7,15 +7,14 @@ pub mod catalog;
 pub mod commands;
 pub mod error;
 pub mod events;
+pub mod fields;
 pub mod handler;
 pub mod overlay;
 pub mod repo;
 pub mod source;
 pub mod translation;
 
-pub use catalog::{
-    FieldRule, FieldSpec, MAX_KEY_LEN, ResourceKind, ResourceRef, UnknownKind, child_key,
-};
+pub use catalog::{FieldRule, FieldSpec, MAX_KEY_LEN, ResourceKind, ResourceRef, UnknownKind};
 pub use commands::{
     CommandError, StoreLanguages, delete_translation, get_translations, list_translations,
     put_translation, require_read, require_write,
