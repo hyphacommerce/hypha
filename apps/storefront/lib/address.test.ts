@@ -86,12 +86,17 @@ test("a field the format doesn't label is named as it is, the country by the cat
   assert.equal(fieldLabel(sr, formWith("city"), "country"), "Zemlja");
 });
 
-test("a label inside a sentence starts lower case, unless it starts with an acronym", () => {
+test("an English label inside a sentence starts lower case, unless it starts with an acronym", () => {
   assert.equal(inSentence("State", "en"), "state");
+  assert.equal(inSentence("State", "en-GB"), "state");
   assert.equal(inSentence("ZIP code", "en"), "ZIP code");
-  assert.equal(inSentence("Poštanski broj", "sr-Latn"), "poštanski broj");
   assert.equal(inSentence("A", "en"), "A");
   assert.equal(inSentence("", "en"), "");
+});
+
+test("a translated catalog's label goes into a sentence as the catalog writes it", () => {
+  assert.equal(inSentence("Poštanski broj", "sr-Latn"), "Poštanski broj");
+  assert.equal(inSentence("Poštanski broj", "sr"), "Poštanski broj");
 });
 
 test("an address's problems keep their code and params, by field", () => {

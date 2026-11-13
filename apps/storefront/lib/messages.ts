@@ -7,7 +7,6 @@ import {
   type Messages,
   type NamespaceKeys,
   type Translator,
-  matchLanguage,
   mergeCatalogs,
   pseudo,
 } from "@hyphacommerce/i18n";
@@ -28,6 +27,7 @@ import product from "../messages/en/product.json" with { type: "json" };
 import sale from "../messages/en/sale.json" with { type: "json" };
 import search from "../messages/en/search.json" with { type: "json" };
 
+import { translated } from "./catalog-languages.ts";
 import { PSEUDO } from "./pseudo.ts";
 
 const namespaces = {
@@ -88,14 +88,7 @@ export type SharedNamespace = (typeof SHARED_NAMESPACES)[number];
 
 export { PSEUDO };
 
-/** The languages with a catalog, English apart. */
-const TRANSLATED = ["sr-Latn"] as const;
-
-/** The translated catalog `language` reads, if there's one: its own, or the nearest
- * (`sr-Latn-RS` and plain `sr` both read `sr-Latn`). */
-export function translated(language: string): string | undefined {
-  return matchLanguage([language], TRANSLATED);
-}
+export { translated };
 
 /**
  * The language a page in `language` is written and formatted in: the language itself,

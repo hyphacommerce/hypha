@@ -3,6 +3,7 @@
 
 import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 
+import { translated } from "./catalog-languages.ts";
 import type { KeyIn, TFor } from "./messages.ts";
 
 /** A country's address form (`GET /storefront/address-formats/{country}`). */
@@ -102,9 +103,15 @@ export function fieldLabel(t: TFor<"address">, format: AddressFormat, field: str
   return format.labels[field] ?? field;
 }
 
-/** A label as it reads inside a sentence: "State" becomes "state", while "ZIP code"
- * stays as it is (the API's own rule). */
+/**
+ * A label as a message in `language` takes it inside a sentence. A label goes in as the
+ * catalog writes it, since only the catalog knows its language's capitals ("Postleitzahl"
+ * stays a noun), and each language's messages are worded around that (Serbian quotes
+ * it). English messages alone take it lower-cased, as the API words them: "State"
+ * becomes "state", while "ZIP code" stays as it is.
+ */
 export function inSentence(label: string, language: string): string {
+  if (translated(language) !== undefined) return label;
   const [first, second] = label;
   if (first === undefined || second === undefined) return label;
   if (second !== second.toLocaleLowerCase(language)) return label;

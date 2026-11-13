@@ -124,7 +124,7 @@ test("required: the field's label, a region chosen and the rest typed", () => {
   );
   assert.equal(
     wordMessage(sr, builtIn("required", { field: "province" }), usLabelSr),
-    "Izaberite: savezna država",
+    "Izaberite: Savezna država",
   );
 });
 
@@ -133,11 +133,11 @@ test("too_long: the field and its most, in the language's plurals", () => {
   assert.equal(wordMessage(t, long, usLabel), "The address is too long (at most 255 characters)");
   assert.equal(
     wordMessage(sr, long, usLabelSr),
-    "Polje „adresa“ je predugačko (najviše 255 znakova)",
+    "Polje „Adresa“ je predugačko (najviše 255 znakova)",
   );
   assert.equal(
     wordMessage(sr, builtIn("too_long", { field: "line1", max: 2 }), usLabelSr),
-    "Polje „adresa“ je predugačko (najviše 2 znaka)",
+    "Polje „Adresa“ je predugačko (najviše 2 znaka)",
   );
 });
 
@@ -167,7 +167,7 @@ test("unknown_region: the region's label", () => {
   );
   assert.equal(
     wordMessage(sr, builtIn("unknown_region", { field: "province" }), usLabelSr),
-    "Izaberite ispravnu vrednost u polju „savezna država“",
+    "Izaberite ispravnu vrednost u polju „Savezna država“",
   );
 });
 
