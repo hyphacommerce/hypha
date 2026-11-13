@@ -1074,3 +1074,36 @@ html[data-theme="dark"] .hypha-wordmark-dark {
 .translation-problem {
   color: var(--color-error);
 }
+
+/* Settings → Languages: a language's progress, translated (up to date, then outdated)
+   over the track that stands for what's missing. */
+.tl-bar {
+  display: flex;
+  overflow: hidden;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-track);
+}
+
+.tl-bar-current,
+.tl-swatch-current {
+  background: var(--color-success);
+}
+
+.tl-bar-outdated,
+.tl-swatch-outdated {
+  background: var(--color-warning);
+}
+
+.tl-swatch {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+}
+
+.tl-swatch-missing {
+  background: var(--color-track);
+  box-shadow: inset 0 0 0 1px var(--color-border-emphasized);
+}

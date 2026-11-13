@@ -56,5 +56,7 @@
   "settings_apps": "Webhooks and custom apps",
   "settings_apps_description": "Apps made by hand: their webhooks, events and signing secrets.",
   "settings_languages": "Languages",
-  "settings_languages_description": "The language your content is written in and the ones it's translated into."
+  "settings_languages_description": "The language your content is written in and the ones it's translated into.",
+  "settings_translations": "Translations",
+  "settings_translations_description": "What's left to translate into each language, and what's outdated."
 }

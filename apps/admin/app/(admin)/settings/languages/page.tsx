@@ -3,17 +3,19 @@ import { Section } from "@astryxdesign/core/Section";
 import { Suspense } from "react";
 
 import { PageHeader } from "@/components/page-header";
-import { FormSkeleton } from "@/components/skeletons";
+import { CardSkeleton, FormSkeleton } from "@/components/skeletons";
 import { requireStaff, requireStore } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
 import { settingsCrumb } from "@/lib/navigation";
 import { canReadTranslations, translateHref } from "@/lib/translations";
 
 import { LanguagesForm } from "./languages-form";
+import { TranslationProgress } from "./progress";
 
 /**
  * Settings → Languages: the language the store's content is written in, the languages
- * it's translated into, and the way into translating the store's own text.
+ * it's translated into, the way into translating the store's own text, and how far each
+ * language has got.
  */
 export default async function LanguagesSettingsPage() {
   const t = await getT();
@@ -27,6 +29,9 @@ export default async function LanguagesSettingsPage() {
         />
         <Suspense fallback={<FormSkeleton />}>
           <Languages />
+        </Suspense>
+        <Suspense fallback={<CardSkeleton />}>
+          <TranslationProgress />
         </Suspense>
       </VStack>
     </Section>

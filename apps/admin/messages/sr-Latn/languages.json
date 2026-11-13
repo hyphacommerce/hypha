@@ -32,5 +32,14 @@
   "in_use_hint": "Prvo uklonite jezik sa ovih tržišta:",
   "in_use_market": "<link>{market}</link>: {languages}",
   "store_form_description": "Jezik na kom je vaš sadržaj napisan i vremenska zona u kojoj se prikazuju vremena.",
-  "store_form_hint": "Promenite ga i dodajte prevode u odeljku <link>Jezici</link>."
+  "store_form_hint": "Promenite ga i dodajte prevode u odeljku <link>Jezici</link>.",
+  "progress_title": "Napredak prevoda",
+  "progress_description": "Koliki deo teksta prodavnice pokriva svaki jezik, brojano u poljima.",
+  "progress_worklist": "Otvori listu za prevođenje",
+  "progress_uncounted": "Brojevi se pojavljuju kada se tekstovi prodavnice indeksiraju, ubrzo posle nadogradnje.",
+  "progress_nothing": "Još nema šta da se prevodi",
+  "progress_share": "Prevedeno: {share} · {translated, number} od {total, number} polja",
+  "progress_current": "{count, plural, one {Ažurno: #} few {Ažurno: #} other {Ažurno: #}}",
+  "progress_outdated": "{count, plural, one {Zastarelo: #} few {Zastarelo: #} other {Zastarelo: #}}",
+  "progress_missing": "{count, plural, one {Nedostaje: #} few {Nedostaje: #} other {Nedostaje: #}}"
 }

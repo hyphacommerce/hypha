@@ -56,5 +56,7 @@
   "settings_apps": "Webhook-ovi i ručno pravljene aplikacije",
   "settings_apps_description": "Ručno napravljene aplikacije: njihovi webhook-ovi, događaji i tajne za potpisivanje.",
   "settings_languages": "Jezici",
-  "settings_languages_description": "Jezik na kom je vaš sadržaj napisan i jezici na koje je preveden."
+  "settings_languages_description": "Jezik na kom je vaš sadržaj napisan i jezici na koje je preveden.",
+  "settings_translations": "Prevodi",
+  "settings_translations_description": "Šta je ostalo da se prevede na svaki jezik i šta je zastarelo."
 }
