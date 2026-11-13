@@ -3034,6 +3034,10 @@ step "ask for a sign-in code" 202 - -X POST "$BASE/storefront/auth/code" -H "$JS
 contains "always says sent" '"sent":true'
 step "whatever the address" 202 - -X POST "$BASE/storefront/auth/code" -H "$JSON" \
     -d '{"email":"not an address"}'
+step "asked for in the storefront's language" 202 - -X POST "$BASE/storefront/auth/code" -H "$JSON" \
+    -d '{"email":"lena@example.de","language":"de-AT"}'
+step "in one the store doesn't publish" 202 - -X POST "$BASE/storefront/auth/code" -H "$JSON" \
+    -d '{"email":"luc@example.fr","language":"fr"}'
 step "a made-up code" 401 invalid_code -X POST "$BASE/storefront/auth/login" -H "$JSON" \
     -d '{"email":"nobody@example.com","code":"000000"}'
 step "signing out needs a session" 401 account_required -X POST "$BASE/storefront/account/logout"
@@ -3101,6 +3105,12 @@ AUTH=()
 step "owner logs in again" 200 - -X POST "$BASE/admin/auth/login" -H "$JSON" \
     -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"$OWNER_PASSWORD\"}"
 AUTH=(-H "authorization: Bearer $(token)")
+step "the customer who asked for a code in German" 200 - "$BASE/admin/customers?q=lena"
+step "reads German" 200 - "$BASE/admin/customers/$(sed -E 's/.*"items":\[\{"id":"([^"]+)".*/\1/' <<<"$BODY")"
+contains "the language without its region, as the store publishes it" '"language":"de"'
+step "the one who asked in French" 200 - "$BASE/admin/customers?q=luc"
+step "reads the store's default" 200 - "$BASE/admin/customers/$(sed -E 's/.*"items":\[\{"id":"([^"]+)".*/\1/' <<<"$BODY")"
+contains "never an error" '"language":"en"'
 step "create an autonomous agent" 201 - -X POST "$BASE/admin/agents" -H "$JSON" \
     -d '{"name":"Restocker","grant":{"read":["orders:read"],"write":{"inventory:write":"apply","products:write":"propose"}}}'
 contains "its key is shown once" '"key":"hypha_ak_'

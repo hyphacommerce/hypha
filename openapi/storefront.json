@@ -1925,6 +1925,13 @@
         "properties": {
           "email": {
             "type": "string"
+          },
+          "language": {
+            "description": "The language the shopper reads the storefront in (a BCP 47 tag), out of the store's\ndefault and published languages: one it doesn't offer is tried without its region,\nthen counts as the store's default; never an error. The code's email is written in\nit when the customer has no language of their own, and a customer created now\nkeeps it.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [

@@ -232,6 +232,39 @@ async fn asking_for_a_code_answers_the_same_for_any_address_and_is_rate_limited(
 
 // Six digits are few: guesses must stay slow from any one address, and at any one email.
 #[tokio::test]
+async fn a_code_asked_for_in_a_language_is_written_in_it_and_the_new_customer_keeps_it() {
+    let app = app().await;
+    let pk = publishable(&app).await;
+    let body = r#"{"languages":[{"language":"sr-Latn","published":true},{"language":"fr"}]}"#;
+    let (status, json) = send(&app, "PATCH", "/admin/store", Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let customer_language = async |email: &str| {
+        let path = format!("/admin/customers?q={email}");
+        let (_, found) = send(&app, "GET", &path, None).await;
+        let id = found["items"][0]["id"].as_str().unwrap().to_string();
+        let (_, customer) = send(&app, "GET", &format!("/admin/customers/{id}"), None).await;
+        customer["language"].clone()
+    };
+    let subject = || app.emails.lock().unwrap().last().unwrap().subject.clone();
+
+    let ask_in = async |email: &str, language: &str| {
+        let body = json!({ "email": email, "language": language }).to_string();
+        let (status, json) = send_as(&app, &pk, "POST", "/storefront/auth/code", Some(&body)).await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{json}");
+    };
+    ask_in("nina@example.com", "sr-latn").await;
+    assert!(subject().starts_with("Vaš kod za prijavu"), "{}", subject());
+    assert_eq!(customer_language("nina").await, "sr-Latn");
+
+    // Unpublished, or not a tag: the store's default, never an error.
+    ask_in("ivo@example.com", "fr").await;
+    assert!(!subject().starts_with("Vaš"), "{}", subject());
+    assert_eq!(customer_language("ivo").await, "en");
+    ask_in("ana@example.com", "not a tag!").await;
+    assert_eq!(customer_language("ana").await, "en");
+}
+
+#[tokio::test]
 async fn guessing_login_codes_from_one_address_is_limited() {
     let app = app().await;
     let pk = publishable(&app).await;

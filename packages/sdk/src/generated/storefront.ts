@@ -1554,6 +1554,14 @@ export interface components {
         };
         LoginCodeRequest: {
             email: string;
+            /**
+             * @description The language the shopper reads the storefront in (a BCP 47 tag), out of the store's
+             *     default and published languages: one it doesn't offer is tried without its region,
+             *     then counts as the store's default; never an error. The code's email is written in
+             *     it when the customer has no language of their own, and a customer created now
+             *     keeps it.
+             */
+            language?: string | null;
         };
         LoginCodeResponse: {
             /**

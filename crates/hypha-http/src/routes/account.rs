@@ -46,6 +46,13 @@ use crate::{
 #[serde(deny_unknown_fields)]
 pub struct LoginCodeRequest {
     email: String,
+    /// The language the shopper reads the storefront in (a BCP 47 tag), out of the store's
+    /// default and published languages: one it doesn't offer is tried without its region,
+    /// then counts as the store's default; never an error. The code's email is written in
+    /// it when the customer has no language of their own, and a customer created now
+    /// keeps it.
+    #[serde(default)]
+    language: Option<String>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -178,7 +185,20 @@ pub async fn request_code<S: Storage>(
         )
         .await?;
     }
-    request_login_code(&ports, &state.staff_env(&ports), &req.email).await?;
+    let language = match req.language.as_deref() {
+        Some(asked) => {
+            let store = super::stores::store_as_system(&state, &ports).await?;
+            crate::language::chosen(Some(asked), &store, None)
+        }
+        None => None,
+    };
+    request_login_code(
+        &ports,
+        &state.staff_env(&ports),
+        &req.email,
+        language.as_ref(),
+    )
+    .await?;
     Ok((StatusCode::ACCEPTED, Json(LoginCodeResponse { sent: true })))
 }
 
