@@ -32,7 +32,7 @@ import {
   signOut,
   signOutEverywhere,
   updateProfile,
-} from "@/app/[country]/account/actions";
+} from "@/app/[country]/(shop)/account/actions";
 
 /** The account's messages and the address form's, beside the shared ones: the account's
  * layout sends them. */

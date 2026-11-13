@@ -15,7 +15,7 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { EnvelopeIcon, KeyIcon } from "@heroicons/react/24/outline";
 import { useState, useTransition } from "react";
 
-import { requestCode, signIn } from "@/app/[country]/account/actions";
+import { requestCode, signIn } from "@/app/[country]/(shop)/account/actions";
 import { useT } from "@/lib/use-t";
 
 export function SignInForm({
