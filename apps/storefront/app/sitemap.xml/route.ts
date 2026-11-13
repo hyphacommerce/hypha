@@ -1,10 +1,11 @@
 // Every page worth finding, in every place it has a URL (each country in each of its
-// languages: `alternatePlaces`): home, the sale, each shown category and each product the
-// country's market sells, with the page's other copies as alternates.
+// languages: `alternatePlaces`) but those that duplicate another (`duplicateOf`): home,
+// the sale, each shown category and each product the country's market sells, with the
+// page's other copies as alternates, by their `hreflang` tags (`hreflangPlaces`).
 
 import { loadCategories, loadCountries } from "@/lib/api";
 import { search } from "@/lib/listing-data";
-import { alternatePlaces, hreflangPlaces } from "@/lib/routing";
+import { alternatePlaces, duplicateOf, hreflangPlaces } from "@/lib/routing";
 import { localeAlternates } from "@/lib/seo";
 import { link, mode, segmentCountry, siteUrl } from "@/lib/site";
 
@@ -48,9 +49,13 @@ type Place = { tag: string; segment: string };
 export async function GET(request: Request) {
   const origin = siteUrl()?.origin ?? new URL(request.url).origin;
   const [countries, categories] = await Promise.all([loadCountries(), loadCategories()]);
-  const places = alternatePlaces(mode(), countries);
-  // What alternates may name (none where a single tree's URLs have no one language).
-  const named = new Set(hreflangPlaces(mode(), countries).map((p) => p.segment));
+  // A duplicate's canonical is the page it duplicates: only that one is listed.
+  const places = alternatePlaces(mode(), countries).filter(
+    (p) => duplicateOf(mode(), countries, p.segment) === undefined,
+  );
+  // What alternates may name, by the tag each is named by (none where a single tree's
+  // URLs have no one language).
+  const named = new Map(hreflangPlaces(mode(), countries).map((p) => [p.segment, p.tag]));
   const codes = [...new Set(places.map((p) => segmentCountry(p.segment)))];
   const perCountry = new Map(
     await Promise.all(codes.map(async (c) => [c, await productHandles(c)] as const)),
@@ -61,12 +66,13 @@ export async function GET(request: Request) {
     for (const h of products) sellers.set(h, (sellers.get(h) ?? new Set()).add(country));
 
   const entry = (place: Place, path: string, alsoIn: Place[]) => {
-    // A place left out of the set (its tag kept by another) names none, itself included.
+    // A place left out of the set names none, itself included.
     const alternates = named.has(place.segment)
       ? localeAlternates(
-          alsoIn
-            .filter((p) => named.has(p.segment))
-            .map((p) => ({ tag: p.tag, href: link(p.segment, path) })),
+          alsoIn.flatMap((p) => {
+            const tag = named.get(p.segment);
+            return tag === undefined ? [] : [{ tag, href: link(p.segment, path) }];
+          }),
         )
       : undefined;
     return [
