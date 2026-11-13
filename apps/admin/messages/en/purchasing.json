@@ -19,6 +19,7 @@
   "view_drafts": "Drafts",
   "view_open": "Open",
   "view_closed": "Closed",
+  "column_purchase_order": "Purchase order",
   "sort_newest": "Newest first",
   "sort_oldest": "Oldest first",
   "sort_due": "Due soonest",

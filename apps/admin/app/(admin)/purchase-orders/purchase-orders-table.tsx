@@ -66,7 +66,7 @@ export function PurchaseOrdersTable({
   const columns: TableColumn<PurchaseOrderSummary>[] = [
     {
       key: "number",
-      header: t("common.order"),
+      header: t("purchasing.column_purchase_order"),
       width: pixel(120),
       renderCell: (po) => (
         <Link href={`/purchase-orders/${po.id}`} weight="semibold" color="primary">
