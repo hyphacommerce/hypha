@@ -42,6 +42,8 @@ import {
   percentLabel,
   toLocalInput,
 } from "@/lib/price-lists";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { createPriceList, updatePriceList } from "./actions";
 
@@ -84,6 +86,8 @@ function SettingsFields({
   productNames: Record<string, string>;
   onPickProducts: () => void;
 }) {
+  const t = useT<"price_lists">();
+  const format = useFormat();
   const currencies = useCurrencies();
   const timeZone = useTimeZone();
   const typed = parsePercent(form.percent);
@@ -101,12 +105,12 @@ function SettingsFields({
       <Card>
         <VStack gap={4}>
           <Text type="display-3" as="h2">
-            Details
+            {t("common.details")}
           </Text>
           <TextInput
-            label="Name"
-            description="For staff, unique: shown wherever the list is chosen."
-            placeholder="Black Friday"
+            label={t("common.name")}
+            description={t("price_lists.form_name_description")}
+            placeholder={t("price_lists.form_name_placeholder")}
             value={form.name}
             onChange={(name) => set({ name })}
             isDisabled={isReadOnly}
@@ -114,7 +118,7 @@ function SettingsFields({
             width="100%"
           />
           <TextArea
-            label="Description"
+            label={t("common.description")}
             isOptional
             rows={2}
             maxLength={255}
@@ -124,11 +128,11 @@ function SettingsFields({
             status={status(errors.description)}
           />
           <Selector
-            label="Currency"
+            label={t("common.currency")}
             description={
               isNew
-                ? "Fixed once it's created: its fixed prices are in it, and only markets in this currency can use it."
-                : "Fixed: its fixed prices are in it."
+                ? t("price_lists.form_currency_description_new")
+                : t("price_lists.form_currency_description_fixed")
             }
             options={currencyCodes(currencies)}
             value={form.currency}
@@ -139,30 +143,28 @@ function SettingsFields({
             width={240}
           />
           <RadioList
-            label="Kind"
+            label={t("price_lists.form_kind")}
             value={form.kind}
             onChange={(kind) => set({ kind: kind === "sale" ? "sale" : "override" })}
             isDisabled={isReadOnly}
           >
-            {KINDS.map((k) => (
+            {KINDS.map((kind) => (
               <RadioListItem
-                key={k.value}
-                value={k.value}
-                label={k.label}
-                description={k.description}
+                key={kind}
+                value={kind}
+                label={t(`price_lists.kind_${kind}`)}
+                description={t(`price_lists.kind_${kind}_description`)}
               />
             ))}
           </RadioList>
           {form.kind === "sale" && (
             <Text type="supporting" color="secondary">
-              Selling in the EU? During a reduction the price struck through must be the lowest of
-              the last 30 days. Hypha doesn&apos;t track that yet: set the variants&apos; compare-at
-              prices (or the fixed prices&apos; own) to it yourself.
+              {t("price_lists.form_eu_notice")}
             </Text>
           )}
           {form.kind === "override" && (
             <RadioList
-              label="Compare-at prices"
+              label={t("price_lists.form_compare_at")}
               value={form.compareAt}
               onChange={(compareAt) =>
                 set({ compareAt: compareAt === "hidden" ? "hidden" : "adjusted" })
@@ -171,13 +173,13 @@ function SettingsFields({
             >
               <RadioListItem
                 value="adjusted"
-                label="Adjust them"
-                description="A variant's compare-at price shows with the list's adjustment applied."
+                label={t("price_lists.form_compare_at_adjusted")}
+                description={t("price_lists.form_compare_at_adjusted_description")}
               />
               <RadioListItem
                 value="hidden"
-                label="Hide them"
-                description="Only a fixed price's own compare-at price shows."
+                label={t("price_lists.form_compare_at_hidden")}
+                description={t("price_lists.form_compare_at_hidden_description")}
               />
             </RadioList>
           )}
@@ -188,24 +190,23 @@ function SettingsFields({
         <VStack gap={4}>
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Schedule
+              {t("price_lists.form_schedule")}
             </Text>
             <Text type="supporting" color="secondary">
-              Times are in the store&apos;s time zone, {timeZone}. Prices change at the moment it
-              starts and ends; search and the storefront&apos;s pages follow within a minute.
+              {t("price_lists.form_schedule_description", { timeZone })}
             </Text>
           </VStack>
           <Switch
-            label="Active"
-            description="A draft prices nothing, whatever its dates say: switch it off to pause the list."
+            label={t("price_lists.form_active")}
+            description={t("price_lists.form_active_description")}
             value={form.status === "active"}
             onChange={(on) => set({ status: on ? "active" : "draft" })}
             isDisabled={isReadOnly}
           />
           <HStack gap={4} wrap="wrap">
             <DateTimeInput
-              label="Starts"
-              description="Empty: at once."
+              label={t("price_lists.form_starts")}
+              description={t("price_lists.form_starts_description")}
               value={isMinute(form.startsAt) ? form.startsAt : undefined}
               onChange={(value) => set({ startsAt: value ?? "" })}
               hasClear
@@ -215,8 +216,8 @@ function SettingsFields({
               status={status(errors.startsAt)}
             />
             <DateTimeInput
-              label="Ends"
-              description="Empty: never."
+              label={t("price_lists.form_ends")}
+              description={t("price_lists.form_ends_description")}
               value={isMinute(form.endsAt) ? form.endsAt : undefined}
               onChange={(value) => set({ endsAt: value ?? "" })}
               hasClear
@@ -233,23 +234,26 @@ function SettingsFields({
         <VStack gap={4}>
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Audience
+              {t("price_lists.form_audience")}
             </Text>
             <Text type="supporting" color="secondary">
-              Who it prices for. Without a group, every shopper. With groups, only signed-in
-              customers in one of them: in their carts and on product pages once they sign in.
-              Listings and search show everyone&apos;s prices.
+              {t("price_lists.form_audience_description")}
             </Text>
           </VStack>
           {groupOptions.length === 0 ? (
             <Text color="secondary">
-              Everyone. To price for some customers, make a{" "}
-              <Link href="/customers/groups">customer group</Link> first.
+              {t.rich("price_lists.form_audience_no_groups", {
+                link: (chunks, key) => (
+                  <Link key={key} href="/customers/groups">
+                    {chunks}
+                  </Link>
+                ),
+              })}
             </Text>
           ) : (
             <MultiSelector
-              label="Customer groups"
-              placeholder="Everyone"
+              label={t("price_lists.form_groups")}
+              placeholder={t("price_lists.form_groups_placeholder")}
               options={groupOptions}
               value={form.groups}
               onChange={(chosen) => set({ groups: chosen })}
@@ -266,16 +270,14 @@ function SettingsFields({
         <VStack gap={4}>
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Adjustment
+              {t("price_lists.form_adjustment")}
             </Text>
             <Text type="supporting" color="secondary">
-              A percentage of the base price, for the products it covers. Variants with a fixed
-              price in the list cost that instead. Without an adjustment, the list prices only the
-              variants it has fixed prices for.
+              {t("price_lists.form_adjustment_description")}
             </Text>
           </VStack>
           <Switch
-            label="Adjust base prices"
+            label={t("price_lists.form_adjust_base_prices")}
             value={form.hasAdjustment}
             onChange={(hasAdjustment) =>
               set({ hasAdjustment, percent: hasAdjustment && !form.percent ? "-10" : form.percent })
@@ -285,13 +287,18 @@ function SettingsFields({
           {form.hasAdjustment && (
             <>
               <TextInput
-                label="Percentage"
+                label={t("price_lists.form_percentage")}
                 description={
                   bps === null
-                    ? "-20 is 20% off; 5 is 5% more."
+                    ? t("price_lists.form_percentage_hint")
                     : bps === 0
-                      ? "0: the base prices as they are."
-                      : `${percentLabel(bps)}: ${bps < 0 ? "a reduction" : "a markup"} of the base price.`
+                      ? t("price_lists.form_percentage_zero")
+                      : t(
+                          bps < 0
+                            ? "price_lists.form_percentage_reduction"
+                            : "price_lists.form_percentage_markup",
+                          { percent: percentLabel(format, bps) },
+                        )
                 }
                 value={form.percent}
                 onChange={(percent) => set({ percent })}
@@ -300,7 +307,7 @@ function SettingsFields({
                 width={200}
               />
               <RadioList
-                label="Applies to"
+                label={t("price_lists.form_applies_to")}
                 value={form.scope}
                 onChange={(scope) =>
                   set({
@@ -314,26 +321,26 @@ function SettingsFields({
                 }
                 isDisabled={isReadOnly}
               >
-                <RadioListItem value="all" label="Every product" />
+                <RadioListItem value="all" label={t("price_lists.form_scope_all")} />
                 <RadioListItem
                   value="categories"
-                  label="Products in categories"
-                  description="A category counts the products in its subcategories too."
+                  label={t("price_lists.form_scope_categories")}
+                  description={t("price_lists.form_scope_categories_description")}
                 />
-                <RadioListItem value="products" label="Chosen products" />
+                <RadioListItem value="products" label={t("price_lists.form_scope_products")} />
               </RadioList>
               {form.scope === "categories" && (
                 <VStack gap={2}>
                   <MultiSelector
-                    label="Categories"
-                    placeholder="Choose categories"
+                    label={t("common.categories")}
+                    placeholder={t("price_lists.form_categories_placeholder")}
                     options={categories}
                     value={form.categories}
                     onChange={(chosen) => set({ categories: chosen })}
                     hasSearch
                     triggerDisplay="count"
                     formatValue={(items) =>
-                      items.length === 1 ? "1 category" : `${items.length} categories`
+                      t("price_lists.form_categories_count", { count: items.length })
                     }
                     isDisabled={isReadOnly}
                     status={status(errors.categories)}
@@ -377,7 +384,11 @@ function SettingsFields({
                     </HStack>
                   )}
                   {!isReadOnly && (
-                    <Button label="Choose products" variant="secondary" onClick={onPickProducts} />
+                    <Button
+                      label={t("price_lists.form_choose_products")}
+                      variant="secondary"
+                      onClick={onPickProducts}
+                    />
                   )}
                 </VStack>
               )}
@@ -405,6 +416,7 @@ export function NewPriceListForm({
   categories: { value: string; label: string }[];
   groups: { value: string; label: string }[];
 }) {
+  const t = useT<"price_lists">();
   const timeZone = useTimeZone();
   const [form, setForm] = useState<ListForm>(() => emptyForm(defaultCurrency));
   const [template, setTemplate] = useState<TemplateKey | null>(null);
@@ -422,7 +434,7 @@ export function NewPriceListForm({
     setErrors((before) => clearErrors(before, change));
   };
   const choose = (key: TemplateKey) => {
-    const found = TEMPLATES.find((t) => t.key === key);
+    const found = TEMPLATES.find((candidate) => candidate.key === key);
     if (!found) return;
     setTemplate(key);
     setForm((before) => found.apply(before, nextWeek(timeZone)));
@@ -435,7 +447,7 @@ export function NewPriceListForm({
   });
 
   const submit = () => {
-    const found = checkForm(form, timeZone);
+    const found = checkForm(t, form, timeZone);
     setErrors(found);
     if (Object.keys(found).length > 0) return;
     startTransition(async () => {
@@ -451,25 +463,25 @@ export function NewPriceListForm({
         <VStack gap={3}>
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Start from
+              {t("price_lists.form_start_from")}
             </Text>
             <Text type="supporting" color="secondary">
-              A template fills in the settings a kind of list needs; change any of them below.
+              {t("price_lists.form_start_from_description")}
             </Text>
           </VStack>
           <div className="template-grid">
-            {TEMPLATES.map((t) => (
+            {TEMPLATES.map(({ key }) => (
               <SelectableCard
-                key={t.key}
-                label={t.label}
-                isSelected={template === t.key}
-                onChange={(isSelected) => isSelected && choose(t.key)}
+                key={key}
+                label={t(`price_lists.template_${key}`)}
+                isSelected={template === key}
+                onChange={(isSelected) => isSelected && choose(key)}
                 padding={3}
               >
                 <VStack gap={1}>
-                  <Text weight="semibold">{t.label}</Text>
+                  <Text weight="semibold">{t(`price_lists.template_${key}`)}</Text>
                   <Text type="supporting" color="secondary">
-                    {t.description}
+                    {t(`price_lists.template_${key}_description`)}
                   </Text>
                 </VStack>
               </SelectableCard>
@@ -496,21 +508,20 @@ export function NewPriceListForm({
         <VStack gap={3}>
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Markets
+              {t("common.markets")}
             </Text>
             <Text type="supporting" color="secondary">
-              Where it prices: the markets whose catalogs use it. A market can use several lists,
-              and shoppers get the lowest live price among them, so a markup list (+20%) can&apos;t
-              win beside a market&apos;s regular list. You can change this on the list&apos;s page
-              later.
+              {t("price_lists.form_markets_description")}
             </Text>
           </VStack>
           {sameCurrency.length === 0 ? (
-            <Text color="secondary">No market sells in {form.currency} yet.</Text>
+            <Text color="secondary">
+              {t("price_lists.form_no_market_in_currency", { currency: form.currency })}
+            </Text>
           ) : (
             <MultiSelector
-              label={`Markets in ${form.currency}`}
-              placeholder="None for now"
+              label={t("price_lists.form_markets_in_currency", { currency: form.currency })}
+              placeholder={t("price_lists.form_markets_placeholder")}
               options={sameCurrency.map((m) => ({ value: m.id, label: m.name }))}
               value={chosenMarkets.filter((id) => sameCurrency.some((m) => m.id === id))}
               onChange={setChosenMarkets}
@@ -521,9 +532,9 @@ export function NewPriceListForm({
       </Card>
 
       <HStack gap={2} hAlign="end">
-        <Button label="Cancel" variant="ghost" href="/markets/price-lists" />
+        <Button label={t("common.cancel")} variant="ghost" href="/markets/price-lists" />
         <Button
-          label="Create price list"
+          label={t("price_lists.form_create")}
           variant="primary"
           isLoading={isPending}
           onClick={submit}
@@ -532,7 +543,7 @@ export function NewPriceListForm({
 
       {isPicking && (
         <ProductPicker
-          title="Products the adjustment covers"
+          title={t("price_lists.form_products_picker_title")}
           isAlreadyIn={(p) => form.products.includes(p.id)}
           onConfirm={async (picked) => {
             setNames((before) => ({
@@ -564,6 +575,7 @@ export function EditPriceListForm({
   productNames: Record<string, string>;
   isReadOnly: boolean;
 }) {
+  const t = useT<"price_lists">();
   const timeZone = useTimeZone();
   const [saved] = useState(() => formFromList(list, timeZone));
   const [form, setForm] = useState<ListForm>(saved);
@@ -579,18 +591,17 @@ export function EditPriceListForm({
     setErrors((before) => clearErrors(before, change));
   };
   const save = () => {
-    const found = checkForm(form, timeZone);
+    const found = checkForm(t, form, timeZone);
     setErrors(found);
     if (Object.keys(found).length > 0) {
-      setError("Some settings need fixing: see the marked fields.");
+      setError(t("price_lists.form_needs_fixing"));
       return;
     }
     startTransition(async () => {
       const result = await updatePriceList(list.id, form);
       setErrors(result.fieldErrors ?? {});
       setError(
-        result.error ??
-          (result.fieldErrors ? "Some settings need fixing: see the marked fields." : undefined),
+        result.error ?? (result.fieldErrors ? t("price_lists.form_needs_fixing") : undefined),
       );
     });
   };
@@ -624,7 +635,7 @@ export function EditPriceListForm({
       />
       {isPicking && (
         <ProductPicker
-          title="Products the adjustment covers"
+          title={t("price_lists.form_products_picker_title")}
           isAlreadyIn={(p) => form.products.includes(p.id)}
           onConfirm={async (picked) => {
             setNames((before) => ({

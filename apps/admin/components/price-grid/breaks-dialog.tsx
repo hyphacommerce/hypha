@@ -21,6 +21,7 @@ import {
 } from "@/lib/price-grid/breaks";
 import { formatAmount, parseAmount } from "@/lib/price-grid/money";
 import { MAX_BREAKS } from "@/lib/price-grid/types";
+import { useT } from "@/lib/use-t";
 
 type Row = { key: number; quantity: string; price: string };
 
@@ -54,19 +55,20 @@ export function BreaksDialog({
   onSave: (text: string) => void;
   onClose: () => void;
 }) {
+  const t = useT<"price_lists">();
   const [rows, setRows] = useState(() => rowsOf(value, digits, currency));
 
   const fixed = parseAmount(fixedPrice, digits, currency);
   const fixedAmount = fixed.ok ? fixed.value : null;
   const parsed = rows.map((row) => ({
     quantity: /^\d+$/.test(row.quantity.trim()) ? Number(row.quantity.trim()) : null,
-    price: parseAmount(row.price, digits, currency),
+    price: parseAmount(row.price, digits, currency, t),
   }));
   const complete: BreakAmount[] = parsed.flatMap((p) =>
     p.quantity !== null && p.price.ok ? [{ min_quantity: p.quantity, amount: p.price.value }] : [],
   );
   const rowsValid = complete.length === rows.length;
-  const problems = rowsValid ? breakProblems(complete, fixedAmount) : [];
+  const problems = rowsValid ? breakProblems(t, complete, fixedAmount) : [];
   const canSave = rowsValid && problems.length === 0;
 
   const update = (key: number, field: "quantity" | "price", text: string) =>
@@ -88,25 +90,27 @@ export function BreaksDialog({
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={480} purpose="form">
       <DialogHeader
-        title={`Quantity breaks for ${title}`}
+        title={t("price_lists.breaks_dialog_title", { name: title })}
         subtitle={
           fixedAmount === null
-            ? "Breaks need a fixed price: set one in the grid first."
-            : `Below the first break, each costs the fixed price, ${formatAmount(fixedAmount, digits)} ${currency}.`
+            ? t("price_lists.breaks_dialog_no_fixed")
+            : // The amount as the grid's cell holds it: plain decimals, the code after.
+              t("price_lists.breaks_dialog_fixed", {
+                amount: formatAmount(fixedAmount, digits),
+                currency,
+              })
         }
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={3} padding={4}>
         {problems.length > 0 && <Banner status="error" title={problems.join(" ")} />}
-        {rows.length === 0 && (
-          <Text color="secondary">No breaks: every quantity costs the same.</Text>
-        )}
+        {rows.length === 0 && <Text color="secondary">{t("price_lists.breaks_dialog_none")}</Text>}
         {rows.map((row, index) => {
           const p = parsed[index];
           return (
             <HStack key={row.key} gap={2} vAlign="end">
               <TextInput
-                label="From quantity"
+                label={t("price_lists.breaks_dialog_from_quantity")}
                 isLabelHidden={index > 0}
                 placeholder="10"
                 value={row.quantity}
@@ -115,12 +119,12 @@ export function BreaksDialog({
                 statusVariant="tooltip"
                 status={
                   row.quantity.trim() !== "" && p?.quantity === null
-                    ? { type: "error", message: "A whole number." }
+                    ? { type: "error", message: t("price_lists.breaks_dialog_whole_number") }
                     : undefined
                 }
               />
               <TextInput
-                label={`Price each, ${currency}`}
+                label={t("price_lists.breaks_dialog_price_each", { currency })}
                 isLabelHidden={index > 0}
                 placeholder="8.00"
                 value={row.price}
@@ -134,7 +138,7 @@ export function BreaksDialog({
                 }
               />
               <IconButton
-                label="Remove the break"
+                label={t("price_lists.breaks_dialog_remove")}
                 icon={<TrashIcon />}
                 variant="ghost"
                 onClick={() => setRows((current) => current.filter((r) => r.key !== row.key))}
@@ -144,14 +148,19 @@ export function BreaksDialog({
         })}
         <HStack gap={2} hAlign="between">
           <Button
-            label="Add break"
+            label={t("price_lists.breaks_dialog_add")}
             variant="secondary"
             isDisabled={rows.length >= MAX_BREAKS}
             onClick={add}
           />
           <HStack gap={2}>
-            <Button label="Cancel" variant="ghost" onClick={onClose} />
-            <Button label="Done" variant="primary" isDisabled={!canSave} onClick={save} />
+            <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
+            <Button
+              label={t("common.done")}
+              variant="primary"
+              isDisabled={!canSave}
+              onClick={save}
+            />
           </HStack>
         </HStack>
       </VStack>

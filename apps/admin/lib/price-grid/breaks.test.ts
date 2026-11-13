@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { breakProblems, breaksLabel, formatBreaks, parseBreaks } from "./breaks.ts";
+import { t } from "./testing.ts";
 
 test("breaks round-trip through their cell text", () => {
   const breaks = [
@@ -38,6 +39,7 @@ test("a part that isn't a break, or a bad price, is refused with the part", () =
 test("good breaks have no problems", () => {
   assert.deepEqual(
     breakProblems(
+      t,
       [
         { min_quantity: 2, amount: 900 },
         { min_quantity: 10, amount: 800 },
@@ -46,21 +48,22 @@ test("good breaks have no problems", () => {
     ),
     [],
   );
-  assert.deepEqual(breakProblems([], null), []);
+  assert.deepEqual(breakProblems(t, [], null), []);
 });
 
 test("breaks need a fixed price", () => {
-  assert.deepEqual(breakProblems([{ min_quantity: 2, amount: 900 }], null), [
+  assert.deepEqual(breakProblems(t, [{ min_quantity: 2, amount: 900 }], null), [
     "Breaks need a fixed price.",
   ]);
 });
 
 test("quantities start at 2 and increase strictly", () => {
-  assert.deepEqual(breakProblems([{ min_quantity: 1, amount: 900 }], 1000), [
+  assert.deepEqual(breakProblems(t, [{ min_quantity: 1, amount: 900 }], 1000), [
     "Quantities start at 2 (1).",
   ]);
   assert.deepEqual(
     breakProblems(
+      t,
       [
         { min_quantity: 5, amount: 900 },
         { min_quantity: 5, amount: 800 },
@@ -72,11 +75,12 @@ test("quantities start at 2 and increase strictly", () => {
 });
 
 test("each price is below the fixed price and the one before it", () => {
-  assert.deepEqual(breakProblems([{ min_quantity: 2, amount: 1000 }], 1000), [
+  assert.deepEqual(breakProblems(t, [{ min_quantity: 2, amount: 1000 }], 1000), [
     "The price from 2 must be below the fixed price.",
   ]);
   assert.deepEqual(
     breakProblems(
+      t,
       [
         { min_quantity: 2, amount: 900 },
         { min_quantity: 5, amount: 900 },
@@ -92,11 +96,11 @@ test("at most ten breaks", () => {
     min_quantity: i + 2,
     amount: 1000 - i - 1,
   }));
-  assert.deepEqual(breakProblems(eleven, 1000), ["At most 10 breaks."]);
-  assert.deepEqual(breakProblems(eleven.slice(0, 10), 1000), []);
+  assert.deepEqual(breakProblems(t, eleven, 1000), ["At most 10 breaks."]);
+  assert.deepEqual(breakProblems(t, eleven.slice(0, 10), 1000), []);
 });
 
 test("labels count breaks", () => {
-  assert.equal(breaksLabel(1), "1 break");
-  assert.equal(breaksLabel(3), "3 breaks");
+  assert.equal(breaksLabel(t, 1), "1 break");
+  assert.equal(breaksLabel(t, 3), "3 breaks");
 });

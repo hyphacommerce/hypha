@@ -9,6 +9,7 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { useState } from "react";
 
 import { parseAmount, parsePercent } from "@/lib/price-grid/money";
+import { useT } from "@/lib/use-t";
 
 export type BulkAction = "amount" | "percent";
 
@@ -29,29 +30,38 @@ export function BulkDialog({
   onApply: (value: number) => void;
   onClose: () => void;
 }) {
+  const t = useT<"price_lists">();
   const [text, setText] = useState("");
-  const parsed = action === "amount" ? parseAmount(text, digits, currency) : parsePercent(text);
+  const parsed =
+    action === "amount" ? parseAmount(text, digits, currency, t) : parsePercent(text, t);
   const apply = () => {
     if (!parsed.ok) return;
     onApply(parsed.value);
     onClose();
   };
-  const what = cells === 1 ? "the selected price" : `the ${cells} selected prices`;
 
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={420} purpose="form">
       <DialogHeader
-        title={action === "amount" ? "Set to an amount" : "Set to a percentage of base"}
+        title={
+          action === "amount"
+            ? t("price_lists.bulk_amount_title")
+            : t("price_lists.bulk_percent_title")
+        }
         subtitle={
           action === "amount"
-            ? `Sets ${what} to one amount in ${currency}.`
-            : `Sets ${what} to each variant's base price adjusted: -10 is 10% off, 5 is 5% more. Rounded as checkout rounds.`
+            ? t("price_lists.bulk_amount_subtitle", { count: cells, currency })
+            : t("price_lists.bulk_percent_subtitle", { count: cells })
         }
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={4} padding={4}>
         <TextInput
-          label={action === "amount" ? `Amount, ${currency}` : "Adjustment, %"}
+          label={
+            action === "amount"
+              ? t("price_lists.bulk_amount_label", { currency })
+              : t("price_lists.bulk_percent_label")
+          }
           placeholder={action === "amount" ? "18.00" : "-10"}
           value={text}
           onChange={setText}
@@ -62,8 +72,13 @@ export function BulkDialog({
           }
         />
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
-          <Button label="Apply" variant="primary" isDisabled={!parsed.ok} onClick={apply} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
+          <Button
+            label={t("common.apply")}
+            variant="primary"
+            isDisabled={!parsed.ok}
+            onClick={apply}
+          />
         </HStack>
       </VStack>
     </Dialog>

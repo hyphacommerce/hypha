@@ -1,13 +1,16 @@
 // Price lists as the admin's screens use them: labels for kinds and phases, the
 // adjustment's percentage and what it covers, the schedule in the store's time zone,
 // the settings form and the requests it makes, and the fixed-price errors by row. Plain
-// functions and types only, shared by server and client code (and run by `node --test`).
+// functions and types only, shared by server and client code (and run by `node --test`):
+// what they say comes from the caller's translator (`t`) and `Format`.
 
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 import { type CategoryNode, subtree } from "./categories.ts";
+import type { Format } from "./format.ts";
 import { adjustAmount, parsePercent } from "./price-grid/money.ts";
-import type { Money } from "./price-grid/types.ts";
+import { say } from "./price-grid/say.ts";
+import { MAX_BREAKS, type Money, type PriceT } from "./price-grid/types.ts";
 
 export type PriceList = AdminSchemas["PriceListResponse"];
 export type AppliesTo = AdminSchemas["AppliesToDto"];
@@ -28,49 +31,56 @@ export const MAX_LISTS_PER_CATALOG = 50;
 /** The most customer groups an audience names. */
 export const MAX_AUDIENCE_GROUPS = 100;
 
-export const KINDS: { value: Kind; label: string; description: string }[] = [
-  {
-    value: "sale",
-    label: "Sale",
-    description:
-      "A reduction: shoppers see its price struck through against the regular price, and the product counts as on sale.",
-  },
-  {
-    value: "override",
-    label: "Regular prices",
-    description:
-      "The regular price where it applies (a market's own prices, wholesale): nothing is struck through unless a compare-at price says so.",
-  },
-];
+/**
+ * The kinds, in the order offered. Each has a label and a description:
+ * `price_lists.kind_<kind>` and `price_lists.kind_<kind>_description`.
+ */
+export const KINDS: readonly Kind[] = ["sale", "override"];
 
-export function kindLabel(kind: string): string {
-  return kind === "sale" ? "Sale" : kind === "override" ? "Regular prices" : kind;
+/** A kind as the admin says it (an unknown one as it is). */
+export function kindLabel(t: PriceT, kind: string): string {
+  const known = KINDS.find((k) => k === kind);
+  return known ? t(`price_lists.kind_${known}`) : kind;
 }
 
-export const PHASES: { value: Phase; label: string }[] = [
-  { value: "active", label: "Active" },
-  { value: "scheduled", label: "Scheduled" },
-  { value: "expired", label: "Expired" },
-  { value: "draft", label: "Draft" },
-];
+/** The phases, in the order a filter offers them. */
+const PHASE_ORDER: readonly Phase[] = ["active", "scheduled", "expired", "draft"];
 
-/** A phase's badge: its label and colour. */
-export function phaseBadge(phase: string): {
+/** A filter's options for the phases, in `t`'s language. */
+export function phaseOptions(t: PriceT): { value: Phase; label: string }[] {
+  return PHASE_ORDER.map((value) => ({ value, label: t(`price_lists.phase_${value}`) }));
+}
+
+/**
+ * LEGACY: the phases with English labels, for the discounts table until it passes its
+ * translator to `phaseOptions`.
+ */
+export const PHASES: { value: Phase; label: string }[] = PHASE_ORDER.map((value) => ({
+  value,
+  label: say(undefined, `price_lists.phase_${value}`),
+}));
+
+const PHASE_VARIANTS = {
+  active: "success",
+  scheduled: "info",
+  expired: "warning",
+  draft: "neutral",
+} as const satisfies Record<Phase, string>;
+
+/**
+ * A phase's badge: its label, in `t`'s language (English without one: the discounts'
+ * badge doesn't pass its translator yet), and its colour. An unknown phase as it is.
+ */
+export function phaseBadge(
+  phase: string,
+  t?: PriceT,
+): {
   label: string;
   variant: "neutral" | "info" | "success" | "warning";
 } {
-  switch (phase) {
-    case "active":
-      return { label: "Active", variant: "success" };
-    case "scheduled":
-      return { label: "Scheduled", variant: "info" };
-    case "expired":
-      return { label: "Expired", variant: "warning" };
-    case "draft":
-      return { label: "Draft", variant: "neutral" };
-    default:
-      return { label: phase, variant: "neutral" };
-  }
+  const known = PHASE_ORDER.find((p) => p === phase);
+  if (!known) return { label: phase, variant: "neutral" };
+  return { label: say(t, `price_lists.phase_${known}`), variant: PHASE_VARIANTS[known] };
 }
 
 // ---- the adjustment ----
@@ -80,29 +90,28 @@ export function percentInput(bps: number): string {
   return String(bps / 100);
 }
 
-const PERCENT = new Intl.NumberFormat("en-IE", { maximumFractionDigits: 2, signDisplay: "always" });
-
-/** "−20%" from -2000. */
-export function percentLabel(bps: number): string {
-  return `${PERCENT.format(bps / 100).replace("-", "−")}%`;
-}
-
-function count(n: number, one: string, many: string): string {
-  return `${n.toLocaleString("en")} ${n === 1 ? one : many}`;
+/** "−20%" from -2000, always signed, as `format`'s locale writes a percentage. */
+export function percentLabel(format: Format, bps: number): string {
+  // A real minus sign where the locale writes a hyphen.
+  return format.percent(bps / 10_000, { signDisplay: "always" }).replace("-", "−");
 }
 
 /** "−20% on every product", "−10% on 3 categories", "No adjustment". */
-export function adjustmentLabel(adjustment: Adjustment | null | undefined): string {
-  if (!adjustment) return "No adjustment";
-  const percent = percentLabel(adjustment.percent_bps);
+export function adjustmentLabel(
+  t: PriceT,
+  format: Format,
+  adjustment: Adjustment | null | undefined,
+): string {
+  if (!adjustment) return t("price_lists.no_adjustment");
+  const percent = percentLabel(format, adjustment.percent_bps);
   const to = adjustment.applies_to ?? { type: "all" };
   switch (to.type) {
     case "products":
-      return `${percent} on ${count(to.products.length, "product", "products")}`;
+      return t("price_lists.adjustment_products", { percent, count: to.products.length });
     case "categories":
-      return `${percent} on ${count(to.categories.length, "category", "categories")}`;
+      return t("price_lists.adjustment_categories", { percent, count: to.categories.length });
     default:
-      return `${percent} on every product`;
+      return t("price_lists.adjustment_all", { percent });
   }
 }
 
@@ -163,9 +172,13 @@ export function adjustedPrice(
 
 // ---- the schedule, in the store's time zone ----
 
+// The wall clock in a time zone, read from `Intl`'s parts: arithmetic, never shown, so
+// its locale is fixed whatever the reader's language.
+const CLOCK_LOCALE = "en-US";
+
 /** How far `timeZone`'s clock is ahead of UTC at instant `at`, in milliseconds. */
 function zoneOffset(at: number, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
+  const parts = new Intl.DateTimeFormat(CLOCK_LOCALE, {
     timeZone,
     hourCycle: "h23",
     year: "numeric",
@@ -208,7 +221,7 @@ export function toLocalInput(rfc3339: string | null | undefined, timeZone: strin
   if (!rfc3339) return "";
   const at = new Date(rfc3339);
   if (Number.isNaN(at.getTime())) return "";
-  const parts = new Intl.DateTimeFormat("en-US", {
+  const parts = new Intl.DateTimeFormat(CLOCK_LOCALE, {
     timeZone,
     hourCycle: "h23",
     year: "numeric",
@@ -318,28 +331,30 @@ export function formFromList(list: PriceList, timeZone: string): ListForm {
 /** "Everyone", "Wholesale", "Wholesale and VIP", "3 customer groups": who a list prices
  * for, by the groups' names (an ID where the name isn't known). */
 export function audienceLabel(
+  t: PriceT,
+  format: Format,
   audience: { groups: readonly string[] } | null | undefined,
   names: Record<string, string>,
 ): string {
   const groups = audience?.groups ?? [];
-  if (groups.length === 0) return "Everyone";
-  if (groups.length > 2) return `${groups.length} customer groups`;
-  return groups.map((g) => names[g] ?? g).join(" and ");
+  if (groups.length === 0) return t("price_lists.audience_everyone");
+  if (groups.length > 2) return t("price_lists.audience_groups_count", { count: groups.length });
+  return format.list(groups.map((g) => names[g] ?? g));
 }
 
 export type TemplateKey = "sale" | "clearance" | "market" | "wholesale";
 
-/** The new list page's starting points: each sets the fields its kind of list needs. */
+/**
+ * The new list page's starting points: each sets the fields its kind of list needs. A
+ * template's name and description are `price_lists.template_<key>` and
+ * `price_lists.template_<key>_description`.
+ */
 export const TEMPLATES: {
   key: TemplateKey;
-  label: string;
-  description: string;
   apply: (form: ListForm, now: { startsAt: string; endsAt: string }) => ListForm;
 }[] = [
   {
     key: "sale",
-    label: "Sale",
-    description: "A reduction for a while: 20% off a category, from one date to another.",
     apply: (form, now) => ({
       ...form,
       kind: "sale",
@@ -352,8 +367,6 @@ export const TEMPLATES: {
   },
   {
     key: "clearance",
-    label: "Clearance",
-    description: "Sell off a category at a reduction, with no end date.",
     apply: (form) => ({
       ...form,
       kind: "sale",
@@ -366,9 +379,6 @@ export const TEMPLATES: {
   },
   {
     key: "market",
-    label: "Market prices",
-    description:
-      "A market's own regular prices: an adjustment of every base price, and fixed prices for some.",
     apply: (form) => ({
       ...form,
       kind: "override",
@@ -381,9 +391,6 @@ export const TEMPLATES: {
   },
   {
     key: "wholesale",
-    label: "Wholesale",
-    description:
-      "Fixed prices and quantity breaks for a customer group: pick the group under Audience.",
     apply: (form) => ({
       ...form,
       kind: "override",
@@ -396,36 +403,40 @@ export const TEMPLATES: {
   },
 ];
 
-/** What's wrong with the form, by field; empty when it can be sent. */
-export function checkForm(form: ListForm, timeZone: string): FormErrors {
+/** The most characters a name or a description takes. */
+const MAX_TEXT = 255;
+
+/** What's wrong with the form, by field, in `t`'s language; empty when it can be sent. */
+export function checkForm(t: PriceT, form: ListForm, timeZone: string): FormErrors {
   const errors: FormErrors = {};
-  if (form.name.trim() === "") errors.name = "Give the list a name.";
-  else if (form.name.trim().length > 255) errors.name = "At most 255 characters.";
-  if (form.description.trim().length > 255) errors.description = "At most 255 characters.";
-  if (form.currency === "") errors.currency = "Choose a currency.";
+  const tooLong = t("price_lists.form_too_long", { max: MAX_TEXT });
+  if (form.name.trim() === "") errors.name = t("price_lists.form_name_required");
+  else if (form.name.trim().length > MAX_TEXT) errors.name = tooLong;
+  if (form.description.trim().length > MAX_TEXT) errors.description = tooLong;
+  if (form.currency === "") errors.currency = t("price_lists.form_currency_required");
   const starts = form.startsAt ? fromLocalInput(form.startsAt, timeZone) : null;
   const ends = form.endsAt ? fromLocalInput(form.endsAt, timeZone) : null;
-  if (form.startsAt && !starts) errors.startsAt = "Enter a date and a time.";
-  if (form.endsAt && !ends) errors.endsAt = "Enter a date and a time.";
+  if (form.startsAt && !starts) errors.startsAt = t("price_lists.form_date_time_invalid");
+  if (form.endsAt && !ends) errors.endsAt = t("price_lists.form_date_time_invalid");
   if (starts && ends && Date.parse(ends) <= Date.parse(starts)) {
-    errors.endsAt = "The end must be after the start.";
+    errors.endsAt = t("price_lists.form_end_before_start");
   }
   if (form.groups.length > MAX_AUDIENCE_GROUPS) {
-    errors.groups = `At most ${MAX_AUDIENCE_GROUPS} customer groups.`;
+    errors.groups = t("price_lists.form_too_many_groups", { max: MAX_AUDIENCE_GROUPS });
   }
   if (form.hasAdjustment) {
     if (!parsePercent(form.percent).ok) {
-      errors.percent = "A percentage, like -20 for 20% off or 5 for 5% more (at most 100% off).";
+      errors.percent = t("price_lists.form_percent_invalid");
     }
     if (form.scope === "products" && form.products.length === 0) {
-      errors.products = "Choose the products it applies to.";
+      errors.products = t("price_lists.form_products_required");
     } else if (form.products.length > MAX_TARGETS) {
-      errors.products = `At most ${MAX_TARGETS.toLocaleString("en")} products.`;
+      errors.products = t("price_lists.form_too_many_products", { max: MAX_TARGETS });
     }
     if (form.scope === "categories" && form.categories.length === 0) {
-      errors.categories = "Choose the categories it applies to.";
+      errors.categories = t("price_lists.form_categories_required");
     } else if (form.categories.length > MAX_TARGETS) {
-      errors.categories = `At most ${MAX_TARGETS.toLocaleString("en")} categories.`;
+      errors.categories = t("price_lists.form_too_many_categories", { max: MAX_TARGETS });
     }
   }
   return errors;
@@ -461,10 +472,11 @@ function sameAdjustment(a: Adjustment | null | undefined, b: Adjustment | null):
 
 /** `POST /admin/price-lists`'s body for the form, or what to fix first. */
 export function createRequest(
+  t: PriceT,
   form: ListForm,
   timeZone: string,
 ): { body: CreatePriceList } | { errors: FormErrors } {
-  const errors = checkForm(form, timeZone);
+  const errors = checkForm(t, form, timeZone);
   if (Object.keys(errors).length > 0) return { errors };
   const body: CreatePriceList = {
     name: form.name.trim(),
@@ -488,11 +500,12 @@ export function createRequest(
  * Patch: `null` clears), or what to fix first. An empty body means nothing changed.
  */
 export function updateRequest(
+  t: PriceT,
   form: ListForm,
   list: PriceList,
   timeZone: string,
 ): { body: UpdatePriceList } | { errors: FormErrors } {
-  const errors = checkForm(form, timeZone);
+  const errors = checkForm(t, form, timeZone);
   if (Object.keys(errors).length > 0) return { errors };
   const saved = formFromList(list, timeZone);
   const body: UpdatePriceList = {};
@@ -523,26 +536,29 @@ export function updateRequest(
 
 // ---- fixed prices' errors ----
 
-/** A message for one fixed price's problem, by the API's code. */
-export function entryMessage(code: string, message: string): string {
+/**
+ * A message for one fixed price's problem, by the API's code, in `t`'s language; a code
+ * the admin has no sentence for shows the API's own.
+ */
+export function entryMessage(t: PriceT, code: string, message: string): string {
   switch (code) {
     case "compare_at_not_above_price":
-      return "The compare-at price must be above the price.";
+      return t("price_lists.entry_compare_at_not_above_price");
     case "too_many_price_breaks":
-      return "At most 10 breaks.";
+      return t("price_lists.breaks_too_many", { max: MAX_BREAKS });
     case "price_break_quantity_invalid":
-      return "Break quantities start at 2 and go up.";
+      return t("price_lists.entry_price_break_quantity_invalid");
     case "price_breaks_not_descending":
-      return "Each break's price must be below the one before it, the first below the price.";
+      return t("price_lists.entry_price_breaks_not_descending");
     case "fixed_price_currency_mismatch":
     case "compare_at_currency_mismatch":
     case "price_break_currency_mismatch":
-      return "Prices must be in the list's currency.";
+      return t("price_lists.entry_currency_mismatch");
     case "duplicate_fixed_price":
-      return "This variant is listed twice.";
+      return t("price_lists.entry_duplicate");
     case "variant_not_found":
     case "unknown_variant":
-      return "This variant no longer exists.";
+      return t("price_lists.entry_variant_not_found");
     default:
       return message ? `${message.charAt(0).toUpperCase()}${message.slice(1)}.` : code;
   }
@@ -556,6 +572,7 @@ export function entryMessage(code: string, message: string): string {
  * aren't that shape.
  */
 export function entryErrors(
+  t: PriceT,
   details: unknown,
   sent: readonly { variant: string }[],
 ): Record<string, string> | null {
@@ -573,6 +590,7 @@ export function entryErrors(
     const code: unknown = Reflect.get(entry, "code");
     const message: unknown = Reflect.get(entry, "message");
     const text = entryMessage(
+      t,
       typeof code === "string" ? code : "",
       typeof message === "string" ? message : "",
     );
@@ -590,25 +608,27 @@ export function catalogsInUse(details: unknown): string[] {
 
 // ---- the product page's prices ----
 
-/** Why a candidate list did or didn't set a variant's price, for the Prices card. */
-export function candidateReason(result: string, phase: string): string {
+/**
+ * Why a candidate list did or didn't set a variant's price, for the Prices card, in `t`'s
+ * language (English without one: the product page doesn't pass its translator yet).
+ */
+export function candidateReason(result: string, phase: string, t?: PriceT): string {
   switch (result) {
     case "won":
-      return "Wins: the lowest price.";
     case "higher":
-      return "Loses: its price is higher.";
     case "tied_with_older":
-      return "Loses: the same price as an older list, which wins the tie.";
-    case "not_live":
-      return phase === "scheduled"
-        ? "Not live yet: its window hasn't started."
-        : phase === "expired"
-          ? "Not live: its window ended."
-          : "Not live: it's a draft.";
     case "not_pricing":
-      return "Doesn't price it: no fixed price, and its adjustment doesn't cover the product.";
     case "not_in_audience":
-      return "Not for this buyer: it prices only for other customer groups.";
+      return say(t, `price_lists.candidate_${result}`);
+    case "not_live":
+      return say(
+        t,
+        phase === "scheduled"
+          ? "price_lists.candidate_not_live_scheduled"
+          : phase === "expired"
+            ? "price_lists.candidate_not_live_expired"
+            : "price_lists.candidate_not_live_draft",
+      );
     default:
       return result;
   }

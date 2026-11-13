@@ -22,10 +22,11 @@ import {
   TableRow,
 } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
-import { useEffect, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 
 import type { PriceList } from "@/lib/price-lists";
 import { sendToStorage } from "@/lib/storage-upload";
+import { useT } from "@/lib/use-t";
 
 import {
   type ImportPreviewResult,
@@ -36,12 +37,19 @@ import {
   startPriceImport,
 } from "@/app/(admin)/markets/price-lists/actions";
 
-const STATUS_BADGES = {
-  changed: { label: "Changes", variant: "info" },
-  unchanged: { label: "Same", variant: "neutral" },
-  unmatched: { label: "Unmatched", variant: "warning" },
-  invalid: { label: "Invalid", variant: "error" },
+/**
+ * A row's status as a badge: its colour here, its label `price_lists.import_status_<status>`
+ * and its count `price_lists.import_count_<status>`.
+ */
+const STATUS_VARIANTS = {
+  changed: "info",
+  unchanged: "neutral",
+  unmatched: "warning",
+  invalid: "error",
 } as const;
+
+/** The column rows are matched by first: a name in the file, the same in every language. */
+const ID_COLUMN = "variant_id";
 
 /** A row (or a whole step's lines) that applying couldn't write. */
 type Failure = { key: string; where: string; error: string };
@@ -61,12 +69,14 @@ async function uploadAndPreview(
   list: string,
   file: File,
   onUploaded: (upload: string) => boolean,
-): Promise<{ upload: string; preview: ImportPreviewResult } | { error: string } | null> {
+): Promise<
+  { upload: string; preview: ImportPreviewResult } | { error: string } | "not_stored" | null
+> {
   const started = await startPriceImport({ filename: file.name, byte_size: file.size });
   if ("error" in started) return started;
   if (!onUploaded(started.id)) return null;
   if (!(await sendToStorage(started.upload, file))) {
-    return { error: "The file didn't reach storage. Check your connection and try again." };
+    return "not_stored";
   }
   return { upload: started.id, preview: await previewPriceImport({ list, upload: started.id }) };
 }
@@ -82,8 +92,15 @@ export function ImportDialog({
   /** `isApplied`: something was written, so the page's prices are stale. */
   onClose: (isApplied: boolean) => void;
 }) {
+  const t = useT<"price_lists">();
   const [phase, setPhase] = useState<Phase>({ kind: "uploading" });
   const [error, setError] = useState<string>();
+
+  // Said when it happens, in the language of that moment: the effect below owns the
+  // upload and must not run again because the translator changed.
+  const report = useEffectEvent((why: "not_stored" | "check_failed") =>
+    setError(t(`price_lists.import_${why}`)),
+  );
 
   // The dialog owns its upload: deleted when it closes, applied or not.
   useEffect(() => {
@@ -99,10 +116,11 @@ export function ImportDialog({
       try {
         const result = await uploadAndPreview(list.id, file, uploaded);
         if (!isCurrent || !result) return;
-        if ("error" in result) setError(result.error);
+        if (result === "not_stored") report(result);
+        else if ("error" in result) setError(result.error);
         else setPhase({ kind: "preview", ...result });
       } catch {
-        if (isCurrent) setError("The file couldn't be checked. Try again.");
+        if (isCurrent) report("check_failed");
       }
     };
     void run();
@@ -124,7 +142,7 @@ export function ImportDialog({
       try {
         result = await applyPriceImport({ list: list.id, upload, step });
       } catch {
-        result = { failed: [], error: "The step couldn't be sent." };
+        result = { failed: [], error: t("price_lists.import_step_failed") };
       }
       if (result.error) {
         const where = step.from === step.to ? `${step.from}` : `${step.from}–${step.to}`;
@@ -149,8 +167,8 @@ export function ImportDialog({
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && close()} width={820} purpose="form">
       <DialogHeader
-        title="Import prices"
-        subtitle={`Rows are matched by variant_id, else SKU, else handle and options, against every product. Nothing is written until you apply.`}
+        title={t("price_lists.import_title")}
+        subtitle={t("price_lists.import_subtitle", { column: ID_COLUMN })}
         onOpenChange={(isOpen) => !isOpen && close()}
       />
       <VStack gap={4} padding={4}>
@@ -159,8 +177,8 @@ export function ImportDialog({
           <VStack gap={2}>
             <Text color="secondary">
               {phase.kind === "uploading"
-                ? "Uploading the file…"
-                : "Reading the file and matching its rows…"}
+                ? t("price_lists.import_uploading")
+                : t("price_lists.import_reading")}
             </Text>
             <Skeleton height={120} />
           </VStack>
@@ -172,15 +190,19 @@ export function ImportDialog({
               {(["changed", "unchanged", "unmatched", "invalid"] as const).map((status) => (
                 <Badge
                   key={status}
-                  variant={STATUS_BADGES[status].variant}
-                  label={`${preview.counts[status].toLocaleString("en")} ${status}`}
+                  variant={STATUS_VARIANTS[status]}
+                  label={t(`price_lists.import_count_${status}`, { count: preview.counts[status] })}
                 />
               ))}
             </HStack>
             <Text type="supporting" color="secondary">
               {changes === 0
-                ? "Nothing to change: every matched row has the prices the list has."
-                : `Applying sets ${preview.upserts.toLocaleString("en")} and removes ${preview.clears.toLocaleString("en")} fixed ${changes === 1 ? "price" : "prices"}. Unmatched and invalid rows are left out.`}
+                ? t("price_lists.import_nothing_to_change")
+                : t("price_lists.import_summary", {
+                    upserts: preview.upserts,
+                    clears: preview.clears,
+                    changes,
+                  })}
             </Text>
             {preview.rows.length > 0 && (
               <div
@@ -189,9 +211,9 @@ export function ImportDialog({
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHeaderCell>Line</TableHeaderCell>
-                      <TableHeaderCell>Result</TableHeaderCell>
-                      <TableHeaderCell>What it does</TableHeaderCell>
+                      <TableHeaderCell>{t("price_lists.import_column_line")}</TableHeaderCell>
+                      <TableHeaderCell>{t("price_lists.import_column_result")}</TableHeaderCell>
+                      <TableHeaderCell>{t("price_lists.import_column_what")}</TableHeaderCell>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -200,8 +222,8 @@ export function ImportDialog({
                         <TableCell>{row.line}</TableCell>
                         <TableCell>
                           <Badge
-                            variant={STATUS_BADGES[row.status].variant}
-                            label={STATUS_BADGES[row.status].label}
+                            variant={STATUS_VARIANTS[row.status]}
+                            label={t(`price_lists.import_status_${row.status}`)}
                           />
                         </TableCell>
                         <TableCell>{row.reasons.join(" ")}</TableCell>
@@ -213,19 +235,19 @@ export function ImportDialog({
             )}
             {preview.more > 0 && (
               <Text type="supporting" color="secondary">
-                And {preview.more.toLocaleString("en")} more rows like these.
+                {t("price_lists.import_more_rows", { count: preview.more })}
               </Text>
             )}
           </>
         )}
         {phase.kind === "applying" && (
           <ProgressBar
-            label="Applying"
+            label={t("price_lists.import_applying")}
             value={phase.done}
             max={Math.max(phase.total, 1)}
             hasValueLabel
             formatValueLabel={(value, max) =>
-              `${value.toLocaleString("en")} of ${max.toLocaleString("en")}`
+              t("price_lists.import_progress", { done: value, total: max })
             }
           />
         )}
@@ -233,14 +255,17 @@ export function ImportDialog({
           (phase.failedCount === 0 ? (
             <Banner
               status="success"
-              title={`Applied: ${phase.total.toLocaleString("en")} fixed ${phase.total === 1 ? "price" : "prices"} changed.`}
+              title={t("price_lists.import_applied", { count: phase.total })}
             />
           ) : (
             <VStack gap={2}>
               <Banner
                 status="warning"
-                title={`${phase.failedCount.toLocaleString("en")} of ${phase.total.toLocaleString("en")} weren't saved`}
-                description="The rest were. Fix these rows and import the file again: rows already applied show as unchanged."
+                title={t("price_lists.import_failed_title", {
+                  failed: phase.failedCount,
+                  total: phase.total,
+                })}
+                description={t("price_lists.import_failed_description")}
               />
               <div
                 style={{ maxHeight: 280, overflow: "auto", flex: "none", padding: 16, margin: -16 }}
@@ -248,8 +273,8 @@ export function ImportDialog({
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHeaderCell>Line</TableHeaderCell>
-                      <TableHeaderCell>Why</TableHeaderCell>
+                      <TableHeaderCell>{t("price_lists.import_column_line")}</TableHeaderCell>
+                      <TableHeaderCell>{t("price_lists.import_column_why")}</TableHeaderCell>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -266,17 +291,21 @@ export function ImportDialog({
           ))}
         <HStack gap={2} hAlign="end">
           {phase.kind === "applied" ? (
-            <Button label="Done" variant="primary" onClick={close} />
+            <Button label={t("common.done")} variant="primary" onClick={close} />
           ) : (
             <>
               <Button
-                label="Cancel"
+                label={t("common.cancel")}
                 variant="ghost"
                 isDisabled={phase.kind === "applying"}
                 onClick={close}
               />
               <Button
-                label={changes > 0 ? `Apply ${changes.toLocaleString("en")} changes` : "Apply"}
+                label={
+                  changes > 0
+                    ? t("price_lists.import_apply_changes", { count: changes })
+                    : t("common.apply")
+                }
                 variant="primary"
                 isLoading={phase.kind === "applying"}
                 isDisabled={!preview || Boolean(preview.error) || changes === 0}

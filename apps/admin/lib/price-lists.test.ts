@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import type { CategoryNode } from "./categories.ts";
 import { parsePercent } from "./price-grid/money.ts";
+import { format, t } from "./price-grid/testing.ts";
 import {
   type ListForm,
   type PriceList,
@@ -62,13 +63,16 @@ test("percentInput is what parsePercent reads back", () => {
 });
 
 test("adjustmentLabel says what the adjustment covers", () => {
-  assert.equal(adjustmentLabel(null), "No adjustment");
+  assert.equal(adjustmentLabel(t, format, null), "No adjustment");
   assert.equal(
-    adjustmentLabel({ percent_bps: -2000, applies_to: { type: "all" } }),
+    adjustmentLabel(t, format, { percent_bps: -2000, applies_to: { type: "all" } }),
     "−20% on every product",
   );
   assert.equal(
-    adjustmentLabel({ percent_bps: 500, applies_to: { type: "categories", categories: ["a"] } }),
+    adjustmentLabel(t, format, {
+      percent_bps: 500,
+      applies_to: { type: "categories", categories: ["a"] },
+    }),
     "+5% on 1 category",
   );
 });
@@ -139,31 +143,34 @@ function form(overrides: Partial<ListForm> = {}): ListForm {
 }
 
 test("checkForm wants a name, a valid percentage and something to apply it to", () => {
-  assert.deepEqual(checkForm(form(), "UTC"), {});
-  assert.ok(checkForm(form({ name: " " }), "UTC").name);
-  assert.ok(checkForm(form({ hasAdjustment: true, percent: "x" }), "UTC").percent);
+  assert.deepEqual(checkForm(t, form(), "UTC"), {});
+  assert.ok(checkForm(t, form({ name: " " }), "UTC").name);
+  assert.ok(checkForm(t, form({ hasAdjustment: true, percent: "x" }), "UTC").percent);
   assert.ok(
-    checkForm(form({ hasAdjustment: true, percent: "-10", scope: "products" }), "UTC").products,
+    checkForm(t, form({ hasAdjustment: true, percent: "-10", scope: "products" }), "UTC").products,
   );
   assert.ok(
-    checkForm(form({ hasAdjustment: true, percent: "-10", scope: "categories" }), "UTC").categories,
+    checkForm(t, form({ hasAdjustment: true, percent: "-10", scope: "categories" }), "UTC")
+      .categories,
   );
 });
 
 test("checkForm wants the end after the start", () => {
   const errors = checkForm(
+    t,
     form({ startsAt: "2026-11-27T00:00", endsAt: "2026-11-27T00:00" }),
     "UTC",
   );
   assert.equal(errors.endsAt, "The end must be after the start.");
   assert.deepEqual(
-    checkForm(form({ startsAt: "2026-11-27T00:00", endsAt: "2026-11-27T00:01" }), "UTC"),
+    checkForm(t, form({ startsAt: "2026-11-27T00:00", endsAt: "2026-11-27T00:01" }), "UTC"),
     {},
   );
 });
 
 test("createRequest sends the window in UTC and the adjustment's scope", () => {
   const result = createRequest(
+    t,
     form({
       kind: "sale",
       description: "  Black Friday ",
@@ -194,9 +201,9 @@ test("createRequest sends the window in UTC and the adjustment's scope", () => {
 });
 
 test("createRequest sends the compare-at mode only for regular prices", () => {
-  const sale = createRequest(form({ kind: "sale", compareAt: "hidden" }), "UTC");
+  const sale = createRequest(t, form({ kind: "sale", compareAt: "hidden" }), "UTC");
   assert.ok("body" in sale && sale.body.compare_at === undefined);
-  const override = createRequest(form({ kind: "override", compareAt: "hidden" }), "UTC");
+  const override = createRequest(t, form({ kind: "override", compareAt: "hidden" }), "UTC");
   assert.ok("body" in override && override.body.compare_at === "hidden");
 });
 
@@ -205,7 +212,7 @@ test("updateRequest sends nothing for an unchanged form", () => {
     starts_at: "2026-11-26T23:00:00Z",
     adjustment: { percent_bps: -2000, applies_to: { type: "products", products: ["b", "a"] } },
   });
-  assert.deepEqual(updateRequest(formFromList(saved, "Europe/Berlin"), saved, "Europe/Berlin"), {
+  assert.deepEqual(updateRequest(t, formFromList(saved, "Europe/Berlin"), saved, "Europe/Berlin"), {
     body: {},
   });
 });
@@ -222,7 +229,7 @@ test("updateRequest clears with null and sends only what changed", () => {
     endsAt: "",
     hasAdjustment: false,
   };
-  assert.deepEqual(updateRequest(edited, saved, "UTC"), {
+  assert.deepEqual(updateRequest(t, edited, saved, "UTC"), {
     body: { description: null, ends_at: null, adjustment: null },
   });
 });
@@ -230,35 +237,38 @@ test("updateRequest clears with null and sends only what changed", () => {
 test("updateRequest sends the whole adjustment when its scope changes", () => {
   const saved = list({ adjustment: { percent_bps: -2000, applies_to: { type: "all" } } });
   const edited = { ...formFromList(saved, "UTC"), scope: "products" as const, products: ["p"] };
-  assert.deepEqual(updateRequest(edited, saved, "UTC"), {
+  assert.deepEqual(updateRequest(t, edited, saved, "UTC"), {
     body: { adjustment: { percent_bps: -2000, applies_to: { type: "products", products: ["p"] } } },
   });
 });
 
 test("createRequest names the audience only when it isn't everyone", () => {
-  const everyone = createRequest(form(), "UTC");
+  const everyone = createRequest(t, form(), "UTC");
   assert.ok("body" in everyone && everyone.body.audience === undefined);
-  const group = createRequest(form({ groups: ["cgrp_1"] }), "UTC");
+  const group = createRequest(t, form({ groups: ["cgrp_1"] }), "UTC");
   assert.ok("body" in group && group.body.audience?.groups[0] === "cgrp_1");
 });
 
 test("updateRequest sends the audience only when its groups change", () => {
   const saved = list({ audience: { groups: ["cgrp_a", "cgrp_b"] } });
   const reordered = { ...formFromList(saved, "UTC"), groups: ["cgrp_b", "cgrp_a"] };
-  assert.deepEqual(updateRequest(reordered, saved, "UTC"), { body: {} });
+  assert.deepEqual(updateRequest(t, reordered, saved, "UTC"), { body: {} });
   const everyone = { ...formFromList(saved, "UTC"), groups: [] };
-  assert.deepEqual(updateRequest(everyone, saved, "UTC"), {
+  assert.deepEqual(updateRequest(t, everyone, saved, "UTC"), {
     body: { audience: { groups: [] } },
   });
 });
 
 test("audienceLabel names up to two groups, else counts them", () => {
   const names = { cgrp_a: "Wholesale", cgrp_b: "VIP" };
-  assert.equal(audienceLabel({ groups: [] }, names), "Everyone");
-  assert.equal(audienceLabel(undefined, names), "Everyone");
-  assert.equal(audienceLabel({ groups: ["cgrp_a", "cgrp_b"] }, names), "Wholesale and VIP");
-  assert.equal(audienceLabel({ groups: ["cgrp_x"] }, names), "cgrp_x");
-  assert.equal(audienceLabel({ groups: ["a", "b", "c"] }, names), "3 customer groups");
+  assert.equal(audienceLabel(t, format, { groups: [] }, names), "Everyone");
+  assert.equal(audienceLabel(t, format, undefined, names), "Everyone");
+  assert.equal(
+    audienceLabel(t, format, { groups: ["cgrp_a", "cgrp_b"] }, names),
+    "Wholesale and VIP",
+  );
+  assert.equal(audienceLabel(t, format, { groups: ["cgrp_x"] }, names), "cgrp_x");
+  assert.equal(audienceLabel(t, format, { groups: ["a", "b", "c"] }, names), "3 customer groups");
 });
 
 test("candidateReason says a list for other groups doesn't price for this buyer", () => {
@@ -274,6 +284,7 @@ test("entryErrors names each refused variant, by variant or by index", () => {
   const sent = [{ variant: "var_a" }, { variant: "var_b" }];
   assert.deepEqual(
     entryErrors(
+      t,
       {
         entries: [
           { index: 0, variant: "var_a", code: "compare_at_not_above_price", message: "x" },
@@ -287,8 +298,8 @@ test("entryErrors names each refused variant, by variant or by index", () => {
       var_b: "Each break's price must be below the one before it, the first below the price.",
     },
   );
-  assert.equal(entryErrors({ other: 1 }, sent), null);
-  assert.equal(entryErrors(null, sent), null);
+  assert.equal(entryErrors(t, { other: 1 }, sent), null);
+  assert.equal(entryErrors(t, null, sent), null);
 });
 
 test("catalogsInUse reads the catalogs holding a list", () => {
