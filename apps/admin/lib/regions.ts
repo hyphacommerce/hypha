@@ -4,7 +4,7 @@
 
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
-import { ENGLISH, compareIn, displayName } from "./format.ts";
+import { compareIn, displayName } from "./format.ts";
 import type { KeyIn } from "./messages";
 
 export type Country = AdminSchemas["CountryResponse"];
@@ -18,44 +18,36 @@ export function flag(code: string): string {
   return String.fromCodePoint(symbol(0), symbol(1));
 }
 
-/** @deprecated Names no locale, so it writes English: use `countryName(code, countries, format.locale)` or `format.countryName(code)`. Deleted once every area is extracted. */
-export function countryName(code: string, countries?: Country[]): string;
 /** "Croatia": `Intl`'s name in `locale`, else the API's, else the code itself. */
-export function countryName(code: string, countries: Country[] | undefined, locale: string): string;
-export function countryName(code: string, countries?: Country[], locale = ENGLISH): string {
+export function countryName(
+  code: string,
+  countries: Country[] | undefined,
+  locale: string,
+): string {
   return (
     displayName("region", code, locale) ?? countries?.find((c) => c.code === code)?.name ?? code
   );
 }
 
-/** @deprecated Names no locale, so it writes English: use `countryLabel(code, countries, format.locale)`. Deleted once every area is extracted. */
-export function countryLabel(code: string, countries?: Country[]): string;
 /** "🇭🇷 Croatia", for selects and lists. */
 export function countryLabel(
   code: string,
   countries: Country[] | undefined,
   locale: string,
-): string;
-export function countryLabel(code: string, countries?: Country[], locale = ENGLISH): string {
+): string {
   return `${flag(code)} ${countryName(code, countries, locale)}`;
 }
 
-/** @deprecated Names no locale, so it writes English: use `currencyOptions(codes, format.locale)`. Deleted once every area is extracted. */
-export function currencyOptions(codes: string[]): Option[];
 /** "EUR · Euro" for each code, as select options. */
-export function currencyOptions(codes: string[], locale: string): Option[];
-export function currencyOptions(codes: string[], locale = ENGLISH): Option[] {
+export function currencyOptions(codes: string[], locale: string): Option[] {
   return codes.map((code) => {
     const name = displayName("currency", code, locale);
     return { value: code, label: name ? `${code} · ${name}` : code };
   });
 }
 
-/** @deprecated Names no locale, so it writes English: use `countryOptions(countries, format.locale)`. Deleted once every area is extracted. */
-export function countryOptions(countries: Country[]): Option[];
 /** Every country as a select option, sorted by name as `locale` orders them. */
-export function countryOptions(countries: Country[], locale: string): Option[];
-export function countryOptions(countries: Country[], locale = ENGLISH): Option[] {
+export function countryOptions(countries: Country[], locale: string): Option[] {
   return countries
     .map((c) => ({
       value: c.code,

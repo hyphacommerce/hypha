@@ -1,16 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import {
-  createFormat,
-  formatBytes,
-  formatDateTime,
-  formatMoney,
-  formatUnitCost,
-  parseUnitCost,
-  unitCostInput,
-  unitCostTotal,
-} from "./format.ts";
+import { createFormat, parseUnitCost, unitCostInput, unitCostTotal } from "./format.ts";
 import { formatLocale } from "./pick-language.ts";
 
 const currencies = { EUR: 2, JPY: 0, KWD: 3, USD: 2 };
@@ -30,10 +21,10 @@ test("English keeps the formats the admin always had", () => {
   assert.equal(format.bytes(1024 * 1024 * 1.4), "1.4 MB");
 });
 
-test("the functions without a language are English", () => {
-  assert.equal(formatMoney({ amount: 1800, currency: "EUR" }, currencies), "€18.00");
-  assert.equal(formatDateTime("2026-10-15T07:30:00Z", "UTC"), "15 Oct 2026, 07:30 UTC");
-  assert.equal(formatBytes(1536), "1.5 KB");
+test("without a store there's no zone: times are UTC", () => {
+  const format = createFormat(formatLocale("en"));
+  assert.equal(format.dateTime("2026-10-15T07:30:00Z"), "15 Oct 2026, 07:30 UTC");
+  assert.equal(format.bytes(1536), "1.5 KB");
 });
 
 test("the pseudo-language formats as English", () => {
@@ -89,8 +80,9 @@ test("a unit cost reads in the major unit with its extra decimals", () => {
   assert.equal(unitCostInput({ amount: "1000", currency: "EUR" }, currencies), "10");
   assert.equal(unitCostInput({ amount: "1000", currency: "JPY" }, currencies), "1000");
   assert.equal(unitCostInput({ amount: "1.5", currency: "KWD" }, currencies), "0.0015");
-  assert.equal(formatUnitCost({ amount: "412.5", currency: "EUR" }, currencies), "€4.125");
-  assert.equal(formatUnitCost({ amount: "400", currency: "EUR" }, currencies), "€4.00");
+  const format = createFormat(formatLocale("en"), { currencies });
+  assert.equal(format.unitCost({ amount: "412.5", currency: "EUR" }), "€4.125");
+  assert.equal(format.unitCost({ amount: "400", currency: "EUR" }), "€4.00");
 });
 
 test("typed costs become minor units as text", () => {
