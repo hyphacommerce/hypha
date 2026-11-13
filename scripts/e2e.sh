@@ -752,6 +752,12 @@ in_language "English, the market's first" en "$BASE/storefront/products/by-handl
 in_language "as without a language" en "$BASE/storefront/products/$MUG?country=HR"
 in_language "the categories take it too" de "$BASE/storefront/categories?language=de"
 in_language "and the country, for its market's default" en "$BASE/storefront/categories?country=HR"
+wait_for "search in German finds the mug by its German title" \
+    "$BASE/storefront/search?country=HR&language=de&q=tasse" '"title":"Tasse"'
+in_language "search names its language" de "$BASE/storefront/search?country=HR&language=de&q=tasse"
+step "search in a language the store hasn't published" 200 - "$BASE/storefront/search?country=HR&language=fr&q=mug"
+contains "answers in the market's default" '"title":"Mug"'
+in_language "named in Content-Language" en "$BASE/storefront/search?country=HR&language=fr&q=mug"
 step "a cart in German" 201 - -X POST "$BASE/storefront/carts" -H "$JSON" -d '{"country":"HR","language":"de"}'
 contains "keeps the language" '"language":"de"'
 LANG_CART=$(id)

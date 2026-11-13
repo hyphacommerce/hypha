@@ -1321,6 +1321,17 @@
             "$ref": "#/components/schemas/SearchGroup",
             "description": "What one hit stands for."
           },
+          "language": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Language",
+                "description": "The language the shopper searches in (a BCP 47 tag), one the market offers:\n`query` is in its words, and hits are shown in it. Filter values stay as stored,\nwhatever the language. An added field: still version 1."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "limit": {
             "format": "int32",
             "minimum": 0,
