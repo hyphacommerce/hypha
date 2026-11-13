@@ -13,7 +13,10 @@ use hypha_merchandising::CategoryImageCleanup;
 use hypha_search::SearchIndexer;
 use hypha_translations::TranslationCleanup;
 
-use crate::{mail::MailHost, translations::LanguageCleanup};
+use crate::{
+    mail::MailHost,
+    translations::{LanguageCleanup, ValueTranslationCleanup},
+};
 
 /// Core's handlers, in no particular order (names must be unique, spores' included; a
 /// test and startup check). A tuple, not a list of trait objects, so `Send` stays provable.
@@ -24,6 +27,7 @@ pub type CoreHandlers = (
     CustomFieldCleanup,
     TranslationCleanup,
     LanguageCleanup,
+    ValueTranslationCleanup,
     Mailer<Arc<MailHost>>,
 );
 
@@ -37,6 +41,7 @@ pub fn core_handlers(mail: Arc<MailHost>) -> CoreHandlers {
         CustomFieldCleanup,
         TranslationCleanup,
         LanguageCleanup,
+        ValueTranslationCleanup,
         Mailer::new(mail),
     )
 }

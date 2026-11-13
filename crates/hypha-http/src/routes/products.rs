@@ -41,6 +41,7 @@ use crate::{
     media::Media,
     patch,
     state::{AppState, SharedState, Storage},
+    translations::translated_values,
 };
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -927,7 +928,9 @@ impl StorefrontProductResponse {
                             Some(o) => o.sellable,
                             None => Some(0),
                         },
-                        custom_fields: fields.json_of(v.id().as_uuid()),
+                        custom_fields: translated_values(fields, v.id().as_uuid(), |d| {
+                            text.text(&keys::custom_field::variant_value(v.id(), d))
+                        }),
                     }
                 })
                 .collect(),
@@ -935,7 +938,9 @@ impl StorefrontProductResponse {
             sold_in_country: sold,
             currency: market.map(|m| m.currency()),
             prices_include_tax: market.map(|m| m.prices_include_tax()),
-            custom_fields: fields.json_of(p.id().as_uuid()),
+            custom_fields: translated_values(fields, p.id().as_uuid(), |d| {
+                text.text(&keys::custom_field::value(d))
+            }),
             promotions: promotions
                 .into_iter()
                 .map(|p| p.translated(overlay))
