@@ -15,9 +15,11 @@ import { ProductStatusBadge } from "@/components/status";
 import { loadExtensions } from "@/lib/app-extensions";
 import { definitionsOf } from "@/lib/custom-fields-server";
 import { type Format, getFormat } from "@/lib/get-format";
+import { getStoreDefaults } from "@/lib/get-store-t";
 import { describe, isMissingScope, loaded, requireStaff, sessionClient } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
 import type { KeyIn, T } from "@/lib/messages";
+import { OPTION_NAME_DEFAULTS } from "@/lib/store-defaults";
 
 import type { Stock } from "../actions";
 import { MediaSection } from "./media-section";
@@ -66,6 +68,7 @@ async function ProductDetail({ id, back }: { id: string; back: Crumb }) {
     fields,
     me,
     t,
+    optionDefaults,
   ] = await Promise.all([
     client.GET("/admin/products/{id}", { params: { path: { id } } }).then(loaded),
     // Without `channels:read` the page shows no Publishing card.
@@ -86,6 +89,8 @@ async function ProductDetail({ id, back }: { id: string; back: Crumb }) {
     client.GET("/admin/products/{id}/custom-fields", { params: { path: { id } } }),
     requireStaff(),
     getT(),
+    // Names offered for a new option are saved with it: in the store's language.
+    getStoreDefaults(OPTION_NAME_DEFAULTS),
   ]);
   const stock = locations.data ? stockOf(product, inventory.data?.items ?? []) : undefined;
 
@@ -100,6 +105,7 @@ async function ProductDetail({ id, back }: { id: string; back: Crumb }) {
 
       <ProductEditor
         product={product}
+        optionNames={OPTION_NAME_DEFAULTS.map((name) => optionDefaults[name])}
         summary={<SummaryCard product={product} t={t} format={format} />}
         channels={channels.data?.items}
         media={<MediaSection id={product.id} media={product.media} />}

@@ -5,6 +5,7 @@ import { Suspense } from "react";
 import { PageHeader } from "@/components/page-header";
 import { CardSkeleton } from "@/components/skeletons";
 import { loaded, sessionClient } from "@/lib/hypha";
+import { getStoreT } from "@/lib/get-store-t";
 import { getT } from "@/lib/i18n";
 import { settingsCrumb } from "@/lib/navigation";
 
@@ -32,6 +33,15 @@ export default async function ChannelsSettingsPage() {
 
 async function Channels() {
   const client = await sessionClient();
-  const channels = await client.GET("/admin/channels").then(loaded);
-  return <ChannelsCard channels={channels.items} />;
+  const [channels, storeT] = await Promise.all([
+    client.GET("/admin/channels").then(loaded),
+    getStoreT(),
+  ]);
+  const keyNames = Object.fromEntries(
+    channels.items.map((channel) => [
+      channel.id,
+      storeT("defaults.channel_key_name", { channel: channel.name }),
+    ]),
+  );
+  return <ChannelsCard channels={channels.items} keyNames={keyNames} />;
 }

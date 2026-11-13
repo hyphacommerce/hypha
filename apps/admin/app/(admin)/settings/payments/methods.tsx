@@ -35,7 +35,13 @@ import {
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { useState, useTransition } from "react";
 
-import { paymentPresets, type PaymentApp, type PaymentPreset, providerLabel } from "@/lib/payments";
+import {
+  type PaymentApp,
+  type PaymentNameDefaults,
+  type PaymentPreset,
+  paymentPresets,
+  providerLabel,
+} from "@/lib/payments";
 import { useFormat } from "@/lib/use-format";
 import { useT } from "@/lib/use-t";
 
@@ -68,10 +74,13 @@ export function PaymentMethodsCard({
   markets,
   channels,
   paymentApps,
+  presetNames,
   canWrite,
 }: {
   /** By position, then ID: as the API lists them. */
   methods: Method[];
+  /** The names a new method starts with, in the store's default language. */
+  presetNames: PaymentNameDefaults;
   markets: Option[];
   channels: Option[];
   paymentApps: PaymentApp[];
@@ -225,6 +234,7 @@ export function PaymentMethodsCard({
           markets={markets}
           channels={channels}
           paymentApps={paymentApps}
+          presetNames={presetNames}
           onClose={() => setEditing(undefined)}
         />
       )}
@@ -254,16 +264,18 @@ function MethodDialog({
   markets,
   channels,
   paymentApps,
+  presetNames,
   onClose,
 }: {
   method?: Method;
   markets: Option[];
   channels: Option[];
   paymentApps: PaymentApp[];
+  presetNames: PaymentNameDefaults;
   onClose: () => void;
 }) {
   const t = useT<"payments">();
-  const presets = paymentPresets(t);
+  const presets = paymentPresets(t, presetNames);
   const [kind, setKind] = useState<Kind>({ preset: presets[0] });
   const kindName = kind.app ? kind.app.name : kind.preset.name;
   const kindValue = kind.app ? `app:${kind.app.key}` : kind.preset.value;

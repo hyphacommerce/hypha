@@ -104,7 +104,7 @@ test("several rewards join with a plus", () => {
 });
 
 test("free shipping over a minimum, combining with product and order discounts", () => {
-  const draft = freeShipping();
+  const draft = freeShipping({ discount_free_shipping_title: "Free shipping" });
   draft.conditions.minSubtotal.amounts = { mkt_ie: "50" };
   assert.equal(
     draftSummary(draft, ctx),

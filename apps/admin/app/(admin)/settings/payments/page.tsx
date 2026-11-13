@@ -6,9 +6,11 @@ import { Suspense } from "react";
 import { PageHeader } from "@/components/page-header";
 import { CardSkeleton } from "@/components/skeletons";
 import { channelNames, loadPaymentMethods, requireStaff, sessionClient } from "@/lib/hypha";
+import { getStoreDefaults } from "@/lib/get-store-t";
 import { getT } from "@/lib/i18n";
 import { settingsCrumb } from "@/lib/navigation";
 import type { PaymentApp } from "@/lib/payments";
+import { PAYMENT_NAME_DEFAULTS } from "@/lib/store-defaults";
 
 import { PaymentMethodsCard } from "./methods";
 
@@ -34,13 +36,14 @@ export default async function PaymentsSettingsPage() {
 
 async function PaymentMethods() {
   const client = await sessionClient();
-  const [t, me, methods, markets, channelName, paymentApps] = await Promise.all([
+  const [t, me, methods, markets, channelName, paymentApps, presetNames] = await Promise.all([
     getT(),
     requireStaff(),
     loadPaymentMethods(),
     client.GET("/admin/markets"),
     channelNames(client),
     loadPaymentApps(client),
+    getStoreDefaults(PAYMENT_NAME_DEFAULTS),
   ]);
   if (methods === null) {
     return (
@@ -67,6 +70,7 @@ async function PaymentMethods() {
         markets={(markets.data?.items ?? []).map((m) => ({ value: m.id, label: m.name }))}
         channels={[...channelName].map(([value, label]) => ({ value, label }))}
         paymentApps={paymentApps}
+        presetNames={presetNames}
         canWrite={me.scopes.includes("payments:write")}
       />
     </>

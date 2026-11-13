@@ -3,6 +3,7 @@
 // code alike.
 
 import type { TFor } from "./messages";
+import type { PAYMENT_NAME_DEFAULTS, StoreDefaults } from "./store-defaults.ts";
 
 /** A starting point for a new method: all `manual`, staff record the money. */
 export type PaymentPreset = {
@@ -15,27 +16,28 @@ export type PaymentPreset = {
   instructionsPlaceholder: string;
 };
 
-/** The name a method made from each preset starts with. */
-const PRESET_NAMES: Record<PaymentPreset["value"], string> = {
-  cash_on_delivery: "Cash on delivery",
-  bank_transfer: "Bank transfer",
-  custom: "",
-};
+/** The names the presets' methods start with, in the store's default language. */
+export type PaymentNameDefaults = StoreDefaults<(typeof PAYMENT_NAME_DEFAULTS)[number]>;
 
 /** The presets, in the order offered. */
 const PRESET_VALUES = ["cash_on_delivery", "bank_transfer", "custom"] as const;
 
 /**
  * The presets as `t`'s language words them. The name a method starts with is content
- * (shoppers see it at checkout), which is in the store's language whatever the staff
- * member's is, so it isn't translated: staff change it before saving.
+ * (shoppers see it at checkout), so it comes from `names`, in the store's default
+ * language whatever the staff member's is; staff can change it before saving.
  */
-export function paymentPresets(t: TFor<"payments">): PaymentPreset[] {
+export function paymentPresets(t: TFor<"payments">, names: PaymentNameDefaults): PaymentPreset[] {
+  const presetNames: Record<PaymentPreset["value"], string> = {
+    cash_on_delivery: names.payment_cash_on_delivery_name,
+    bank_transfer: names.payment_bank_transfer_name,
+    custom: "",
+  };
   return PRESET_VALUES.map((value) => ({
     value,
     label: t(`payments.preset_${value}_label`),
     description: t(`payments.preset_${value}_description`),
-    name: PRESET_NAMES[value],
+    name: presetNames[value],
     instructionsPlaceholder: t(`payments.preset_${value}_instructions`),
   }));
 }

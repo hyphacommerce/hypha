@@ -37,7 +37,14 @@ function knownKind(value: string): ChannelKind | undefined {
   return KINDS.find((kind) => kind === value);
 }
 
-export function ChannelsCard({ channels }: { channels: Channel[] }) {
+export function ChannelsCard({
+  channels,
+  keyNames,
+}: {
+  channels: Channel[];
+  /** The name a channel's new key starts with, by channel ID: in the store's default language. */
+  keyNames: Readonly<Record<string, string>>;
+}) {
   const t = useT<"settings">();
   const [editing, setEditing] = useState<Channel | "new">();
   const [keyFor, setKeyFor] = useState<Channel>();
@@ -123,7 +130,13 @@ export function ChannelsCard({ channels }: { channels: Channel[] }) {
           onClose={() => setEditing(undefined)}
         />
       )}
-      {keyFor && <KeyDialog channel={keyFor} onClose={() => setKeyFor(undefined)} />}
+      {keyFor && (
+        <KeyDialog
+          channel={keyFor}
+          defaultName={keyNames[keyFor.id] ?? keyFor.name}
+          onClose={() => setKeyFor(undefined)}
+        />
+      )}
     </Card>
   );
 }
@@ -201,10 +214,18 @@ function ChannelDialog({ channel, onClose }: { channel?: Channel; onClose: () =>
 }
 
 /** Creates a publishable key for the channel and shows it. */
-function KeyDialog({ channel, onClose }: { channel: Channel; onClose: () => void }) {
+function KeyDialog({
+  channel,
+  defaultName,
+  onClose,
+}: {
+  channel: Channel;
+  /** The key's name to start from. It's stored, so it's in the store's default language. */
+  defaultName: string;
+  onClose: () => void;
+}) {
   const t = useT<"settings">();
-  // The key's name is stored: English whatever the staff member's language.
-  const [name, setName] = useState(`${channel.name} storefront`);
+  const [name, setName] = useState(defaultName);
   const [token, setToken] = useState<string>();
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();

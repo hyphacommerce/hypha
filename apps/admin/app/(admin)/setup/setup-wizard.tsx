@@ -21,7 +21,8 @@ import { CountryPicker } from "@/components/country-picker";
 import { useCurrencies } from "@/components/currencies";
 import { currencyCodes } from "@/lib/format";
 import type { KeyIn } from "@/lib/messages";
-import { paymentPresets } from "@/lib/payments";
+import { type PaymentNameDefaults, paymentPresets } from "@/lib/payments";
+import type { StoreDefaults, WIZARD_DEFAULTS } from "@/lib/store-defaults";
 import { type Country, countryLabel, currencyOptions, takenCountries } from "@/lib/regions";
 import { useFormat } from "@/lib/use-format";
 import { useT } from "@/lib/use-t";
@@ -127,15 +128,19 @@ const KEY_FILE = "apps/storefront/.dev.vars";
  * option at checkout), which is in the store's language whatever the staff member's is,
  * so they aren't translated: staff type their own.
  */
-const OPTION_NAME = "Standard";
-const KEY_NAME = "Storefront";
+
+/** What the wizard's forms are prefilled with. */
+export type WizardDefaults = StoreDefaults<(typeof WIZARD_DEFAULTS)[number]>;
 
 export function SetupWizard({
   data,
+  defaults,
   initialStep,
   savedStep,
 }: {
   data: WizardData;
+  /** What the forms are prefilled with and then saved: in the store's default language. */
+  defaults: WizardDefaults;
   initialStep?: number;
   /** The step the store remembers the merchant on (`setup.step`). */
   savedStep?: string | null;
@@ -182,16 +187,30 @@ export function SetupWizard({
       form = <MarketStep data={data} onSaved={onSaved} />;
       break;
     case 2:
-      form = <ShippingStep data={data} onSaved={onSaved} goTo={setActive} />;
+      form = (
+        <ShippingStep
+          data={data}
+          optionName={defaults.shipping_option_name}
+          onSaved={onSaved}
+          goTo={setActive}
+        />
+      );
       break;
     case 3:
-      form = <PaymentStep data={data} onSaved={onSaved} />;
+      form = <PaymentStep data={data} presetNames={defaults} onSaved={onSaved} />;
       break;
     case 4:
       form = <ProductStep data={data} onSaved={onSaved} goTo={setActive} />;
       break;
     default:
-      form = <SellStep data={data} onSaved={() => router.refresh()} goTo={setActive} />;
+      form = (
+        <SellStep
+          data={data}
+          defaultKeyName={defaults.storefront_key_name}
+          onSaved={() => router.refresh()}
+          goTo={setActive}
+        />
+      );
   }
 
   return (
@@ -547,10 +566,12 @@ function NeedsMarket({ goTo }: { goTo: (step: number) => void }) {
 
 function ShippingStep({
   data,
+  optionName: defaultOptionName,
   onSaved,
   goTo,
 }: {
   data: WizardData;
+  optionName: string;
   onSaved: () => void;
   goTo: (step: number) => void;
 }) {
@@ -564,7 +585,7 @@ function ShippingStep({
   const [chosen, setChosen] = useState<string[]>(() =>
     first ? first.countries.filter((c) => !zoned.has(c)) : [],
   );
-  const [optionName, setOptionName] = useState(OPTION_NAME);
+  const [optionName, setOptionName] = useState(defaultOptionName);
   const [price, setPrice] = useState("");
   const [currency, setCurrency] = useState(first?.currency);
   const { error, isPending, run } = useSave(onSaved);
@@ -643,9 +664,17 @@ function ShippingStep({
   );
 }
 
-function PaymentStep({ data, onSaved }: { data: WizardData; onSaved: () => void }) {
+function PaymentStep({
+  data,
+  presetNames,
+  onSaved,
+}: {
+  data: WizardData;
+  presetNames: PaymentNameDefaults;
+  onSaved: () => void;
+}) {
   const t = useT<"setup" | "payments">();
-  const presets = paymentPresets(t);
+  const presets = paymentPresets(t, presetNames);
   const [isAdding, setIsAdding] = useState(data.paymentMethods.length === 0);
   const [presetValue, setPresetValue] = useState<string>(presets[0].value);
   const preset = presets.find((p) => p.value === presetValue) ?? presets[0];
@@ -849,10 +878,12 @@ function ProductStep({
 
 function SellStep({
   data,
+  defaultKeyName,
   onSaved,
   goTo,
 }: {
   data: WizardData;
+  defaultKeyName: string;
   onSaved: () => void;
   goTo: (step: number) => void;
 }) {
@@ -864,7 +895,7 @@ function SellStep({
   const [picked, setProduct] = useState<string>();
   const unpublished = data.products.find((p) => !channel || !p.channels.includes(channel));
   const product = picked ?? unpublished?.id ?? data.products[0]?.id;
-  const [keyName, setKeyName] = useState(KEY_NAME);
+  const [keyName, setKeyName] = useState(defaultKeyName);
   const [token, setToken] = useState<string>();
   const published = useSave(onSaved);
   const key = useSave(onSaved);

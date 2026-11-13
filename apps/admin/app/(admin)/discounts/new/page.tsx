@@ -5,7 +5,8 @@ import { Suspense } from "react";
 import { PageHeader } from "@/components/page-header";
 import { type SearchParams, one } from "@/components/resource-table/params";
 import { FormSkeleton } from "@/components/skeletons";
-import { templateOf } from "@/lib/discounts/templates";
+import { TEMPLATE_DEFAULTS, templateOf } from "@/lib/discounts/templates";
+import { getStoreDefaults } from "@/lib/get-store-t";
 import { sessionClient } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
 
@@ -40,7 +41,11 @@ export default async function NewDiscountPage({
 
 async function Form({ template }: { template: string | undefined }) {
   const client = await sessionClient();
-  const [options, live] = await Promise.all([loadOptions(client), loadLive(client)]);
+  const [options, live, defaults] = await Promise.all([
+    loadOptions(client),
+    loadLive(client),
+    getStoreDefaults(TEMPLATE_DEFAULTS),
+  ]);
   // From the server, so the browser judges the summary's phase at the same instant. A
   // server component renders once per request, so reading the clock here is fine.
   // oxlint-disable-next-line react/purity
@@ -52,6 +57,7 @@ async function Form({ template }: { template: string | undefined }) {
       live={live}
       now={now}
       initial={templateOf(template ?? "")?.key ?? null}
+      defaults={defaults}
     />
   );
 }
