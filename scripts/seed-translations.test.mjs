@@ -94,7 +94,7 @@ function store({ productTranslations = [] } = {}) {
         field("options.opt_1.name", "Species"),
         field("options.opt_2.name", "Size"),
         field("option_values.optval_1.label", "Pearl oyster"),
-        field("option_values.optval_2.label", "Starter"), // the same in German: left out
+        field("option_values.optval_2.label", "Starter"), // the same in German: itself
         field("option_values.optval_3.label", "A value someone added"), // no German: left out
         field("custom_fields.cfdef_1.value", "Our lab and farm", {
           custom_field: { key: "custom.grown_in", definition: "cfdef_1", variant: null },
@@ -129,7 +129,23 @@ function store({ productTranslations = [] } = {}) {
       field("description", ""),
     ]),
     "/admin/custom-field-definitions": { items: [] },
-    "/admin/shipping-zones": { items: [] },
+    "/admin/shipping-zones": {
+      items: [
+        {
+          options: [
+            { id: "ship_1", name: "Standard" },
+            { id: "ship_2", name: "Royal Mail Tracked" },
+            { id: "ship_3", name: "Someone's courier" },
+          ],
+        },
+      ],
+    },
+    "/admin/translations/shipping_option/ship_1": view("shipping_option", "ship_1", [
+      field("name", "Standard"),
+    ]),
+    "/admin/translations/shipping_option/ship_2": view("shipping_option", "ship_2", [
+      field("name", "Royal Mail Tracked"),
+    ]),
     "/admin/payment-methods": { items: [] },
     "/admin/discounts": { items: [] },
     "/admin/checkout-rules": { items: [] },
@@ -184,16 +200,22 @@ test("a product's fields are matched by key and source text, with their digests"
   const admin = store();
   await seedGerman(admin);
   const { fields } = put(admin.sent, "/admin/translations/product/prod_1/de");
-  // Every field the view has but those with no German or the same text.
+  // Every field the view has but one with no German.
   assert.deepEqual(Object.keys(fields), [
     "title",
     "description",
     "options.opt_1.name",
     "options.opt_2.name",
     "option_values.optval_1.label",
+    "option_values.optval_2.label",
     "custom_fields.cfdef_1.value",
     "custom_fields.cfdef_2.value",
   ]);
+  // A value that reads the same in German is its own translation, so it isn't missing.
+  assert.deepEqual(fields["option_values.optval_2.label"], {
+    value: "Starter",
+    source_digest: digest("Starter"),
+  });
   assert.deepEqual(fields.title, {
     value: "Austernseitling-Zuchtset",
     source_digest: digest("Oyster Mushroom Grow Kit"),
@@ -243,13 +265,32 @@ test("alt texts, the store and the search filters", async () => {
   assert.equal(alt("asset_1"), "Austernseitling-Zuchtset, Blauer Austernseitling");
   assert.equal(alt("asset_2"), "Austernseitling-Zuchtset, Austernseitling");
   assert.equal(alt("asset_3"), "Zucht");
-  assert.deepEqual(Object.keys(put(admin.sent, "/admin/translations/store/store_1/de").fields), [
-    "description",
-  ]);
+  const storeFields = put(admin.sent, "/admin/translations/store/store_1/de").fields;
+  assert.deepEqual(Object.keys(storeFields), ["description", "email_footer"]);
+  // The email footer reads the same in German.
+  assert.deepEqual(storeFields.email_footer, {
+    value: "Mycelium Works Ltd. · hello@myceliumworks.example",
+    source_digest: digest("Mycelium Works Ltd. · hello@myceliumworks.example"),
+  });
   assert.deepEqual(put(admin.sent, "/admin/translations/search_facet/store_1/de").fields, {
     "facets.field.custom.species.label": { value: "Sorte", source_digest: digest("Species") },
     "facets.vendor.label": { value: "Hersteller", source_digest: digest("Maker") },
   });
+});
+
+test("a carrier's own name is recorded as it is; an option the seed doesn't know isn't", async () => {
+  const admin = store();
+  await seedGerman(admin);
+  assert.deepEqual(put(admin.sent, "/admin/translations/shipping_option/ship_1/de").fields, {
+    name: { value: "Standardversand", source_digest: digest("Standard") },
+  });
+  assert.deepEqual(put(admin.sent, "/admin/translations/shipping_option/ship_2/de").fields, {
+    name: { value: "Royal Mail Tracked", source_digest: digest("Royal Mail Tracked") },
+  });
+  assert.equal(
+    admin.sent.some((s) => s.path.includes("ship_3")),
+    false,
+  );
 });
 
 test("a resource with a German translation already is left as it is", async () => {

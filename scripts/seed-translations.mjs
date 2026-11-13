@@ -79,8 +79,9 @@ export async function seedLanguages(admin) {
 
 /**
  * Writes the German translation of the resource `kind`/`id` from `lookup(field)`, the
- * German for one field of its view (`undefined` when there's none). `"kept"` when it
- * already has one, `"added"`, or `"none"` when nothing differs from the source.
+ * German for one field of its view (`undefined` when there's none), or the source itself
+ * where it reads the same in German (`SAME`): recorded too, so the field isn't missing.
+ * `"kept"` when it already has one, `"added"`, or `"none"` when there's no German at all.
  */
 async function translate(admin, kind, id, lookup) {
   const view = await admin.get(`/admin/translations/${kind}/${id}`);
@@ -88,8 +89,8 @@ async function translate(admin, kind, id, lookup) {
   const fields = {};
   for (const field of view.fields) {
     if (!field.source.trim()) continue; // nothing to translate: the API refuses it
-    const value = lookup(field);
-    if (value === undefined || value === field.source) continue;
+    const value = lookup(field) ?? (de.SAME.has(field.source) ? field.source : undefined);
+    if (value === undefined) continue;
     fields[field.key] = { value, source_digest: field.digest };
   }
   if (Object.keys(fields).length === 0) return "none";
@@ -201,7 +202,7 @@ export async function seedTranslations(admin, { store, log = () => {} } = {}) {
   log("  shipping, payments, discounts, checkout rules");
   for (const zone of (await admin.get("/admin/shipping-zones")).items) {
     for (const option of zone.options) {
-      if (!de.SHIPPING_OPTIONS[option.name]) continue;
+      if (!de.SHIPPING_OPTIONS[option.name] && !de.SAME.has(option.name)) continue;
       record(
         "shipping_option",
         await translate(admin, "shipping_option", option.id, (field) =>

@@ -6,8 +6,8 @@
 // The shop says "du", as German hobby shops do. One term per thing throughout: Zuchtset
 // (grow kit), Myzel, Fruchtkörper, Körnerbrut (grain spawn), Impfspritze, Substrat,
 // Austernseitling, Igelstachelbart (lion's mane), Laminar-Flow-Werkbank, Still-Air-Box.
-// A text that reads the same in German ("10 ml", "EU", "Shiitake") isn't listed: the
-// source shows.
+// A text that reads the same in German ("10 ml", "EU", "Shiitake") is in `SAME`, and is
+// recorded as its own translation.
 
 /** The language's tag. */
 export const LANGUAGE = "de";
@@ -78,6 +78,49 @@ export const OPTION_VALUES = {
   Hardcover: "Gebundene Ausgabe",
   eBook: "E-Book",
 };
+
+/**
+ * What reads the same in German, by the English text: option names and values, choice
+ * labels, carriers' names and the store's email footer. Each is recorded as its own
+ * translation, so a German worklist counts it done rather than missing.
+ */
+export const SAME = new Set([
+  // Option names and values.
+  "Format",
+  "Starter",
+  "Shiitake",
+  "Reishi",
+  "10 ml",
+  "20 ml",
+  "1 kg",
+  "3 kg",
+  "5 kg",
+  "23 L",
+  "41 L",
+  "40 cm",
+  "60 cm",
+  "120 cm",
+  "60 × 60 cm",
+  "120 × 60 cm",
+  "50",
+  "250",
+  "EU",
+  "UK",
+  "US",
+  // Choice labels (the species' are above).
+  "Agar",
+  "OEKO-TEX Standard 100",
+  "B-s1, d0",
+  "C-s2, d0",
+  "E",
+  "220–240 V, 50 Hz",
+  "110–120 V, 60 Hz",
+  // Carriers' own names.
+  "Royal Mail Tracked",
+  "Post Express",
+  // The store's email footer.
+  "Mycelium Works Ltd. · hello@myceliumworks.example",
+]);
 
 /** Custom field values several products share, by field key, then by the English value. */
 export const VALUES = {
