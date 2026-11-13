@@ -5195,6 +5195,7 @@ export interface components {
             /** @description False when any line is unavailable; checkout should refuse such a cart. */
             fully_available: boolean;
             id: components["schemas"]["CartId"];
+            language?: components["schemas"]["Language"] | null;
             lines: components["schemas"]["LineResponse"][];
             /** @description Picked from the country when the cart was created; it sets the currency. */
             market: components["schemas"]["MarketId"];
@@ -6260,6 +6261,7 @@ export interface components {
             /** @description The customer groups it's in, sorted; `PUT /admin/customers/{id}/groups` sets them. */
             groups: components["schemas"]["CustomerGroupId"][];
             id: components["schemas"]["CustomerId"];
+            language?: components["schemas"]["Language"] | null;
             last_name?: string | null;
             /** @description What the customer's orders add up to. */
             orders: components["schemas"]["OrderStatsResponse"];
@@ -7300,6 +7302,20 @@ export interface components {
             /** @description In the call's order, each owner once. */
             items: components["schemas"]["OwnerItemsResponse"][];
         };
+        /** @description A line's names as the buyer read them, in the order's language. */
+        LocalizedLineResponse: {
+            product_title: string;
+            /** @description `null` for a product without options. */
+            variant_title?: string | null;
+        };
+        /** @description A name as the buyer read it, in the order's language. */
+        LocalizedNameResponse: {
+            name: string;
+        };
+        /** @description A title as the buyer read it, in the order's language. */
+        LocalizedTitleResponse: {
+            title: string;
+        };
         /**
          * @description A LocationId: `loc_` and 32 hex digits.
          * @example loc_0190f1a2b3c47d8e9f00112233445566
@@ -7667,6 +7683,7 @@ export interface components {
             /** @description The code it came by, normalised; `null` for an automatic discount. */
             code?: string | null;
             discount: components["schemas"]["DiscountId"];
+            localized?: components["schemas"]["LocalizedTitleResponse"] | null;
             /** @description The sentence the shopper saw at checkout, kept as it was. */
             summary: string;
             target: components["schemas"]["DiscountTargetDto"];
@@ -7694,6 +7711,7 @@ export interface components {
             fulfilled_quantity: number;
             id: components["schemas"]["OrderLineId"];
             image?: components["schemas"]["ProductMediaResponse"] | null;
+            localized?: components["schemas"]["LocalizedLineResponse"] | null;
             price_list?: components["schemas"]["PriceListId"] | null;
             product: components["schemas"]["ProductId"];
             product_title: string;
@@ -7746,6 +7764,7 @@ export interface components {
             financial_status: components["schemas"]["FinancialStatusDto"];
             fulfillment_status: components["schemas"]["FulfillmentStatusDto"];
             id: components["schemas"]["OrderId"];
+            language?: components["schemas"]["Language"] | null;
             lines: components["schemas"]["OrderLineResponse"][];
             market: components["schemas"]["MarketId"];
             /**
@@ -7787,6 +7806,7 @@ export interface components {
             group: components["schemas"]["ShippingGroupId"];
             /** @description The order lines this ships. */
             lines: components["schemas"]["OrderLineId"][];
+            localized?: components["schemas"]["LocalizedNameResponse"] | null;
             name: string;
             option: components["schemas"]["ShippingOptionId"];
             /** @description `app_…` or `spore_…`; `null` for a built-in rate. */
@@ -10448,6 +10468,12 @@ export interface components {
         UpdateCustomerRequest: {
             email?: string;
             first_name?: string | null;
+            /**
+             * @description The language they read (a BCP 47 tag), out of those the store publishes: one it
+             *     doesn't is tried without its region, else the store's default is kept. `null`
+             *     goes back to the store's default.
+             */
+            language?: string | null;
             last_name?: string | null;
             phone?: string | null;
         };
