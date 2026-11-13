@@ -114,5 +114,8 @@
   "channel_dialog_title_add": "Add channel",
   "channel_dialog_submit_add": "Add channel",
   "channel_dialog_title_rename": "Rename {name}",
-  "channel_kind_label": "Kind"
+  "channel_kind_label": "Kind",
+  "index_title": "Settings",
+  "search_title": "Search",
+  "channels_title": "Channels"
 }

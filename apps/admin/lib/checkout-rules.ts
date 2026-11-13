@@ -106,9 +106,9 @@ export function flagLabel(t: CheckoutT, flag: string): string {
   return hasKey(t, key) ? t(key) : flag;
 }
 
-/** A verification verdict's name; an unknown one as it is. */
-export function verdictLabel(t: CheckoutT, verdict: string): string {
-  const key = `checkout.verdict_${verdict}`;
+/** A verdict as it reads inside a sentence ("Verification says …"); an unknown one as it is. */
+export function verdictPhrase(t: CheckoutT, verdict: string): string {
+  const key = `checkout.verdict_inline_${verdict}`;
   return hasKey(t, key) ? t(key) : verdict;
 }
 
@@ -444,7 +444,7 @@ export function conditionSummary(
     case "verification_is":
       return t("checkout.summary_verification_is", {
         verdicts: format.list(
-          c.verdicts.map((v) => verdictLabel(t, v).toLocaleLowerCase(format.locale)),
+          c.verdicts.map((v) => verdictPhrase(t, v)),
           "disjunction",
         ),
       });
@@ -475,6 +475,17 @@ export function conditionSummary(
     case "weight_below":
       return t("checkout.summary_weight_below", { grams: String(c.grams) });
   }
+}
+
+/** A rule's conditions in one sentence: "A and B and C", since each may hold a list. */
+export function conditionsSummary(
+  t: CheckoutT,
+  format: Format,
+  conditions: readonly Condition[],
+  options: Pick<RuleOptions, "categories">,
+): string {
+  const [first = "", ...rest] = conditions.map((c) => conditionSummary(t, format, c, options));
+  return rest.reduce((so, next) => t("checkout.summary_both", { first: so, second: next }), first);
 }
 
 /** Where a rule applies, in a sentence; empty when everywhere. */

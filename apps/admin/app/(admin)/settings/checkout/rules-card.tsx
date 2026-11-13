@@ -32,7 +32,7 @@ import {
   type Rule,
   type RuleOptions,
   appliesSummary,
-  conditionSummary,
+  conditionsSummary,
 } from "@/lib/checkout-rules";
 import { useFormat } from "@/lib/use-format";
 import { useT } from "@/lib/use-t";
@@ -108,10 +108,7 @@ export function RulesCard({
                           {rule.name}
                         </Link>
                         <Text type="supporting" color="secondary">
-                          {format.list(
-                            rule.conditions.map((c) => conditionSummary(t, format, c, options)),
-                            "conjunction",
-                          )}
+                          {conditionsSummary(t, format, rule.conditions, options)}
                         </Text>
                         {where && (
                           <Text type="supporting" color="secondary">

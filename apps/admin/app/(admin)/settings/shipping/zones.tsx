@@ -54,9 +54,6 @@ type Option = AdminSchemas["ShippingOptionResponse"];
 type Provider = RateApp;
 type Currency = AdminSchemas["Currency"];
 
-/** The unit a weight tier's limit is in: a symbol, the same in every language. */
-const GRAMS = "g";
-
 export function ZonesSection({ zones, providers }: { zones: Zone[]; providers: Provider[] }) {
   const t = useT<"shipping">();
   const [isAdding, setIsAdding] = useState(false);
@@ -656,7 +653,6 @@ function RateEditor({
               ...draft,
               tables: draft.tables.map((other, j) => (j === i ? { ...other, ...patch } : other)),
             });
-          const unit = draft.kind === "weight" ? GRAMS : table.currency;
           return (
             <VStack key={table.currency} gap={2}>
               {currencyPicker(table.currency, (currency) => setTable({ currency }))}
@@ -679,7 +675,11 @@ function RateEditor({
                       </Text>
                     ) : (
                       <TextInput
-                        label={t("shipping.rate_below", { unit })}
+                        label={
+                          draft.kind === "weight"
+                            ? t("shipping.rate_below_weight")
+                            : t("shipping.rate_below_amount", { currency: table.currency })
+                        }
                         placeholder={draft.kind === "weight" ? "1000" : "50"}
                         value={tier.upTo}
                         onChange={(upTo) => setTier({ upTo })}

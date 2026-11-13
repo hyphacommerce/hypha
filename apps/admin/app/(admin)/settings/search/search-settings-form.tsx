@@ -436,7 +436,7 @@ function sample(t: SettingsT, format: Format, values: Counted[]): string {
 /** "A product in Red and Blue shows as 2 results." */
 function splitExample(t: SettingsT, name: string, values: Counted[]): string {
   const two = values.slice(0, 2).map((v) => v.value);
-  const option = name.toLocaleLowerCase(t.locale);
+  const option = name.toLowerCase();
   if (two.length < 2) return t("settings.search_split_example_one", { option });
   return t("settings.search_split_example_two", { first: two[0], second: two[1], option });
 }

@@ -54,7 +54,6 @@
   "rate_service_placeholder": "express",
   "rate_price_in": "Price ({currency})",
   "rate_free_from_in": "Free from ({currency})",
-  "rate_below": "Below ({unit})",
   "rate_tier_any": "Any",
   "rate_tier_above": "Above that",
   "rate_tier_add": "Add tier",
@@ -93,5 +92,8 @@
   "option_backup_label": "Backup",
   "rate_app_label": "Rate app",
   "app_dialog_title": "Add rate app",
-  "app_dialog_submit": "Add rate app"
+  "app_dialog_submit": "Add rate app",
+  "page_title": "Shipping",
+  "rate_below_weight": "Below (g)",
+  "rate_below_amount": "Below ({currency})"
 }

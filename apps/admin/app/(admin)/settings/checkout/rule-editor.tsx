@@ -20,7 +20,7 @@ import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { TrashIcon } from "@heroicons/react/24/outline";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 
 import { loadAddressFormat } from "@/app/(admin)/address-actions";
 import { AddressFields } from "@/components/address-fields";
@@ -47,15 +47,29 @@ import {
   marketCurrencies,
   pathOptions,
   toBody,
-  verdictLabel,
   verdictOptions,
+  verdictPhrase,
 } from "@/lib/checkout-rules";
+import type { TFor } from "@/lib/messages";
 import { useFormat } from "@/lib/use-format";
 import { useT } from "@/lib/use-t";
 
 import { type RuleProblems, createRule, tryAddress, updateRule } from "./actions";
 
 const MAX_CONDITIONS = 10;
+
+/** The pickers' choices in the staff member's language, built once per editor. */
+function choicesOf(t: TFor<"checkout">) {
+  return {
+    kinds: conditionTypeOptions(t),
+    fields: fieldOptions(t),
+    flags: flagOptions(t),
+    verdicts: verdictOptions(t),
+    paths: pathOptions(t),
+  };
+}
+
+type Choices = ReturnType<typeof choicesOf>;
 
 type Status = { type: "error"; message: string } | undefined;
 
@@ -85,6 +99,7 @@ export function RuleEditor({
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
   const [names, setNames] = useState(productNames);
+  const choices = useMemo(() => choicesOf(t), [t]);
 
   const set = (patch: Partial<RuleForm>) => setForm((f) => ({ ...f, ...patch }));
   const setCondition = (i: number, patch: Partial<ConditionForm>) =>
@@ -220,6 +235,7 @@ export function RuleEditor({
                 index={i}
                 condition={condition}
                 options={options}
+                choices={choices}
                 names={names}
                 currencies={marketCurrencies(options)}
                 canRemove={form.conditions.length > 1 && canWrite}
@@ -270,7 +286,7 @@ export function RuleEditor({
             />
             <Selector
               label={t("checkout.editor_path")}
-              options={pathOptions(t)}
+              options={choices.paths}
               value={form.path}
               onChange={(path) => set({ path })}
               isDisabled={!canWrite}
@@ -320,6 +336,7 @@ function ConditionRow({
   index,
   condition: c,
   options,
+  choices,
   names,
   currencies,
   canRemove,
@@ -332,6 +349,7 @@ function ConditionRow({
   index: number;
   condition: ConditionForm;
   options: RuleOptions;
+  choices: Choices;
   names: Record<string, string>;
   currencies: string[];
   canRemove: boolean;
@@ -361,7 +379,7 @@ function ConditionRow({
                   ? t("checkout.editor_condition_when")
                   : t("checkout.editor_condition_and")
               }
-              options={conditionTypeOptions(t)}
+              options={choices.kinds}
               value={type}
               onChange={(value) => {
                 const next = CONDITION_TYPES.find((kind) => kind.value === value);
@@ -383,7 +401,7 @@ function ConditionRow({
         {isField && (
           <Selector
             label={t("checkout.editor_field")}
-            options={fieldOptions(t)}
+            options={choices.fields}
             value={c.field}
             onChange={(field) => onChange({ field })}
             isDisabled={isDisabled}
@@ -472,7 +490,7 @@ function ConditionRow({
         {(type === "address_is" || type === "address_is_not") && (
           <Selector
             label={t("checkout.editor_flag")}
-            options={flagOptions(t)}
+            options={choices.flags}
             value={c.flag}
             onChange={(flag) => onChange({ flag })}
             isDisabled={isDisabled}
@@ -482,7 +500,7 @@ function ConditionRow({
           <MultiSelector
             label={t("checkout.editor_verdicts")}
             description={t("checkout.editor_verdicts_description")}
-            options={verdictOptions(t)}
+            options={choices.verdicts}
             value={c.verdicts}
             onChange={(verdicts) => onChange({ verdicts })}
             triggerDisplay="labels"
@@ -779,11 +797,11 @@ function TryResult({ result }: { result: TestResult }) {
         <Text type="supporting" color="secondary">
           {verification.failure
             ? t("checkout.try_verification_failed", {
-                verdict: verdictLabel(t, verification.verdict).toLocaleLowerCase(format.locale),
+                verdict: verdictPhrase(t, verification.verdict),
                 failure: verification.failure,
               })
             : t("checkout.try_verification", {
-                verdict: verdictLabel(t, verification.verdict).toLocaleLowerCase(format.locale),
+                verdict: verdictPhrase(t, verification.verdict),
               })}
         </Text>
       )}

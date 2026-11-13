@@ -203,5 +203,12 @@
   "validation_ask": "Ask {app}",
   "validation_block": "Block checkout when {app} fails",
   "editor_products_picker_title": "Choose products",
-  "try_blocks": "Blocks checkout"
+  "try_blocks": "Blocks checkout",
+  "verdict_inline_deliverable": "deliverable",
+  "verdict_inline_deliverable_with_fixes": "deliverable with fixes",
+  "verdict_inline_missing_subpremise": "missing an apartment or unit",
+  "verdict_inline_ambiguous": "ambiguous",
+  "verdict_inline_undeliverable": "undeliverable",
+  "verdict_inline_unknown": "unknown (verification failed)",
+  "summary_both": "{first} and {second}"
 }

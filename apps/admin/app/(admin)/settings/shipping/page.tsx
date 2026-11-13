@@ -20,7 +20,7 @@ export default async function ShippingSettingsPage() {
       <VStack gap={5} maxWidth={960}>
         <PageHeader
           back={settingsCrumb(t)}
-          title={t("common.shipping")}
+          title={t("shipping.page_title")}
           description={t("shipping.page_description")}
         />
         <Suspense fallback={<FormSkeleton cards={2} />}>

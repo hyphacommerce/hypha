@@ -19,7 +19,7 @@ export default async function ChannelsSettingsPage() {
       <VStack gap={5} maxWidth={960}>
         <PageHeader
           back={settingsCrumb(t)}
-          title={t("common.channels")}
+          title={t("settings.channels_title")}
           description={t("settings.channels_description")}
         />
         <Suspense fallback={<CardSkeleton lines={4} />}>

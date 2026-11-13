@@ -24,7 +24,7 @@ export default async function SearchSettingsPage() {
       <VStack gap={5} maxWidth={1280}>
         <PageHeader
           back={settingsCrumb(t)}
-          title={t("common.search")}
+          title={t("settings.search_title")}
           description={t("settings.search_description")}
         />
         <Suspense fallback={<FormSkeleton cards={4} />}>

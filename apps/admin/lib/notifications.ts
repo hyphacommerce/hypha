@@ -42,10 +42,7 @@ export function templateDescription(t: NotificationsT, key: string): string | un
   return hasKey(t, description) ? t(description) : undefined;
 }
 
-/**
- * A message's status: its badge colour, and its label in English. With a translator,
- * the label is `messageStatusLabel(t, status)`.
- */
+/** A message's status: its label (in English) and badge colour. */
 export const MESSAGE_STATUS: Record<
   string,
   { label: string; variant: "success" | "neutral" | "warning" | "error" | "info" }
@@ -57,14 +54,8 @@ export const MESSAGE_STATUS: Record<
   skipped: { label: "Skipped", variant: "neutral" },
 };
 
-/** A message's status as people read it; an unknown one as it is. */
-export function messageStatusLabel(t: NotificationsT, status: string): string {
-  const label = `notifications.message_status_${status}`;
-  return hasKey(t, label) ? t(label) : status;
-}
-
 /** Which source a template problem is in, as the editor names it; an unknown one as it is. */
-export function partName(t: NotificationsT, part: string): string {
+function partName(t: NotificationsT, part: string): string {
   const name = `notifications.part_${part}`;
   return hasKey(t, name) ? t(name) : part;
 }

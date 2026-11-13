@@ -22,7 +22,10 @@ export default async function SettingsPage() {
   return (
     <Section padding={6}>
       <VStack gap={6} maxWidth={960}>
-        <PageHeader title={t("common.settings")} description={t("settings.index_description")} />
+        <PageHeader
+          title={t("settings.index_title")}
+          description={t("settings.index_description")}
+        />
         {groups.length === 0 && (
           <Banner
             status="info"
