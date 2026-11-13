@@ -161,6 +161,8 @@ export function LanguageCard({
 }) {
   const t = useT<"account">();
   const [error, setError] = useState<string>();
+  // Why the choice was kept on this browser alone (an account that can't change itself).
+  const [note, setNote] = useState<string>();
   // The choice while it's being saved, so the select doesn't jump back meanwhile.
   const [chosen, setChosen] = useState<string>();
   const [isPending, startSaving] = useTransition();
@@ -171,6 +173,7 @@ export function LanguageCard({
     startSaving(async () => {
       const result = await chooseLanguage(language);
       setError(result.error);
+      setNote(result.note);
       setChosen(undefined);
     });
   };
@@ -178,6 +181,7 @@ export function LanguageCard({
   return (
     <AccountCard title={t("common.language")} description={t("account.language_description")}>
       {error && <Banner status="error" title={error} onDismiss={() => setError(undefined)} />}
+      {note && <Banner status="info" title={note} onDismiss={() => setNote(undefined)} />}
       <Selector
         label={t("common.language")}
         isLabelHidden

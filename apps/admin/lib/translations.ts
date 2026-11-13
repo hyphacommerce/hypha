@@ -354,6 +354,19 @@ export function lengthOf(value: string, format: string): number {
   return Array.from(value).length;
 }
 
+/**
+ * Whether a translation is shorter than its field's `min_length`, as the API counts it:
+ * characters (code points) of the trimmed text (of the HTML, for HTML, which the API
+ * counts once sanitised, so this is only near for it). Blank is no translation and never
+ * too short.
+ */
+export function isTooShort(value: string, field: { min_length?: number | null }): boolean {
+  const min = field.min_length;
+  if (min === null || min === undefined) return false;
+  const text = value.trim();
+  return text !== "" && Array.from(text).length < min;
+}
+
 /** The longest text a one-line input takes; longer fields get a text area. */
 export const SINGLE_LINE_MAX = 255;
 

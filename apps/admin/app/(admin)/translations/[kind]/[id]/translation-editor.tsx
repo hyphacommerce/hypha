@@ -34,6 +34,7 @@ import {
   grouped,
   isDirty,
   isSingleLine,
+  isTooShort,
   isTranslatable,
   lengthOf,
   oneLine,
@@ -111,7 +112,10 @@ function inputName(t: EditorT, name: FieldName, label: string): string {
 }
 
 /** A refused field's problem in the reader's language; the API's own for an unknown code. */
-function problemText(t: EditorT, problem: FieldProblem): string {
+function problemText(t: EditorT, problem: FieldProblem, field: TranslatableField): string {
+  const min = field.min_length;
+  if (problem.code === "too_short" && min !== null && min !== undefined)
+    return t("translations.problem_too_short_min", { min });
   const key = `translations.problem_${problem.code}`;
   return hasKey(t, key) ? t(key) : problem.message || t("common.something_went_wrong");
 }
@@ -148,11 +152,12 @@ export function TranslationEditor({
   const [isSwitching, startSwitching] = useTransition();
 
   const isChanged = canWrite && isDirty(data.fields, language, draft);
-  const isOver = data.fields.some(
-    (field) =>
-      isTranslatable(field) &&
-      lengthOf(draft[field.key]?.value ?? "", field.format) > field.max_length,
-  );
+  // A field over its limit or under its minimum: the API would refuse the save.
+  const isOutOfBounds = data.fields.some((field) => {
+    if (!isTranslatable(field)) return false;
+    const value = draft[field.key]?.value ?? "";
+    return lengthOf(value, field.format) > field.max_length || isTooShort(value, field);
+  });
   const saved = data.translations.find((state) => state.language === language);
   const sections = grouped(data.fields, (valueId) => options[valueId]);
 
@@ -184,7 +189,7 @@ export function TranslationEditor({
     setProblems({});
   };
   const save = () => {
-    if (!isChanged || isOver) return;
+    if (!isChanged || isOutOfBounds) return;
     startSaving(async () => {
       const result = await saveTranslation(
         kind,
@@ -211,7 +216,7 @@ export function TranslationEditor({
         isDirty={isChanged}
         isPending={isSaving}
         error={error}
-        canSave={!isOver}
+        canSave={!isOutOfBounds}
         onSave={save}
         onDiscard={discard}
       />
@@ -407,7 +412,7 @@ function FieldRow({
           {problem && (
             <span className="translation-problem">
               <Text type="supporting" color="inherit">
-                {problemText(t, problem)}
+                {problemText(t, problem, field)}
               </Text>
             </span>
           )}
@@ -445,10 +450,12 @@ function TranslationInput({
   const isHtml = field.format === "html";
   const length = lengthOf(entry.value, field.format);
   const isOver = length > field.max_length;
+  const isShort = isTooShort(entry.value, field);
+  const min = field.min_length ?? undefined;
   // Edited text is saved against the source as shown, so only an untouched outdated
   // translation is left to mark by hand.
   const isUntouched = stored !== undefined && entry.value === stored.value;
-  const status = problem || isOver ? ({ type: "error" } as const) : undefined;
+  const status = problem || isOver || isShort ? ({ type: "error" } as const) : undefined;
 
   return (
     <VStack gap={1}>
@@ -522,7 +529,7 @@ function TranslationInput({
           {problem && (
             <span className="translation-problem">
               <Text type="supporting" color="inherit">
-                {problemText(t, problem)}
+                {problemText(t, problem, field)}
               </Text>
             </span>
           )}
@@ -543,11 +550,20 @@ function TranslationInput({
               </Text>
             </span>
           )}
+          {!problem && !isOver && isShort && min !== undefined && (
+            <span className="translation-problem">
+              <Text type="supporting" color="inherit">
+                {isHtml ? t("translations.too_short_html") : t("translations.too_short", { min })}
+              </Text>
+            </span>
+          )}
         </HStack>
         {canWrite && !isHtml && (
-          <span className={isOver ? "translation-problem" : undefined}>
-            <Text type="supporting" color={isOver ? "inherit" : "secondary"}>
-              {t("translations.counter", { count: length, max: field.max_length })}
+          <span className={isOver || isShort ? "translation-problem" : undefined}>
+            <Text type="supporting" color={isOver || isShort ? "inherit" : "secondary"}>
+              {min === undefined
+                ? t("translations.counter", { count: length, max: field.max_length })
+                : t("translations.counter_min", { count: length, max: field.max_length, min })}
             </Text>
           </span>
         )}

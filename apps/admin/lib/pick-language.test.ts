@@ -5,8 +5,35 @@ import { formatLocale, pickLanguage } from "./pick-language.ts";
 
 const available = ["en", "sr-Latn", "de"];
 
-test("the profile's choice wins over the browser's languages", () => {
+test("the choice on this browser wins over the browser's languages", () => {
   assert.equal(pickLanguage({ cookie: "de", acceptLanguage: "sr-Latn,en;q=0.8" }, available), "de");
+});
+
+test("the signed-in user's language wins over this browser's choice and its languages", () => {
+  assert.equal(
+    pickLanguage({ user: "sr-Latn", cookie: "de", acceptLanguage: "de,en;q=0.8" }, available),
+    "sr-Latn",
+  );
+});
+
+test("the user's language is matched against the catalogs: sr reads sr-Latn", () => {
+  assert.equal(pickLanguage({ user: "sr", cookie: "de" }, available), "sr-Latn");
+  assert.equal(pickLanguage({ user: "de-AT" }, available), "de");
+});
+
+test("a user's language the admin has no catalog for falls to the cookie, then the browser", () => {
+  assert.equal(pickLanguage({ user: "fr", cookie: "de", acceptLanguage: "sr" }, available), "de");
+  assert.equal(pickLanguage({ user: "fr", acceptLanguage: "sr" }, available), "sr-Latn");
+  assert.equal(pickLanguage({ user: "fr" }, available), "en");
+});
+
+test("without a user's language (signed out, or none chosen) the cookie decides", () => {
+  assert.equal(pickLanguage({ user: null, cookie: "de", acceptLanguage: "sr" }, available), "de");
+});
+
+test("the pseudo-language in the cookie wins over the user's language, where it's offered", () => {
+  assert.equal(pickLanguage({ user: "de", cookie: "en-XA" }, [...available, "en-XA"]), "en-XA");
+  assert.equal(pickLanguage({ user: "de", cookie: "en-XA" }, available), "de");
 });
 
 test("a choice is matched in the catalogs' spelling", () => {

@@ -7,7 +7,8 @@ import { revalidatePath } from "next/cache";
 
 import { describe, sessionClient } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
-import { rememberLanguage } from "@/lib/language";
+import { offeredLanguages, rememberLanguage } from "@/lib/language";
+import { PSEUDO } from "@/lib/pseudo";
 
 export type Result = { error?: string };
 export type TotpSetup = Result & { secret?: string; uri?: string };
@@ -25,19 +26,32 @@ export async function updateName(name: string): Promise<Result> {
 }
 
 /**
- * Chooses the language the admin speaks to the staff member, on this browser; the whole
- * admin renders again in it.
+ * Chooses the language the admin speaks to the staff member: saved on their user, so it
+ * follows them to any browser, and on this one (the cookie), so the pages before the
+ * login speak it too. The whole admin renders again in it. An account that can't change
+ * itself (a locked demo login, `account_locked`) keeps the choice on this browser alone,
+ * with a `note` saying so.
  */
-export async function chooseLanguage(language: string): Promise<Result> {
-  if (!(await rememberLanguage(language))) {
+export async function chooseLanguage(language: string): Promise<Result & { note?: string }> {
+  if (!offeredLanguages().includes(language)) {
     const t = await getT();
     return { error: t("account.language_not_offered") };
   }
-  // Saving the choice on the user (so it follows them to another browser) goes here. The
-  // pseudo-language `en-XA` is the admin's own and must never be sent to the API: skip
-  // the call for `PSEUDO`.
+  let note: string | undefined;
+  // The pseudo-language is the admin's own: it lives in the cookie, never in the API.
+  if (language !== PSEUDO) {
+    const client = await sessionClient();
+    const { error } = await client.PATCH("/admin/me", { body: { language } });
+    if (error?.code === "account_locked") {
+      // In the language just chosen: the page renders in it next to the note.
+      note = (await getT(language))("account.language_browser_only");
+    } else if (error) {
+      return { error: await describe(error) };
+    }
+  }
+  await rememberLanguage(language);
   revalidatePath("/", "layout");
-  return {};
+  return { note };
 }
 
 /** Signs one of the staff member's other sessions out: that device must sign in again. */

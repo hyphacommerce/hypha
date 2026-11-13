@@ -8,21 +8,35 @@ import { PSEUDO } from "./pseudo.ts";
 /** The source language: every key exists in it, and it's what nobody asked for gets. */
 export const DEFAULT_LANGUAGE = "en";
 
-/** The cookie the profile's language select writes. */
+/**
+ * The cookie the profile's language select writes: the choice on this browser, which the
+ * pages before the login read, and the only place the pseudo-language is kept.
+ */
 export const LANGUAGE_COOKIE = "hypha_admin_language";
 
 /**
- * The language for a request: the one chosen in the profile (the cookie) when the admin
- * has it, else the first language of the browser's `Accept-Language` that `available`
- * has (or has a nearer form of: `sr` reads `sr-Latn`), else English. Always one of
- * `available`, in its spelling.
+ * The language for a request, from the first of these the admin has (or has a nearer
+ * form of: `sr` reads `sr-Latn`): the signed-in staff member's own (`users.language`),
+ * the one chosen on this browser (the cookie: the pages before the login have no user),
+ * the browser's `Accept-Language` in its order, else English. Always one of `available`,
+ * in its spelling.
+ *
+ * The pseudo-language is the exception: it's never saved on the user, so where the
+ * cookie names it it comes first, and where it isn't offered the cookie is passed over.
  */
 export function pickLanguage(
-  wanted: { cookie?: string | null; acceptLanguage?: string | null },
+  wanted: { user?: string | null; cookie?: string | null; acceptLanguage?: string | null },
   available: readonly string[],
 ): string {
-  const chosen = wanted.cookie ? canonicalLanguage(wanted.cookie) : undefined;
-  const preferred = [...(chosen ? [chosen] : []), ...parseAcceptLanguage(wanted.acceptLanguage)];
+  const user = wanted.user ? canonicalLanguage(wanted.user) : undefined;
+  const cookie = wanted.cookie ? canonicalLanguage(wanted.cookie) : undefined;
+  // Not offered, the pseudo-language is no choice at all (it would read as English).
+  const chosen =
+    cookie !== PSEUDO ? [user, cookie] : available.includes(PSEUDO) ? [PSEUDO, user] : [user];
+  const preferred = [
+    ...chosen.filter((tag) => tag !== undefined),
+    ...parseAcceptLanguage(wanted.acceptLanguage),
+  ];
   return matchLanguage(preferred, available) ?? DEFAULT_LANGUAGE;
 }
 
