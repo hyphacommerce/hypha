@@ -16,28 +16,10 @@ import {
 } from "@/components/resource-table/resource-table";
 import { TransferStatusBadge } from "@/components/status";
 import { type TransferSummary, trNumber } from "@/lib/transfers";
+import { useFormat } from "@/lib/use-format";
 import { useT } from "@/lib/use-t";
 
-const FILTERS: FilterDef[] = [
-  {
-    kind: "select",
-    param: "status",
-    label: "Status",
-    options: [
-      { value: "draft", label: "Draft" },
-      { value: "in_transit", label: "In transit" },
-      { value: "received", label: "Received" },
-      { value: "cancelled", label: "Cancelled" },
-    ],
-  },
-];
-
-const VIEWS: View[] = [
-  { label: "All", params: {} },
-  { label: "Drafts", params: { status: ["draft"] } },
-  { label: "In transit", params: { status: ["in_transit"] } },
-  { label: "Received", params: { status: ["received"] } },
-];
+const STATUSES = ["draft", "in_transit", "received", "cancelled"] as const;
 
 const NO_LOCATIONS: Record<string, string> = {};
 
@@ -52,12 +34,27 @@ export function TransfersTable({
   locations?: Record<string, string>;
   canWrite: boolean;
 }) {
-  const t = useT();
-  const place = (id: string) => locations[id] ?? "A location";
+  const t = useT<"transfers">();
+  const format = useFormat();
+  const filters: FilterDef[] = [
+    {
+      kind: "select",
+      param: "status",
+      label: t("common.status"),
+      options: STATUSES.map((value) => ({ value, label: t(`transfers.status_${value}`) })),
+    },
+  ];
+  const views: View[] = [
+    { label: t("common.all"), params: {} },
+    { label: t("transfers.view_drafts"), params: { status: ["draft"] } },
+    { label: t("transfers.view_in_transit"), params: { status: ["in_transit"] } },
+    { label: t("transfers.view_received"), params: { status: ["received"] } },
+  ];
+  const place = (id: string) => locations[id] ?? t("transfers.a_location");
   const columns: TableColumn<TransferSummary>[] = [
     {
       key: "number",
-      header: "Transfer",
+      header: t("transfers.column_transfer"),
       width: pixel(120),
       renderCell: (transfer) => (
         <Link href={`/transfers/${transfer.id}`} weight="semibold" color="primary">
@@ -67,7 +64,7 @@ export function TransfersTable({
     },
     {
       key: "route",
-      header: "From → to",
+      header: t("transfers.column_route"),
       width: proportional(2, { minWidth: 220 }),
       renderCell: (transfer) => (
         <Text>
@@ -77,13 +74,13 @@ export function TransfersTable({
     },
     {
       key: "status",
-      header: "Status",
+      header: t("common.status"),
       width: pixel(130),
       renderCell: (transfer) => <TransferStatusBadge status={transfer.status} t={t} />,
     },
     {
       key: "expected",
-      header: "Expected",
+      header: t("transfers.expected"),
       width: pixel(140),
       renderCell: (transfer) =>
         transfer.expected_at ? (
@@ -94,10 +91,10 @@ export function TransfersTable({
     },
     {
       key: "units",
-      header: "Units",
+      header: t("transfers.units"),
       width: pixel(100),
       align: "end",
-      renderCell: (transfer) => <Text>{transfer.units}</Text>,
+      renderCell: (transfer) => <Text>{format.number(transfer.units)}</Text>,
     },
   ];
   return (
@@ -109,17 +106,17 @@ export function TransfersTable({
       idKey="id"
       rowHref={(transfer) => `/transfers/${transfer.id}`}
       isSelectable={false}
-      filters={FILTERS}
-      views={VIEWS}
+      filters={filters}
+      views={views}
       error={page?.error}
       empty={{
         icon: <ArrowsRightLeftIcon width={32} />,
-        title: "No transfers yet",
+        title: t("transfers.list_empty_title"),
         description: canWrite
-          ? "Move stock between your locations: it leaves one when shipped and reaches the other when received."
-          : "Stock moved between locations shows here.",
+          ? t("transfers.list_empty_description_write")
+          : t("transfers.list_empty_description_read"),
       }}
-      noResults={{ title: "No transfers match these filters" }}
+      noResults={{ title: t("transfers.list_no_results_title") }}
     />
   );
 }

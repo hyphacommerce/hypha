@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import { type SearchParams, one } from "@/components/resource-table/params";
 import { listPage, pageQuery } from "@/components/resource-table/server";
 import { locationNames, requireStaff, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import { hasScope } from "@/lib/navigation";
 
 import { NewTransfer } from "./new-transfer";
@@ -27,14 +28,14 @@ export default async function TransfersPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const [params, me] = await Promise.all([searchParams, requireStaff()]);
+  const [params, me, t] = await Promise.all([searchParams, requireStaff(), getT()]);
   const canWrite = hasScope(me.scopes, "inventory:write");
   return (
     <Section padding={6}>
       <VStack gap={5}>
         <PageHeader
-          title="Transfers"
-          description="Stock moved between your locations: what left, what's on its way, what arrived."
+          title={t("transfers.list_title")}
+          description={t("transfers.list_description")}
           actions={canWrite && <NewTransfer />}
         />
         <Suspense fallback={<TransfersTable canWrite={canWrite} />}>

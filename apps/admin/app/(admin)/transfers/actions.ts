@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { describe, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 
 export type Result = { error?: string };
 
@@ -21,7 +22,10 @@ export async function createTransfer(
 ): Promise<Result> {
   const client = await sessionClient();
   const { data, error } = await client.POST("/admin/transfers", { body: input });
-  if (!data) return { error: error ? await describe(error) : "Couldn't write the transfer." };
+  if (!data) {
+    const t = await getT();
+    return { error: error ? await describe(error) : t("transfers.create_failed") };
+  }
   revalidatePath("/transfers");
   redirect(`/transfers/${data.id}`);
 }

@@ -12,27 +12,26 @@ import { trNumber } from "@/lib/transfers";
 
 import { TransferActions, TransferView } from "./transfer-view";
 
-const BACK: Crumb[] = [{ label: "Transfers", href: "/transfers" }];
-
 /**
  * A transfer: what moves from where to where, and how much of each line left and arrived.
  * A draft's lines and details change in place; the header's actions ship it, receive it,
  * cancel or delete it.
  */
 export default async function TransferPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+  const [{ id }, t] = await Promise.all([params, getT()]);
+  const back: Crumb[] = [{ label: t("transfers.list_title"), href: "/transfers" }];
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={1280}>
-        <Suspense fallback={<DetailSkeleton back={BACK} />}>
-          <Transfer id={id} />
+        <Suspense fallback={<DetailSkeleton back={back} />}>
+          <Transfer id={id} back={back} />
         </Suspense>
       </VStack>
     </Section>
   );
 }
 
-async function Transfer({ id }: { id: string }) {
+async function Transfer({ id, back }: { id: string; back: Crumb[] }) {
   const client = await sessionClient();
   const [transfer, me, locations, t] = await Promise.all([
     client.GET("/admin/transfers/{id}", { params: { path: { id } } }).then(loaded),
@@ -61,7 +60,7 @@ async function Transfer({ id }: { id: string }) {
     <VStack gap={5}>
       <PageHeader
         title={trNumber(transfer.number)}
-        back={BACK}
+        back={back}
         badges={<TransferStatusBadge status={transfer.status} t={t} />}
         description={`${nameOf(transfer.origin)} → ${nameOf(transfer.destination)}`}
         actions={

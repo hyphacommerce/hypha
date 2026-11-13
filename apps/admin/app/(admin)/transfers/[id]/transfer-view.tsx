@@ -41,6 +41,8 @@ import {
   transferLineLabel,
   trNumber,
 } from "@/lib/transfers";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import {
   type TransferPatch,
@@ -90,6 +92,8 @@ export function TransferView({
 }
 
 function Lines({ transfer, canEdit }: { transfer: Transfer; canEdit: boolean }) {
+  const t = useT<"transfers">();
+  const format = useFormat();
   const [isPicking, setIsPicking] = useState(false);
   const [picked, setPicked] = useState<{ title: string; variants: PickerVariant[] }>();
   const [editing, setEditing] = useState<{ variant: string; label: string; quantity: number }>();
@@ -105,11 +109,11 @@ function Lines({ transfer, canEdit }: { transfer: Transfer; canEdit: boolean }) 
       <VStack gap={3}>
         <HStack hAlign="between" vAlign="center">
           <Text type="display-3" as="h2">
-            Lines
+            {t("transfers.lines_title")}
           </Text>
           {canEdit && (
             <Button
-              label="Add line"
+              label={t("transfers.add_line")}
               variant="secondary"
               size="sm"
               onClick={() => setIsPicking(true)}
@@ -119,17 +123,17 @@ function Lines({ transfer, canEdit }: { transfer: Transfer; canEdit: boolean }) 
         {error && <Banner status="error" title={error} />}
         {transfer.lines.length === 0 ? (
           <Text type="supporting" color="secondary">
-            No lines yet. Add the variants to move: each needs stock tracked at the origin.
+            {t("transfers.lines_empty")}
           </Text>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHeaderCell>Variant</TableHeaderCell>
-                <TableHeaderCell>Quantity</TableHeaderCell>
-                {shipped && <TableHeaderCell>Received</TableHeaderCell>}
-                {shipped && <TableHeaderCell>Lost</TableHeaderCell>}
-                {shipped && <TableHeaderCell>In transit</TableHeaderCell>}
+                <TableHeaderCell>{t("common.variant")}</TableHeaderCell>
+                <TableHeaderCell>{t("common.quantity")}</TableHeaderCell>
+                {shipped && <TableHeaderCell>{t("transfers.lines_received")}</TableHeaderCell>}
+                {shipped && <TableHeaderCell>{t("transfers.lost")}</TableHeaderCell>}
+                {shipped && <TableHeaderCell>{t("transfers.lines_in_transit")}</TableHeaderCell>}
                 {canEdit && <TableHeaderCell />}
               </TableRow>
             </TableHeader>
@@ -140,40 +144,42 @@ function Lines({ transfer, canEdit }: { transfer: Transfer; canEdit: boolean }) 
                     <VStack gap={0}>
                       <Text weight="medium">{transferLineLabel(l)}</Text>
                       <Text type="supporting" color="secondary">
-                        {l.sku ? `SKU ${l.sku}` : "No SKU"}
+                        {l.sku ? t("transfers.line_sku", { sku: l.sku }) : t("transfers.no_sku")}
                       </Text>
                     </VStack>
                   </TableCell>
                   <TableCell>
-                    <Text>{l.quantity}</Text>
+                    <Text>{format.number(l.quantity)}</Text>
                   </TableCell>
                   {shipped && (
                     <TableCell>
-                      <Text>{l.received}</Text>
+                      <Text>{format.number(l.received)}</Text>
                     </TableCell>
                   )}
                   {shipped && (
                     <TableCell>
-                      <Text color={l.rejected > 0 ? undefined : "secondary"}>{l.rejected}</Text>
+                      <Text color={l.rejected > 0 ? undefined : "secondary"}>
+                        {format.number(l.rejected)}
+                      </Text>
                     </TableCell>
                   )}
                   {shipped && (
                     <TableCell>
-                      <Text>{l.in_transit}</Text>
+                      <Text>{format.number(l.in_transit)}</Text>
                     </TableCell>
                   )}
                   {canEdit && (
                     <TableCell>
                       <HStack gap={1} hAlign="end">
                         <IconButton
-                          label={`Edit ${transferLineLabel(l)}`}
+                          label={t("transfers.edit_named", { name: transferLineLabel(l) })}
                           icon={<PencilSquareIcon />}
                           size="sm"
                           variant="ghost"
                           onClick={() => startEditing(l.variant, transferLineLabel(l))}
                         />
                         <IconButton
-                          label={`Remove ${transferLineLabel(l)}`}
+                          label={t("transfers.remove_named", { name: transferLineLabel(l) })}
                           icon={<TrashIcon />}
                           size="sm"
                           variant="ghost"
@@ -190,9 +196,9 @@ function Lines({ transfer, canEdit }: { transfer: Transfer; canEdit: boolean }) 
       </VStack>
       {isPicking && (
         <ProductPicker
-          title="Add a product's variant"
+          title={t("transfers.picker_title")}
           mode="single"
-          confirmLabel={() => "Choose variant"}
+          confirmLabel={() => t("transfers.picker_confirm")}
           onClose={() => setIsPicking(false)}
           onConfirm={async ([product]) => {
             if (!product) return;
@@ -236,9 +242,11 @@ function Lines({ transfer, canEdit }: { transfer: Transfer; canEdit: boolean }) 
       <AlertDialog
         isOpen={removing !== undefined}
         onOpenChange={(open) => !open && setRemoving(undefined)}
-        title={removing ? `Remove ${transferLineLabel(removing)}?` : ""}
-        description="It's taken off this transfer."
-        actionLabel="Remove"
+        title={
+          removing ? t("transfers.remove_line_title", { name: transferLineLabel(removing) }) : ""
+        }
+        description={t("transfers.remove_line_description")}
+        actionLabel={t("common.remove")}
         isActionLoading={isPending}
         onAction={() => {
           if (!removing) return;
@@ -262,30 +270,36 @@ function VariantChoice({
   onClose: () => void;
   onChoose: (variant: PickerVariant) => void;
 }) {
+  const t = useT<"transfers">();
   const [chosen, setChosen] = useState<string>();
   const variant = product.variants.find((v) => v.id === chosen);
   return (
     <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={440} purpose="form">
       <DialogHeader
         title={product.title}
-        subtitle="Which variant is moving?"
+        subtitle={t("transfers.choice_subtitle")}
         onOpenChange={(open) => !open && onClose()}
       />
       <VStack gap={4} padding={4}>
         <Selector
-          label="Variant"
-          options={product.variants.map((v) => ({
-            value: v.id,
-            label: `${v.title ?? "Default"}${v.sku ? ` · ${v.sku}` : ""}${onTransfer.has(v.id) ? " (on the transfer)" : ""}`,
-          }))}
+          label={t("common.variant")}
+          options={product.variants.map((v) => {
+            const name = [v.title ?? t("common.default"), v.sku].filter(Boolean).join(" · ");
+            return {
+              value: v.id,
+              label: onTransfer.has(v.id)
+                ? t("transfers.variant_on_transfer", { variant: name })
+                : name,
+            };
+          })}
           value={chosen}
           onChange={setChosen}
-          placeholder="Choose a variant"
+          placeholder={t("transfers.choose_variant")}
         />
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label="Next"
+            label={t("common.next")}
             variant="primary"
             isDisabled={!variant}
             onClick={() => variant && onChoose(variant)}
@@ -309,22 +323,23 @@ function QuantityDialog({
   onClose: () => void;
   onSave: (quantity: number) => void;
 }) {
+  const t = useT<"transfers">();
   const [quantity, setQuantity] = useState(editing.quantity);
   const isValid = Number.isInteger(quantity) && quantity >= 1;
   return (
     <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={400} purpose="form">
       <DialogHeader
         title={editing.label}
-        subtitle="How many units move."
+        subtitle={t("transfers.quantity_subtitle")}
         onOpenChange={(open) => !open && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
-        <NumberInput label="Quantity" min={1} value={quantity} onChange={setQuantity} />
+        <NumberInput label={t("common.quantity")} min={1} value={quantity} onChange={setQuantity} />
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label="Save"
+            label={t("common.save")}
             variant="primary"
             isLoading={isPending}
             isDisabled={!isValid}
@@ -345,6 +360,7 @@ function Details({
   places: Place[];
   canEdit: boolean;
 }) {
+  const t = useT<"transfers">();
   const [isEditing, setIsEditing] = useState(false);
   const nameOf = (id: string) => places.find((p) => p.id === id)?.name ?? id;
   return (
@@ -352,41 +368,41 @@ function Details({
       <VStack gap={3}>
         <HStack hAlign="between" vAlign="center">
           <Text type="display-3" as="h2">
-            Details
+            {t("common.details")}
           </Text>
-          {canEdit && <Link onClick={() => setIsEditing(true)}>Edit</Link>}
+          {canEdit && <Link onClick={() => setIsEditing(true)}>{t("common.edit")}</Link>}
         </HStack>
         <MetadataList>
-          <MetadataListItem label="From">
+          <MetadataListItem label={t("transfers.from")}>
             <Text>{nameOf(transfer.origin)}</Text>
           </MetadataListItem>
-          <MetadataListItem label="To">
+          <MetadataListItem label={t("transfers.to")}>
             <Text>{nameOf(transfer.destination)}</Text>
           </MetadataListItem>
-          <MetadataListItem label="Expected">
+          <MetadataListItem label={t("transfers.expected")}>
             {transfer.expected_at ? (
               <CalendarDate value={transfer.expected_at} />
             ) : (
               <Text color="secondary">—</Text>
             )}
           </MetadataListItem>
-          <MetadataListItem label="Reference">
+          <MetadataListItem label={t("transfers.reference")}>
             <Text color={transfer.reference ? undefined : "secondary"}>
               {transfer.reference ?? "—"}
             </Text>
           </MetadataListItem>
           {transfer.shipped_at && (
-            <MetadataListItem label="Shipped">
+            <MetadataListItem label={t("transfers.fact_shipped")}>
               <DateTime value={transfer.shipped_at} />
             </MetadataListItem>
           )}
           {transfer.received_at && (
-            <MetadataListItem label="Received">
+            <MetadataListItem label={t("transfers.fact_received")}>
               <DateTime value={transfer.received_at} />
             </MetadataListItem>
           )}
           {transfer.cancelled_at && (
-            <MetadataListItem label="Cancelled">
+            <MetadataListItem label={t("transfers.fact_cancelled")}>
               <DateTime value={transfer.cancelled_at} />
             </MetadataListItem>
           )}
@@ -409,6 +425,7 @@ function DetailsDialog({
   places: Place[];
   onClose: () => void;
 }) {
+  const t = useT<"transfers">();
   const [origin, setOrigin] = useState(transfer.origin);
   const [destination, setDestination] = useState(transfer.destination);
   const [expected, setExpected] = useState(() => dayOf(transfer.expected_at));
@@ -420,27 +437,28 @@ function DetailsDialog({
   return (
     <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={520} purpose="form">
       <DialogHeader
-        title="Transfer details"
-        subtitle="Where it goes from and to, and when it's due."
+        title={t("transfers.details_dialog_title")}
+        subtitle={t("transfers.details_dialog_subtitle")}
         onOpenChange={(open) => !open && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
         <div className="form-grid">
-          <Selector label="From" options={options} value={origin} onChange={setOrigin} />
           <Selector
-            label="To"
+            label={t("transfers.from")}
+            options={options}
+            value={origin}
+            onChange={setOrigin}
+          />
+          <Selector
+            label={t("transfers.to")}
             options={options}
             value={destination}
             onChange={setDestination}
-            status={
-              same
-                ? { type: "error", message: "Choose another location than where it's from" }
-                : undefined
-            }
+            status={same ? { type: "error", message: t("transfers.same_location") } : undefined}
           />
           <DateInput
-            label="Expected"
+            label={t("transfers.expected")}
             isOptional
             value={expected}
             hasClear
@@ -448,18 +466,18 @@ function DetailsDialog({
             onChange={(value) => setExpected(value ?? undefined)}
           />
           <TextInput
-            label="Reference"
+            label={t("transfers.reference")}
             isOptional
-            description="A carrier or tracking note."
+            description={t("transfers.reference_description")}
             value={reference}
             onChange={setReference}
           />
         </div>
-        <TextArea label="Note" isOptional value={note} onChange={setNote} />
+        <TextArea label={t("common.note")} isOptional value={note} onChange={setNote} />
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label="Save"
+            label={t("common.save")}
             variant="primary"
             isLoading={isPending}
             isDisabled={same}
@@ -496,6 +514,7 @@ export function TransferActions({
   atOrigin: Record<string, number>;
   places: Place[];
 }) {
+  const t = useT<"transfers">();
   const [confirm, setConfirm] = useState<Confirm>();
   const [isShipping, setIsShipping] = useState(false);
   const [isReceiving, setIsReceiving] = useState(false);
@@ -507,7 +526,8 @@ export function TransferActions({
       setConfirm(undefined);
       setError(result?.error);
     });
-  const origin = places.find((p) => p.id === transfer.origin)?.name ?? "the origin";
+  const origin = places.find((p) => p.id === transfer.origin)?.name ?? t("transfers.the_origin");
+  const number = trNumber(transfer.number);
   if (transfer.status !== "draft" && transfer.status !== "in_transit") return null;
   return (
     <VStack gap={2}>
@@ -515,29 +535,47 @@ export function TransferActions({
       <HStack gap={2} wrap="wrap">
         {transfer.status === "draft" ? (
           <>
-            <Button label="Delete" variant="ghost" onClick={() => setConfirm("delete")} />
-            <Button label="Cancel" variant="secondary" onClick={() => setConfirm("cancel")} />
             <Button
-              label="Ship"
+              label={t("common.delete")}
+              variant="ghost"
+              onClick={() => setConfirm("delete")}
+            />
+            <Button
+              label={t("transfers.action_cancel")}
+              variant="secondary"
+              onClick={() => setConfirm("cancel")}
+            />
+            <Button
+              label={t("transfers.ship")}
               variant="primary"
               isDisabled={transfer.lines.length === 0}
               onClick={() => setIsShipping(true)}
             />
           </>
         ) : (
-          <Button label="Receive" variant="primary" onClick={() => setIsReceiving(true)} />
+          <Button
+            label={t("transfers.receive")}
+            variant="primary"
+            onClick={() => setIsReceiving(true)}
+          />
         )}
       </HStack>
       <AlertDialog
         isOpen={confirm !== undefined}
         onOpenChange={(open) => !open && setConfirm(undefined)}
-        title={confirm === "delete" ? "Delete this draft?" : "Cancel this transfer?"}
-        description={`${trNumber(transfer.number)}: ${
+        title={
           confirm === "delete"
-            ? "it's removed for good."
-            : "it stays listed as cancelled; nothing moved."
-        }`}
-        actionLabel={confirm === "delete" ? "Delete" : "Cancel transfer"}
+            ? t("transfers.confirm_delete_title")
+            : t("transfers.confirm_cancel_title")
+        }
+        description={
+          confirm === "delete"
+            ? t("transfers.confirm_delete_description", { number })
+            : t("transfers.confirm_cancel_description", { number })
+        }
+        actionLabel={
+          confirm === "delete" ? t("common.delete") : t("transfers.confirm_cancel_action")
+        }
         isActionLoading={isPending}
         onAction={() =>
           run(() =>
@@ -569,6 +607,8 @@ function ShipDialog({
   origin: string;
   onClose: () => void;
 }) {
+  const t = useT<"transfers">();
+  const format = useFormat();
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
   // One key per dialog: a double submit ships once.
@@ -577,8 +617,8 @@ function ShipDialog({
   return (
     <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={560} purpose="form">
       <DialogHeader
-        title={`Ship ${trNumber(transfer.number)}`}
-        subtitle={`Every line leaves ${origin} now, whole, and is on its way until received.`}
+        title={t("transfers.ship_dialog_title", { number: trNumber(transfer.number) })}
+        subtitle={t("transfers.ship_dialog_subtitle", { origin })}
         onOpenChange={(open) => !open && onClose()}
       />
       <VStack gap={4} padding={4}>
@@ -586,25 +626,33 @@ function ShipDialog({
         <VStack gap={1}>
           {transfer.lines.map((l) => (
             <Text key={l.variant}>
-              {l.quantity} × {transferLineLabel(l)}
-              <Text type="supporting" color="secondary">
-                {" "}
-                · {atOrigin[l.variant] ?? 0} at {origin}
-              </Text>
+              {t.rich("transfers.ship_line", {
+                quantity: l.quantity,
+                name: transferLineLabel(l),
+                count: atOrigin[l.variant] ?? 0,
+                origin,
+                dim: (chunks, tag) => (
+                  <Text key={tag} type="supporting" color="secondary">
+                    {chunks}
+                  </Text>
+                ),
+              })}
             </Text>
           ))}
         </VStack>
         {short.length > 0 && (
           <Banner
             status="warning"
-            title="Not enough counted at the origin"
-            description={`${short.map(transferLineLabel).join(", ")}: shipping takes the count below zero. Ship anyway?`}
+            title={t("transfers.ship_short_title")}
+            description={t("transfers.ship_short_description", {
+              lines: format.list(short.map(transferLineLabel)),
+            })}
           />
         )}
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label={short.length > 0 ? "Ship anyway" : "Ship"}
+            label={short.length > 0 ? t("transfers.ship_anyway") : t("transfers.ship_submit")}
             variant="primary"
             isLoading={isPending}
             onClick={() =>
@@ -624,6 +672,8 @@ function ShipDialog({
 type Counts = Record<string, { accepted: number; rejected: number }>;
 
 function ReceiveDialog({ transfer, onClose }: { transfer: Transfer; onClose: () => void }) {
+  const t = useT<"transfers">();
+  const format = useFormat();
   const waiting = transfer.lines.filter((l) => l.in_transit > 0);
   const [counts, setCounts] = useState<Counts>(() =>
     Object.fromEntries(waiting.map((l) => [l.variant, { accepted: l.in_transit, rejected: 0 }])),
@@ -647,8 +697,8 @@ function ReceiveDialog({ transfer, onClose }: { transfer: Transfer; onClose: () 
   return (
     <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={640} purpose="form">
       <DialogHeader
-        title={`Receive ${trNumber(transfer.number)}`}
-        subtitle="Accepted units go on hand at the destination; lost ones were broken or missing on the way."
+        title={t("transfers.receive_dialog_title", { number: trNumber(transfer.number) })}
+        subtitle={t("transfers.receive_dialog_subtitle")}
         onOpenChange={(open) => !open && onClose()}
       />
       <VStack gap={4} padding={4}>
@@ -661,18 +711,21 @@ function ReceiveDialog({ transfer, onClose }: { transfer: Transfer; onClose: () 
                 <VStack gap={0}>
                   <Text weight="medium">{transferLineLabel(line)}</Text>
                   <Text type="supporting" color="secondary">
-                    {line.in_transit} of {line.shipped} on the way
+                    {t("transfers.receive_on_the_way", {
+                      in_transit: line.in_transit,
+                      shipped: line.shipped,
+                    })}
                   </Text>
                 </VStack>
                 <HStack gap={2}>
                   <NumberInput
-                    label="Accepted"
+                    label={t("transfers.accepted")}
                     min={0}
                     value={c.accepted}
                     onChange={(accepted) => set(line.variant, { accepted })}
                   />
                   <NumberInput
-                    label="Lost"
+                    label={t("transfers.lost")}
                     min={0}
                     value={c.rejected}
                     onChange={(rejected) => set(line.variant, { rejected })}
@@ -685,14 +738,16 @@ function ReceiveDialog({ transfer, onClose }: { transfer: Transfer; onClose: () 
         {over.length > 0 && (
           <Banner
             status="error"
-            title="More than is on its way"
-            description={`${over.map(transferLineLabel).join(", ")}: no more can arrive than left.`}
+            title={t("transfers.receive_over_title")}
+            description={t("transfers.receive_over_description", {
+              lines: format.list(over.map(transferLineLabel)),
+            })}
           />
         )}
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label="Receive"
+            label={t("transfers.receive_submit")}
             variant="primary"
             isLoading={isPending}
             isDisabled={lines.length === 0 || over.length > 0}

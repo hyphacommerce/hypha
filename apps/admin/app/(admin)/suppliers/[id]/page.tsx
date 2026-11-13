@@ -15,8 +15,9 @@ import {
   requireStaff,
   sessionClient,
 } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import { hasScope } from "@/lib/navigation";
-import { type Supplier, daysLabel, termsLabel } from "@/lib/purchasing";
+import { type Supplier, termsLabel } from "@/lib/purchasing";
 
 import { NewPurchaseOrder } from "../../purchase-orders/new-purchase-order";
 import { PurchaseOrdersTable } from "../../purchase-orders/purchase-orders-table";
@@ -25,8 +26,6 @@ import { CatalogueTable } from "./catalogue-table";
 import { DeleteSupplier } from "./delete-supplier";
 import { SupplierForm } from "./supplier-form";
 import { type SupplierTab, SupplierTabs } from "./supplier-tabs";
-
-const BACK: Crumb[] = [{ label: "Suppliers", href: "/suppliers" }];
 
 /** The supplier this request read: the header and the tab share one read. */
 const supplierReads = perRequest(async () => new Map<string, Promise<Supplier>>());
@@ -61,7 +60,8 @@ export default async function SupplierPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<SearchParams>;
 }) {
-  const [{ id }, query] = await Promise.all([params, searchParams]);
+  const [{ id }, query, t] = await Promise.all([params, searchParams, getT()]);
+  const back: Crumb[] = [{ label: t("suppliers.list_title"), href: "/suppliers" }];
   const asked = one(query, "tab");
   const tab: SupplierTab = asked === "catalogue" || asked === "orders" ? asked : "details";
   return (
@@ -70,12 +70,12 @@ export default async function SupplierPage({
         <Suspense
           fallback={
             <>
-              <PageHeader back={BACK} />
+              <PageHeader back={back} />
               {tabFallback(tab)}
             </>
           }
         >
-          <SupplierView id={id} tab={tab} query={query} />
+          <SupplierView id={id} tab={tab} query={query} back={back} />
         </Suspense>
       </VStack>
     </Section>
@@ -86,20 +86,30 @@ async function SupplierView({
   id,
   tab,
   query,
+  back,
 }: {
   id: string;
   tab: SupplierTab;
   query: SearchParams;
+  back: Crumb[];
 }) {
-  const [supplier, me] = await Promise.all([loadSupplier(id), requireStaff()]);
+  const [supplier, me, t] = await Promise.all([loadSupplier(id), requireStaff(), getT()]);
   const canOrder = hasScope(me.scopes, "purchasing:write") && !supplier.archived;
   return (
     <>
       <PageHeader
         title={supplier.name}
-        back={BACK}
-        badges={supplier.archived ? <Badge label="Archived" variant="warning" /> : undefined}
-        description={`${supplier.currency} · ${termsLabel(supplier.payment_terms)} · lead time ${daysLabel(supplier.lead_time_days)}`}
+        back={back}
+        badges={
+          supplier.archived ? <Badge label={t("common.archived")} variant="warning" /> : undefined
+        }
+        description={[
+          supplier.currency,
+          termsLabel(t, supplier.payment_terms),
+          supplier.lead_time_days == null
+            ? t("suppliers.detail_lead_time_none")
+            : t("suppliers.detail_lead_time", { count: supplier.lead_time_days }),
+        ].join(" · ")}
         actions={canOrder && <NewPurchaseOrder supplier={supplier.id} />}
       />
       <SupplierTabs id={id} tab={tab}>
