@@ -1,9 +1,9 @@
 use axum::{Json, extract::State, http::StatusCode, response::Response};
 use hypha_cart::{
-    AddLine, ContentLanguages, CreateCart, GroupOffers, HasCarts, LineStatus, PricedCart,
-    PricedShippingGroup, PricingPorts, SetLineQuantity, add_discount_code, add_line, create_cart,
-    remove_cart_line, remove_discount_code, select_shipping, set_cart_customer, set_cart_email,
-    set_cart_language, set_line_quantity, set_shipping_address, shipping_offers,
+    AddLine, CartStatus, ContentLanguages, CreateCart, GroupOffers, HasCarts, LineStatus,
+    PricedCart, PricedShippingGroup, PricingPorts, SetLineQuantity, add_discount_code, add_line,
+    create_cart, remove_cart_line, remove_discount_code, select_shipping, set_cart_customer,
+    set_cart_email, set_cart_language, set_line_quantity, set_shipping_address, shipping_offers,
 };
 use hypha_checkout::CartChecks;
 use hypha_checkout_rules::HasCheckoutRules;
@@ -15,6 +15,7 @@ use hypha_core::{
 use hypha_customers::{HasCustomers, get_customer};
 use hypha_markets::{HasMarkets, MarketRepo};
 use hypha_media::{AssetRepo, HasAssets};
+use hypha_orders::{HasOrders, OrderRepo};
 use hypha_shipping::OfferOutcome;
 use hypha_tax::TaxLine;
 use hypha_translations::{HasTranslations, Overlay, ResourceKind, ResourceRef, fields as keys};
@@ -1338,7 +1339,9 @@ pub(crate) async fn shopper_error<S: Storage>(
 }
 
 /// The language the cart `id` reads in now, for a read about it that isn't the cart
-/// itself (its shipping options, its payment methods): the cart and its market read.
+/// itself (its shipping options, its payment methods): the cart's rule
+/// (`ServedLanguage::of_cart_choice`) over the cart and its market, or its order once
+/// checked out, without pricing it.
 async fn served_for<S: Storage>(
     state: &crate::state::AppState<S>,
     ports: &S::Ports<'_>,
@@ -1350,16 +1353,35 @@ async fn served_for<S: Storage>(
 }
 
 /// `served_for` with the store already read.
-async fn served_in_store<P: HasCarts + HasMarkets>(
+async fn served_in_store<P: HasCarts + HasMarkets + HasOrders>(
     ports: &P,
     ctx: &hypha_core::Ctx,
     id: CartId,
     store: &hypha_stores::Store,
 ) -> Result<ServedLanguage, ApiError> {
     let cart = hypha_cart::find_cart(ctx, ports, id).await?;
-    let market = ports.markets().get(cart.market()).await?;
-    let asked = cart.language().map(Language::as_str);
-    Ok(ServedLanguage::of(asked, store, market.as_ref()))
+    // What `PricedCart::market_languages` holds: the market's, or a checked-out cart's
+    // order's language alone.
+    let market_languages: Vec<Language> = match cart.status() {
+        CartStatus::Open => ports
+            .markets()
+            .get(cart.market())
+            .await?
+            .map(|m| m.languages().to_vec())
+            .unwrap_or_default(),
+        CartStatus::Completed { order } => ports
+            .orders()
+            .get(order)
+            .await?
+            .and_then(|o| o.language().cloned())
+            .into_iter()
+            .collect(),
+    };
+    Ok(ServedLanguage::of_cart_choice(
+        cart.language(),
+        &market_languages,
+        store,
+    ))
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]

@@ -28,8 +28,19 @@ impl ContentLanguages {
     /// offers out of the store's (`Language::pick`), else the store's default. A choice
     /// the market or store stopped offering falls back rather than fails.
     pub fn of(&self, cart: &PricedCart) -> Language {
-        let offered = offered_languages(&cart.market_languages, &self.servable);
-        Language::pick(cart.language.as_ref(), &offered).unwrap_or_else(|| self.source.clone())
+        self.of_choice(cart.language.as_ref(), &cart.market_languages)
+    }
+
+    /// `of` for a read that hasn't priced the cart: its choice (`Cart::language`) and its
+    /// market's languages (a checked-out cart's: its order's language alone, as
+    /// `PricedCart::market_languages` holds then).
+    pub fn of_choice(
+        &self,
+        language: Option<&Language>,
+        market_languages: &[Language],
+    ) -> Language {
+        let offered = offered_languages(market_languages, &self.servable);
+        Language::pick(language, &offered).unwrap_or_else(|| self.source.clone())
     }
 
     /// What apps asked about `cart` (`checkout.validate`, `shipping.rates`) are told: `of`,

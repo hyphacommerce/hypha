@@ -77,6 +77,19 @@ impl ServedLanguage {
         Self::fixed(content_languages(store).of(cart), store)
     }
 
+    /// `of_cart` for a read that hasn't priced the cart: its choice and its market's
+    /// languages (a checked-out cart's: its order's language alone).
+    pub fn of_cart_choice(
+        language: Option<&Language>,
+        market_languages: &[Language],
+        store: &Store,
+    ) -> Self {
+        Self::fixed(
+            content_languages(store).of_choice(language, market_languages),
+            store,
+        )
+    }
+
     /// `language` as it is, for what was written in it already (an order); `None`, an
     /// order from before languages, reads as the store's default.
     pub fn of_order(language: Option<&Language>, store: &Store) -> Self {
