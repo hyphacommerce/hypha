@@ -508,6 +508,12 @@ async fn transfer_repo() {
 }
 
 #[tokio::test]
+async fn translation_repo() {
+    let Some(url) = database_url() else { return };
+    contract::translation_repo(async || fresh_store(&url, "contract_translations").await).await;
+}
+
+#[tokio::test]
 async fn checkout_rule_repo() {
     let Some(url) = database_url() else { return };
     contract::checkout_rule_repo(async || fresh_store(&url, "contract_checkout_rules").await).await;

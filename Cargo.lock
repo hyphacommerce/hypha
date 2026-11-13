@@ -1742,6 +1742,7 @@ dependencies = [
  "hypha-stores",
  "hypha-tax",
  "hypha-testkit",
+ "hypha-translations",
  "hypha-users",
  "serde",
  "serde_json",
