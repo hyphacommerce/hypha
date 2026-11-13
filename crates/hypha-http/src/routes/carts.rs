@@ -22,7 +22,9 @@ use hypha_translations::{HasTranslations, Overlay, ResourceKind, ResourceRef, fi
 use serde::{Deserialize, Serialize};
 
 use super::{
-    address::{PostalAddressRequest, PostalAddressResponse, ShippingAddressCheckResponse},
+    address::{
+        MessageParamsDto, PostalAddressRequest, PostalAddressResponse, ShippingAddressCheckResponse,
+    },
     discounts::{DiscountClassDto, DiscountTargetDto, DiscountValueDto},
     payments::CartPaymentMethodResponse,
     products::ProductMediaResponse,
@@ -166,9 +168,11 @@ pub struct CartMessageResponse {
     /// the message by that field; one a client doesn't place goes at the top.
     #[schema(example = "$.shipping_address.line1")]
     path: String,
-    /// Plain text for the shopper.
+    /// Plain text for the shopper, in English when the message is built in: a client
+    /// showing another language words it from `code` and `params`.
     message: String,
     source: MessageSourceDto,
+    params: MessageParamsDto,
 }
 
 /// Whether a message stops checkout: `error` does, `warning` never.
@@ -205,6 +209,7 @@ impl From<&Message> for CartMessageResponse {
             code: m.code().to_string(),
             path: m.path().to_string(),
             message: m.message().to_string(),
+            params: MessageParamsDto::from(m.params()),
             source: match m.source() {
                 MessageSource::Format => MessageSourceDto::Format,
                 MessageSource::Verification => MessageSourceDto::Verification,

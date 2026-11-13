@@ -226,6 +226,77 @@ mod app_key {
     }
 }
 
+/// The data a client needs to word a built-in message or address problem itself, from its
+/// code, rather than show the English `message`. Empty for a checkout rule's or an app's
+/// message: those are worded by whoever wrote them. A contract like the codes: fields are
+/// added, never renamed. Stored with messages (carts' app checks, orders' address checks),
+/// so every field reads back absent.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct MessageParams {
+    /// The address field the message or problem is about.
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "field")]
+    pub field: Option<AddressField>,
+    /// A value in the country's shape (`invalid_format` on a postal code, where the
+    /// country gives one).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub example: Option<String>,
+    /// The region the address names, as its code (`region_mismatch`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    /// That region's name, as the address data has it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region_name: Option<String>,
+    /// The most characters the field takes (`too_long`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max: Option<u32>,
+}
+
+impl MessageParams {
+    /// Params naming only `field`.
+    pub fn field(field: AddressField) -> Self {
+        Self {
+            field: Some(field),
+            ..Self::default()
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
+}
+
+/// `AddressField` as its wire name.
+mod field {
+    use serde::{Deserialize, Deserializer, Serializer, de::Error};
+
+    use crate::AddressField;
+
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's `with` hands the field by reference"
+    )]
+    pub(super) fn serialize<S: Serializer>(
+        field: &Option<AddressField>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        match field {
+            Some(f) => s.serialize_str(f.as_str()),
+            None => s.serialize_none(),
+        }
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<Option<AddressField>, D::Error> {
+        let raw = Option::<String>::deserialize(d)?;
+        raw.map(|name| {
+            AddressField::from_name(&name)
+                .ok_or_else(|| D::Error::custom(format!("{name:?} is not an address field")))
+        })
+        .transpose()
+    }
+}
+
 /// One thing the shopper should know about their cart.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "RawMessage")]
@@ -235,6 +306,9 @@ pub struct Message {
     path: MessagePath,
     message: String,
     source: MessageSource,
+    /// Only built-in messages have any.
+    #[serde(default, skip_serializing_if = "MessageParams::is_empty")]
+    params: MessageParams,
 }
 
 impl Message {
@@ -279,6 +353,7 @@ impl Message {
             path,
             message: message.to_string(),
             source,
+            params: MessageParams::default(),
         })
     }
 
@@ -291,6 +366,7 @@ impl Message {
             // The format's own sentence: short, and never quoting the address.
             message: warning.message.clone(),
             source: MessageSource::Format,
+            params: MessageParams::field(warning.field),
         }
     }
 
@@ -321,12 +397,17 @@ impl Message {
                 "We couldn't find this address. Check it before you continue.",
             ),
         };
+        let params = match path {
+            MessagePath::ShippingAddressField(field) => MessageParams::field(field),
+            _ => MessageParams::default(),
+        };
         Some(Self {
             severity: Severity::Warning,
             code,
             path,
             message: message.to_string(),
             source: MessageSource::Verification,
+            params,
         })
     }
 
@@ -339,6 +420,7 @@ impl Message {
             path: MessagePath::Cart,
             message: "We can't check your order right now. Try again in a moment.".to_string(),
             source: MessageSource::App { app: app.clone() },
+            params: MessageParams::default(),
         }
     }
 
@@ -364,6 +446,11 @@ impl Message {
 
     pub fn source(&self) -> &MessageSource {
         &self.source
+    }
+
+    /// What a client needs to word it from `code`; empty but for built-in messages.
+    pub fn params(&self) -> &MessageParams {
+        &self.params
     }
 }
 
@@ -426,13 +513,17 @@ struct RawMessage {
     path: MessagePath,
     message: String,
     source: MessageSource,
+    #[serde(default)]
+    params: MessageParams,
 }
 
 impl TryFrom<RawMessage> for Message {
     type Error = MessageError;
 
     fn try_from(raw: RawMessage) -> Result<Self, Self::Error> {
-        Message::new(raw.severity, raw.code, raw.path, &raw.message, raw.source)
+        let mut message = Message::new(raw.severity, raw.code, raw.path, &raw.message, raw.source)?;
+        message.params = raw.params;
+        Ok(message)
     }
 }
 
@@ -772,6 +863,46 @@ mod tests {
                 "source": { "type": "rule", "rule": rule.to_string() },
             })
         );
+    }
+
+    #[test]
+    fn a_format_warning_names_its_field_in_params() {
+        assert_eq!(
+            serde_json::to_value(warning()).unwrap()["params"],
+            serde_json::json!({ "field": "line1" })
+        );
+    }
+
+    #[test]
+    fn a_missing_apartment_names_line_two_in_params() {
+        let message =
+            Message::verification_warning(&verified(AddressVerdict::MissingSubpremise)).unwrap();
+        assert_eq!(message.params(), &MessageParams::field(AddressField::Line2));
+    }
+
+    #[test]
+    fn a_whole_address_verdict_has_no_params() {
+        let message = Message::verification_warning(&verified(AddressVerdict::Ambiguous)).unwrap();
+        assert!(message.params().is_empty());
+    }
+
+    #[test]
+    fn a_stored_built_in_message_keeps_its_params() {
+        let json = serde_json::to_string(&warning()).unwrap();
+        assert_eq!(serde_json::from_str::<Message>(&json).unwrap(), warning());
+    }
+
+    #[test]
+    fn a_message_stored_without_params_reads_back_with_none() {
+        let json = r#"{"severity":"warning","code":"house_number_missing","path":"$.shipping_address.line1","message":"Add a house number","source":{"type":"format"}}"#;
+        let message = serde_json::from_str::<Message>(json).unwrap();
+        assert!(message.params().is_empty());
+    }
+
+    #[test]
+    fn a_stored_param_naming_no_field_doesnt_read() {
+        let json = r#"{"severity":"warning","code":"x","path":"$","message":"m","source":{"type":"format"},"params":{"field":"street"}}"#;
+        assert!(serde_json::from_str::<Message>(json).is_err());
     }
 
     #[test]

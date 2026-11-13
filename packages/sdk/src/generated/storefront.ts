@@ -1068,8 +1068,12 @@ export interface components {
              *     error codes; a checkout rule's is the merchant's, a validation app's the app's.
              */
             code: string;
-            /** @description Plain text for the shopper. */
+            /**
+             * @description Plain text for the shopper, in English when the message is built in: a client
+             *     showing another language words it from `code` and `params`.
+             */
             message: string;
+            params: components["schemas"]["MessageParamsDto"];
             /**
              * @description An RFC 9535 JSONPath into this response, from a closed set: `$` (the cart),
              *     `$.email`, `$.shipping_address`, `$.shipping_address.<field>`,
@@ -1547,6 +1551,36 @@ export interface components {
          */
         MarketId: string;
         /**
+         * @description What a client needs to word a built-in cart message or an address problem from its
+         *     `code` in the shopper's language, rather than show the English `message`. Empty for a
+         *     checkout rule's or a validation app's message, which are worded by whoever wrote them.
+         *     Fields are added, never renamed. By code:
+         *
+         *     - `required`, `unknown_region`: `field`.
+         *     - `too_long`: `field`, `max`.
+         *     - `invalid_format`: `field`, and `example` where the country gives one.
+         *     - `region_mismatch`: `field` (`postal_code`), `region` (the code the address names) and
+         *       `region_name`.
+         *     - `house_number_missing`: `field` (`line1`).
+         *     - `apartment_missing`: `field` (`line2`).
+         *     - `address_corrections_suggested`, `address_ambiguous`, `address_undeliverable`,
+         *       `validation_unavailable`: none (a suggested address is the cart's
+         *       `shipping_address_check.suggested`).
+         *
+         *     A field's label in the country's words is the address format's `label_keys`.
+         */
+        MessageParamsDto: {
+            /** @example 90210 */
+            example?: string | null;
+            field?: components["schemas"]["AddressFieldDto"] | null;
+            /** Format: int32 */
+            max?: number | null;
+            /** @example NY */
+            region?: string | null;
+            /** @example New York */
+            region_name?: string | null;
+        };
+        /**
          * @description Who said it: the address's format, the store's verification app, one of the merchant's
          *     checkout rules, or a validation app.
          */
@@ -1863,7 +1897,8 @@ export interface components {
          *     format (`GET …/address-formats/{country}`): its required fields, the postal code's
          *     shape, the region (a name, alternate name or code, stored as the code where the
          *     country lists regions). Every problem comes back at once as `422 invalid_address`
-         *     with `details.problems: [{field, code, message}]`.
+         *     with `details.problems: [{field, code, message, params}]` (`params` as a cart
+         *     message's).
          */
         PostalAddressRequest: {
             city: string;
@@ -2001,6 +2036,7 @@ export interface components {
             code: string;
             field: components["schemas"]["AddressFieldDto"];
             message: string;
+            params: components["schemas"]["MessageParamsDto"];
         };
         /**
          * @description One result: a listing, a product or a variant (the request's `group`), shown by

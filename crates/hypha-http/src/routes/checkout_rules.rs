@@ -22,7 +22,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{
-    address::{AddressVerificationResponse, PostalAddressRequest, PostalAddressResponse},
+    address::{
+        AddressVerificationResponse, MessageParamsDto, PostalAddressRequest, PostalAddressResponse,
+    },
     carts::CartMessageResponse,
     stamp_times,
 };
@@ -293,6 +295,7 @@ pub struct TestAddressProblem {
     field: String,
     code: String,
     message: String,
+    params: MessageParamsDto,
 }
 
 /// What the address's text tells.
@@ -380,6 +383,7 @@ pub async fn test<S: Storage>(
                         field: p.field.as_str().to_string(),
                         code: p.code.as_str().to_string(),
                         message: p.message.clone(),
+                        params: MessageParamsDto::from(&p.params),
                     })
                     .collect(),
                 address: None,

@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 use hypha_core::address::{in_sentence, with_article};
 use hypha_core::{
     Address, AddressField, AddressFormats, AddressParts, AddressProblem, AddressProblemCode,
-    AddressWarning, AddressWarningCode, CheckedAddress, CountryCode,
+    AddressWarning, AddressWarningCode, CheckedAddress, CountryCode, MessageParams,
 };
 use regex::Regex;
 
@@ -190,6 +190,7 @@ fn normalise_region(
                 field: AddressField::Province,
                 code: AddressProblemCode::Required,
                 message: format!("Select {}", with_article(label)),
+                params: MessageParams::field(AddressField::Province),
             });
         }
         return None;
@@ -215,6 +216,7 @@ fn normalise_region(
                 field: AddressField::Province,
                 code: AddressProblemCode::UnknownRegion,
                 message: format!("Select a valid {}", in_sentence(label)),
+                params: MessageParams::field(AddressField::Province),
             });
             None
         }
@@ -246,6 +248,7 @@ fn check_postal_code(
                 field: AddressField::PostalCode,
                 code: AddressProblemCode::Required,
                 message: format!("Enter {}", with_article(label)),
+                params: MessageParams::field(AddressField::PostalCode),
             });
         }
         return;
@@ -262,6 +265,10 @@ fn check_postal_code(
             field: AddressField::PostalCode,
             code: AddressProblemCode::InvalidFormat,
             message,
+            params: MessageParams {
+                example: country.postal_example.map(str::to_string),
+                ..MessageParams::field(AddressField::PostalCode)
+            },
         });
     } else if let Some(region) = region
         && placed(country, &code)
@@ -271,6 +278,11 @@ fn check_postal_code(
             field: AddressField::PostalCode,
             code: AddressProblemCode::RegionMismatch,
             message: format!("This {} isn't in {}", in_sentence(label), region.name),
+            params: MessageParams {
+                region: Some(region.code.to_string()),
+                region_name: Some(region.name.to_string()),
+                ..MessageParams::field(AddressField::PostalCode)
+            },
         });
     }
     parts.postal_code = Some(code);

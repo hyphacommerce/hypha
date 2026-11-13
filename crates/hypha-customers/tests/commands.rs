@@ -418,6 +418,7 @@ fn add_address_rejects_an_invalid_address() {
                 field: AddressField::City,
                 code: AddressProblemCode::Required,
                 message: "Enter a city".to_string(),
+                params: hypha_core::MessageParams::field(AddressField::City),
             }
         ])))
     );

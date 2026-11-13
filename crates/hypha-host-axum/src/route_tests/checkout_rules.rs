@@ -166,6 +166,7 @@ async fn a_rules_error_blocks_checkout_until_the_address_changes() {
         "path": "$.shipping_address.line1",
         "message": "We can't ship to PO boxes.",
         "source": {"type": "rule", "rule": rule},
+        "params": {},
     });
     assert_eq!(json["messages"], json!([error]));
 

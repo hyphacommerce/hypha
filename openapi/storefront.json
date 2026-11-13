@@ -615,8 +615,11 @@
             "type": "string"
           },
           "message": {
-            "description": "Plain text for the shopper.",
+            "description": "Plain text for the shopper, in English when the message is built in: a client\nshowing another language words it from `code` and `params`.",
             "type": "string"
+          },
+          "params": {
+            "$ref": "#/components/schemas/MessageParamsDto"
           },
           "path": {
             "description": "An RFC 9535 JSONPath into this response, from a closed set: `$` (the cart),\n`$.email`, `$.shipping_address`, `$.shipping_address.<field>`,\n`$.shipping_groups[<i>]` (the group and its chosen option) or `$.lines[<i>]`. Show\nthe message by that field; one a client doesn't place goes at the top.",
@@ -635,7 +638,8 @@
           "code",
           "path",
           "message",
-          "source"
+          "source",
+          "params"
         ],
         "type": "object"
       },
@@ -1890,6 +1894,51 @@
         "pattern": "^mkt_[0-9a-f]{32}$",
         "type": "string"
       },
+      "MessageParamsDto": {
+        "description": "What a client needs to word a built-in cart message or an address problem from its\n`code` in the shopper's language, rather than show the English `message`. Empty for a\ncheckout rule's or a validation app's message, which are worded by whoever wrote them.\nFields are added, never renamed. By code:\n\n- `required`, `unknown_region`: `field`.\n- `too_long`: `field`, `max`.\n- `invalid_format`: `field`, and `example` where the country gives one.\n- `region_mismatch`: `field` (`postal_code`), `region` (the code the address names) and\n  `region_name`.\n- `house_number_missing`: `field` (`line1`).\n- `apartment_missing`: `field` (`line2`).\n- `address_corrections_suggested`, `address_ambiguous`, `address_undeliverable`,\n  `validation_unavailable`: none (a suggested address is the cart's\n  `shipping_address_check.suggested`).\n\nA field's label in the country's words is the address format's `label_keys`.",
+        "properties": {
+          "example": {
+            "example": "90210",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "field": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AddressFieldDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "max": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "region": {
+            "example": "NY",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "region_name": {
+            "example": "New York",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "MessageSourceDto": {
         "description": "Who said it: the address's format, the store's verification app, one of the merchant's\ncheckout rules, or a validation app.",
         "oneOf": [
@@ -2751,7 +2800,7 @@
       },
       "PostalAddressRequest": {
         "additionalProperties": false,
-        "description": "Sent: last name, first line and city required, text trimmed, at most 255 characters\nper field. A cart's or a location's address is also checked against its country's\nformat (`GET …/address-formats/{country}`): its required fields, the postal code's\nshape, the region (a name, alternate name or code, stored as the code where the\ncountry lists regions). Every problem comes back at once as `422 invalid_address`\nwith `details.problems: [{field, code, message}]`.",
+        "description": "Sent: last name, first line and city required, text trimmed, at most 255 characters\nper field. A cart's or a location's address is also checked against its country's\nformat (`GET …/address-formats/{country}`): its required fields, the postal code's\nshape, the region (a name, alternate name or code, stored as the code where the\ncountry lists regions). Every problem comes back at once as `422 invalid_address`\nwith `details.problems: [{field, code, message, params}]` (`params` as a cart\nmessage's).",
         "properties": {
           "city": {
             "type": "string"
@@ -3072,12 +3121,16 @@
           },
           "message": {
             "type": "string"
+          },
+          "params": {
+            "$ref": "#/components/schemas/MessageParamsDto"
           }
         },
         "required": [
           "field",
           "code",
-          "message"
+          "message",
+          "params"
         ],
         "type": "object"
       },

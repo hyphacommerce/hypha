@@ -610,9 +610,14 @@ fn address_problems(e: &hypha_core::AddressError) -> Value {
     let problems: Vec<Value> = e
         .problems()
         .iter()
-        .map(
-            |p| json!({ "field": p.field.as_str(), "code": p.code.as_str(), "message": p.message }),
-        )
+        .map(|p| {
+            json!({
+                "field": p.field.as_str(),
+                "code": p.code.as_str(),
+                "message": p.message,
+                "params": crate::routes::address::MessageParamsDto::from(&p.params),
+            })
+        })
         .collect();
     json!({ "problems": problems })
 }
@@ -2494,6 +2499,7 @@ mod tests {
                     "path": "$.shipping_groups[0]",
                     "message": "No PO boxes with this option.",
                     "source": { "type": "format" },
+                    "params": {},
                 }] }))
             )
         );

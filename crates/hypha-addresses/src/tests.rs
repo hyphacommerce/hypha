@@ -167,6 +167,45 @@ fn the_shape_problem_names_the_example() {
 }
 
 #[test]
+fn the_shape_problem_gives_the_example_as_a_param() {
+    let Err(AddressError::Invalid(found)) = Formats.validate(us(Some("CA"), Some("1"))) else {
+        panic!("expected problems");
+    };
+    assert_eq!(
+        found[0].params,
+        MessageParams {
+            example: Some("90210".to_string()),
+            ..MessageParams::field(AddressField::PostalCode)
+        }
+    );
+}
+
+#[test]
+fn a_mismatch_names_the_region_as_params() {
+    let Err(AddressError::Invalid(found)) = Formats.validate(us(Some("NY"), Some("94043"))) else {
+        panic!("expected problems");
+    };
+    assert_eq!(
+        (
+            found[0].params.region.as_deref(),
+            found[0].params.region_name.as_deref()
+        ),
+        (Some("NY"), Some("New York"))
+    );
+}
+
+#[test]
+fn a_missing_region_names_its_field_as_params() {
+    let Err(AddressError::Invalid(found)) = Formats.validate(us(None, Some("94043"))) else {
+        panic!("expected problems");
+    };
+    assert_eq!(
+        found[0].params,
+        MessageParams::field(AddressField::Province)
+    );
+}
+
+#[test]
 fn a_postal_code_is_upper_cased_with_spaces_collapsed() {
     let address = checked(AddressParts {
         postal_code: Some(" e2   7rg ".to_string()),

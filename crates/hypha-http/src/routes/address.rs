@@ -4,7 +4,7 @@
 
 use hypha_core::{
     Address, AddressField, AddressParts, AddressPrecision, AddressVerdict, AddressVerification,
-    CountryCode, FieldStatus, SuggestedAddress, VerificationFlags,
+    CountryCode, FieldStatus, MessageParams, SuggestedAddress, VerificationFlags,
 };
 use serde::{Deserialize, Serialize};
 
@@ -43,12 +43,59 @@ impl From<AddressField> for AddressFieldDto {
     }
 }
 
+/// What a client needs to word a built-in cart message or an address problem from its
+/// `code` in the shopper's language, rather than show the English `message`. Empty for a
+/// checkout rule's or a validation app's message, which are worded by whoever wrote them.
+/// Fields are added, never renamed. By code:
+///
+/// - `required`, `unknown_region`: `field`.
+/// - `too_long`: `field`, `max`.
+/// - `invalid_format`: `field`, and `example` where the country gives one.
+/// - `region_mismatch`: `field` (`postal_code`), `region` (the code the address names) and
+///   `region_name`.
+/// - `house_number_missing`: `field` (`line1`).
+/// - `apartment_missing`: `field` (`line2`).
+/// - `address_corrections_suggested`, `address_ambiguous`, `address_undeliverable`,
+///   `validation_unavailable`: none (a suggested address is the cart's
+///   `shipping_address_check.suggested`).
+///
+/// A field's label in the country's words is the address format's `label_keys`.
+#[derive(Serialize, utoipa::ToSchema)]
+pub(crate) struct MessageParamsDto {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    field: Option<AddressFieldDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(example = "90210")]
+    example: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(example = "NY")]
+    region: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(example = "New York")]
+    region_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max: Option<u32>,
+}
+
+impl From<&MessageParams> for MessageParamsDto {
+    fn from(p: &MessageParams) -> Self {
+        Self {
+            field: p.field.map(AddressFieldDto::from),
+            example: p.example.clone(),
+            region: p.region.clone(),
+            region_name: p.region_name.clone(),
+            max: p.max,
+        }
+    }
+}
+
 /// Sent: last name, first line and city required, text trimmed, at most 255 characters
 /// per field. A cart's or a location's address is also checked against its country's
 /// format (`GET …/address-formats/{country}`): its required fields, the postal code's
 /// shape, the region (a name, alternate name or code, stored as the code where the
 /// country lists regions). Every problem comes back at once as `422 invalid_address`
-/// with `details.problems: [{field, code, message}]`.
+/// with `details.problems: [{field, code, message, params}]` (`params` as a cart
+/// message's).
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PostalAddressRequest {

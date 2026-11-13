@@ -19,7 +19,7 @@ use crate::{
     error::ApiError,
     extract::{Caller, PathId, Query, Storefront},
     rate_limit::{self, Rule},
-    routes::address::{AddressFieldDto, SuggestedAddressResponse},
+    routes::address::{AddressFieldDto, MessageParamsDto, SuggestedAddressResponse},
     state::{SharedState, Storage},
 };
 
@@ -89,6 +89,7 @@ pub struct ResolvedProblem {
     /// as `invalid_address`'s problems.
     code: &'static str,
     message: String,
+    params: MessageParamsDto,
 }
 
 /// The picked suggestion's address, normalised like any address a form sends (the region
@@ -259,6 +260,7 @@ fn checked(s: SuggestedAddress) -> ResolvedAddressResponse {
             .map(|p| ResolvedProblem {
                 field: p.field.into(),
                 code: p.code.as_str(),
+                params: MessageParamsDto::from(&p.params),
                 message: p.message,
             })
             .collect(),

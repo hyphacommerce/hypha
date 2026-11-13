@@ -238,7 +238,7 @@ async fn a_failing_app_is_skipped_unless_its_failure_blocks() {
         json["details"]["messages"][0],
         json!({"severity": "error", "code": "validation_unavailable", "path": "$",
             "message": "We can't check your order right now. Try again in a moment.",
-            "source": {"type": "app", "app": "app_rules"}})
+            "source": {"type": "app", "app": "app_rules"}, "params": {}})
     );
 }
 
