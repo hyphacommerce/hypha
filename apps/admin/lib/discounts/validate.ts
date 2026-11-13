@@ -3,6 +3,7 @@
 // the API's problems mapped onto the same paths; and the paths turned into the field
 // errors the form shows.
 
+import type { TFor } from "../messages";
 import { fromLocalInput } from "../price-lists.ts";
 import { parseAmount, parsePercent } from "../price-grid/money.ts";
 import {
@@ -17,6 +18,9 @@ import {
   amountMarkets,
 } from "./draft.ts";
 
+/** The translator a discount's labels, problems and summary need. */
+export type DiscountsT = TFor<"common" | "discounts">;
+
 /** One broken rule: where it is and what to do about it. */
 export type Problem = { path: string; message: string };
 
@@ -29,12 +33,12 @@ export type CheckContext = {
   currencies: Readonly<Record<string, number>>;
   /** The store's time zone, which the schedule's wall-clock times are in. */
   timeZone: string;
+  /** Says the problems in the staff member's language. */
+  t: DiscountsT;
 };
 
 /** Field errors by draft path, the first problem of each. */
 export type FieldErrors = Record<string, string>;
-
-const count = (n: number) => n.toLocaleString("en");
 
 /** A positive whole number from what was typed, or null. */
 export function parseCount(text: string): number | null {
@@ -44,13 +48,46 @@ export function parseCount(text: string): number | null {
   return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
 
-/** Basis points off (2000 for "20"), from 0.01% to 100%, or what's wrong. */
-export function parseOff(text: string): { ok: true; value: number } | { ok: false; error: string } {
-  if (/^\s*[-−]/.test(text)) return { ok: false, error: "Without a sign: 20 is 20% off." };
+/** What's wrong with a percentage off, as the message saying so. */
+export type OffProblem =
+  | "discounts.problem_off_sign"
+  | "discounts.problem_off_not_percent"
+  | "discounts.problem_off_zero"
+  | "discounts.problem_off_over";
+
+/**
+ * Basis points off (2000 for "20"), from 0.01% to 100%, or what's wrong: a message key,
+ * for `t`.
+ */
+export function parseOff(
+  text: string,
+): { ok: true; value: number } | { ok: false; error: OffProblem } {
+  if (/^\s*[-−]/.test(text)) return { ok: false, error: "discounts.problem_off_sign" };
   const parsed = parsePercent(text);
-  if (!parsed.ok) return { ok: false, error: "A percentage, like 20 for 20% off." };
-  if (parsed.value <= 0) return { ok: false, error: "More than 0%." };
-  if (parsed.value > 10_000) return { ok: false, error: "At most 100%." };
+  if (!parsed.ok) return { ok: false, error: "discounts.problem_off_not_percent" };
+  if (parsed.value <= 0) return { ok: false, error: "discounts.problem_off_zero" };
+  if (parsed.value > 10_000) return { ok: false, error: "discounts.problem_off_over" };
+  return parsed;
+}
+
+/**
+ * Minor units by market from typed amounts, for the markets amounts are typed for: those
+ * that parse (zero only when allowed), the rest left out.
+ */
+export function amountsOf(
+  amounts: PerMarketText,
+  markets: readonly MarketOption[],
+  currencies: CheckContext["currencies"],
+  options: { allowZero?: boolean } = {},
+): Record<string, number> {
+  const parsed: Record<string, number> = {};
+  for (const market of markets) {
+    const text = amounts[market.id]?.trim() ?? "";
+    const digits = currencies[market.currency];
+    if (text === "" || digits === undefined) continue;
+    const amount = parseAmount(text, digits, market.currency);
+    if (amount.ok && (amount.value !== 0 || options.allowZero)) parsed[market.id] = amount.value;
+  }
   return parsed;
 }
 
@@ -63,6 +100,7 @@ export function parseAmounts(
   markets: readonly MarketOption[],
   currencies: CheckContext["currencies"],
   path: string,
+  t: DiscountsT,
   options: { allowZero?: boolean } = {},
 ): { amounts: Record<string, number>; problems: Problem[] } {
   const parsed: Record<string, number> = {};
@@ -73,13 +111,16 @@ export function parseAmounts(
     const digits = currencies[market.currency];
     const at = `${path}.${market.id}`;
     if (digits === undefined) {
-      problems.push({ path: at, message: `${market.currency} isn't a currency the store knows.` });
+      problems.push({
+        path: at,
+        message: t("discounts.problem_unknown_currency", { currency: market.currency }),
+      });
       continue;
     }
     const amount = parseAmount(text, digits, market.currency);
     if (!amount.ok) problems.push({ path: at, message: amount.error });
     else if (amount.value === 0 && !options.allowZero) {
-      problems.push({ path: at, message: "More than 0." });
+      problems.push({ path: at, message: t("discounts.problem_amount_zero") });
     } else parsed[market.id] = amount.value;
   }
   return { amounts: parsed, problems };
@@ -90,12 +131,13 @@ function checkAmounts(
   ctx: CheckContext,
   markets: readonly MarketOption[],
   path: string,
-  what: string,
+  what: "amount" | "price" | "subtotal" | "minimum",
+  t: DiscountsT,
   options: { allowZero?: boolean } = {},
 ): Problem[] {
-  const parsed = parseAmounts(amounts, markets, ctx.currencies, path, options);
+  const parsed = parseAmounts(amounts, markets, ctx.currencies, path, t, options);
   const typed = markets.some((m) => (amounts[m.id]?.trim() ?? "") !== "");
-  if (!typed) return [{ path, message: `Enter ${what} for at least one market.` }];
+  if (!typed) return [{ path, message: t("discounts.problem_amounts_missing", { what }) }];
   return parsed.problems;
 }
 
@@ -105,116 +147,158 @@ function checkValue(
   markets: readonly MarketOption[],
   path: string,
   allowed: readonly ValueDraft["type"][],
+  t: DiscountsT,
 ): Problem[] {
   if (!allowed.includes(value.type)) {
-    return [{ path: `${path}.type`, message: "This reward can't take that kind of value." }];
+    return [{ path: `${path}.type`, message: t("discounts.problem_value_type") }];
   }
   switch (value.type) {
     case "percent": {
       const off = parseOff(value.percent);
-      return off.ok ? [] : [{ path: `${path}.percent`, message: off.error }];
+      return off.ok ? [] : [{ path: `${path}.percent`, message: t(off.error) }];
     }
     case "amount": {
-      const problems = checkAmounts(value.amounts, ctx, markets, `${path}.amounts`, "an amount");
+      const problems = checkAmounts(value.amounts, ctx, markets, `${path}.amounts`, "amount", t);
       if (value.allocation === "cheapest" && parseCount(value.cheapestUnits) === null) {
-        problems.push({ path: `${path}.cheapestUnits`, message: "A whole number, 1 or more." });
+        problems.push({
+          path: `${path}.cheapestUnits`,
+          message: t("discounts.problem_whole_number"),
+        });
       }
       return problems;
     }
     case "fixed_price":
-      return checkAmounts(value.amounts, ctx, markets, `${path}.amounts`, "a price", {
+      return checkAmounts(value.amounts, ctx, markets, `${path}.amounts`, "price", t, {
         allowZero: true,
       });
   }
 }
 
-function checkItems(items: ItemSetDraft, path: string): Problem[] {
-  const named: Record<Exclude<ItemSetDraft["scope"], "all">, [string[], string]> = {
-    products: [items.products, "products"],
-    variants: [items.variants, "variants"],
-    categories: [items.categories, "categories"],
-  };
+/** What a list of IDs names, as `discounts.problem_too_many` tells them apart. */
+type Listed =
+  | "products"
+  | "variants"
+  | "categories"
+  | "markets"
+  | "channels"
+  | "customer_groups"
+  | "customers";
+
+function checkItems(items: ItemSetDraft, path: string, t: DiscountsT): Problem[] {
   if (items.scope === "all") return [];
-  const [ids, noun] = named[items.scope];
-  if (ids.length === 0) return [{ path: `${path}.${items.scope}`, message: `Choose the ${noun}.` }];
-  if (ids.length > MAX_IDS) {
-    return [{ path: `${path}.${items.scope}`, message: `At most ${count(MAX_IDS)} ${noun}.` }];
+  const ids = items[items.scope];
+  const at = `${path}.${items.scope}`;
+  if (ids.length === 0) {
+    return [{ path: at, message: t("discounts.problem_choose", { what: items.scope }) }];
   }
-  return [];
+  return checkIds(ids, at, items.scope, t);
 }
 
-function checkIds(ids: readonly string[], path: string, noun: string): Problem[] {
-  return ids.length > MAX_IDS ? [{ path, message: `At most ${count(MAX_IDS)} ${noun}.` }] : [];
+function checkIds(ids: readonly string[], path: string, what: Listed, t: DiscountsT): Problem[] {
+  return ids.length > MAX_IDS
+    ? [{ path, message: t("discounts.problem_too_many", { what, max: MAX_IDS }) }]
+    : [];
 }
 
 function checkKind(draft: DiscountDraft, ctx: CheckContext): Problem[] {
+  const t = ctx.t;
   const markets = amountMarkets(draft.conditions, ctx.markets);
   const kind = draft.kind;
   const problems: Problem[] = [];
+  const wholeNumber = t("discounts.problem_whole_number");
+  const tierOrder = t("discounts.problem_tier_order");
   switch (kind.type) {
     case "standard": {
       if (!kind.product && !kind.order && !kind.shipping) {
         problems.push({
           path: "kind",
-          message: "Choose what it takes off: products, the order or shipping.",
+          message: t("discounts.problem_kind_empty"),
         });
       }
       if (kind.product) {
-        problems.push(...checkItems(kind.product.items, "kind.product.items"));
+        problems.push(...checkItems(kind.product.items, "kind.product.items", t));
         problems.push(
-          ...checkValue(kind.product.value, ctx, markets, "kind.product.value", [
-            "percent",
-            "amount",
-            "fixed_price",
-          ]),
+          ...checkValue(
+            kind.product.value,
+            ctx,
+            markets,
+            "kind.product.value",
+            ["percent", "amount", "fixed_price"],
+            t,
+          ),
         );
       }
       if (kind.order) {
         problems.push(
-          ...checkValue(kind.order.value, ctx, markets, "kind.order.value", ["percent", "amount"]),
+          ...checkValue(
+            kind.order.value,
+            ctx,
+            markets,
+            "kind.order.value",
+            ["percent", "amount"],
+            t,
+          ),
         );
       }
       if (kind.shipping) {
         problems.push(
-          ...checkValue(kind.shipping.value, ctx, markets, "kind.shipping.value", [
-            "percent",
-            "amount",
-          ]),
+          ...checkValue(
+            kind.shipping.value,
+            ctx,
+            markets,
+            "kind.shipping.value",
+            ["percent", "amount"],
+            t,
+          ),
           ...parseAmounts(
             kind.shipping.maxAmount,
             markets,
             ctx.currencies,
             "kind.shipping.maxAmount",
+            t,
           ).problems,
         );
       }
       return problems;
     }
     case "buy_x_get_y": {
-      problems.push(...checkItems(kind.buys, "kind.buys"), ...checkItems(kind.gets, "kind.gets"));
+      problems.push(
+        ...checkItems(kind.buys, "kind.buys", t),
+        ...checkItems(kind.gets, "kind.gets", t),
+      );
       if (kind.buy.type === "quantity") {
         if (parseCount(kind.buy.quantity) === null) {
-          problems.push({ path: "kind.buy.quantity", message: "A whole number, 1 or more." });
+          problems.push({ path: "kind.buy.quantity", message: wholeNumber });
         }
       } else {
         problems.push(
-          ...checkAmounts(kind.buy.amounts, ctx, markets, "kind.buy.amounts", "an amount"),
+          ...checkAmounts(kind.buy.amounts, ctx, markets, "kind.buy.amounts", "amount", t),
         );
       }
       if (parseCount(kind.getQuantity) === null) {
-        problems.push({ path: "kind.getQuantity", message: "A whole number, 1 or more." });
+        problems.push({ path: "kind.getQuantity", message: wholeNumber });
       }
-      problems.push(...checkValue(kind.value, ctx, markets, "kind.value", ["percent", "amount"]));
+      problems.push(
+        ...checkValue(kind.value, ctx, markets, "kind.value", ["percent", "amount"], t),
+      );
       if (kind.usesPerOrder.trim() !== "" && parseCount(kind.usesPerOrder) === null) {
-        problems.push({ path: "kind.usesPerOrder", message: "A whole number, or blank for any." });
+        problems.push({
+          path: "kind.usesPerOrder",
+          message: t("discounts.problem_uses_per_order"),
+        });
       }
       return problems;
     }
     case "tiered": {
-      problems.push(...checkItems(kind.items, "kind.items"));
-      if (kind.tiers.length === 0) problems.push({ path: "kind.tiers", message: "Add a tier." });
+      problems.push(...checkItems(kind.items, "kind.items", t));
+      if (kind.tiers.length === 0) {
+        problems.push({ path: "kind.tiers", message: t("discounts.problem_tiers_empty") });
+      }
       if (kind.tiers.length > MAX_TIERS) {
-        problems.push({ path: "kind.tiers", message: `At most ${MAX_TIERS} tiers.` });
+        problems.push({
+          path: "kind.tiers",
+          message: t("discounts.problem_tiers_too_many", { max: MAX_TIERS }),
+        });
       }
       let previous: number | null = null;
       const previousAmounts: Record<string, number> = {};
@@ -223,30 +307,26 @@ function checkKind(draft: DiscountDraft, ctx: CheckContext): Problem[] {
         if (kind.measure === "quantity") {
           const n = parseCount(tier.quantity);
           if (n === null) {
-            problems.push({ path: `${at}.quantity`, message: "A whole number, 1 or more." });
+            problems.push({ path: `${at}.quantity`, message: wholeNumber });
           } else if (previous !== null && n <= previous) {
-            problems.push({
-              path: `${at}.quantity`,
-              message: "Each tier needs more than the one before it.",
-            });
+            problems.push({ path: `${at}.quantity`, message: tierOrder });
           }
           if (n !== null) previous = n;
         } else {
-          problems.push(...checkAmounts(tier.amounts, ctx, markets, `${at}.amounts`, "a subtotal"));
-          const parsed = parseAmounts(tier.amounts, markets, ctx.currencies, `${at}.amounts`);
+          problems.push(
+            ...checkAmounts(tier.amounts, ctx, markets, `${at}.amounts`, "subtotal", t),
+          );
+          const parsed = parseAmounts(tier.amounts, markets, ctx.currencies, `${at}.amounts`, t);
           for (const [market, amount] of Object.entries(parsed.amounts)) {
             const before = previousAmounts[market];
             if (before !== undefined && amount <= before) {
-              problems.push({
-                path: `${at}.amounts.${market}`,
-                message: "Each tier needs more than the one before it.",
-              });
+              problems.push({ path: `${at}.amounts.${market}`, message: tierOrder });
             }
             previousAmounts[market] = amount;
           }
         }
         problems.push(
-          ...checkValue(tier.value, ctx, markets, `${at}.value`, ["percent", "amount"]),
+          ...checkValue(tier.value, ctx, markets, `${at}.value`, ["percent", "amount"], t),
         );
       });
       return problems;
@@ -256,17 +336,22 @@ function checkKind(draft: DiscountDraft, ctx: CheckContext): Problem[] {
 
 /** Every rule the draft breaks, in the form's order; empty when it can be sent. */
 export function checkDraft(draft: DiscountDraft, ctx: CheckContext): Problem[] {
+  const t = ctx.t;
   const problems: Problem[] = [];
   const title = draft.title.trim();
-  if (title === "") problems.push({ path: "title", message: "Give it a title buyers will see." });
+  if (title === "") problems.push({ path: "title", message: t("discounts.problem_title_empty") });
   else if (title.length > MAX_TITLE) {
-    problems.push({ path: "title", message: `At most ${MAX_TITLE} characters.` });
+    problems.push({
+      path: "title",
+      message: t("discounts.problem_too_long", { max: MAX_TITLE }),
+    });
   }
   if (draft.method === "codes") {
     const code = draft.code.trim();
-    if (/\s/.test(code)) problems.push({ path: "code", message: "A code has no spaces." });
-    else if (code.length > MAX_CODE) {
-      problems.push({ path: "code", message: `At most ${MAX_CODE} characters.` });
+    if (/\s/.test(code)) {
+      problems.push({ path: "code", message: t("discounts.problem_code_spaces") });
+    } else if (code.length > MAX_CODE) {
+      problems.push({ path: "code", message: t("discounts.problem_too_long", { max: MAX_CODE }) });
     }
   }
 
@@ -274,10 +359,10 @@ export function checkDraft(draft: DiscountDraft, ctx: CheckContext): Problem[] {
 
   const c = draft.conditions;
   problems.push(
-    ...checkIds(c.markets, "conditions.markets", "markets"),
-    ...checkIds(c.channels, "conditions.channels", "channels"),
-    ...checkIds(c.customerGroups, "conditions.customerGroups", "customer groups"),
-    ...checkIds(c.customers, "conditions.customers", "customers"),
+    ...checkIds(c.markets, "conditions.markets", "markets", t),
+    ...checkIds(c.channels, "conditions.channels", "channels", t),
+    ...checkIds(c.customerGroups, "conditions.customerGroups", "customer_groups", t),
+    ...checkIds(c.customers, "conditions.customers", "customers", t),
   );
   if (c.minSubtotal.enabled) {
     problems.push(
@@ -286,31 +371,33 @@ export function checkDraft(draft: DiscountDraft, ctx: CheckContext): Problem[] {
         ctx,
         amountMarkets(c, ctx.markets),
         "conditions.minSubtotal.amounts",
-        "a minimum",
+        "minimum",
+        t,
       ),
     );
   }
   if (c.minQuantity.enabled && parseCount(c.minQuantity.quantity) === null) {
     problems.push({
       path: "conditions.minQuantity.quantity",
-      message: "A whole number, 1 or more.",
+      message: t("discounts.problem_whole_number"),
     });
   }
 
   if (draft.limits.totalUses.trim() !== "" && parseCount(draft.limits.totalUses) === null) {
-    problems.push({ path: "limits.totalUses", message: "A whole number, or blank for no limit." });
+    problems.push({ path: "limits.totalUses", message: t("discounts.problem_total_uses") });
   }
 
   const { startsAt, endsAt } = draft.schedule;
   const starts = startsAt ? fromLocalInput(startsAt, ctx.timeZone) : null;
   const ends = endsAt ? fromLocalInput(endsAt, ctx.timeZone) : null;
   if (startsAt && !starts) {
-    problems.push({ path: "schedule.startsAt", message: "Enter a date and a time." });
+    problems.push({ path: "schedule.startsAt", message: t("discounts.problem_date_time") });
   }
-  if (endsAt && !ends)
-    problems.push({ path: "schedule.endsAt", message: "Enter a date and a time." });
+  if (endsAt && !ends) {
+    problems.push({ path: "schedule.endsAt", message: t("discounts.problem_date_time") });
+  }
   if (starts && ends && Date.parse(ends) <= Date.parse(starts)) {
-    problems.push({ path: "schedule.endsAt", message: "The end must be after the start." });
+    problems.push({ path: "schedule.endsAt", message: t("discounts.problem_end_before_start") });
   }
   return problems;
 }

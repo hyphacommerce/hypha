@@ -12,6 +12,7 @@ import { Text } from "@astryxdesign/core/Text";
 import type { ReactNode } from "react";
 
 import type { Definition, FieldInput, OwnerType } from "@/lib/custom-fields";
+import { useT } from "@/lib/use-t";
 
 import { CustomFieldInput } from "./field-input";
 
@@ -33,6 +34,7 @@ export function CustomFieldsForm({
   /** Fields left out for this session (`custom_fields.<key>`). */
   redacted?: string[];
 }) {
+  const t = useT<"custom_fields">();
   const hidden = new Set((redacted ?? []).map((name) => name.replace(/^custom_fields\./, "")));
   return (
     <VStack gap={4}>
@@ -44,7 +46,7 @@ export function CustomFieldsForm({
             <VStack key={definition.field} gap={0.5}>
               <Text weight="medium">{definition.name}</Text>
               <Text type="supporting" color="secondary">
-                Personal: hidden from your role.
+                {t("custom_fields.form_hidden_personal")}
               </Text>
             </VStack>
           );
@@ -76,16 +78,23 @@ export function CustomFieldsFrame({
   actions?: ReactNode;
   children: ReactNode;
 }) {
+  const t = useT<"custom_fields">();
   return (
     <Card>
       <VStack gap={3}>
         <VStack gap={1}>
           <Text type="display-3" as="h2">
-            Custom fields
+            {t("custom_fields.title")}
           </Text>
           <Text type="supporting" color="secondary">
-            Your own data on this {ownerType}, and what apps keep here.{" "}
-            <Link href={`/custom-fields?owner=${ownerType}`}>Manage fields</Link>
+            {t.rich("custom_fields.card_hint", {
+              owner: ownerType,
+              link: (chunks, key) => (
+                <Link key={key} href={`/custom-fields?owner=${ownerType}`}>
+                  {chunks}
+                </Link>
+              ),
+            })}
           </Text>
         </VStack>
         {error && <Banner status="error" title={error} />}

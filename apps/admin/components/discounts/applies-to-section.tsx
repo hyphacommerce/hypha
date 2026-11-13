@@ -16,6 +16,7 @@ import { useState } from "react";
 import { ProductPicker } from "@/components/product-picker";
 import type { ItemSetDraft, ItemsScope } from "@/lib/discounts/draft";
 import type { FieldErrors } from "@/lib/discounts/validate";
+import { useT } from "@/lib/use-t";
 
 import { FieldError, IdTokens, type Option, type SectionProps, fieldStatus } from "./fields";
 import { SearchPicker } from "./search-picker";
@@ -26,7 +27,7 @@ const scopeOf = (value: string): ItemsScope => SCOPES.find((s) => s === value) ?
 
 /** An item set's fields, for a reward or either side of a buy X get Y. */
 export function ItemSetFields({
-  label = "Applies to",
+  label: given,
   items,
   path,
   errors,
@@ -48,6 +49,8 @@ export function ItemSetFields({
   /** Names of products and variants picked here, for the tokens and the summary. */
   onNames: (names: Record<string, string>) => void;
 }) {
+  const t = useT<"discounts">();
+  const label = given ?? t("discounts.applies_to");
   const [picking, setPicking] = useState<"products" | "variants" | null>(null);
   const set = (change: Partial<ItemSetDraft>, field: string) =>
     onChange({ ...items, ...change }, [`${path}.${field}`]);
@@ -60,17 +63,17 @@ export function ItemSetFields({
         onChange={(scope) => set({ scope: scopeOf(scope) }, "scope")}
         isDisabled={isReadOnly}
       >
-        <RadioListItem value="all" label="Every product" />
+        <RadioListItem value="all" label={t("discounts.items_all")} />
         <RadioListItem
           value="categories"
-          label="Products in categories"
-          description="A category counts the products in its subcategories too."
+          label={t("discounts.items_categories")}
+          description={t("discounts.items_categories_hint")}
         />
-        <RadioListItem value="products" label="Chosen products" />
+        <RadioListItem value="products" label={t("discounts.items_products")} />
         <RadioListItem
           value="variants"
-          label="Chosen variants"
-          description="Only these variants of their products."
+          label={t("discounts.items_variants")}
+          description={t("discounts.items_variants_hint")}
         />
       </RadioList>
       <FieldError message={errors[`${path}.scope`]} />
@@ -78,15 +81,15 @@ export function ItemSetFields({
       {items.scope === "categories" && (
         <VStack gap={2}>
           <MultiSelector
-            label="Categories"
-            placeholder="Choose categories"
+            label={t("common.categories")}
+            placeholder={t("discounts.items_choose_categories")}
             options={[...categories]}
             value={items.categories}
             onChange={(chosen) => set({ categories: chosen }, "categories")}
             hasSearch
             triggerDisplay="count"
             formatValue={(chosen) =>
-              chosen.length === 1 ? "1 category" : `${chosen.length} categories`
+              t("discounts.items_categories_count", { count: chosen.length })
             }
             isDisabled={isReadOnly}
             status={fieldStatus(errors[`${path}.categories`])}
@@ -119,7 +122,7 @@ export function ItemSetFields({
           />
           {!isReadOnly && (
             <Button
-              label="Choose products"
+              label={t("discounts.items_choose_products")}
               variant="secondary"
               onClick={() => setPicking("products")}
             />
@@ -141,7 +144,7 @@ export function ItemSetFields({
           />
           {!isReadOnly && (
             <Button
-              label="Choose variants"
+              label={t("discounts.items_choose_variants")}
               variant="secondary"
               onClick={() => setPicking("variants")}
             />
@@ -150,8 +153,8 @@ export function ItemSetFields({
       )}
 
       <CheckboxInput
-        label="Not on items already on sale"
-        description="Leaves out items a sale price list has reduced."
+        label={t("discounts.items_not_on_sale")}
+        description={t("discounts.items_not_on_sale_hint")}
         value={items.excludeOnSale}
         onChange={(excludeOnSale) => set({ excludeOnSale }, "excludeOnSale")}
         isDisabled={isReadOnly}
@@ -159,7 +162,7 @@ export function ItemSetFields({
 
       {picking === "products" && (
         <ProductPicker
-          title={`${label}: products`}
+          title={t("discounts.items_picker_products", { label })}
           isAlreadyIn={(p) => items.products.includes(p.id)}
           onConfirm={async (picked) => {
             onNames(Object.fromEntries(picked.map((p) => [p.id, p.title])));
@@ -172,7 +175,7 @@ export function ItemSetFields({
       {picking === "variants" && (
         <SearchPicker
           source="variants"
-          title={`${label}: variants`}
+          title={t("discounts.items_picker_variants", { label })}
           chosen={items.variants}
           onConfirm={(picked) => {
             onNames(Object.fromEntries(picked.map((v) => [v.id, v.label])));
@@ -203,6 +206,7 @@ export function AppliesToSection({
   names: Readonly<Record<string, string>>;
   onNames: (names: Record<string, string>) => void;
 }) {
+  const t = useT<"discounts">();
   const kind = draft.kind;
   const shared = { errors, isReadOnly, categories, names, onNames };
 
@@ -212,16 +216,15 @@ export function AppliesToSection({
         <VStack gap={4}>
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Applies to
+              {t("discounts.applies_to")}
             </Text>
             <Text type="supporting" color="secondary">
-              The units bought count the most expensive first; the units got are the cheapest left.
-              One item may be on both sides: buy 2, get 1 free.
+              {t("discounts.applies_bxgy_hint")}
             </Text>
           </VStack>
           <ItemSetFields
             {...shared}
-            label="Customer buys"
+            label={t("discounts.applies_buys")}
             items={kind.buys}
             path="kind.buys"
             onChange={(buys, paths) => onChange({ ...draft, kind: { ...kind, buys } }, paths)}
@@ -229,7 +232,7 @@ export function AppliesToSection({
           <Divider />
           <ItemSetFields
             {...shared}
-            label="Customer gets"
+            label={t("discounts.applies_gets")}
             items={kind.gets}
             path="kind.gets"
             onChange={(gets, paths) => onChange({ ...draft, kind: { ...kind, gets } }, paths)}
@@ -245,10 +248,10 @@ export function AppliesToSection({
         <VStack gap={4}>
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Applies to
+              {t("discounts.applies_to")}
             </Text>
             <Text type="supporting" color="secondary">
-              The items the tiers count, and that their discount comes off.
+              {t("discounts.applies_tiers_hint")}
             </Text>
           </VStack>
           <ItemSetFields
@@ -268,13 +271,13 @@ export function AppliesToSection({
       <VStack gap={4}>
         <VStack gap={1}>
           <Text type="display-3" as="h2">
-            Applies to
+            {t("discounts.applies_to")}
           </Text>
           {!product && (
             <Text type="supporting" color="secondary">
               {kind.order
-                ? "An order discount comes off the whole subtotal."
-                : "A shipping discount comes off the chosen shipping."}
+                ? t("discounts.applies_order_hint")
+                : t("discounts.applies_shipping_hint")}
             </Text>
           )}
         </VStack>

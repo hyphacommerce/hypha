@@ -9,26 +9,28 @@ import { VStack } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 
+import { useT } from "@/lib/use-t";
+
 import { type SectionProps, fieldStatus } from "./fields";
 
 export function LimitsSection({ draft, errors, onChange, isReadOnly }: SectionProps) {
+  const t = useT<"discounts">();
   const limits = draft.limits;
   return (
     <Card>
       <VStack gap={4}>
         <VStack gap={1}>
           <Text type="display-3" as="h2">
-            Limits
+            {t("discounts.limits_title")}
           </Text>
           <Text type="supporting" color="secondary">
-            A use is counted when an order is placed with it. Cancelling the order doesn&apos;t give
-            it back: raise the limit instead.
+            {t("discounts.limits_hint")}
           </Text>
         </VStack>
         <TextInput
-          label="Total uses"
+          label={t("discounts.limits_total")}
           isOptional
-          description="Across every buyer and code. Blank: no limit."
+          description={t("discounts.limits_total_hint")}
           value={limits.totalUses}
           onChange={(totalUses) =>
             onChange({ ...draft, limits: { ...limits, totalUses } }, ["limits.totalUses"])
@@ -38,8 +40,8 @@ export function LimitsSection({ draft, errors, onChange, isReadOnly }: SectionPr
           width={200}
         />
         <CheckboxInput
-          label="Once per customer"
-          description="Counted by the buyer's email, so a guest checkout counts too."
+          label={t("discounts.limits_once")}
+          description={t("discounts.limits_once_hint")}
           value={limits.oncePerCustomer}
           onChange={(oncePerCustomer) =>
             onChange({ ...draft, limits: { ...limits, oncePerCustomer } }, [

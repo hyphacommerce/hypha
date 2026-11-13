@@ -5,8 +5,13 @@
 
 import type { FilterDef } from "@/components/resource-table/resource-table";
 import { type Definition, filterParam, isFilterOffered, parseType } from "@/lib/custom-fields";
+import type { TFor } from "@/lib/messages";
 
-export function customFieldFilters(definitions: Definition[]): FilterDef[] {
+/**
+ * `t` names the yes/no of a true/false field; without one they're English, for the
+ * lists that haven't a translator yet.
+ */
+export function customFieldFilters(definitions: Definition[], t?: TFor<"common">): FilterDef[] {
   return definitions.filter(isFilterOffered).map((definition): FilterDef => {
     const param = filterParam(definition);
     const label = definition.name;
@@ -28,8 +33,8 @@ export function customFieldFilters(definitions: Definition[]): FilterDef[] {
         param,
         label,
         options: [
-          { value: "true", label: "Yes" },
-          { value: "false", label: "No" },
+          { value: "true", label: t?.("common.yes") ?? "Yes" },
+          { value: "false", label: t?.("common.no") ?? "No" },
         ],
       };
     }

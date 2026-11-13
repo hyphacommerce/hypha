@@ -2,6 +2,8 @@
 // random one for the "Generate" button, from the same look-alike-free alphabet the API
 // generates batches with.
 
+import type { TFor } from "../messages";
+
 /** No 0/O, 1/I/L: a code read off a flyer is typed right. */
 export const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
@@ -26,17 +28,42 @@ const characters = (text: string) => [...text].length;
  * Why codes of `length` characters can't be generated after `prefix`, or null when they
  * can: the length counts the prefix, and leaves at least `MIN_RANDOM_CHARACTERS` random.
  */
-export function generationProblem(length: number, prefix: string): string | null {
+export function generationProblem(
+  length: number,
+  prefix: string,
+  t: TFor<"discounts">,
+): string | null {
   if (!Number.isInteger(length) || length < MIN_GENERATED_LENGTH || length > MAX_GENERATED_LENGTH) {
-    return `Length: ${MIN_GENERATED_LENGTH} to ${MAX_GENERATED_LENGTH} characters, the prefix included.`;
+    return t("discounts.codes_length_range", {
+      min: MIN_GENERATED_LENGTH,
+      max: MAX_GENERATED_LENGTH,
+    });
   }
   const taken = characters(normaliseCode(prefix));
   if (length - taken >= MIN_RANDOM_CHARACTERS) return null;
   const longest = MAX_GENERATED_LENGTH - MIN_RANDOM_CHARACTERS;
   if (taken > longest) {
-    return `The prefix is ${taken} characters: at most ${longest}, so codes keep ${MIN_RANDOM_CHARACTERS} random characters.`;
+    return t("discounts.codes_prefix_too_long", {
+      taken,
+      longest,
+      random: MIN_RANDOM_CHARACTERS,
+    });
   }
-  return `Codes need ${MIN_RANDOM_CHARACTERS} random characters after the ${taken}-character prefix: a length of ${taken + MIN_RANDOM_CHARACTERS} or more.`;
+  return t("discounts.codes_need_random", {
+    random: MIN_RANDOM_CHARACTERS,
+    taken,
+    length: taken + MIN_RANDOM_CHARACTERS,
+  });
+}
+
+/** Whether codes of `length` characters can be generated after `prefix`. */
+function canGenerate(length: number, prefix: string): boolean {
+  return (
+    Number.isInteger(length) &&
+    length >= MIN_GENERATED_LENGTH &&
+    length <= MAX_GENERATED_LENGTH &&
+    length - characters(normaliseCode(prefix)) >= MIN_RANDOM_CHARACTERS
+  );
 }
 
 /**
@@ -60,16 +87,17 @@ export function codesFrom(text: string): string[] {
  * A random code of `length` characters, the prefix included as the API counts it:
  * `prefix` (normalised), then characters from `CODE_ALPHABET`. `random` fills a byte
  * array (the browser's `crypto.getRandomValues` by default); bytes that would favour some
- * characters are drawn again. Throws a `RangeError` with `generationProblem`'s message
- * when the length and prefix leave too few random characters.
+ * characters are drawn again. Throws a `RangeError` when the length and prefix leave too
+ * few random characters (`generationProblem` says why, for people).
  */
 export function generateCode(
   length = 12,
   prefix = "",
   random: (bytes: Uint8Array) => Uint8Array = (bytes) => crypto.getRandomValues(bytes),
 ): string {
-  const problem = generationProblem(length, prefix);
-  if (problem) throw new RangeError(problem);
+  if (!canGenerate(length, prefix)) {
+    throw new RangeError(`can't generate codes of ${length} characters after ${prefix}`);
+  }
   const start = normaliseCode(prefix);
   const wanted = length - characters(start);
   const size = CODE_ALPHABET.length;

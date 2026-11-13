@@ -9,6 +9,7 @@ import { redirect } from "next/navigation";
 
 import type { CreateDiscount, Refusal, UpdateDiscount } from "@/lib/discounts/wire";
 import { describe, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 
 /** The outcome of a write: why it was refused, if it was. */
 export type Result = { refusal?: Refusal };
@@ -92,7 +93,10 @@ export async function addCodes(
         ? Reflect.get(error.details, "code")
         : undefined;
     return {
-      error: typeof taken === "string" ? `Another discount has ${taken}.` : await describe(error),
+      error:
+        typeof taken === "string"
+          ? (await getT())("discounts.codes_taken", { code: taken })
+          : await describe(error),
     };
   }
   refresh();

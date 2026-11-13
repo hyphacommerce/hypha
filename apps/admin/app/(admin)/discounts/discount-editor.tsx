@@ -10,7 +10,7 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { useCurrencies } from "@/components/currencies";
 import { useTimeZone } from "@/components/date-time";
@@ -21,6 +21,7 @@ import { TemplatesPicker } from "@/components/discounts/templates-picker";
 import { SaveBar } from "@/components/save-bar";
 import type { DiscountDraft } from "@/lib/discounts/draft";
 import { type TemplateKey, templateOf } from "@/lib/discounts/templates";
+import { useT } from "@/lib/use-t";
 import {
   type CheckContext,
   type FieldErrors,
@@ -95,7 +96,13 @@ function useServerSummary(
 }
 
 function useCheckContext(options: DiscountOptions): CheckContext {
-  return { markets: options.markets, currencies: useCurrencies(), timeZone: useTimeZone() };
+  const t = useT<"discounts">();
+  const currencies = useCurrencies();
+  const timeZone = useTimeZone();
+  return useMemo(
+    () => ({ markets: options.markets, currencies, timeZone, t }),
+    [options.markets, currencies, timeZone, t],
+  );
 }
 
 /** A new discount: a template first, then the form, created with its first code. */
@@ -109,6 +116,7 @@ export function NewDiscount({
   /** A template chosen by the URL (`?template=`). */
   initial: TemplateKey | null;
 }) {
+  const t = useT<"discounts">();
   const ctx = useCheckContext(options);
   const [template, setTemplate] = useState<TemplateKey | null>(initial);
   const [draft, setDraft] = useState<DiscountDraft | null>(
@@ -129,7 +137,7 @@ export function NewDiscount({
     return (
       <VStack gap={3}>
         <Text type="display-3" as="h2">
-          Start from
+          {t("discounts.new_start_from")}
         </Text>
         <TemplatesPicker
           value={template}
@@ -150,15 +158,19 @@ export function NewDiscount({
         return;
       }
       const result = await createDiscount(built.body);
-      if (result.refusal) setErrors(fieldErrors(refusalProblems(result.refusal, draft)));
+      if (result.refusal) setErrors(fieldErrors(refusalProblems(result.refusal, draft, t)));
     });
 
   return (
     <VStack gap={5}>
       <HStack gap={2} vAlign="center" wrap="wrap">
-        <Text color="secondary">From the template {templateOf(template ?? "")?.label ?? ""}.</Text>
+        <Text color="secondary">
+          {t("discounts.new_from_template", {
+            template: template ? t(`discounts.template_${template}`) : "",
+          })}
+        </Text>
         <Button
-          label="Choose another"
+          label={t("discounts.new_choose_another")}
           variant="ghost"
           size="sm"
           onClick={() => {
@@ -184,8 +196,13 @@ export function NewDiscount({
         now={now}
       />
       <HStack gap={2} hAlign="end">
-        <Button label="Cancel" variant="ghost" href="/discounts" />
-        <Button label="Create discount" variant="primary" isLoading={isPending} onClick={create} />
+        <Button label={t("common.cancel")} variant="ghost" href="/discounts" />
+        <Button
+          label={t("discounts.create")}
+          variant="primary"
+          isLoading={isPending}
+          onClick={create}
+        />
       </HStack>
     </VStack>
   );
@@ -200,6 +217,7 @@ export function EditDiscount({
   now,
   isReadOnly,
 }: Common & { discount: Discount; isReadOnly: boolean }) {
+  const t = useT<"discounts">();
   const ctx = useCheckContext(options);
   const [saved] = useState(() => draftOf(discount, ctx));
   const [draft, setDraft] = useState(saved);
@@ -223,14 +241,16 @@ export function EditDiscount({
     startTransition(async () => {
       if ("problems" in built) {
         setErrors(fieldErrors(built.problems));
-        setError("Fix the fields marked below.");
+        setError(t("discounts.edit_fix_fields"));
         return;
       }
       const result = await updateDiscount(discount.id, built.body);
       if (result.refusal) {
-        const problems = refusalProblems(result.refusal, draft);
+        const problems = refusalProblems(result.refusal, draft, t);
         setErrors(fieldErrors(problems));
-        setError(problems.some((p) => p.path !== "") ? "Fix the fields marked below." : undefined);
+        setError(
+          problems.some((p) => p.path !== "") ? t("discounts.edit_fix_fields") : undefined,
+        );
       } else {
         setError(undefined);
       }
@@ -238,8 +258,8 @@ export function EditDiscount({
 
   const uses =
     discount.limits.total == null
-      ? `Used on ${discount.used.toLocaleString("en")} ${discount.used === 1 ? "order" : "orders"}`
-      : `${discount.used.toLocaleString("en")} of ${discount.limits.total.toLocaleString("en")} uses`;
+      ? t("discounts.edit_used_on", { count: discount.used })
+      : t("discounts.edit_uses_of_limit", { used: discount.used, limit: discount.limits.total });
 
   return (
     <VStack gap={4}>
@@ -255,7 +275,7 @@ export function EditDiscount({
         }}
       />
       {isReadOnly && (
-        <Banner status="info" title="Your role can see discounts but not change them." />
+        <Banner status="info" title={t("discounts.edit_read_only")} />
       )}
       <DiscountForm
         draft={draft}

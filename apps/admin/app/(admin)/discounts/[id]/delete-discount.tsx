@@ -8,6 +8,8 @@ import { VStack } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
 import { useState, useTransition } from "react";
 
+import { useT } from "@/lib/use-t";
+
 import { deleteDiscount } from "../actions";
 
 /**
@@ -15,6 +17,7 @@ import { deleteDiscount } from "../actions";
  * it took off them; carts holding one of its codes see it go.
  */
 export function DeleteDiscount({ id, title, used }: { id: string; title: string; used: number }) {
+  const t = useT<"discounts">();
   const [isAsking, setIsAsking] = useState(false);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -22,25 +25,28 @@ export function DeleteDiscount({ id, title, used }: { id: string; title: string;
     <Card>
       <VStack gap={3} hAlign="start">
         <Text type="display-3" as="h2">
-          Delete
+          {t("discounts.delete_title")}
         </Text>
         <Text type="supporting" color="secondary">
-          Its codes and usage records go with it. Orders keep what it took off them. To stop it for
-          now, switch it off under Schedule instead.
+          {t("discounts.delete_hint")}
         </Text>
         {error && <Banner status="error" title={error} />}
-        <Button label="Delete discount" variant="destructive" onClick={() => setIsAsking(true)} />
+        <Button
+          label={t("discounts.delete_action")}
+          variant="destructive"
+          onClick={() => setIsAsking(true)}
+        />
       </VStack>
       <AlertDialog
         isOpen={isAsking}
         onOpenChange={(open) => !open && setIsAsking(false)}
-        title={`Delete ${title}?`}
+        title={t("common.delete_named", { name: title })}
         description={
           used > 0
-            ? `It was used on ${used.toLocaleString("en")} ${used === 1 ? "order" : "orders"}: they keep their discount, but its usage records are deleted with it.`
-            : "The discount and its codes are deleted for good."
+            ? t("discounts.delete_dialog_used", { count: used })
+            : t("discounts.delete_dialog_unused")
         }
-        actionLabel="Delete discount"
+        actionLabel={t("discounts.delete_action")}
         isActionLoading={isPending}
         onAction={() =>
           startTransition(async () => {
