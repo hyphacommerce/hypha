@@ -63,10 +63,12 @@ export function progressParts(progress: LanguageProgress): ProgressParts {
 
 /**
  * The share translated as the legend writes it, a fraction in whole percents rounded
- * down: a language with one field missing never reads "100%".
+ * down: a language with one field missing never reads "100%". Worked out from the
+ * counts, since a fraction times 100 isn't exact (0.29 × 100 floors to 28).
  */
-export function shownShare(share: number): number {
-  return Math.floor(Math.min(1, Math.max(0, share)) * 100) / 100;
+export function shownShare(parts: Pick<ProgressParts, "current" | "outdated" | "total">): number {
+  if (parts.total === 0) return 0;
+  return Math.floor(((parts.current + parts.outdated) * 100) / parts.total) / 100;
 }
 
 /**

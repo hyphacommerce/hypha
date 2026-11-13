@@ -10,7 +10,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { LanguageIcon } from "@heroicons/react/24/outline";
 
 import { type FilterDef, ResourceTable } from "@/components/resource-table/resource-table";
-import { shortId } from "@/lib/agents";
+import { shortId } from "@/lib/ids";
 import {
   type WorklistItem,
   type WorklistState,

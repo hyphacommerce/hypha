@@ -2,24 +2,33 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { VStack } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
-import { forbidden } from "next/navigation";
+import { forbidden, redirect } from "next/navigation";
 import { Suspense } from "react";
 
 import { type Crumb, PageHeader } from "@/components/page-header";
-import { type SearchParams, one } from "@/components/resource-table/params";
+import {
+  CURSOR,
+  PREV,
+  type SearchParams,
+  href,
+  one,
+  withChanges,
+} from "@/components/resource-table/params";
 import { listPage, pageQuery } from "@/components/resource-table/server";
 import { loadStore, loaded, requireStaff, sessionClient } from "@/lib/hypha";
 import { getT } from "@/lib/i18n";
 import type { T } from "@/lib/messages";
 import { hasScope, settingsCrumb } from "@/lib/navigation";
 import {
+  type LanguageProgress,
   WORKLIST_PATH,
   type WorklistFilters,
+  isUncounted,
   worklistFilters,
   worklistQuery,
 } from "@/lib/translation-worklist";
 import { resourceNames } from "@/lib/translation-worklist-server";
-import { KINDS, type Kind, canReadTranslations } from "@/lib/translations";
+import { KINDS, type Kind, canReadTranslations, isKind } from "@/lib/translations";
 
 import { WorklistControls } from "./worklist-controls";
 import { WorklistTable } from "./worklist-table";
@@ -46,10 +55,19 @@ export default async function TranslationWorklistPage({
   ]);
   if (!hasScope(me.scopes, "translations:read")) forbidden();
   const kinds = KINDS.filter((kind) => canReadTranslations(me.scopes, kind));
-  const back: Crumb[] = [
-    settingsCrumb(t),
-    { label: t("translations.worklist_back"), href: "/settings/languages" },
-  ];
+  // A kind the role can't read (or this build doesn't know) leaves the URL, so the table's
+  // filter never shows a kind the list isn't filtered by.
+  const asked = one(params, "kind");
+  if (asked !== undefined && !(isKind(asked) && kinds.includes(asked))) {
+    const changes = { kind: undefined, [CURSOR]: undefined, [PREV]: undefined };
+    redirect(href(WORKLIST_PATH, withChanges(params, changes)));
+  }
+  // Settings → Languages reads the store: without `stores:read` it's the no-access
+  // notice, so the page offers no way there.
+  const canManage = store !== null;
+  const back: Crumb[] = canManage
+    ? [settingsCrumb(t), { label: t("translations.worklist_back"), href: "/settings/languages" }]
+    : [settingsCrumb(t)];
   const header = (
     <PageHeader
       back={back}
@@ -71,28 +89,29 @@ export default async function TranslationWorklistPage({
     );
   }
   const languages = store.languages;
-  const filters = filtersFor(params, languages, kinds);
   return (
     <Section padding={6}>
       <VStack gap={5}>
         {header}
-        <Worklist languages={languages} filters={filters} params={params} kinds={kinds} t={t} />
+        <Worklist
+          languages={languages}
+          filters={filtersFor(params, languages)}
+          params={params}
+          kinds={kinds}
+          canManage
+          t={t}
+        />
       </VStack>
     </Section>
   );
 }
 
-/** The filters from the URL, with a kind the role can't read dropped. */
-function filtersFor(
-  params: SearchParams,
-  languages: readonly Language[],
-  kinds: readonly Kind[],
-): WorklistFilters {
-  const filters = worklistFilters(
+/** The filters from the URL, whose kind the shell has checked. */
+function filtersFor(params: SearchParams, languages: readonly Language[]): WorklistFilters {
+  return worklistFilters(
     { language: one(params, "language"), state: one(params, "state"), kind: one(params, "kind") },
     languages.map((l) => l.language),
   );
-  return filters.kind && kinds.includes(filters.kind) ? filters : { ...filters, kind: undefined };
 }
 
 /** The choices above the table and the table, or a note when there's nothing to choose. */
@@ -101,12 +120,18 @@ function Worklist({
   filters,
   params,
   kinds,
+  canManage,
+  progress,
   t,
 }: {
   languages: Language[];
   filters: WorklistFilters;
   params: SearchParams;
   kinds: Kind[];
+  /** Whether the role may open Settings → Languages. */
+  canManage: boolean;
+  /** Each language's progress, where the page has read it already. */
+  progress?: LanguageProgress[];
   t: T;
 }) {
   const { language, state } = filters;
@@ -117,11 +142,13 @@ function Worklist({
         title={t("translations.worklist_no_languages_title")}
         description={t("translations.worklist_no_languages_description")}
         endContent={
-          <Button
-            label={t("translations.worklist_no_languages_action")}
-            variant="secondary"
-            href="/settings/languages"
-          />
+          canManage && (
+            <Button
+              label={t("translations.worklist_no_languages_action")}
+              variant="secondary"
+              href="/settings/languages"
+            />
+          )
         }
       />
     );
@@ -129,7 +156,12 @@ function Worklist({
   return (
     <WorklistControls languages={languages} language={language} state={state} kind={filters.kind}>
       <Suspense fallback={<WorklistTable kinds={kinds} language={language} state={state} />}>
-        <Rows filters={{ ...filters, language }} params={params} kinds={kinds} />
+        <Rows
+          filters={{ ...filters, language }}
+          params={params}
+          kinds={kinds}
+          progress={progress}
+        />
       </Suspense>
     </WorklistControls>
   );
@@ -143,9 +175,11 @@ async function LanguagesThenRows({ params, kinds }: { params: SearchParams; kind
   return (
     <Worklist
       languages={languages}
-      filters={filtersFor(params, languages, kinds)}
+      filters={filtersFor(params, languages)}
       params={params}
       kinds={kinds}
+      canManage={false}
+      progress={progress.languages}
       t={t}
     />
   );
@@ -155,10 +189,12 @@ async function Rows({
   filters,
   params,
   kinds,
+  progress,
 }: {
   filters: WorklistFilters & { language: string };
   params: SearchParams;
   kinds: Kind[];
+  progress?: LanguageProgress[];
 }) {
   const [client, t] = await Promise.all([sessionClient(), getT()]);
   const result = await client.GET("/admin/translations", {
@@ -167,7 +203,9 @@ async function Rows({
   const page = await listPage(result, WORKLIST_PATH, params);
   const [names, uncounted] = await Promise.all([
     resourceNames(page.items, t),
-    page.items.length === 0 && !page.error ? isUncountedFor(filters) : false,
+    page.items.length === 0 && !page.error && filters.kind === undefined
+      ? isUncountedFor(filters.language, progress)
+      : false,
   ]);
   return (
     <WorklistTable
@@ -182,15 +220,16 @@ async function Rows({
 }
 
 /**
- * Whether an empty list is empty because nothing is counted yet (the API counts the
+ * Whether an unfiltered list is empty because nothing is counted yet (the API counts the
  * store's texts in the background after an upgrade), not because nothing is left: then
- * the table says so rather than "Nothing left to translate".
+ * the table says so rather than "Nothing left to translate". Only without a kind, since
+ * a kind the store has nothing of counts 0 too. `known` is the page's own read, if any.
  */
-async function isUncountedFor(filters: WorklistFilters & { language: string }): Promise<boolean> {
-  const client = await sessionClient();
-  const { data } = await client.GET("/admin/translations/progress", {
-    params: { query: filters.kind ? { kind: filters.kind } : {} },
-  });
-  const progress = data?.languages.find((l) => l.language === filters.language);
-  return progress !== undefined && progress.total === 0;
+async function isUncountedFor(language: string, known?: LanguageProgress[]): Promise<boolean> {
+  let languages = known;
+  if (languages === undefined) {
+    const client = await sessionClient();
+    languages = (await client.GET("/admin/translations/progress")).data?.languages ?? [];
+  }
+  return isUncounted(languages.filter((l) => l.language === language));
 }

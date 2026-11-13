@@ -90,10 +90,15 @@ test("counts past their bounds are clamped, never drawn past the track", () => {
 });
 
 test("the shown share rounds down, so one field missing never reads 100%", () => {
-  assert.equal(shownShare(999 / 1000), 0.99);
-  assert.equal(shownShare(1), 1);
-  assert.equal(shownShare(0.5), 0.5);
-  assert.equal(shownShare(0.004), 0);
+  assert.equal(shownShare(progressParts(progress(1000, 999, 0))), 0.99);
+  assert.equal(shownShare(progressParts(progress(4, 4, 1))), 1);
+  assert.equal(shownShare(progressParts(progress(1000, 4, 0))), 0);
+  assert.equal(shownShare(progressParts(progress(0, 0, 0))), 0);
+});
+
+test("the shown share is exact where the fraction isn't (29 of 100 is 29%)", () => {
+  assert.equal(shownShare(progressParts(progress(100, 29, 0))), 0.29);
+  assert.equal(shownShare(progressParts(progress(100, 57, 3))), 0.57);
 });
 
 test("a store whose every total is 0 isn't counted yet", () => {

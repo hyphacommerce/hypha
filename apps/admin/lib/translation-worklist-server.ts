@@ -51,8 +51,15 @@ async function namesOf(client: Client, kind: NamedKind, ids: string[], t: T): Pr
       return named([...pathsById(data?.items ?? [])]);
     }
     case "custom_field_definition": {
+      // Products, variants and the rest often have a field of the same name ("Material"):
+      // what it's on says which one it is.
       const { data } = await client.GET("/admin/custom-field-definitions");
-      return named((data?.items ?? []).map((d) => [d.id, d.name]));
+      return named(
+        (data?.items ?? []).map((d): [string, string] => [
+          d.id,
+          t("translations.worklist_custom_field", { name: d.name, owner: d.owner_type }),
+        ]),
+      );
     }
     case "shipping_option": {
       // Zones often share option names ("Standard"): the zone says which one it is.

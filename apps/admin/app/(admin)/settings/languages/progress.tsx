@@ -91,8 +91,8 @@ function LanguageRow({
           {parts.translated === null
             ? t("languages.progress_nothing")
             : t("languages.progress_share", {
-                share: format.percent(shownShare(parts.translated)),
-                translated: progress.translated,
+                share: format.percent(shownShare(parts)),
+                translated: parts.current + parts.outdated,
                 total: parts.total,
               })}
         </Text>

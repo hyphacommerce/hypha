@@ -97,6 +97,7 @@
   "worklist_column_total": "Fields",
   "worklist_translate": "Translate",
   "worklist_shipping_option": "{option} ({zone})",
+  "worklist_custom_field": "{name} ({owner, select, product {products} variant {variants} category {categories} customer {customers} other {orders}})",
   "worklist_empty_missing": "Nothing left to translate",
   "worklist_empty_missing_description": "Every text in the store has a translation in this language.",
   "worklist_empty_outdated": "Nothing outdated",

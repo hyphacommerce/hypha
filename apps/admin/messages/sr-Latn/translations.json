@@ -97,6 +97,7 @@
   "worklist_column_total": "Polja",
   "worklist_translate": "Prevedi",
   "worklist_shipping_option": "{option} ({zone})",
+  "worklist_custom_field": "{name} ({owner, select, product {proizvodi} variant {varijante} category {kategorije} customer {kupci} other {porudžbine}})",
   "worklist_empty_missing": "Nema više ničega za prevođenje",
   "worklist_empty_missing_description": "Svaki tekst u prodavnici ima prevod na ovaj jezik.",
   "worklist_empty_outdated": "Nema zastarelih prevoda",
