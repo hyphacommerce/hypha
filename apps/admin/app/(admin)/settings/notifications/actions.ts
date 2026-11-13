@@ -18,6 +18,14 @@ export type SettingsPatch = AdminSchemas["UpdateNotificationSettingsRequest"];
 /** A template's sources as the editor holds them. */
 export type Sources = { subject: string; html: string; text: string | null };
 
+/** Where a template's sources come from: whose, and in which language. */
+export type SourcesFrom = { language: string; origin: string };
+
+/** The `?language=` of a template's routes: none for the store's content language. */
+function inLanguage(language: string | null) {
+  return language ? { language } : {};
+}
+
 type Rendered = AdminSchemas["RenderedNotificationResponse"];
 
 function refresh() {
@@ -51,53 +59,75 @@ function body(key: string, sources: Sources) {
     : { subject: sources.subject, html: sources.html, text: sources.text };
 }
 
-export async function saveTemplate(key: string, sources: Sources): Promise<TemplateResult> {
+/** Saves `sources` as the template in `language` (`null`: the store's content language). */
+export async function saveTemplate(
+  key: string,
+  language: string | null,
+  sources: Sources,
+): Promise<TemplateResult & { from?: SourcesFrom }> {
   const client = await sessionClient();
-  const { error } = await client.PUT("/admin/notification-templates/{key}", {
-    params: { path: { key } },
+  const { data, error } = await client.PUT("/admin/notification-templates/{key}", {
+    params: { path: { key }, query: inLanguage(language) },
     body: body(key, sources),
   });
   if (error) return { error: await describe(error), problem: problemOf(error.details) };
   refresh();
-  return {};
+  return { from: { language: data.sources_language, origin: data.sources_origin } };
 }
 
-/** Goes back to the default; answers with its sources, for the editor to show. */
-export async function revertTemplate(key: string): Promise<Result & { sources?: Sources }> {
+/**
+ * Deletes the merchant's template in `language`; answers with what emails in it send now,
+ * and where that comes from, for the editor to show.
+ */
+export async function revertTemplate(
+  key: string,
+  language: string | null,
+): Promise<Result & { sources?: Sources; from?: SourcesFrom }> {
   const client = await sessionClient();
   const { data, error } = await client.DELETE("/admin/notification-templates/{key}", {
-    params: { path: { key } },
+    params: { path: { key }, query: inLanguage(language) },
   });
   if (error) return { error: await describe(error) };
   refresh();
-  return { sources: { subject: data.subject, html: data.html, text: data.text ?? null } };
+  return {
+    sources: { subject: data.subject, html: data.html, text: data.text ?? null },
+    from: { language: data.sources_language, origin: data.sources_origin },
+  };
 }
 
-/** The unsaved sources rendered against the sample, or against `order` as it is now. */
+/**
+ * The unsaved sources rendered against the sample, or against `order` as it is now, in
+ * `language`'s layout and formats.
+ */
 export async function previewTemplate(
   key: string,
+  language: string | null,
   sources: Sources,
   order: string | null,
 ): Promise<TemplateResult & { rendered?: Rendered }> {
   const client = await sessionClient();
   const { data, error } = await client.POST("/admin/notification-templates/{key}/preview", {
     params: { path: { key } },
-    body: { ...body(key, sources), order },
+    body: { ...body(key, sources), order, language },
   });
   if (error) return { error: await describe(error), problem: problemOf(error.details) };
   return { rendered: data };
 }
 
-/** Sends the unsaved sources, rendered, to the signed-in staff member's own address. */
+/**
+ * Sends the unsaved sources, rendered in `language`, to the signed-in staff member's own
+ * address.
+ */
 export async function sendTestEmail(
   key: string,
+  language: string | null,
   sources: Sources,
   order: string | null,
 ): Promise<TemplateResult & { sentTo?: string }> {
   const client = await sessionClient();
   const { data, error } = await client.POST("/admin/notification-templates/{key}/test", {
     params: { path: { key } },
-    body: { ...body(key, sources), order },
+    body: { ...body(key, sources), order, language },
   });
   if (error) return { error: await describe(error), problem: problemOf(error.details) };
   return { sentTo: data.sent_to };

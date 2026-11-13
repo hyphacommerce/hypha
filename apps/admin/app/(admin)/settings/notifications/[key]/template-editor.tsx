@@ -1,8 +1,9 @@
 "use client";
 
-// A template's editor: the subject, the HTML and the plain text, a live preview of the
-// unsaved sources (against the sample or a chosen order), Save, Revert to default and
-// Send test. Problems from a preview or a save point at their line.
+// A template's editor in one of the store's languages: the subject, the HTML and the
+// plain text, a live preview of the unsaved sources (against the sample or a chosen
+// order), Save, Revert to default and Send test, all in that language. Problems from a
+// preview or a save point at their line.
 
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Badge } from "@astryxdesign/core/Badge";
@@ -11,6 +12,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
+import { Selector } from "@astryxdesign/core/Selector";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { Switch } from "@astryxdesign/core/Switch";
 import { Text } from "@astryxdesign/core/Text";
@@ -18,17 +20,23 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { useToast } from "@astryxdesign/core/Toast";
 import { Tooltip } from "@astryxdesign/core/Tooltip";
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
+import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 
-import { type Problem, describeProblem, variablePaths } from "@/lib/notifications";
+import { type StoreLanguage, languageLabel } from "@/lib/languages";
+import type { TFor } from "@/lib/messages";
+import { type Problem, describeProblem, templateHref, variablePaths } from "@/lib/notifications";
+import { useFormat } from "@/lib/use-format";
 import { useT } from "@/lib/use-t";
 
 import {
   type Sources,
+  type SourcesFrom,
   previewTemplate,
   revertTemplate,
   saveTemplate,
   sendTestEmail,
+  setTemplateEnabled,
 } from "../actions";
 import { CodeEditor } from "./code-editor";
 import { VariablesPanel } from "./variables-panel";
@@ -56,14 +64,40 @@ function lineIn(problem: Problem | undefined, part: string): number | null {
   return problem?.part === part ? (problem.line ?? null) : null;
 }
 
+/** The store's languages a template can be written in. */
+type Languages = {
+  /** The content language: the template's own, and where it's turned on or off. */
+  content: string;
+  /** The others, published or not. */
+  others: StoreLanguage[];
+};
+
+type EditorT = TFor<"notifications">;
+
+/** "Showing your English template": whose the shown sources are, and in which language. */
+function sourcesLine(t: EditorT, from: SourcesFrom, name: (tag: string) => string) {
+  const language = name(from.language);
+  if (from.origin === "merchant") return t("notifications.sources_merchant", { language });
+  if (from.origin === "default") return t("notifications.sources_default", { language });
+  return undefined;
+}
+
 export function TemplateEditor({
   template,
+  language,
+  languages,
   firstPreview,
   sender,
   canWrite,
   canReadOrders,
 }: {
+  /** The template in `language`, as the API answers it. */
   template: Template;
+  /** The language edited: one of `languages.others`, or `null` for the content language. */
+  language: string | null;
+  /** The languages to switch between; `null` hides the switch (one language, or a staff
+   * or supplier email, which has one template). */
+  languages: Languages | null;
   /** The saved sources rendered against the sample; `null` when they don't render. */
   firstPreview: Rendered | null;
   /** The deployment's sender: `log` refuses test sends. */
@@ -73,6 +107,8 @@ export function TemplateEditor({
   canReadOrders: boolean;
 }) {
   const t = useT<"notifications">();
+  const format = useFormat();
+  const router = useRouter();
   const key = template.key;
   const isLayout = key === "layout";
   // Templates about no order: their preview is the sample's.
@@ -85,6 +121,12 @@ export function TemplateEditor({
   const [saved, setSaved] = useState(() => sourcesOf(template));
   const [draft, setDraft] = useState(saved);
   const [isCustomized, setIsCustomized] = useState(template.customized);
+  const [from, setFrom] = useState<SourcesFrom>({
+    language: template.sources_language,
+    origin: template.sources_origin,
+  });
+  const [isEnabled, setIsEnabled] = useState(template.enabled);
+  const [isSwitching, startSwitching] = useTransition();
   const [order, setOrder] = useState("");
   const [rendered, setRendered] = useState(firstPreview);
   const [problem, setProblem] = useState<Problem>();
@@ -110,7 +152,7 @@ export function TemplateEditor({
     timer.current = setTimeout(async () => {
       const request = ++latest.current;
       try {
-        const result = await previewTemplate(key, sources, forOrder);
+        const result = await previewTemplate(key, language, sources, forOrder);
         if (request !== latest.current) return;
         if (result.rendered) {
           setRendered(result.rendered);
@@ -140,12 +182,13 @@ export function TemplateEditor({
 
   const save = () =>
     startSaving(async () => {
-      const result = await saveTemplate(key, draft);
+      const result = await saveTemplate(key, language, draft);
       setProblem(result.problem);
       setError(result.error);
       if (!result.error) {
         setSaved(draft);
         setIsCustomized(true);
+        if (result.from) setFrom(result.from);
         toast({ body: t("notifications.editor_saved_toast") });
       }
     });
@@ -157,7 +200,7 @@ export function TemplateEditor({
 
   const sendTest = () =>
     startSending(async () => {
-      const result = await sendTestEmail(key, draft, orderId);
+      const result = await sendTestEmail(key, language, draft, orderId);
       if (result.sentTo) {
         toast({ body: t("notifications.editor_sent_toast", { email: result.sentTo }) });
       } else {
@@ -166,8 +209,17 @@ export function TemplateEditor({
       }
     });
 
+  const toggleEnabled = async (enabled: boolean) => {
+    const result = await setTemplateEnabled(key, enabled);
+    setError(result.error);
+    if (!result.error) setIsEnabled(enabled);
+  };
+
   const canSend = sender !== "log";
   const textEditor = draft.text !== null;
+  const languageName = (tag: string) => format.languageName(tag);
+  const contentName = languages ? languageName(languages.content) : undefined;
+  const shownFrom = sourcesLine(t, from, languageName);
 
   return (
     <VStack gap={4}>
@@ -179,7 +231,7 @@ export function TemplateEditor({
             ) : (
               <Badge label={t("common.default")} variant="neutral" />
             )}
-            {!template.enabled && <Badge label={t("common.off")} variant="warning" />}
+            {!isEnabled && <Badge label={t("common.off")} variant="warning" />}
             <Text weight="medium">
               {isDirty ? t("common.unsaved_changes") : t("notifications.editor_no_unsaved_changes")}
             </Text>
@@ -252,7 +304,71 @@ export function TemplateEditor({
         />
       )}
 
-      <div className="template-columns">
+      <Card>
+        <VStack gap={4}>
+          <HStack gap={4} vAlign="end" wrap="wrap">
+            {languages && (
+              <Selector
+                label={t("notifications.language_label")}
+                options={[languages.content, ...languages.others.map((l) => l.language)].map(
+                  (tag) => ({
+                    value: tag,
+                    label:
+                      tag === languages.content
+                        ? t("notifications.language_option_content", {
+                            language: languageLabel(format, tag),
+                          })
+                        : languages.others.some((l) => l.language === tag && !l.published)
+                          ? t("notifications.language_option_unpublished", {
+                              language: languageLabel(format, tag),
+                            })
+                          : languageLabel(format, tag),
+                  }),
+                )}
+                value={language ?? languages.content}
+                onChange={(tag) =>
+                  // The same page in another language: replaced in place, never a push.
+                  startSwitching(() =>
+                    router.replace(templateHref(key, tag === languages.content ? null : tag)),
+                  )
+                }
+                hasSearch={languages.others.length > 8}
+                isLoading={isSwitching}
+                isDisabled={isDirty}
+                disabledMessage={t("notifications.language_locked")}
+                width={320}
+              />
+            )}
+            <VStack gap={0.5}>
+              {shownFrom && <Text type="supporting">{shownFrom}</Text>}
+              {language !== null && !isCustomized && (
+                <Text type="supporting" color="secondary">
+                  {t("notifications.sources_fallback", { language: languageName(language) })}
+                </Text>
+              )}
+            </VStack>
+          </HStack>
+          {template.can_disable &&
+            (language === null ? (
+              <Switch
+                label={t("notifications.sending_label")}
+                description={languages ? t("notifications.sending_description") : undefined}
+                value={isEnabled}
+                isDisabled={!canWrite}
+                changeAction={toggleEnabled}
+              />
+            ) : (
+              <Text type="supporting" color="secondary">
+                {t("notifications.sending_other_language", { language: contentName ?? "" })}
+              </Text>
+            ))}
+        </VStack>
+      </Card>
+
+      <div
+        className="template-columns"
+        style={isSwitching ? { opacity: 0.6, pointerEvents: "none" } : undefined}
+      >
         <VStack gap={4}>
           <Card>
             <VStack gap={4}>
@@ -385,11 +501,21 @@ export function TemplateEditor({
       {isReverting && (
         <RevertDialog
           templateKey={key}
+          language={language}
+          description={
+            language !== null && contentName !== undefined
+              ? t("notifications.revert_dialog_description_language", {
+                  language: languageName(language),
+                  content: contentName,
+                })
+              : t("notifications.revert_dialog_description")
+          }
           onClose={() => setIsReverting(false)}
-          onReverted={(sources) => {
+          onReverted={(sources, reverted) => {
             setSaved(sources);
             setDraft(sources);
             setIsCustomized(false);
+            if (reverted) setFrom(reverted);
             setProblem(undefined);
             setError(undefined);
             schedulePreview(sources, orderId);
@@ -403,12 +529,17 @@ export function TemplateEditor({
 
 function RevertDialog({
   templateKey,
+  language,
+  description,
   onClose,
   onReverted,
 }: {
   templateKey: string;
+  /** The language whose template goes (`null`: the content language's). */
+  language: string | null;
+  description: string;
   onClose: () => void;
-  onReverted: (sources: Sources) => void;
+  onReverted: (sources: Sources, from: SourcesFrom | undefined) => void;
 }) {
   const t = useT<"notifications">();
   const [error, setError] = useState<string>();
@@ -418,17 +549,17 @@ function RevertDialog({
       isOpen
       onOpenChange={(isOpen) => !isOpen && onClose()}
       title={t("notifications.revert_dialog_title")}
-      description={error ?? t("notifications.revert_dialog_description")}
+      description={error ?? description}
       actionLabel={t("notifications.revert_dialog_action")}
       isActionLoading={isPending}
       onAction={() =>
         startTransition(async () => {
-          const result = await revertTemplate(templateKey);
+          const result = await revertTemplate(templateKey, language);
           if (result.error || !result.sources) {
             setError(result.error);
             return;
           }
-          onReverted(result.sources);
+          onReverted(result.sources, result.from);
           onClose();
         })
       }

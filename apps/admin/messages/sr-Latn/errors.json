@@ -49,6 +49,7 @@
   "email_not_configured": "Imejlovi se samo upisuju u log servera, pa probni imejl ne bi stigao nikome. Podesite način slanja u odeljku [email] fajla hypha.config.toml.",
   "email_refused": "Imejl provajder je odbio poruku: {error}",
   "email_unavailable": "Imejl provajder nije dostupan. Pokušajte ponovo za koji trenutak. ({error})",
+  "enabled_not_per_language": "Da li se imejl šalje je jedan prekidač za sve jezike: promenite ga na šablonu jezika sadržaja.",
   "empty_option": "Svaka opcija mora imati bar jednu vrednost.",
   "ends_not_after_start": "Kraj mora biti posle početka.",
   "file_too_large": "Taj fajl je prevelik: slike do 20 MB, video-snimci do 1 GB, PDF-ovi do 100 MB.",

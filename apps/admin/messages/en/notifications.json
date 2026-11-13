@@ -50,6 +50,7 @@
   "templates_column_state": "State",
   "templates_column_sent": "Sent",
   "template_customized": "Customized",
+  "template_customized_in": "Customized in {language}",
   "template_broken": "Broken: sending the default",
   "template_broken_tooltip": "{problem}. Emails use the default until it's fixed.",
   "template_send_label": "Send {name}",
@@ -115,6 +116,7 @@
   "preview_none": "No preview yet.",
   "revert_dialog_title": "Revert to the default?",
   "revert_dialog_description": "Your changes to this template are deleted, and emails use Hypha's default from now on. Whether it's on stays as it is.",
+  "revert_dialog_description_language": "Your {language} version of this template is deleted. Emails in that language then use the next one that fits: Hypha's default in it, else your {content} template. Whether it's sent stays as it is.",
   "revert_dialog_action": "Revert",
   "variables_title": "Variables",
   "variables_description": "Click one to copy it. Values are from a made-up order. A list's items are shown under [0]: loop over the list to print each.",
@@ -126,5 +128,15 @@
   "variables_copy_failed": "Couldn't copy: select the path and copy it yourself.",
   "editor_subject_label": "Subject",
   "editor_html_label": "HTML",
-  "preview_text": "Plain text"
+  "preview_text": "Plain text",
+  "language_label": "Language",
+  "language_option_content": "{language}, content language",
+  "language_option_unpublished": "{language}, not published",
+  "language_locked": "Save or discard your changes before switching language.",
+  "sources_merchant": "Showing your {language} template.",
+  "sources_default": "Showing Hypha's {language} default.",
+  "sources_fallback": "{language} has no template of its own yet: its emails send these sources. Saving makes them its own.",
+  "sending_label": "Send this email",
+  "sending_description": "One switch for every language.",
+  "sending_other_language": "Whether this email is sent is set on the {language} template and applies to every language."
 }

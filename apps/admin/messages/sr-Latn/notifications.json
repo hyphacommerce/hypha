@@ -50,6 +50,7 @@
   "templates_column_state": "Stanje",
   "templates_column_sent": "Slanje",
   "template_customized": "Prilagođen",
+  "template_customized_in": "Prilagođen: {language}",
   "template_broken": "Neispravan: šalje se podrazumevani",
   "template_broken_tooltip": "{problem}. Imejlovi koriste podrazumevani šablon dok se ne ispravi.",
   "template_send_label": "Šalji: {name}",
@@ -115,6 +116,7 @@
   "preview_none": "Još nema pregleda.",
   "revert_dialog_title": "Vratiti na podrazumevano?",
   "revert_dialog_description": "Vaše izmene ovog šablona se brišu i imejlovi od sada koriste podrazumevani šablon sistema Hypha. To da li je uključen ostaje kako jeste.",
+  "revert_dialog_description_language": "Vaša verzija ovog šablona na jeziku {language} se briše. Imejlovi na tom jeziku zatim koriste sledeći koji odgovara: podrazumevani šablon sistema Hypha na tom jeziku, a ako ga nema, vaš šablon na jeziku {content}. To da li je uključen ostaje kako jeste.",
   "revert_dialog_action": "Vrati",
   "variables_title": "Promenljive",
   "variables_description": "Kliknite na neku da je kopirate. Vrednosti su iz izmišljene porudžbine. Stavke liste prikazane su pod [0]: prođite petljom kroz listu da biste ispisali svaku.",
@@ -126,5 +128,15 @@
   "variables_copy_failed": "Kopiranje nije uspelo: označite putanju i kopirajte je sami.",
   "editor_subject_label": "Naslov",
   "editor_html_label": "HTML",
-  "preview_text": "Običan tekst"
+  "preview_text": "Običan tekst",
+  "language_label": "Jezik",
+  "language_option_content": "{language}, jezik sadržaja",
+  "language_option_unpublished": "{language}, nije objavljen",
+  "language_locked": "Sačuvajte ili odbacite izmene pre promene jezika.",
+  "sources_merchant": "Prikazan je vaš šablon na jeziku {language}.",
+  "sources_default": "Prikazan je podrazumevani šablon sistema Hypha na jeziku {language}.",
+  "sources_fallback": "Jezik {language} još nema sopstveni šablon: imejlovi na tom jeziku šalju ovaj. Kada ga sačuvate, postaje šablon tog jezika.",
+  "sending_label": "Šalji ovaj imejl",
+  "sending_description": "Jedan prekidač za sve jezike.",
+  "sending_other_language": "Da li se ovaj imejl šalje podešava se na šablonu na jeziku {language} i važi za sve jezike."
 }

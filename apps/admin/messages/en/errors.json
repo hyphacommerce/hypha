@@ -49,6 +49,7 @@
   "email_not_configured": "Emails are only written to the server log, so a test would reach nobody. Set up a sender under [email] in hypha.config.toml.",
   "email_refused": "The email provider refused the message: {error}",
   "email_unavailable": "The email provider couldn't be reached. Try again in a moment. ({error})",
+  "enabled_not_per_language": "Whether an email is sent is one switch for every language: change it on the content language's template.",
   "empty_option": "Every option needs at least one value.",
   "ends_not_after_start": "The end must be after the start.",
   "file_too_large": "That file is too large: images up to 20 MB, videos up to 1 GB, PDFs up to 100 MB.",
