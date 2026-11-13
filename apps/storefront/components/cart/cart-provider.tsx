@@ -26,6 +26,7 @@ import {
   removeDiscountCode,
   setQuantity,
 } from "@/app/[country]/actions";
+import { useLocale } from "@/components/locale";
 import { CloseOnNavigate } from "@/components/close-on-navigate";
 import { WITHIN_PAGE, addTransitionType } from "@/components/view-transition";
 import { hasCartFlag } from "@/lib/cart-flag";
@@ -80,6 +81,13 @@ export function CartProvider({
   const [isOpen, setIsOpen] = useState(false);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
+  // The page's place: actions answer in its language.
+  const locale = useLocale();
+
+  // Changes go one at a time: each writes the cart, so two at once would race for its
+  // version. A read waits its turn too: it may write (`loadCart` moves a cart in
+  // another language to the page's).
+  const queue = useRef(SETTLED);
 
   // Which read is the latest: an older one answering late is dropped.
   const reads = useRef(0);
@@ -88,7 +96,11 @@ export function CartProvider({
     let found: Cart | null | undefined = null;
     try {
       // No cart in this country (the flag cookie says so): nothing to read.
-      if (hasCartFlag(country)) found = await loadCart(country);
+      if (hasCartFlag(country)) {
+        const run = queue.current.then(() => loadCart(locale));
+        queue.current = run.catch(() => undefined);
+        found = await run;
+      }
     } catch {
       // The shop's server didn't answer: keep the cart shown (none, on the first read)
       // rather than the cart page's skeleton for good.
@@ -97,7 +109,7 @@ export function CartProvider({
     if (read !== reads.current) return;
     if (found !== undefined) setCart(found);
     setIsLoading(false);
-  }, [country]);
+  }, [country, locale]);
 
   useEffect(() => {
     // Only the browser knows the cart (the flag cookie, then the server), and a static
@@ -112,7 +124,9 @@ export function CartProvider({
 
   const add = useCallback(
     async (variant: string, quantity: number) => {
-      const result = await addToCart({ country, variant, quantity });
+      const run = queue.current.then(() => addToCart({ locale, variant, quantity }));
+      queue.current = run.catch(() => undefined);
+      const result = await run;
       // Within the page: the caller's transition would otherwise start a view
       // transition, which snapshots the page while the drawer animates open.
       startTransition(() => {
@@ -123,12 +137,11 @@ export function CartProvider({
       });
       return result.error;
     },
-    [country],
+    [locale],
   );
 
-  // Changes go one at a time: each writes the cart, so two at once would race.
-  // Each answers with the cart, shown as it comes; the error is the caller's to place.
-  const queue = useRef(SETTLED);
+  // Each change answers with the cart, shown as it comes; the error is the caller's to
+  // place.
   const write = useCallback(async (send: () => Promise<CartResult>) => {
     const run = queue.current.then(send);
     queue.current = run.catch(() => undefined);
@@ -142,22 +155,22 @@ export function CartProvider({
   const change = useCallback(
     (variant: string, quantity: number) =>
       startTransition(async () => {
-        const failed = await write(() => setQuantity({ country, variant, quantity }));
+        const failed = await write(() => setQuantity({ locale, variant, quantity }));
         startTransition(() => setError(failed));
       }),
-    [country, write],
+    [locale, write],
   );
   const applyCode = useCallback(
-    (code: string) => write(() => applyDiscountCode({ country, code })),
-    [country, write],
+    (code: string) => write(() => applyDiscountCode({ locale, code })),
+    [locale, write],
   );
   const removeCode = useCallback(
     (code: string) =>
       startTransition(async () => {
-        const failed = await write(() => removeDiscountCode({ country, code }));
+        const failed = await write(() => removeDiscountCode({ locale, code }));
         startTransition(() => setError(failed));
       }),
-    [country, write],
+    [locale, write],
   );
 
   const value = useMemo<CartContext>(
