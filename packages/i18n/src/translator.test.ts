@@ -109,6 +109,26 @@ test("a missing key falls back to the fallback catalog, then to the key", () => 
   ]);
 });
 
+test("an empty message counts as missing", () => {
+  const missing: Missing[] = [];
+  const de: Messages = { "cart.title": "", "cart.greeting": "  ", "cart.nowhere": "" };
+  const t = createTranslator("de", de, { fallback: untyped, onMissing: (m) => missing.push(m) });
+  assert.equal(t("cart.title"), "Your cart");
+  assert.equal(t("cart.greeting", { name: "Ada" }), "Hello, Ada!");
+  assert.equal(t("cart.nowhere"), "cart.nowhere");
+  assert.equal(t.has("cart.title"), true);
+  assert.equal(t.has("cart.nowhere"), false);
+  assert.deepEqual(
+    missing.map((m) => m.shown),
+    ["fallback", "fallback", "key"],
+  );
+});
+
+test("an empty fallback message counts as missing too", () => {
+  const t = createTranslator("de", {}, { fallback: { empty: "" } });
+  assert.equal(t("empty"), "empty");
+});
+
 test("the language's own message wins over the fallback's", () => {
   const t = createTranslator("de", { "cart.title": "Ihr Warenkorb" }, { fallback: en });
   assert.equal(t("cart.title"), "Ihr Warenkorb");

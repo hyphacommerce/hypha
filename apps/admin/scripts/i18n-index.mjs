@@ -89,8 +89,27 @@ async function namespacesOf(language) {
     .toSorted();
 }
 
-function languageModule(language, namespaces) {
+/** A language's messages by full key (`<namespace>.<key>`), read from its folder. */
+async function messagesOf(language, namespaces) {
+  const messages = {};
+  for (const ns of namespaces) {
+    const file = JSON.parse(await readFile(join(root, language, `${ns}.json`), "utf8"));
+    for (const [key, message] of Object.entries(file)) messages[`${ns}.${key}`] = message;
+  }
+  return messages;
+}
+
+/**
+ * A language's module. `missing` is English for the keys the language lacks, written
+ * into the module: the browser gets this one catalog, so a key still to be translated
+ * reads in English there rather than as its key. CI keeps a shipped language complete
+ * (`i18n:check`); this is for the time between.
+ */
+function languageModule(language, namespaces, missing = {}) {
   const imports = namespaces.map((ns) => `import ${ns} from "./${language}/${ns}.json";`);
+  const filled = Object.entries(missing).map(
+    ([key, message]) => `  ${JSON.stringify(key)}: ${JSON.stringify(message)},`,
+  );
   return [
     banner,
     'import { mergeCatalogs } from "@hyphacommerce/i18n";',
@@ -100,8 +119,20 @@ function languageModule(language, namespaces) {
     `/** The ${language} catalog's files, by namespace. */`,
     `export const namespaces = { ${namespaces.join(", ")} };`,
     "",
-    `/** The ${language} catalog: every namespace, keys as \`<namespace>.<key>\`. */`,
-    "export default mergeCatalogs(namespaces);",
+    ...(filled.length > 0
+      ? [
+          `/** English, for the keys ${language} doesn't have yet. */`,
+          "const untranslated: Record<string, string> = {",
+          ...filled,
+          "};",
+          "",
+          `/** The ${language} catalog: every key, in English where it isn't translated yet. */`,
+          "export default { ...untranslated, ...mergeCatalogs(namespaces) };",
+        ]
+      : [
+          `/** The ${language} catalog: every namespace, keys as \`<namespace>.<key>\`. */`,
+          "export default mergeCatalogs(namespaces);",
+        ]),
     "",
   ].join("\n");
 }
@@ -160,6 +191,7 @@ if (!folders.includes(SOURCE)) throw new Error(`messages/${SOURCE} is missing`);
 const languages = [SOURCE, ...folders.filter((name) => name !== SOURCE).toSorted()];
 
 const outputs = new Map();
+const english = await messagesOf(SOURCE, await namespacesOf(SOURCE));
 for (const language of languages) {
   const namespaces = await namespacesOf(language);
   const bad = namespaces.filter((ns) => !NAMESPACE.test(ns) || RESERVED.has(ns));
@@ -168,7 +200,11 @@ for (const language of languages) {
       `messages/${language}: a namespace is lower-case letters, digits and "_", and not a JavaScript keyword: ${bad.join(", ")}`,
     );
   }
-  outputs.set(`${language}.generated.ts`, languageModule(language, namespaces));
+  const own = language === SOURCE ? english : await messagesOf(language, namespaces);
+  const missing = Object.fromEntries(
+    Object.entries(english).filter(([key]) => !Object.hasOwn(own, key)),
+  );
+  outputs.set(`${language}.generated.ts`, languageModule(language, namespaces, missing));
 }
 outputs.set("languages.generated.ts", languagesModule(languages));
 outputs.set("astryx.generated.ts", astryxModule(languages));

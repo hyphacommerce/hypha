@@ -11,7 +11,7 @@ import { createTranslator } from "@hyphacommerce/i18n";
 
 import { getLanguage } from "./language";
 import { type Key, type T, en, loadMessages } from "./messages";
-import { localeOf } from "./pick-language.ts";
+import { formatLocale } from "./pick-language.ts";
 
 export type { Key, T };
 
@@ -36,7 +36,7 @@ export async function getT(language?: string): Promise<T> {
     translator = loadMessages(wanted).then((messages) =>
       createTranslator<Key>(wanted, messages, {
         fallback: en,
-        locale: localeOf(wanted),
+        locale: formatLocale(wanted),
         onError: (error, key) => console.error(`i18n: ${key} (${wanted})`, error),
       }),
     );

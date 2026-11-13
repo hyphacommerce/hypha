@@ -5,7 +5,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { VStack } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
 import { TextInput } from "@astryxdesign/core/TextInput";
-import { type FormEvent, startTransition, useActionState, useState } from "react";
+import { type SubmitEvent, startTransition, useActionState, useState } from "react";
 
 import { fieldText } from "@/components/new-password";
 import { useT } from "@/lib/use-t";
@@ -20,7 +20,7 @@ export function ForgotForm() {
   const [isIncomplete, setIsIncomplete] = useState(false);
   const [state, request, isPending] = useActionState(requestPasswordReset, {});
 
-  const submit = (e: FormEvent<HTMLFormElement>) => {
+  const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     const submitted = fieldText(new FormData(e.currentTarget), "email").trim();
     setEmail(submitted);

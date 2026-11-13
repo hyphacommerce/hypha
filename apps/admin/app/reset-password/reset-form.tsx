@@ -4,7 +4,7 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { VStack } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
-import { type FormEvent, startTransition, useActionState, useState } from "react";
+import { type SubmitEvent, startTransition, useActionState, useState } from "react";
 
 import { NewPasswordFields, fieldText, newPasswordProblem } from "@/components/new-password";
 import { useT } from "@/lib/use-t";
@@ -18,7 +18,7 @@ export function ResetForm({ token }: { token: string }) {
   const [problem, setProblem] = useState<string>();
   const [state, confirm, isPending] = useActionState(confirmPasswordReset, {});
 
-  const submit = (e: FormEvent<HTMLFormElement>) => {
+  const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     const fields = new FormData(e.currentTarget);
     const password = fieldText(fields, "new-password");

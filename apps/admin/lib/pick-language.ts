@@ -23,14 +23,7 @@ export function pickLanguage(
 ): string {
   const chosen = wanted.cookie ? canonicalLanguage(wanted.cookie) : undefined;
   const preferred = [...(chosen ? [chosen] : []), ...parseAcceptLanguage(wanted.acceptLanguage)];
-  // One wanted language at a time, most wanted first: a Serbian browser also lists
-  // English, and matched together English (exact) would win over `sr` → `sr-Latn`
-  // (widened), though the reader asked for Serbian first.
-  for (const tag of preferred) {
-    const found = matchLanguage([tag], available);
-    if (found !== undefined) return found;
-  }
-  return DEFAULT_LANGUAGE;
+  return matchLanguage(preferred, available) ?? DEFAULT_LANGUAGE;
 }
 
 /**
@@ -39,6 +32,6 @@ export function pickLanguage(
  * first, "15 Oct 2026, 09:30 CEST", "€18.00", "US$18.00"). The pseudo-language formats
  * as English. This is a translator's `locale`, which every format takes.
  */
-export function localeOf(language: string): string {
+export function formatLocale(language: string): string {
   return language === DEFAULT_LANGUAGE || language === PSEUDO ? "en-GB" : language;
 }

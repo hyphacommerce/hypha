@@ -50,6 +50,34 @@ test("a language that must be complete fails for each key it lacks", () => {
   assert.equal(report.missing.fr?.length, 3);
 });
 
+test("an empty translation is missing, not translated", () => {
+  const de = { "cart.title": "", "cart.count": "  ", "cart.terms": "<link>AGB</link>, {name}" };
+  const report = checkCatalogs({ en, de });
+  assert.deepEqual(report.problems, []);
+  assert.deepEqual(report.missing, { de: ["cart.count", "cart.title"] });
+
+  const strict = checkCatalogs({ en, de }, { complete: ["de"] });
+  assert.deepEqual(strict.problems, [
+    { code: "missing_key", language: "de", key: "cart.count", message: "must be translated" },
+    { code: "missing_key", language: "de", key: "cart.title", message: "must be translated" },
+  ]);
+});
+
+test("an empty message in the source is a problem", () => {
+  const report = checkCatalogs({ en: { ...en, "cart.empty": "" }, de: { "cart.empty": "Leer" } });
+  assert.deepEqual(report.problems, [
+    { code: "invalid_message", language: "en", key: "cart.empty", message: "is empty" },
+  ]);
+});
+
+test("an empty message for a key the source lacks is still an unknown key", () => {
+  const report = checkCatalogs({ en, de: { "cart.nope": "" } });
+  assert.deepEqual(
+    report.problems.map((problem) => problem.code),
+    ["unknown_key"],
+  );
+});
+
 test("a key the source lacks is a problem", () => {
   const report = checkCatalogs({ en, de: { "cart.titel": "Ihr Warenkorb" } });
   assert.deepEqual(report.problems, [

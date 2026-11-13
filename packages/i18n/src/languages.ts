@@ -36,16 +36,16 @@ export function parseAcceptLanguage(header: string | null | undefined): string[]
 }
 
 /**
- * The first of `wanted` that `available` has, in `available`'s spelling: the exact tag,
- * then the tag with its last parts taken off one at a time (`de-CH` → `de`,
- * `sr-Latn-RS` → `sr-Latn` → `sr`), compared without case.
+ * The language of `available` for the first of `wanted` that has one, in `available`'s
+ * spelling. Each wanted tag is tried fully before the next: the exact tag, then the tag
+ * with its last parts taken off one at a time (`de-CH` → `de`, `sr-Latn-RS` →
+ * `sr-Latn` → `sr`), then wider, the first available tag of the same language (`sr` or
+ * `sr-RS` → `sr-Latn`, `de` → `de-AT`). Compared without case.
  *
- * Only when that finds nothing for any wanted tag does it widen: the first of `wanted`
- * whose language some available tag shares gets the first such tag (`sr` or `sr-RS`
- * → `sr-Latn`, `de` → `de-AT`). Two passes over all of `wanted`, so an exact or
- * shortened match for a later wanted tag beats a widened one for an earlier tag.
- * Widening never crosses scripts: a wanted tag that names one (`sr-Cyrl`, `zh-Hant`)
- * only gets a tag with that script or with none, since its reader may not read another.
+ * So what a reader asks for first wins, even widened: `sr-RS, sr, en-US, en` against
+ * `en` and `sr-Latn` is `sr-Latn`. Widening never crosses scripts: a wanted tag that
+ * names one (`sr-Cyrl`, `zh-Hant`) only gets a tag with that script or with none, since
+ * its reader may not read another.
  */
 export function matchLanguage(
   wanted: readonly string[],
@@ -65,16 +65,14 @@ export function matchLanguage(
       // A single letter introduces an extension (`-u-…`, `-x-…`): it goes with its values.
       if (parts.at(-1)?.length === 1) parts.pop();
     }
-  }
-  for (const tag of wanted) {
     const { primary, script } = subtags(tag);
     if (!primary) continue;
-    const found = available.find((other) => {
+    const wider = available.find((other) => {
       const has = subtags(other);
       if (has.primary !== primary) return false;
       return script === undefined || has.script === undefined || has.script === script;
     });
-    if (found !== undefined) return found;
+    if (wider !== undefined) return wider;
   }
   return undefined;
 }

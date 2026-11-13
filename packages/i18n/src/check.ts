@@ -75,7 +75,8 @@ export function placeholdersOf(message: string): Placeholders {
  * Checks the catalogs of an app, by language. Fails (a problem) on: a message that
  * isn't ICU MessageFormat, a key the source lacks, placeholders or tags that differ
  * from the source's, and a missing key in a language that must be complete. What other
- * languages still lack is reported, not a problem.
+ * languages still lack is reported, not a problem. An empty message isn't a translation:
+ * the key counts as lacking, and an empty message in the source is a problem.
  */
 export function checkCatalogs(
   catalogs: Readonly<Record<string, Readonly<Record<string, unknown>>>>,
@@ -92,6 +93,14 @@ export function checkCatalogs(
     for (const [key, message] of Object.entries(catalog)) {
       if (typeof message !== "string") {
         problems.push({ code: "invalid_message", language, key, message: "isn't a string" });
+        continue;
+      }
+      if (isBlank(message)) {
+        // Not a translation yet: counted with what the language lacks, below. The
+        // source has nothing to fall back to.
+        if (language === source) {
+          problems.push({ code: "invalid_message", language, key, message: "is empty" });
+        }
         continue;
       }
       try {
@@ -143,7 +152,7 @@ export function checkCatalogs(
       }
     }
     const lacks = Object.keys(sourceCatalog)
-      .filter((key) => !Object.hasOwn(catalog, key))
+      .filter((key) => !Object.hasOwn(catalog, key) || isBlank(catalog[key]))
       .toSorted();
     missing[language] = lacks;
     if (complete.has(language)) {
@@ -153,6 +162,11 @@ export function checkCatalogs(
     }
   }
   return { source, problems, missing };
+}
+
+/** An empty message: a key someone added without its translation. */
+function isBlank(message: unknown): boolean {
+  return typeof message === "string" && message.trim() === "";
 }
 
 function differences(what: string, expected: string[], found: string[]): string[] {
