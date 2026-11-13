@@ -75,16 +75,9 @@ impl ServedLanguage {
         servable: Vec<Language>,
         offered: &[Language],
     ) -> Self {
-        let language = asked
-            .and_then(|tag| Language::new(tag).ok())
-            .and_then(|asked| {
-                if offered.contains(&asked) {
-                    return Some(asked);
-                }
-                asked.without_region().filter(|l| offered.contains(l))
-            })
-            .or_else(|| offered.first().cloned())
-            .unwrap_or_else(|| source.clone());
+        let asked = asked.and_then(|tag| Language::new(tag).ok());
+        let language =
+            Language::pick(asked.as_ref(), offered).unwrap_or_else(|| source.clone());
         Self {
             source: language == *source,
             language,

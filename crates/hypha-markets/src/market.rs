@@ -204,16 +204,7 @@ impl Market {
     /// it lists none. A language the store stopped offering since (the store's check and
     /// a market's write don't share a transaction) is left out rather than promised.
     pub fn offered_languages(&self, store_languages: &[Language]) -> Vec<Language> {
-        let offered: Vec<Language> = self
-            .languages
-            .iter()
-            .filter(|l| store_languages.contains(l))
-            .cloned()
-            .collect();
-        if offered.is_empty() {
-            return store_languages.first().cloned().into_iter().collect();
-        }
-        offered
+        hypha_core::offered_languages(&self.languages, store_languages)
     }
 }
 
