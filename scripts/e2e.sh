@@ -313,6 +313,31 @@ if [[ $BODY == *'"code":"handle_taken"'* ]]; then
 fi
 MUG=$(id)
 MUG_VAR=$(variant)
+step "the mug's translatable fields" 200 - "$BASE/admin/translations/product/$MUG"
+contains "what it can be translated from and into" '"default_language":"en","languages":["de","fr"]'
+contains "the title's source text" '"key":"title","format":"text","max_length":255,"source":"Mug"'
+step "translate the mug into German" 200 - -X PUT "$BASE/admin/translations/product/$MUG/de" -H "$JSON" \
+    -d '{"fields":{"title":{"value":" Tasse "},"description":{"value":"<p>Eine Tasse.</p><script>x</script>"}}}'
+contains "the title, trimmed" '"de":{"value":"Tasse","source_digest":"'
+contains "the description, sanitised" '"de":{"value":"<p>Eine Tasse.</p>","source_digest":"'
+contains "both up to date" '"language":"de","translated":2,"outdated":0'
+step "into an unpublished language too" 200 - -X PUT "$BASE/admin/translations/product/$MUG/fr" -H "$JSON" \
+    -d '{"fields":{"title":{"value":"Tasse"}}}'
+step "never into the default language" 422 translation_into_default_language -X PUT "$BASE/admin/translations/product/$MUG/en" \
+    -H "$JSON" -d '{"fields":{"title":{"value":"Mug"}}}'
+step "nor into a language the store doesn't list" 422 language_not_listed -X PUT "$BASE/admin/translations/product/$MUG/es" \
+    -H "$JSON" -d '{"fields":{"title":{"value":"Taza"}}}'
+step "a field a product doesn't have" 422 invalid_translation -X PUT "$BASE/admin/translations/product/$MUG/de" \
+    -H "$JSON" -d '{"fields":{"handle":{"value":"tasse"}}}'
+contains "says which" '"code":"unknown_field"'
+step "a kind that has no translations" 404 unknown_resource_kind "$BASE/admin/translations/variant/$MUG"
+step "what's translated into German" 200 - "$BASE/admin/translations?kind=product&language=de"
+contains "the mug's title and description" "{\"resource\":{\"kind\":\"product\",\"id\":\"$MUG\"},\"language\":\"de\",\"fields\":[\"description\",\"title\"]"
+step "the default language is fixed while anything is translated" 409 default_language_in_use -X PATCH "$BASE/admin/store" \
+    -H "$JSON" -d '{"default_language":"es"}'
+step "remove the German translation" 204 - -X DELETE "$BASE/admin/translations/product/$MUG/de"
+step "it is gone" 404 translation_not_found -X DELETE "$BASE/admin/translations/product/$MUG/de"
+step "remove the French one" 204 - -X DELETE "$BASE/admin/translations/product/$MUG/fr"
 step "create cup" 201 - -X POST "$BASE/admin/products" -H "$JSON" \
     -d '{"handle":"cup","title":"Cup","price":{"amount":250,"currency":"EUR"}}'
 CUP=$(id)

@@ -661,6 +661,7 @@ pub trait Storage: Send + Sync + 'static {
         + hypha_receiving::ReceivingPorts
         + hypha_inventory::TransferPorts
         + hypha_checkout_rules::HasCheckoutSettings
+        + hypha_translations::HasTranslations
         + hypha_inventory::HasLocations
         + HasBatch<
             Batch: hypha_core::StageEvents

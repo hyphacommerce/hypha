@@ -57,6 +57,7 @@ mod stores;
 mod suppliers;
 mod tax;
 mod transfers;
+mod translations;
 mod usages;
 mod users;
 
@@ -103,6 +104,7 @@ pub use stores::{store_events, store_repo};
 pub use suppliers::{supplier_repo, supplier_variants};
 pub use tax::{tax_class_repo, tax_region_repo};
 pub use transfers::transfer_repo;
+pub use translations::translation_repo;
 pub use usages::asset_usages;
 pub use users::{invite_repo, role_repo, staff_sessions, user_repo};
 

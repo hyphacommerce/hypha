@@ -162,6 +162,7 @@ pub fn event_scope(subject_kind: &str) -> Option<Scope> {
         "supplier" | "purchase_order" | "receipt" => Scope::PurchasingRead,
         "transfer" => Scope::InventoryRead,
         "checkout_rule" | "checkout_settings" => Scope::CheckoutRulesRead,
+        "translation" => Scope::TranslationsRead,
         // Definitions; `<owner>.custom_fields_updated` events are about their owner
         // (`product`, `category`, `customer`, `order`) and go by its read scope.
         "custom_field_definition" => Scope::CustomFieldsRead,
@@ -842,6 +843,11 @@ mod tests {
             event_scope("checkout_settings"),
             Some(Scope::CheckoutRulesRead)
         );
+    }
+
+    #[test]
+    fn translation_events_need_translations_read() {
+        assert_eq!(event_scope("translation"), Some(Scope::TranslationsRead));
     }
 
     #[test]

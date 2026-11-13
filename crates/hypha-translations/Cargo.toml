@@ -1,0 +1,21 @@
+[package]
+name = "hypha-translations"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+hypha-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# The digest of a source text; builds for wasm.
+sha2 = { version = "0.11", default-features = false }
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+hypha-testkit = { path = "../hypha-testkit" }
+pollster = "1.0"
+
+[lints]
+workspace = true

@@ -34,6 +34,10 @@ pub enum CommandError {
     /// or the default one replaced): each such market with those languages.
     #[error("{} market(s) still offer a language the store would no longer offer", .0.len())]
     LanguageInUse(Vec<MarketLanguages>),
+    /// Every translation is a translation from the default language: another one would
+    /// leave them translating text that's no longer the source.
+    #[error("the default language can't change while the store has translations")]
+    DefaultLanguageInUse,
     /// One store per deployment (model A) found more than one.
     #[error("expected exactly one store in this deployment, found {0}")]
     MultipleStores(usize),
@@ -53,6 +57,7 @@ impl ErrorCode for CommandError {
             CommandError::StoreNotFound(_) => "store_not_found",
             CommandError::CurrencyLocked => "store_currency_locked",
             CommandError::LanguageInUse(_) => "language_in_use",
+            CommandError::DefaultLanguageInUse => "default_language_in_use",
             CommandError::MultipleStores(_) => "multiple_stores",
         }
     }
@@ -102,6 +107,10 @@ pub struct UpdateStore {
     /// Set by the host, not the caller: whether a cost was ever recorded, which fixes
     /// the currency.
     pub currency_locked: bool,
+    /// Set by the host, not the caller: whether the store has any translation into a
+    /// language it still has after this change (listed, or the new default), which fixes
+    /// the default language.
+    pub has_translations: bool,
     /// The setup guide's step the merchant is on.
     pub setup_step: Option<Option<String>>,
     /// `true` marks the guide done (now, the first time); `false` shows it again.
@@ -130,6 +139,7 @@ impl UpdateStore {
         *self
             == Self {
                 currency_locked: self.currency_locked,
+                has_translations: self.has_translations,
                 market_languages: self.market_languages.clone(),
                 ..Self::default()
             }
@@ -189,6 +199,7 @@ pub async fn update_store<R: StoreRepo>(
         store.set_timezone(timezone.as_deref().map(Timezone::new).transpose()?);
     }
     let offered_before = store.offered_languages();
+    let default_before = store.default_language().clone();
     let default_language = input
         .default_language
         .as_deref()
@@ -211,6 +222,10 @@ pub async fn update_store<R: StoreRepo>(
         }
         (Some(default), None) => store.set_default_language(default)?,
         (None, None) => {}
+    }
+    // Whichever way it changed: alone, or swapped with a language on the list.
+    if input.has_translations && *store.default_language() != default_before {
+        return Err(CommandError::DefaultLanguageInUse);
     }
     let in_use = languages_in_use(&offered_before, &store, input.market_languages);
     if !in_use.is_empty() {

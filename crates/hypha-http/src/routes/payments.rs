@@ -15,11 +15,14 @@ use hypha_payments::{
 use serde::{Deserialize, Serialize};
 
 use super::{orders::FinancialStatusDto, rfc3339, stamp_times};
+use hypha_translations::ResourceKind;
+
 use crate::{
     error::ApiError,
     extract::{Caller, JsonBody, KeyedJson, PathId, idempotent_response},
     patch,
     state::{SharedState, Storage},
+    translations::forget,
 };
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -360,6 +363,8 @@ pub async fn delete<S: Storage>(
     delete_payment_method(&ctx, &ports, id)
         .await
         .map_err(|e| ApiError::from(e).not_found_if("payment_method_not_found"))?;
+    // No event names a deleted method, so its translations go here.
+    forget(&ports, ResourceKind::PaymentMethod, [id.as_uuid()]).await;
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -6,6 +6,7 @@ use hypha_purchasing::{HasPurchaseOrders, PurchaseOrderRepo};
 use hypha_stores::{
     LanguageInput, MarketLanguages, Store, StoreLanguage, UpdateStore, get_store, update_store,
 };
+use hypha_translations::{HasTranslations, TranslationRepo};
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -229,6 +230,32 @@ pub async fn update<S: Storage>(
     } else {
         Vec::new()
     };
+    // Every translation is one from the default language, which fixes it; checked like
+    // the currency, before the write.
+    // Translations into a language the request removes from the store altogether don't
+    // count: they go with it (and may still be there, waiting for that cleanup). Those
+    // into the new default do: the cleanup keeps only listed languages, so a swap of the
+    // default with a listed language would delete every translation into it.
+    let has_translations = match &req.default_language {
+        Some(default) => {
+            let mut remaining: Vec<Language> = match &req.languages {
+                Some(languages) => languages
+                    .iter()
+                    .filter_map(|l| Language::new(&l.language).ok())
+                    .collect(),
+                None => store_as_system(&state, &ports)
+                    .await?
+                    .languages()
+                    .iter()
+                    .map(|l| l.language.clone())
+                    .collect(),
+            };
+            // An invalid tag is refused by the command.
+            remaining.extend(Language::new(default).ok());
+            ports.translations().any_in(&remaining).await?
+        }
+        None => false,
+    };
     let input = UpdateStore {
         name: req.name,
         contact_email: req.contact_email,
@@ -249,6 +276,7 @@ pub async fn update<S: Storage>(
         market_languages,
         currency: req.currency,
         currency_locked,
+        has_translations,
         setup_step: req.setup_step,
         setup_finished: req.setup_finished,
     };
@@ -342,7 +370,7 @@ pub(crate) async fn offered_languages<S: Storage>(
     Ok(store_as_system(state, ports).await?.offered_languages())
 }
 
-async fn store_as_system<S: Storage>(
+pub(crate) async fn store_as_system<S: Storage>(
     state: &AppState<S>,
     ports: &S::Ports<'_>,
 ) -> Result<Store, ApiError> {
