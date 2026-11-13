@@ -105,13 +105,9 @@ impl ServedLanguage {
         )
     }
 
-    /// `language` as it is, chosen already out of what the read may answer in: a
-    /// search that fell back to a language its market has documents in.
-    pub(crate) fn chosen(language: Language, store: &Store) -> Self {
-        Self::fixed(language, store)
-    }
-
-    fn fixed(language: Language, store: &Store) -> Self {
+    /// `language` as it is, chosen already out of what the read may answer in (a
+    /// search's, which may fall back to a language its market has documents in).
+    pub(crate) fn fixed(language: Language, store: &Store) -> Self {
         Self {
             source: language == *store.default_language(),
             language,

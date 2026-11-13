@@ -284,7 +284,7 @@ pub async fn storefront_search<S: Storage>(
         (served.language().clone(), others)
     })
     .await?;
-    let served = ServedLanguage::chosen(found.language.clone(), &store);
+    let served = ServedLanguage::fixed(found.language.clone(), &store);
     let results = found.results;
 
     // Each image once, in one query.
