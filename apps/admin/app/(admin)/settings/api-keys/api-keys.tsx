@@ -22,6 +22,8 @@ import { useState, useTransition } from "react";
 
 import { DateTime } from "@/components/date-time";
 import { ResourceTable } from "@/components/resource-table/resource-table";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { createApiKey, revokeApiKey } from "./actions";
 
@@ -46,11 +48,13 @@ export function ApiKeys({
 }) {
   const [isCreating, setIsCreating] = useState(false);
   const [revoking, setRevoking] = useState<ApiKey>();
+  const t = useT<"api_keys">();
+  const format = useFormat();
 
   const columns: TableColumn<ApiKey>[] = [
     {
       key: "name",
-      header: "Name",
+      header: t("common.name"),
       renderCell: (k) => (
         <VStack gap={0.5}>
           <Text weight="medium">{k.name}</Text>
@@ -62,21 +66,30 @@ export function ApiKeys({
     },
     {
       key: "kind",
-      header: "Kind",
+      header: t("api_keys.kind"),
       width: pixel(130),
-      renderCell: (k) => <Badge label={k.kind === "secret" ? "Secret" : "Publishable"} />,
+      renderCell: (k) => (
+        <Badge
+          label={k.kind === "secret" ? t("api_keys.kind_secret") : t("api_keys.kind_publishable")}
+        />
+      ),
     },
     {
       key: "access",
-      header: "Access",
+      header: t("api_keys.access"),
       renderCell: (k) =>
         k.kind === "publishable"
-          ? `Storefront of ${k.channel ? (channels[k.channel] ?? k.channel) : "every channel"}`
-          : `${k.scopes.length} ${k.scopes.length === 1 ? "scope" : "scopes"}: ${k.scopes.join(", ")}`,
+          ? k.channel
+            ? t("api_keys.access_storefront", { channel: channels[k.channel] ?? k.channel })
+            : t("api_keys.access_storefront_every")
+          : t("api_keys.access_scopes", {
+              count: k.scopes.length,
+              scopes: format.list(k.scopes, "unit"),
+            }),
     },
     {
       key: "created_at",
-      header: "Created",
+      header: t("common.created"),
       width: pixel(190),
       renderCell: (k) => <DateTime value={k.created_at} short />,
     },
@@ -87,10 +100,15 @@ export function ApiKeys({
       align: "end",
       renderCell: (k) =>
         k.revoked_at ? (
-          <Badge label="Revoked" variant="neutral" />
+          <Badge label={t("api_keys.revoked")} variant="neutral" />
         ) : (
           canWrite && (
-            <Button label="Revoke" size="sm" variant="ghost" onClick={() => setRevoking(k)} />
+            <Button
+              label={t("api_keys.revoke")}
+              size="sm"
+              variant="ghost"
+              onClick={() => setRevoking(k)}
+            />
           )
         ),
     },
@@ -100,7 +118,11 @@ export function ApiKeys({
     <VStack gap={4}>
       {canWrite && (
         <HStack hAlign="end">
-          <Button label="Create key" variant="primary" onClick={() => setIsCreating(true)} />
+          <Button
+            label={t("api_keys.create_key")}
+            variant="primary"
+            onClick={() => setIsCreating(true)}
+          />
         </HStack>
       )}
       <ResourceTable<ApiKey>
@@ -113,9 +135,8 @@ export function ApiKeys({
         error={page?.error}
         empty={{
           icon: <KeyIcon width={32} />,
-          title: "No API keys",
-          description:
-            "Secret keys let your own systems call the admin API; publishable keys let a storefront read what a channel sells.",
+          title: t("api_keys.empty_title"),
+          description: t("api_keys.empty_description"),
         }}
       />
       {isCreating && (
@@ -135,6 +156,7 @@ function CreateKeyDialog({
   scopes: string[];
   onClose: () => void;
 }) {
+  const t = useT<"api_keys">();
   const [kind, setKind] = useState<"secret" | "publishable">("secret");
   const [name, setName] = useState("");
   const [chosen, setChosen] = useState<string[]>([]);
@@ -160,12 +182,12 @@ function CreateKeyDialog({
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={560} purpose="form">
       <DialogHeader
-        title={token ? `${name.trim()} is ready` : "Create API key"}
-        subtitle={
+        title={
           token
-            ? "Copy it now: it isn't shown again."
-            : "Keys act on their own, with the scopes they're given."
+            ? t("api_keys.created_title", { name: name.trim() })
+            : t("api_keys.create_dialog_title")
         }
+        subtitle={token ? t("api_keys.created_subtitle") : t("api_keys.create_dialog_subtitle")}
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={4} padding={4}>
@@ -174,46 +196,59 @@ function CreateKeyDialog({
           <>
             <CodeBlock
               code={token}
-              title={kind === "secret" ? "Secret key" : "Publishable key"}
+              title={
+                kind === "secret"
+                  ? t("api_keys.created_secret_key")
+                  : t("api_keys.created_publishable_key")
+              }
               isWrapped
             />
             {kind === "publishable" && (
               <Text type="supporting" color="secondary">
-                For a storefront, it goes in its STOREFRONT_KEY setting (apps/storefront/.dev.vars
-                when you run it locally).
+                {t("api_keys.created_publishable_hint", {
+                  setting: "STOREFRONT_KEY",
+                  file: "apps/storefront/.dev.vars",
+                })}
               </Text>
             )}
             {kind === "secret" && (
               <Banner
                 status="warning"
-                title="Keep it secret"
-                description="It works like a staff login with these scopes: store it in your server's secrets, never in a browser."
+                title={t("api_keys.created_secret_warning_title")}
+                description={t("api_keys.created_secret_warning_description")}
               />
             )}
           </>
         ) : (
           <>
             <SegmentedControl
-              label="Kind"
+              label={t("api_keys.create_kind")}
               value={kind}
               onChange={(value) => {
                 if (value === "secret" || value === "publishable") setKind(value);
               }}
             >
-              <SegmentedControlItem value="secret" label="Secret" />
-              <SegmentedControlItem value="publishable" label="Publishable" />
+              <SegmentedControlItem value="secret" label={t("api_keys.create_kind_secret")} />
+              <SegmentedControlItem
+                value="publishable"
+                label={t("api_keys.create_kind_publishable")}
+              />
             </SegmentedControl>
             <TextInput
-              label="Name"
-              description="Shown to staff, so you know what uses it."
-              placeholder={kind === "secret" ? "ERP sync" : "Main storefront"}
+              label={t("common.name")}
+              description={t("api_keys.name_description")}
+              placeholder={
+                kind === "secret"
+                  ? t("api_keys.name_placeholder_secret")
+                  : t("api_keys.name_placeholder_publishable")
+              }
               value={name}
               onChange={setName}
             />
             {kind === "secret" ? (
               <MultiSelector
-                label="Scopes"
-                description="Only scopes you hold yourself."
+                label={t("api_keys.scopes")}
+                description={t("api_keys.scopes_description")}
                 options={scopes.map((s) => ({ value: s, label: s }))}
                 value={chosen}
                 onChange={setChosen}
@@ -223,8 +258,8 @@ function CreateKeyDialog({
               />
             ) : (
               <Selector
-                label="Channel"
-                description="The storefront reads and sells what this channel publishes."
+                label={t("common.channel")}
+                description={t("api_keys.channel_description")}
                 options={Object.entries(channels).map(([value, label]) => ({ value, label }))}
                 value={channel}
                 onChange={setChannel}
@@ -234,12 +269,12 @@ function CreateKeyDialog({
         )}
         <HStack gap={2} hAlign="end">
           {token ? (
-            <Button label="Done" variant="primary" onClick={onClose} />
+            <Button label={t("common.done")} variant="primary" onClick={onClose} />
           ) : (
             <>
-              <Button label="Cancel" variant="ghost" onClick={onClose} />
+              <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
               <Button
-                label="Create key"
+                label={t("api_keys.create_key")}
                 variant="primary"
                 isLoading={isPending}
                 isDisabled={!isComplete}
@@ -254,18 +289,16 @@ function CreateKeyDialog({
 }
 
 function RevokeDialog({ apiKey, onClose }: { apiKey: ApiKey; onClose: () => void }) {
+  const t = useT<"api_keys">();
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
   return (
     <AlertDialog
       isOpen
       onOpenChange={(isOpen) => !isOpen && onClose()}
-      title={`Revoke ${apiKey.name}?`}
-      description={
-        error ??
-        "Every call with this key fails from now on. This can't be undone: make a new key instead."
-      }
-      actionLabel="Revoke key"
+      title={t("api_keys.revoke_dialog_title", { name: apiKey.name })}
+      description={error ?? t("api_keys.revoke_dialog_description")}
+      actionLabel={t("api_keys.revoke_dialog_action")}
       isActionLoading={isPending}
       onAction={() =>
         startTransition(async () => {

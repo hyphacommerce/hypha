@@ -13,14 +13,22 @@ import { Suspense } from "react";
 import { DateTime } from "@/components/date-time";
 import { type Crumb, PageHeader } from "@/components/page-header";
 import { FormSkeleton } from "@/components/skeletons";
-import { requireStaff, sessionClient } from "@/lib/hypha";
+import { describe, requireStaff, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
+import type { T } from "@/lib/messages";
 
 import { draftOf } from "../grant";
 import { ConnectForm } from "./connect-form";
 
 type Connection = AdminSchemas["AgentConnectionResponse"];
 
-const BACK: Crumb = { label: "Agents", href: "/agents" };
+/** The way back to the list of agents. */
+function back(t: T): Crumb {
+  return { label: t("agents.list_title"), href: "/agents" };
+}
+
+/** Where a client starts connecting: a command, never translated. */
+const MCP_COMMAND = "/mcp";
 
 /**
  * The consent page for an MCP client (Claude Code, Cursor, ChatGPT…): where the API's
@@ -36,17 +44,17 @@ export default async function ConnectPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { request: id } = await searchParams;
+  const [{ request: id }, t] = await Promise.all([searchParams, getT()]);
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={960}>
         {typeof id !== "string" || !id.startsWith("oareq_") ? (
-          <Problem title="No request to answer" />
+          <Problem t={t} title={t("agents.connect_no_request_title")} />
         ) : (
           <Suspense
             fallback={
               <>
-                <PageHeader back={BACK} />
+                <PageHeader back={back(t)} />
                 <FormSkeleton cards={2} />
               </>
             }
@@ -60,15 +68,16 @@ export default async function ConnectPage({
 }
 
 async function ConnectRequest({ id }: { id: string }) {
-  const [client, me] = await Promise.all([sessionClient(), requireStaff()]);
+  const [client, me, t] = await Promise.all([sessionClient(), requireStaff(), getT()]);
   const result = await client.GET("/admin/agent-connections/{id}", { params: { path: { id } } });
   if (!result.data) {
     return result.response.status === 404 ? (
-      <Problem title="This request doesn't exist" />
+      <Problem t={t} title={t("agents.connect_missing_title")} />
     ) : (
       <Problem
-        title="This request can't be answered here"
-        description={result.error?.error ?? "Connect again from the client."}
+        t={t}
+        title={t("agents.connect_unanswerable_title")}
+        description={result.error ? await describe(result.error) : t("agents.connect_again")}
       />
     );
   }
@@ -78,18 +87,16 @@ async function ConnectRequest({ id }: { id: string }) {
   return (
     <>
       <PageHeader
-        title={`Connect ${agentClient.name}`}
-        back={BACK}
-        badges={<StatusBadge status={request.status} />}
-        description={
-          <>
-            It asks to work in this store as an agent acting for you, {me.user.name}. Asked{" "}
-            <DateTime value={request.created_at} short />.
-          </>
-        }
+        title={t("agents.connect_title", { name: agentClient.name })}
+        back={back(t)}
+        badges={<StatusBadge t={t} status={request.status} />}
+        description={t.rich("agents.connect_description", {
+          name: me.user.name,
+          time: <DateTime key="time" value={request.created_at} short />,
+        })}
       />
 
-      <ClientIdentity request={request} />
+      <ClientIdentity t={t} request={request} />
 
       {request.status === "pending" ? (
         <ConnectForm
@@ -106,18 +113,20 @@ async function ConnectRequest({ id }: { id: string }) {
           status={request.status === "expired" ? "warning" : "info"}
           title={
             request.status === "approved"
-              ? "Already connected"
+              ? t("agents.connect_already_connected")
               : request.status === "denied"
-                ? "Already declined"
-                : "This request expired"
+                ? t("agents.connect_already_declined")
+                : t("agents.connect_request_expired")
           }
           description={
             request.status === "expired"
-              ? "Requests wait ten minutes for an answer. Connect again from the client."
-              : "Each request is answered once. To connect again, start from the client."
+              ? t("agents.connect_expired_description")
+              : t("agents.connect_answered_once")
           }
           endContent={
-            request.status === "approved" ? <Link href="/agents">Agents</Link> : undefined
+            request.status === "approved" ? (
+              <Link href="/agents">{t("agents.connect_open_agents")}</Link>
+            ) : undefined
           }
         />
       )}
@@ -129,7 +138,7 @@ async function ConnectRequest({ id }: { id: string }) {
  * Who the client says it is, and where its access goes. A name and a logo are anyone's
  * to pick, so the redirect's host is the fact that matters.
  */
-function ClientIdentity({ request }: { request: Connection }) {
+function ClientIdentity({ t, request }: { t: T; request: Connection }) {
   const { client } = request;
   return (
     <Card>
@@ -161,17 +170,22 @@ function ClientIdentity({ request }: { request: Connection }) {
           </VStack>
         </HStack>
         <Text>
-          After you approve, you&apos;ll go back to{" "}
-          <Text weight="semibold" type="inherit">
-            {client.redirect_host}
-          </Text>
-          .
+          {t.rich("agents.connect_go_back_to", {
+            host: (
+              <Text key="host" weight="semibold" type="inherit">
+                {client.redirect_host}
+              </Text>
+            ),
+          })}
         </Text>
         {client.loopback_only && (
           <Banner
             status="warning"
-            title="This client only runs on your own computer"
-            description={`Its access goes to ${client.redirect_host}, a program on this machine. That's expected for Claude Code, Cursor and other desktop or command-line clients you're connecting right now. If you didn't just start connecting one here, cancel: any program on this computer can call itself ${client.name}.`}
+            title={t("agents.connect_loopback_title")}
+            description={t("agents.connect_loopback_description", {
+              host: client.redirect_host,
+              name: client.name,
+            })}
           />
         )}
       </VStack>
@@ -187,30 +201,27 @@ function hostOf(url: string): string | undefined {
   }
 }
 
-function Problem({ title, description }: { title: string; description?: string }) {
+function Problem({ t, title, description }: { t: T; title: string; description?: string }) {
   return (
     <EmptyState
       icon={<ExclamationTriangleIcon width={32} />}
       title={title}
-      description={
-        description ??
-        "The link may be old or mistyped. Start connecting again from the client (in Claude Code, /mcp)."
-      }
-      actions={<Link href="/agents">Back to agents</Link>}
+      description={description ?? t("agents.connect_problem_description", { command: MCP_COMMAND })}
+      actions={<Link href="/agents">{t("agents.connect_back_to_agents")}</Link>}
     />
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ t, status }: { t: T; status: string }) {
   switch (status) {
     case "pending":
-      return <Badge label="Waiting for you" variant="info" />;
+      return <Badge label={t("agents.connect_status_pending")} variant="info" />;
     case "approved":
-      return <Badge label="Connected" variant="success" />;
+      return <Badge label={t("agents.connect_status_approved")} variant="success" />;
     case "denied":
-      return <Badge label="Declined" variant="error" />;
+      return <Badge label={t("agents.connect_status_denied")} variant="error" />;
     case "expired":
-      return <Badge label="Expired" variant="warning" />;
+      return <Badge label={t("agents.connect_status_expired")} variant="warning" />;
     default:
       return <Badge label={status} />;
   }

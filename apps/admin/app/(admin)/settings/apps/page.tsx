@@ -19,8 +19,8 @@ export default async function AppsSettingsPage() {
       <VStack gap={5} maxWidth={960}>
         <PageHeader
           back={settingsCrumb(t)}
-          title="Webhooks and custom apps"
-          description="Services Hypha calls, signed with each app's secret: webhooks for the events they subscribe to, and live shipping rates."
+          title={t("apps.dev_page_title")}
+          description={t("apps.dev_page_description")}
         />
         <Suspense fallback={<CardSkeleton lines={4} />}>
           <Apps />

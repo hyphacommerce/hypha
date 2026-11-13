@@ -14,6 +14,8 @@ import { Text } from "@astryxdesign/core/Text";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useState, useTransition } from "react";
 
+import { useT } from "@/lib/use-t";
+
 import {
   type ConsentResult,
   type Credentials,
@@ -40,6 +42,7 @@ export function ConsentButtons({
   /** What approving does, or why this staff member can't. */
   intro: ReactNode;
 }) {
+  const t = useT<"apps">();
   const router = useRouter();
   const [error, setError] = useState<string>();
   const [credentials, setCredentials] = useState<Credentials>();
@@ -66,7 +69,9 @@ export function ConsentButtons({
       </Card>
     );
   }
-  if (leaving) return <Text color="secondary">Taking you back to {appName}…</Text>;
+  if (leaving) {
+    return <Text color="secondary">{t("apps.consent_leaving", { name: appName })}</Text>;
+  }
   if (!isPending) return null;
   return (
     <Card>
@@ -75,14 +80,14 @@ export function ConsentButtons({
         {error && <Banner status="error" title={error} />}
         <HStack gap={2}>
           <Button
-            label="Approve"
+            label={t("apps.consent_approve")}
             variant="primary"
             isDisabled={!canApprove}
             isLoading={pending}
             onClick={() => answer(approveConsent)}
           />
           <Button
-            label="Deny"
+            label={t("apps.consent_deny")}
             variant="secondary"
             isDisabled={!canDeny || pending}
             onClick={() => answer(denyConsent)}
@@ -101,6 +106,11 @@ export function CredentialsShown({
   name: string;
   credentials: Credentials;
 }) {
+  const t = useT<"apps">();
+  const help = {
+    endpoint: credentials.token_endpoint,
+    grant: "grant_type=refresh_token",
+  };
   const env = [
     `HYPHA_APP_KEY=${credentials.app}`,
     `HYPHA_ACCESS_TOKEN=${credentials.access_token}`,
@@ -112,25 +122,22 @@ export function CredentialsShown({
     <VStack gap={3}>
       <Banner
         status="success"
-        title={`${name} is installed`}
-        description="Copy its credentials now: they aren't shown again."
+        title={t("apps.credentials_installed", { name })}
+        description={t("apps.credentials_copy_now")}
       />
-      <CodeBlock code={env} title="Credentials" isWrapped />
+      <CodeBlock code={env} title={t("apps.credentials_title")} isWrapped />
       <Text type="supporting" color="secondary">
-        The access token works for an hour. Before it lapses, exchange the refresh token at{" "}
-        {credentials.token_endpoint} (grant_type=refresh_token) for a new pair; each refresh token
-        is used once and lasts 30 days.
         {credentials.app_secret
-          ? " The app secret verifies Hypha's webhook and extension-point signatures."
-          : " The app keeps the secret it had."}
+          ? t("apps.credentials_help_new_secret", help)
+          : t("apps.credentials_help_kept_secret", help)}
       </Text>
       <Banner
         status="warning"
-        title="Keep them secret"
-        description="They act as the app with the scopes you approved: store them in your server's secrets, never in a browser."
+        title={t("apps.credentials_keep_secret_title")}
+        description={t("apps.credentials_keep_secret_description")}
       />
       <HStack>
-        <Button label="Done" variant="primary" href={`/apps/${credentials.app}`} />
+        <Button label={t("common.done")} variant="primary" href={`/apps/${credentials.app}`} />
       </HStack>
     </VStack>
   );

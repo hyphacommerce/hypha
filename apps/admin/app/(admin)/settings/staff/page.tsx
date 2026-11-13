@@ -20,8 +20,8 @@ export default async function StaffPage() {
       <VStack gap={5}>
         <PageHeader
           back={settingsCrumb(t)}
-          title="Staff and roles"
-          description="Who can sign in, and what their roles allow."
+          title={t("staff.page_title")}
+          description={t("staff.page_description")}
         />
         <Suspense
           fallback={
@@ -41,7 +41,8 @@ export default async function StaffPage() {
 
 async function Team() {
   const client = await sessionClient();
-  const [me, users, invites, roles] = await Promise.all([
+  const [t, me, users, invites, roles] = await Promise.all([
+    getT(),
     requireStaff(),
     client.GET("/admin/users"),
     client.GET("/admin/invites"),
@@ -58,9 +59,9 @@ async function Team() {
     return (
       <Banner
         status="info"
-        title="Your role can't see the team"
-        description="Ask the store owner for the users:read scope. Your own account is under Your account."
-        endContent={<Button label="Your account" variant="secondary" href="/account" />}
+        title={t("staff.no_access_title")}
+        description={t("staff.no_access_description", { scope: "users:read" })}
+        endContent={<Button label={t("common.your_account")} variant="secondary" href="/account" />}
       />
     );
   }

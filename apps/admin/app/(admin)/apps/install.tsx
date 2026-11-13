@@ -17,7 +17,15 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { useRouter } from "next/navigation";
 import { type ChangeEvent, useState, useTransition } from "react";
 
+import { useT } from "@/lib/use-t";
+
 import { type ManifestProblem, createPrivateApp } from "./extension-actions";
+
+/** Examples of what the form takes, and the names of a manifest's parts: never translated. */
+const SITE_EXAMPLE = "https://app.example";
+const MANIFEST_EXAMPLE = "…/hypha-app.json";
+const MANIFEST_FILE = "hypha-app.json";
+const URL_START = "https://";
 
 /**
  * The install URL for what staff typed: an app's address (its `app_url`) or its
@@ -41,12 +49,17 @@ export function installUrl(typed: string, api: string): string | null {
 }
 
 export function InstallButtons({ api, canWrite }: { api: string; canWrite: boolean }) {
+  const t = useT<"apps">();
   const [open, setOpen] = useState<"install" | "private">();
   if (!canWrite) return null;
   return (
     <>
-      <Button label="Create private app" variant="secondary" onClick={() => setOpen("private")} />
-      <Button label="Install app" variant="primary" onClick={() => setOpen("install")} />
+      <Button
+        label={t("apps.install_create_private")}
+        variant="secondary"
+        onClick={() => setOpen("private")}
+      />
+      <Button label={t("apps.install_app")} variant="primary" onClick={() => setOpen("install")} />
       {open === "install" && <InstallDialog api={api} onClose={() => setOpen(undefined)} />}
       {open === "private" && <PrivateAppDialog onClose={() => setOpen(undefined)} />}
     </>
@@ -54,40 +67,43 @@ export function InstallButtons({ api, canWrite }: { api: string; canWrite: boole
 }
 
 function InstallDialog({ api, onClose }: { api: string; onClose: () => void }) {
+  const t = useT<"apps">();
   const [typed, setTyped] = useState("");
   const target = typed.trim() === "" ? null : installUrl(typed, api);
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={560} purpose="form">
       <DialogHeader
-        title="Install an app"
-        subtitle="The app's own site starts the installation; you approve what it may do here."
+        title={t("apps.install_dialog_title")}
+        subtitle={t("apps.install_dialog_subtitle")}
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={4} padding={4}>
         <TextInput
-          label="The app's address"
-          description="Its site (https://app.example) or its manifest's URL (…/hypha-app.json)."
-          placeholder="https://"
+          label={t("apps.install_address")}
+          description={t("apps.install_address_description", {
+            site: SITE_EXAMPLE,
+            manifest: MANIFEST_EXAMPLE,
+          })}
+          placeholder={URL_START}
           value={typed}
           onChange={setTyped}
         />
         {typed.trim() !== "" && !target && (
           <Banner
             status="warning"
-            title="That isn't an app's address"
-            description="Use an https:// URL (http:// only for localhost)."
+            title={t("apps.install_address_invalid_title")}
+            description={t("apps.install_address_invalid_description")}
           />
         )}
         {target && (
           <Text type="supporting" color="secondary">
-            You&apos;ll continue on {new URL(target).host}, which sends you back here to approve.
-            This store&apos;s API is {api}.
+            {t("apps.install_continue_hint", { host: new URL(target).host, api })}
           </Text>
         )}
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="secondary" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="secondary" onClick={onClose} />
           <Button
-            label="Continue to the app"
+            label={t("apps.install_continue")}
             variant="primary"
             isDisabled={!target}
             onClick={() => target && window.location.assign(target)}
@@ -110,6 +126,7 @@ const EXAMPLE = `{
 }`;
 
 function PrivateAppDialog({ onClose }: { onClose: () => void }) {
+  const t = useT<"apps">();
   const router = useRouter();
   const [text, setText] = useState("");
   const [error, setError] = useState<string>();
@@ -137,8 +154,8 @@ function PrivateAppDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={640} purpose="form">
       <DialogHeader
-        title="Create a private app"
-        subtitle="Your own integration: its manifest says what it may do, you approve it, and its credentials are shown once."
+        title={t("apps.private_dialog_title")}
+        subtitle={t("apps.private_dialog_subtitle")}
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={4} padding={4}>
@@ -149,7 +166,7 @@ function PrivateAppDialog({ onClose }: { onClose: () => void }) {
                 {problems.map((p) => (
                   <ListItem
                     key={`${p.path}:${p.message}`}
-                    label={p.path || "manifest"}
+                    label={p.path || t("apps.private_problem_manifest")}
                     description={p.message}
                   />
                 ))}
@@ -158,26 +175,29 @@ function PrivateAppDialog({ onClose }: { onClose: () => void }) {
           </Banner>
         )}
         <VStack gap={1}>
-          <Text type="label">Manifest file</Text>
+          <Text type="label">{t("apps.private_manifest_file")}</Text>
           <input
             type="file"
             accept="application/json,.json"
-            aria-label="Manifest file"
+            aria-label={t("apps.private_manifest_file")}
             onChange={readFile}
           />
         </VStack>
         <TextArea
-          label="Or paste it"
-          description="hypha-app.json: like a public app's, except it needs no redirect_uris."
+          label={t("apps.private_paste")}
+          description={t("apps.private_paste_description", {
+            file: MANIFEST_FILE,
+            field: "redirect_uris",
+          })}
           placeholder={EXAMPLE}
           value={text}
           onChange={setText}
           rows={12}
         />
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="secondary" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="secondary" onClick={onClose} />
           <Button
-            label="Review access"
+            label={t("apps.private_review")}
             variant="primary"
             isDisabled={text.trim() === ""}
             isLoading={pending}

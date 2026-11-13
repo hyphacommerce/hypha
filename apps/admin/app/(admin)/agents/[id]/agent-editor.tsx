@@ -10,6 +10,7 @@ import { useState, useTransition } from "react";
 import { DateTime } from "@/components/date-time";
 import { SaveBar } from "@/components/save-bar";
 import type { Agent } from "@/lib/agents";
+import { useT } from "@/lib/use-t";
 
 import { saveAgent } from "../actions";
 import {
@@ -39,6 +40,7 @@ export function AgentEditor({
   myScopes: readonly string[];
   canWrite: boolean;
 }) {
+  const t = useT<"agents">();
   const saved = draftOf(agent.grant);
   const [name, setName] = useState(agent.name);
   const [grant, setGrant] = useState<GrantDraft>(saved);
@@ -101,17 +103,17 @@ export function AgentEditor({
           <Card>
             <VStack gap={4}>
               <Text type="display-3" as="h2">
-                Details
+                {t("common.details")}
               </Text>
               <TextInput
-                label="Name"
+                label={t("common.name")}
                 value={name}
                 onChange={setName}
                 onEnter={save}
                 isReadOnly={!canWrite}
                 status={
                   !name.trim()
-                    ? { type: "error", message: "An agent needs a name." }
+                    ? { type: "error", message: t("agents.editor_name_required") }
                     : problem?.field === "name"
                       ? { type: "error", message: problem.error }
                       : undefined
@@ -119,7 +121,7 @@ export function AgentEditor({
               />
               <MetadataList>
                 {agent.client && (
-                  <MetadataListItem label="Client">
+                  <MetadataListItem label={t("agents.editor_client")}>
                     <VStack gap={0}>
                       <Text>{agent.client.name}</Text>
                       <Text type="supporting" color="secondary">
@@ -128,18 +130,18 @@ export function AgentEditor({
                     </VStack>
                   </MetadataListItem>
                 )}
-                <MetadataListItem label="Last used">
+                <MetadataListItem label={t("agents.last_used")}>
                   {agent.last_used_at ? (
                     <DateTime value={agent.last_used_at} />
                   ) : (
-                    <Text color="secondary">Never</Text>
+                    <Text color="secondary">{t("agents.never")}</Text>
                   )}
                 </MetadataListItem>
-                <MetadataListItem label="Created">
+                <MetadataListItem label={t("common.created")}>
                   <DateTime value={agent.created_at} />
                 </MetadataListItem>
                 {agent.revoked_at && (
-                  <MetadataListItem label="Revoked">
+                  <MetadataListItem label={t("agents.editor_revoked")}>
                     <DateTime value={agent.revoked_at} />
                   </MetadataListItem>
                 )}
