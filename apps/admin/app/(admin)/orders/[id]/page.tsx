@@ -35,7 +35,6 @@ import { type Format, getFormat } from "@/lib/get-format";
 import {
   channelNames,
   loadCountries,
-  loadStore,
   loaded,
   requireStaff,
   sessionClient,
@@ -340,9 +339,8 @@ async function Order({ id }: { id: string }) {
   // The address check names an app and a staff member by ID: their names, when it does
   // (IDs stay where the role can't read apps or users).
   const check = order.address_check;
-  const [countries, store, addressFormat, people, apps] = await Promise.all([
+  const [countries, addressFormat, people, apps] = await Promise.all([
     loadCountries(),
-    loadStore(),
     order.shipping_address
       ? client
           .GET("/admin/address-formats/{country}", {
@@ -358,10 +356,6 @@ async function Order({ id }: { id: string }) {
       : new Map<string, string>(),
   ]);
   const canWriteOrders = me.scopes.includes("orders:write");
-  // The language the buyer read the order in, when it isn't the one content is written
-  // in (none when the store can't be read: there's nothing to compare with).
-  const buyerLanguage =
-    order.language && store && order.language !== store.default_language ? order.language : null;
   const listNames = priceListNames(client, order.lines);
 
   const fulfillments = shipments.data?.items ?? [];
@@ -551,13 +545,7 @@ async function Order({ id }: { id: string }) {
             </VStack>
           </Card>
 
-          <PaymentCard
-            order={order}
-            buyerLanguage={buyerLanguage}
-            format={format}
-            extensions={extensions}
-            t={t}
-          />
+          <PaymentCard order={order} format={format} extensions={extensions} t={t} />
 
           {fulfillments.length > 0 && (
             <ShipmentsCard order={order} fulfillments={fulfillments} places={places} />
@@ -735,14 +723,11 @@ type Order = AdminSchemas["AdminOrderResponse"];
 /** How the order is paid for: each payment, newest first. */
 function PaymentCard({
   order,
-  buyerLanguage,
   format,
   extensions,
   t,
 }: {
   order: Order;
-  /** The order's language when it isn't the store's default: the buyer read another copy. */
-  buyerLanguage: string | null;
   format: Format;
   extensions: Extensions;
   t: T;
@@ -773,6 +758,13 @@ function PaymentCard({
                   </HStack>
                   <Text weight="medium">{format.money(payment.amount)}</Text>
                 </HStack>
+                {payment.localized?.method_name && (
+                  <Text type="supporting" color="secondary">
+                    {t("orders.detail_payment_method_localized", {
+                      name: payment.localized.method_name,
+                    })}
+                  </Text>
+                )}
                 <MetadataList>
                   <MetadataListItem label={t("orders.detail_payment_provider")}>
                     {providerLabel(payment.provider, t)}
@@ -798,24 +790,23 @@ function PaymentCard({
                     </MetadataListItem>
                   )}
                 </MetadataList>
-                {/* The admin's payment answers its method's name and instructions in the
-                    source language only, not the buyer's copy in the order's language:
-                    for an order in another language they're labelled as the source. */}
+                {/* What the buyer read, in the order's language; the store's own text
+                    beside it where that reads differently. */}
                 {payment.instructions && (
                   <VStack gap={1}>
-                    <Text type="label">
-                      {buyerLanguage
-                        ? t("orders.detail_payment_instructions_source")
-                        : t("orders.detail_payment_instructions")}
-                    </Text>
+                    <Text type="label">{t("orders.detail_payment_instructions")}</Text>
                     <Text type="supporting" color="secondary">
-                      <span style={{ whiteSpace: "pre-wrap" }}>{payment.instructions}</span>
+                      <span style={{ whiteSpace: "pre-wrap" }}>
+                        {payment.localized?.instructions ?? payment.instructions}
+                      </span>
                     </Text>
-                    {buyerLanguage && (
+                    {payment.localized?.instructions && (
                       <Text type="supporting" color="secondary">
-                        {t("orders.detail_payment_instructions_source_note", {
-                          language: format.languageNameInSentence(buyerLanguage),
-                        })}
+                        <span style={{ whiteSpace: "pre-wrap" }}>
+                          {t("orders.detail_payment_instructions_source_text", {
+                            text: payment.instructions,
+                          })}
+                        </span>
                       </Text>
                     )}
                   </VStack>
