@@ -2,7 +2,7 @@
   "region_eu": "Evropska unija",
   "region_europe": "Evropa",
   "region_north_america": "Severna Amerika",
-  "address_choose_region": "Izaberite: {label}",
+  "address_choose_region": "Izaberite",
   "address_label_first_name": "Ime",
   "address_label_last_name": "Prezime",
   "address_label_company": "Firma",

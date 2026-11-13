@@ -102,24 +102,26 @@ const DEFAULT_LABELS: Record<Exclude<AddressField, "country">, LabelKey> = {
 /** What labels an address's fields need: the shared vocabulary for the country. */
 export type AddressT = TFor<"components" | "common">;
 
+/** What labels a country's fields: its format's `labels` and `label_keys`. */
+export type LabelledFormat = Pick<AddressFormat, "labels" | "label_keys">;
+
 /**
  * `field`'s label in `t`'s language: by the key the country's format gives it, its
  * English label as the API has it where the key is `null` or one this build doesn't
  * know, and the field's default label without a format (or where the format doesn't
  * label it). An unknown field is shown as it is.
  */
-export function fieldLabel(
+export function addressFieldLabel(
   t: AddressT,
-  format: Pick<AddressFormat, "labels" | "label_keys"> | null | undefined,
+  format: LabelledFormat | null | undefined,
   field: string,
 ): string {
   if (field === "country") return t("common.country");
-  if (format && field in format.label_keys) {
-    const key = asLabelKey(format.label_keys[field]);
-    if (key) return t(`components.address_label_${key}`);
-    const english = format.labels[field];
-    if (english !== undefined) return english;
-  }
+  // An answer cached from before the API sent `label_keys` has only `labels`.
+  const keys: Partial<AddressFormat["label_keys"]> = format?.label_keys ?? {};
+  const key = Object.hasOwn(keys, field) ? asLabelKey(keys[field]) : undefined;
+  if (key) return t(`components.address_label_${key}`);
+  if (format && Object.hasOwn(format.labels, field)) return format.labels[field];
   const known = asField(field);
   if (known === undefined || known === "country") return field;
   return t(`components.address_label_${DEFAULT_LABELS[known]}`);
@@ -153,14 +155,15 @@ type Source = { type: string };
 /**
  * A problem's or a message's sentence in `t`'s language, from its `code` and `params`:
  * the API's `message` for a code this build doesn't know, for a checkout rule's or an
- * app's message, and for a code whose params are missing. `label` names a field (its
- * country's word for it: `fieldLabel` with the form's format).
+ * app's message, and for a code whose params are missing. A field is named as `format`
+ * labels it (`addressFieldLabel`).
  */
 export function wordAddressMessage(
   t: AddressT,
   message: AddressProblem & { source?: Source },
-  label: (field: string) => string,
+  format: LabelledFormat | null | undefined,
 ): string {
+  const label = (field: string) => addressFieldLabel(t, format, field);
   if (
     message.source &&
     message.source.type !== "format" &&
@@ -188,13 +191,13 @@ export function wordAddressMessage(
             example: params.example,
           })
         : t("components.address_message_invalid_format", { label: label(field) });
-    case "region_mismatch":
-      return field && params?.region_name
-        ? t("components.address_message_region_mismatch", {
-            label: label(field),
-            region: params.region_name,
-          })
+    case "region_mismatch": {
+      // The region's name, or its code where the API had no name for it.
+      const region = params?.region_name ?? params?.region;
+      return field && region
+        ? t("components.address_message_region_mismatch", { label: label(field), region })
         : message.message;
+    }
     case "house_number_missing":
     case "apartment_missing":
     case "address_corrections_suggested":
@@ -263,10 +266,14 @@ export function problemsOf(error: { code: string; details?: unknown }): FieldPro
     const field: unknown = Reflect.get(item, "field");
     const code: unknown = Reflect.get(item, "code");
     const message: unknown = Reflect.get(item, "message");
-    if (typeof field !== "string" || typeof code !== "string" || typeof message !== "string") {
-      continue;
-    }
-    items.push({ field, code, message, params: Reflect.get(item, "params") });
+    if (typeof field !== "string" || typeof message !== "string") continue;
+    // Without a code it's worded as an unknown one: the API's sentence as sent.
+    items.push({
+      field,
+      code: typeof code === "string" ? code : "",
+      message,
+      params: Reflect.get(item, "params"),
+    });
   }
   return problemsByField(items);
 }

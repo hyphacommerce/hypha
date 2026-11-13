@@ -30,7 +30,6 @@ import {
   ADDRESS_FIELDS,
   type AddressFormat,
   type AddressValues,
-  fieldLabel,
   problemsByField,
   wordAddressMessage,
 } from "@/lib/address";
@@ -781,16 +780,19 @@ function TryResult({
 }) {
   const t = useT<"checkout">();
   const format = useFormat();
-  const label = (field: string) => fieldLabel(t, addressFormat, field);
   if (result.problems.length > 0) {
     return (
       <Banner
         status="error"
         title={t("checkout.try_refused_title")}
-        description={format.list(
-          result.problems.map((p) => wordAddressMessage(t, p, label)),
-          "unit",
-        )}
+        description={
+          // One problem a line: each is a sentence of its own.
+          <VStack gap={1}>
+            {result.problems.map((p) => (
+              <span key={`${p.field}:${p.code}`}>{wordAddressMessage(t, p, addressFormat)}</span>
+            ))}
+          </VStack>
+        }
       />
     );
   }
@@ -825,7 +827,7 @@ function TryResult({
             // A rule says one thing, and the format one thing per field.
             key={`${m.source.type}:${"rule" in m.source ? m.source.rule : ""}:${m.code}:${m.path}`}
             status={m.severity === "error" ? "error" : "warning"}
-            title={wordAddressMessage(t, m, label)}
+            title={wordAddressMessage(t, m, addressFormat)}
             description={[
               m.severity === "error" ? t("checkout.try_blocks") : t("checkout.try_warning"),
               m.path,

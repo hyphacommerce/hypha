@@ -9,7 +9,7 @@ import {
   type AddressT,
   type MessageParams,
   LABEL_KEYS,
-  fieldLabel,
+  addressFieldLabel,
   problemsByField,
   problemsOf,
   wordAddressMessage,
@@ -54,41 +54,52 @@ test("each label key's English is the API's label, word for word", () => {
 });
 
 test("a field is labelled by its format's key, in the reader's language", () => {
-  assert.equal(fieldLabel(en, us, "postal_code"), "ZIP code");
-  assert.equal(fieldLabel(sr, us, "postal_code"), "ZIP kôd");
-  assert.equal(fieldLabel(sr, us, "province"), "Savezna država");
+  assert.equal(addressFieldLabel(en, us, "postal_code"), "ZIP code");
+  assert.equal(addressFieldLabel(sr, us, "postal_code"), "ZIP kôd");
+  assert.equal(addressFieldLabel(sr, us, "province"), "Savezna država");
 });
 
 test("a label without a key is shown as the API has it", () => {
   const format = { labels: { city: "Town or village" }, label_keys: { city: null } };
-  assert.equal(fieldLabel(sr, format, "city"), "Town or village");
+  assert.equal(addressFieldLabel(sr, format, "city"), "Town or village");
 });
 
 test("a key this build doesn't know shows the API's label", () => {
   const format = { labels: { city: "Hamlet" }, label_keys: { city: "hamlet" } };
-  assert.equal(fieldLabel(sr, format, "city"), "Hamlet");
+  assert.equal(addressFieldLabel(sr, format, "city"), "Hamlet");
 });
 
 test("without a format, or a field it doesn't label, the field's default label", () => {
-  assert.equal(fieldLabel(sr, undefined, "line1"), "Adresa");
-  assert.equal(fieldLabel(en, undefined, "province"), "Region");
-  assert.equal(fieldLabel(en, us, "phone"), "Phone");
+  assert.equal(addressFieldLabel(sr, undefined, "line1"), "Adresa");
+  assert.equal(addressFieldLabel(en, undefined, "province"), "Region");
+  assert.equal(addressFieldLabel(en, us, "phone"), "Phone");
 });
 
 test("the country is named by the shared vocabulary; an unknown field as it is", () => {
-  assert.equal(fieldLabel(sr, us, "country"), "Zemlja");
-  assert.equal(fieldLabel(en, us, "floor"), "floor");
+  assert.equal(addressFieldLabel(sr, us, "country"), "Zemlja");
+  assert.equal(addressFieldLabel(en, us, "floor"), "floor");
+});
+
+test("a format answered before label keys existed shows its English labels", () => {
+  // As the wire had it: no `label_keys` at all.
+  const old: typeof us = JSON.parse('{"labels": {"postal_code": "ZIP code"}}');
+  assert.equal(addressFieldLabel(sr, old, "postal_code"), "ZIP code");
+  assert.equal(addressFieldLabel(sr, old, "city"), "Grad");
+});
+
+test("a field named like an object's own property isn't read from the prototype", () => {
+  assert.equal(addressFieldLabel(en, us, "toString"), "toString");
+  assert.equal(addressFieldLabel(en, us, "constructor"), "constructor");
 });
 
 // Problems and messages.
 
-const label = (t: AddressT) => (field: string) => fieldLabel(t, us, field);
 const word = (
   t: AddressT,
   code: string,
   params?: MessageParams | null,
   source?: { type: string },
-) => wordAddressMessage(t, { code, message: "the API's words", params, source }, label(t));
+) => wordAddressMessage(t, { code, message: "the API's words", params, source }, us);
 
 test("a required field names its label in the country's words", () => {
   assert.equal(word(en, "required", { field: "postal_code" }), "ZIP code is required");
@@ -120,6 +131,13 @@ test("a region mismatch names the region the address gave", () => {
       region_name: "New York",
     }),
     "ZIP kôd: ne pripada regionu New York",
+  );
+});
+
+test("a region mismatch without the region's name names its code", () => {
+  assert.equal(
+    word(sr, "region_mismatch", { field: "postal_code", region: "NY" }),
+    "ZIP kôd: ne pripada regionu NY",
   );
 });
 
@@ -184,7 +202,7 @@ test("a problem without params keeps none, so it's shown in the API's words", ()
   });
   const city = problems.city;
   assert.ok(city);
-  assert.equal(wordAddressMessage(sr, city, label(sr)), "Enter a city");
+  assert.equal(wordAddressMessage(sr, city, us), "Enter a city");
 });
 
 test("an invalid_address error's problems are read from its details", () => {
@@ -210,4 +228,14 @@ test("an invalid_address error's problems are read from its details", () => {
     },
   });
   assert.equal(problemsOf({ code: "not_found", details: error.details }), undefined);
+});
+
+test("a problem without a code is kept, in the API's words", () => {
+  const problems = problemsOf({
+    code: "invalid_address",
+    details: { problems: [{ field: "city", message: "Enter a city" }] },
+  });
+  const city = problems?.city;
+  assert.ok(city);
+  assert.equal(wordAddressMessage(sr, city, us), "Enter a city");
 });

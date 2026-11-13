@@ -2,7 +2,7 @@
   "region_eu": "European Union",
   "region_europe": "Europe",
   "region_north_america": "North America",
-  "address_choose_region": "Choose a {label}",
+  "address_choose_region": "Choose one",
   "address_label_first_name": "First name",
   "address_label_last_name": "Last name",
   "address_label_company": "Company",

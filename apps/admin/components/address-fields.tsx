@@ -21,7 +21,7 @@ import {
   type AddressValues,
   type FieldProblems,
   asField,
-  fieldLabel,
+  addressFieldLabel,
   wordAddressMessage,
 } from "@/lib/address";
 import { useT } from "@/lib/use-t";
@@ -52,11 +52,10 @@ export function AddressFields({
 }) {
   const t = useT();
   const required = new Set(format.required);
-  const labelOf = (field: string) => fieldLabel(t, format, field);
   const status = (field: Field) => {
     const problem = problems?.[field];
     if (problem) {
-      return { type: "error" as const, message: wordAddressMessage(t, problem, labelOf) };
+      return { type: "error" as const, message: wordAddressMessage(t, problem, format) };
     }
     if (tried && required.has(field) && values[field].trim() === "") {
       return { type: "error" as const, message: t("common.required") };
@@ -64,7 +63,7 @@ export function AddressFields({
     return undefined;
   };
   const input = (field: Field) => {
-    const label = labelOf(field);
+    const label = addressFieldLabel(t, format, field);
     const isRequired = required.has(field);
     if (field === "line1" && format.autocomplete && onFill) {
       return (
@@ -101,7 +100,7 @@ export function AddressFields({
           value={values.province || undefined}
           onChange={(value) => onChange("province", value)}
           hasSearch={format.regions.length > 12}
-          placeholder={t("components.address_choose_region", { label: label.toLowerCase() })}
+          placeholder={t("components.address_choose_region")}
           status={status(field)}
         />
       );

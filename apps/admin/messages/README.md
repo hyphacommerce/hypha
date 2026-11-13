@@ -359,8 +359,8 @@ A function that builds text takes the translator, always: none has an English fa
 | `phaseBadge(phase, t)`, `phaseOptions(t)` (`lib/price-lists.ts`) | a price list's or a discount's phase |
 | `settingsCrumb(t)`, `appsCrumb(t)`, `agentsCrumb(t)` (`lib/navigation.ts`) | a breadcrumb's way back |
 | `describe(error)`, `describeWith(t, error)` | an API error's sentence |
-| `fieldLabel(t, format, field)` (`lib/address.ts`) | an address field's label in the country's words, by the format's `label_keys` (`components.address_label_*`) |
-| `wordAddressMessage(t, problem, label)` (`lib/address.ts`) | an address problem or a built-in cart message, from its `code` and `params` (`components.address_message_*`); a rule's or an app's as written |
+| `addressFieldLabel(t, format, field)` (`lib/address.ts`) | an address field's label in the country's words, by the format's `label_keys` (`components.address_label_*`) |
+| `wordAddressMessage(t, problem, format)` (`lib/address.ts`) | an address problem or a built-in cart message, from its `code` and `params` (`components.address_message_*`); a rule's or an app's as written |
 | `parseAmount(text, digits, currency, t)`, `parsePercent`, `parseBreaks` (`lib/price-grid/`) | typed prices, with the problem in `t`'s language |
 
 ## Before a second language ships
