@@ -354,11 +354,35 @@ is about 150 lines and has no framework in it (Q4).
   `en`. The login pages use the last two.
 - The admin shows content in the store's default language whatever the UI language is.
 
-### 8.4 Which languages ship
+### 8.4 Rules the extraction settled
+
+- **Delivery differs by app.** The storefront sends each route the namespaces it uses
+  (pages are cached, so the catalog rides in the page). The admin loads one cached
+  chunk per language (every page is dynamic and the layout re-renders per navigation).
+  Both type `useT<N>()` by namespace.
+- **One key, one role.** A button and a page title get separate keys even when the
+  English is the same.
+- **Numbers.** A plain `{count}` isn't formatted; a number outside a plural's `#` is
+  written `{count, number}`.
+- **Defaults saved as content** (a preset's rule name and shopper message, the setup
+  wizard's "Standard" shipping option) are written in the store's default language,
+  never the staff member's: content is in the store's language (ML2).
+- **Input isn't localised.** Typed prices accept `.` and `,` in every language, and the
+  price grid's cells, copy and paste and CSV files are written the same for everyone.
+  Only what is displayed follows the locale.
+- **The admin's English formats as `en-GB`,** as before, and Astryx gets the same
+  locale as the app's own formats.
+- **Before `users.language` exists** the admin keeps the choice in a cookie
+  (`hypha_admin_language`), which stays afterwards for the pages before the login.
+- **Text built outside JSX isn't linted** (objects, actions, `lib/`): the
+  pseudo-language is the check for it.
+
+### 8.5 Which languages ship
 
 - English is the source. Each further language is a catalog file per app plus the
   email defaults: a contribution anyone can make, checked by CI for completeness.
-- Shipping the first second language with the feature proves the path (Q1).
+- Shipping the first second language with the feature proves the path (Q1). A shipped language is held complete by CI; a key it
+  lacks still shows English at run time.
 
 ## 9. The storefront (ML15)
 
