@@ -2313,6 +2313,11 @@ contains "the layout first" '"items":[{"key":"layout"'
 step "one template" 200 - "$BASE/admin/notification-templates/order_shipped"
 contains "with its variables" '"variables":{'
 step "an unknown template" 404 template_unknown "$BASE/admin/notification-templates/nope"
+step "a template in the store's default language" 200 - \
+    "$BASE/admin/notification-templates/order_shipped?language=en"
+contains "is the default language's" '"language":null'
+step "a template in a language the store doesn't have" 422 language_not_listed \
+    "$BASE/admin/notification-templates/order_shipped?language=ja"
 TEMPLATES="$BASE/admin/notification-templates/order_shipped"
 BROKEN='{"subject":"Shipped","html":"{% extends \"layout\" %}{% block content %}{{ order.nope }}{% endblock %}"}'
 GOOD='{"subject":"Shipped: {{ order.number }}","html":"{% extends \"layout\" %}{% block content %}<p>{{ order.number }}</p>{% endblock %}"}'

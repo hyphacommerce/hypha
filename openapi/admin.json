@@ -9003,7 +9003,7 @@
           "items": {
             "description": "Every template: the layout, the buyer's, then the staff's.",
             "items": {
-              "$ref": "#/components/schemas/NotificationTemplateSummary"
+              "$ref": "#/components/schemas/NotificationTemplateListItem"
             },
             "type": "array"
           }
@@ -9012,6 +9012,38 @@
           "items"
         ],
         "type": "object"
+      },
+      "NotificationTemplateListItem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/NotificationTemplateSummary"
+          },
+          {
+            "properties": {
+              "languages": {
+                "description": "The store's other languages with a template of the merchant's own for this key\n(`?language=` reads one).",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "languages"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "A template in the list: in the store's default language, with the other languages the\nmerchant saved it in."
+      },
+      "NotificationTemplateOrigin": {
+        "description": "Where a template's sources come from.\n\nKnown values: `merchant`, `default`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "merchant",
+          "default"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
       },
       "NotificationTemplateResponse": {
         "allOf": [
@@ -9024,8 +9056,23 @@
                 "description": "Jinja HTML. A message starts with `{% extends \"layout\" %}` and fills\n`{% block preheader %}` and `{% block content %}`.",
                 "type": "string"
               },
+              "language": {
+                "description": "The language this is the template of; `null`: the store's default language.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sources_language": {
+                "description": "The language `subject`, `html` and `text` are written in: this one's when\n`customized`, else the one its emails fall back to.",
+                "type": "string"
+              },
+              "sources_origin": {
+                "$ref": "#/components/schemas/NotificationTemplateOrigin",
+                "description": "Where `subject`, `html` and `text` come from."
+              },
               "subject": {
-                "description": "Jinja; empty for the layout. The merchant's when `customized`, else the default.",
+                "description": "Jinja; empty for the layout. The merchant's when `customized`, else what emails\nin this language send.",
                 "type": "string"
               },
               "text": {
@@ -9036,11 +9083,13 @@
                 ]
               },
               "variables": {
-                "description": "The template's context, filled with a made-up order and the store's branding:\nevery variable it can print (money as `{amount, currency, formatted}`, times as\n`{iso, formatted}`), for the editor's variable list.",
+                "description": "The template's context, filled with a made-up order in this language and the\nstore's branding: every variable it can print (money as `{amount, currency,\nformatted}`, times as `{iso, formatted}`), for the editor's variable list.",
                 "type": "object"
               }
             },
             "required": [
+              "sources_language",
+              "sources_origin",
               "subject",
               "html",
               "variables"
@@ -9073,7 +9122,7 @@
             "type": "boolean"
           },
           "enabled": {
-            "description": "Whether its messages are sent. A template that's off records each message as\n`skipped`.",
+            "description": "Whether its messages are sent, in every language. A template that's off records\neach message as `skipped`.",
             "type": "boolean"
           },
           "key": {
@@ -10866,6 +10915,13 @@
         "properties": {
           "html": {
             "type": "string"
+          },
+          "language": {
+            "description": "The language the sources are written for (a BCP 47 tag, one of the store's):\nrendered in that language's layout, its money and dates written its way. Absent:\nthe store's default.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "order": {
             "oneOf": [
@@ -13896,7 +13952,7 @@
         "description": "A template's sources (all of them: this replaces the stored ones).",
         "properties": {
           "enabled": {
-            "description": "Absent keeps whether it's on.",
+            "description": "Absent keeps whether it's on. Set for every language at once: with a `language`\nit's `422 enabled_not_per_language`.",
             "type": "boolean"
           },
           "html": {
@@ -40245,7 +40301,7 @@
             "bearer": []
           }
         ],
-        "summary": "Every template, customized or default.",
+        "summary": "Every template in the store's default language, customized or default, and the other\nlanguages each is customized in.",
         "tags": [
           "notifications"
         ],
@@ -40265,6 +40321,15 @@
             "required": true,
             "schema": {
               "pattern": "^[a-z_]+$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "One of the store's languages (a BCP 47 tag, `sr-Latn`, `de-AT`); absent, or the\nstore's default language, is the default language's template. Another language's\ntemplate is the merchant's for it, else what an email in it sends: their template\nfor it without its region, the build's default in it (or without its region), then\nthe default language's. A language the store doesn't have is `422\nlanguage_not_listed`.",
+            "in": "query",
+            "name": "language",
+            "required": false,
+            "schema": {
               "type": "string"
             }
           },
@@ -40294,7 +40359,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+            "description": "A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -40362,7 +40427,7 @@
             "bearer": []
           }
         ],
-        "summary": "Goes back to the default's sources, keeping whether it's on.",
+        "summary": "Drops the merchant's sources for a language (none: the store's default), keeping\nwhether it's on: emails in it send what they fall back to again.",
         "tags": [
           "notifications"
         ],
@@ -40383,6 +40448,15 @@
             "required": true,
             "schema": {
               "pattern": "^[a-z_]+$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "One of the store's languages (a BCP 47 tag, `sr-Latn`, `de-AT`); absent, or the\nstore's default language, is the default language's template. Another language's\ntemplate is the merchant's for it, else what an email in it sends: their template\nfor it without its region, the build's default in it (or without its region), then\nthe default language's. A language the store doesn't have is `422\nlanguage_not_listed`.",
+            "in": "query",
+            "name": "language",
+            "required": false,
+            "schema": {
               "type": "string"
             }
           }
@@ -40406,7 +40480,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`)."
+            "description": "A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`)."
           },
           "401": {
             "content": {
@@ -40454,7 +40528,7 @@
             "bearer": []
           }
         ],
-        "summary": "One template: its sources in effect, whether it's customized and on, and its\nvariables.",
+        "summary": "One template in one language: its sources in effect, whether it's customized and on,\nand its variables.",
         "tags": [
           "notifications"
         ],
@@ -40599,7 +40673,7 @@
             "bearer": []
           }
         ],
-        "summary": "Turns a template on or off, keeping its sources: a default stays a default (and\ngets later improvements). Turning off one that can't be is `template_required`.",
+        "summary": "Turns a template on or off in every language, keeping its sources: a default stays a\ndefault (and gets later improvements). Turning off one that can't be is\n`template_required`. Answers the default language's template.",
         "tags": [
           "notifications"
         ],
@@ -40620,6 +40694,15 @@
             "required": true,
             "schema": {
               "pattern": "^[a-z_]+$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "One of the store's languages (a BCP 47 tag, `sr-Latn`, `de-AT`); absent, or the\nstore's default language, is the default language's template. Another language's\ntemplate is the merchant's for it, else what an email in it sends: their template\nfor it without its region, the build's default in it (or without its region), then\nthe default language's. A language the store doesn't have is `422\nlanguage_not_listed`.",
+            "in": "query",
+            "name": "language",
+            "required": false,
+            "schema": {
               "type": "string"
             }
           },
@@ -40659,7 +40742,7 @@
                 }
               }
             },
-            "description": "A malformed ID in the path (`invalid_path`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
+            "description": "A malformed ID in the path (`invalid_path`). An unknown or malformed query parameter (`invalid_query`). A body that isn't JSON (`malformed_json`). A `Hypha-Preview` other than `1` or `0`, or sent with `Hypha-Preview-Token` (`invalid_preview_header`)."
           },
           "401": {
             "content": {
@@ -40747,7 +40830,7 @@
             "bearer": []
           }
         ],
-        "summary": "Saves a template. The sources must parse and render against the template's sample\nin the layout in effect (`template_invalid` with `details: {part, line, message}`);\nsaving the layout renders every message in it. Turning off one that can't be is\n`template_required`.",
+        "summary": "Saves a template for a language (none: the store's default). The sources must parse\nand render against the template's sample in that language, in the layout in effect\nfor it (`template_invalid` with `details: {part, line, message}`); saving the layout\nrenders every message in it. Turning off one that can't be is `template_required`.",
         "tags": [
           "notifications"
         ],
