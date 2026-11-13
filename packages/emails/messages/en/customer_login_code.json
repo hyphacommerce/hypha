@@ -1,0 +1,9 @@
+{
+  "subject": "Your {shop} sign-in code",
+  "preheader": "Enter this code to sign in to {shop}.",
+  "heading": "Your sign-in code",
+  "enter": "Enter this code to sign in to {shop}. It works for {minutes} minutes.",
+  "sign_in": "Sign in",
+  "one_click": "Or sign in with one click: {link}",
+  "ignore": "If you didn't ask for a code, you can ignore this email: nobody can sign in without it."
+}

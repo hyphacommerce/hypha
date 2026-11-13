@@ -524,67 +524,28 @@ impl<S: Storage> AppState<S> {
     /// `payments:write`). The order placed (or placed already by the shopper's browser);
     /// `None` when there was nothing to complete. A checkout that can't complete gives the
     /// money back and answers why; a storage failure is worth trying again (the provider's
-    /// report delivered again does).
-    pub async fn complete_paid_checkout<P>(
+    /// report delivered again does). `ports` are the request's own (`Caller::authenticate`,
+    /// `public_ports`).
+    pub async fn complete_paid_checkout(
         &self,
-        ports: &P,
+        ports: &S::Ports<'_>,
         ctx: &hypha_core::Ctx,
         payment: &hypha_payments::Payment,
-    ) -> Result<Option<hypha_core::OrderId>, hypha_checkout::CommandError>
-    where
-        P: hypha_checkout::CheckoutPorts
-            + hypha_shipping::HasAppProviders
-            + hypha_apps::HasApps
-            + hypha_apps::HasExtensionEndpoints
-            + hypha_apps::HasSporeSettings
-            + hypha_extensions::HasExtensionCalls
-            + hypha_checkout_rules::HasCheckoutSettings,
-    {
-        // Nothing to complete: no need to read the store.
-        if payment.cart().is_none() || payment.order().is_some() || !payment.status().committed() {
-            return Ok(None);
-        }
-        // The store's languages, which the order's is resolved against: read through
-        // the directory, as these ports may be any (a spore's webhook's). A caller holding
-        // the request's own ports reads them there instead (`complete_paid_checkout_in`),
-        // not taking a second connection. A failure is a storage one, worth trying again.
-        let languages = match self.storage.directory().await {
-            Ok(directory) => {
-                hypha_stores::get_store(&hypha_core::Ctx::system(), &directory, self.store)
-                    .await
-                    .map(|store| crate::language::content_languages(&store))
-                    .map_err(|e| hypha_core::RepoError::Backend(e.to_string()))?
-            }
-            Err(e) => return Err(hypha_core::RepoError::Backend(format!("{e:?}")).into()),
-        };
-        self.complete_paid_checkout_in(ports, ctx, payment, languages)
-            .await
-    }
-
-    /// `complete_paid_checkout` with the store's languages already read
-    /// (`language::content_languages`).
-    pub async fn complete_paid_checkout_in<P>(
-        &self,
-        ports: &P,
-        ctx: &hypha_core::Ctx,
-        payment: &hypha_payments::Payment,
-        languages: hypha_checkout::ContentLanguages,
-    ) -> Result<Option<hypha_core::OrderId>, hypha_checkout::CommandError>
-    where
-        P: hypha_checkout::CheckoutPorts
-            + hypha_shipping::HasAppProviders
-            + hypha_apps::HasApps
-            + hypha_apps::HasExtensionEndpoints
-            + hypha_apps::HasSporeSettings
-            + hypha_extensions::HasExtensionCalls
-            + hypha_checkout_rules::HasCheckoutSettings,
-    {
+    ) -> Result<Option<hypha_core::OrderId>, hypha_checkout::CommandError> {
         let (Some(cart), None) = (payment.cart(), payment.order()) else {
             return Ok(None);
         };
         if !payment.status().committed() {
             return Ok(None);
         }
+        // The store's languages, which the order's is resolved against, read on the
+        // connection `ports` hold: a request holding one pooled connection while it waits
+        // for a second can starve the pool when reports arrive together. A failure is a
+        // storage one, worth trying again.
+        let store = crate::routes::stores::store_as_system(self, ports)
+            .await
+            .map_err(|e| hypha_core::RepoError::Backend(format!("{e:?}")))?;
+        let languages = crate::language::content_languages(&store);
         let rates = self.cart_rates(ports, cart);
         let providers = self.payments(ports);
         let placed = hypha_checkout::complete_paid_checkout(

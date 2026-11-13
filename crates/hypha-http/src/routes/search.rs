@@ -1,10 +1,10 @@
 //! Search: the storefront's search and product listing, and the admin's settings, reindex
 //! and status.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt, str::FromStr};
 
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_core::{AssetId, CategoryId, Money, ProductId, VariantId};
+use hypha_core::{AssetId, CategoryId, Language, Money, ProductId, VariantId};
 use hypha_media::{AssetRepo, HasAssets};
 use hypha_search::{SearchInput, search, update_search_settings};
 use hypha_search_index::{
@@ -192,7 +192,9 @@ pub struct FacetResponse {
     /// (values `true` and `false`), or `field.<namespace>.<key>` for a custom field
     /// (`field.custom.material`).
     key: String,
-    /// The merchant's label, if they set one, in the response's language.
+    /// The merchant's label, if they set one, in the response's language. Without one, an
+    /// option facet's is the option's name in the response's language where that differs
+    /// from the name as stored (as this page's results write it); `null` otherwise.
     label: Option<String>,
     /// Most results first, then by value; at most 100.
     values: Vec<FacetValueResponse>,
@@ -211,6 +213,39 @@ pub struct SearchResponse {
     has_more: bool,
     /// Pass as `cursor` for the next page; `null` on the last. Opaque.
     next_cursor: Option<String>,
+}
+
+/// Where a search's next page starts, as its cursor holds it: the results shown so far
+/// and the language searched (`20@de`; a cursor from before languages has the offset
+/// alone), so following pages search the documents the first page did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SearchPosition {
+    offset: u32,
+    language: Option<Language>,
+}
+
+impl FromStr for SearchPosition {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, ()> {
+        let (offset, language) = match s.split_once('@') {
+            Some((offset, tag)) => (offset, Some(Language::new(tag).map_err(|_| ())?)),
+            None => (s, None),
+        };
+        Ok(Self {
+            offset: offset.parse().map_err(|_| ())?,
+            language,
+        })
+    }
+}
+
+impl fmt::Display for SearchPosition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.language {
+            Some(language) => write!(f, "{}@{}", self.offset, language.as_str()),
+            None => write!(f, "{}", self.offset),
+        }
+    }
 }
 
 /// Searches the products the shopper's market sells, priced and stocked there, in the
@@ -236,11 +271,14 @@ pub async fn storefront_search<S: Storage>(
     query: ListQuery<SearchParams>,
 ) -> Result<Localized<SearchResponse>, ApiError> {
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let (page, params, scope) = query.parse::<u32>()?;
+    let (page, params, scope) = query.parse::<SearchPosition>()?;
     let asked = params.language;
     let store = super::stores::store_as_system(&state, &ports).await?;
     let servable = store.offered_languages();
-    let offset = page.after.unwrap_or(0);
+    let (offset, searched) = match page.after {
+        Some(at) => (at.offset, at.language),
+        None => (0, None),
+    };
     let limit = page.limit.get();
     let words = params.q.clone();
     let input = SearchInput {
@@ -271,20 +309,26 @@ pub async fn storefront_search<S: Storage>(
         endpoints: state.app_endpoints(&ports),
         caller: state.extensions(),
         env: &state.env,
+        answered: Default::default(),
     };
-    // The language a product read in the same market would answer in, then the market's
+    // A following page: the language its first page searched, while the market offers
+    // it, so a fallback that changed since can't skip or repeat results. Otherwise the
+    // language a product read in the same market would answer in, then the market's
     // others, for while it has no documents yet.
     let found = search(&ctx, &ports, &engine, input, |market| {
+        let offered = market.offered_languages(&servable);
+        if let Some(language) = searched.filter(|l| offered.contains(l)) {
+            return (language, Vec::new());
+        }
         let served = ServedLanguage::of(asked.as_deref(), &store, Some(market));
-        let others = market
-            .offered_languages(&servable)
+        let others = offered
             .into_iter()
             .filter(|l| l != served.language())
             .collect();
         (served.language().clone(), others)
     })
     .await?;
-    let served = ServedLanguage::chosen(found.language.clone(), &store);
+    let served = ServedLanguage::fixed(found.language.clone(), &store);
     let results = found.results;
 
     // Each image once, in one query.
@@ -336,6 +380,25 @@ pub async fn storefront_search<S: Storage>(
     // Pages stop at `MAX_DEPTH`: past it, there is no next page to offer.
     let shown = u64::from(offset) + results.hits.len() as u64;
     let has_more = shown < results.total.min(u64::from(hypha_search_index::MAX_DEPTH));
+    // An option facet's heading where the merchant set none: the option's name as the
+    // results write it in this language, where it isn't the stored one (the least, where
+    // they differ).
+    let mut option_names: BTreeMap<String, String> = BTreeMap::new();
+    for hit in &results.hits {
+        let d = &hit.document;
+        for ((name, _), (label, _)) in d.options.iter().zip(&d.option_labels) {
+            if label != name {
+                option_names
+                    .entry(name.to_lowercase())
+                    .and_modify(|least| {
+                        if label < least {
+                            least.clone_from(label);
+                        }
+                    })
+                    .or_insert_with(|| label.clone());
+            }
+        }
+    }
     let items = results
         .hits
         .into_iter()
@@ -388,7 +451,13 @@ pub async fn storefront_search<S: Storage>(
                         &keys::search_facet::facet_label(&f.key),
                         found.labels.get(&f.key).map(String::as_str),
                     )
-                    .map(str::to_string);
+                    .map(str::to_string)
+                    .or_else(|| match &f.key {
+                        hypha_search_index::FacetKey::Option(name) => {
+                            option_names.get(name).cloned()
+                        }
+                        _ => None,
+                    });
                 FacetResponse {
                     label,
                     key: f.key.to_string(),
@@ -427,7 +496,11 @@ pub async fn storefront_search<S: Storage>(
             .map(|(min, max)| SearchPriceRange { min, max }),
         has_more,
         next_cursor: if has_more {
-            Some(cursor_at(&scope, shown)?)
+            let at = SearchPosition {
+                offset: u32::try_from(shown).map_err(ApiError::internal)?,
+                language: Some(served.language().clone()),
+            };
+            Some(cursor_at(&scope, at)?)
         } else {
             None
         },

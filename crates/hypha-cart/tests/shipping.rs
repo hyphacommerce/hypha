@@ -341,7 +341,8 @@ fn offers_price_built_in_and_provider_options() {
         &languages(),
         cart,
     ))
-    .unwrap();
+    .unwrap()
+    .groups;
     assert_eq!(offers.len(), 1);
     assert_eq!(offers[0].group, group(cart));
     assert_eq!(
@@ -362,7 +363,8 @@ fn the_backup_stays_hidden_while_a_regular_option_is_offered() {
         &languages(),
         cart,
     ))
-    .unwrap();
+    .unwrap()
+    .groups;
     assert_eq!(offered(&offers[0].offers), vec![(standard(), eur(400))]);
 }
 
@@ -696,7 +698,8 @@ fn offers_show_their_price_after_shipping_discounts() {
         &languages(),
         cart,
     ))
-    .unwrap();
+    .unwrap()
+    .groups;
     // The hidden backup is the third outcome: not offered, so nothing beside it.
     assert_eq!(
         offers[0].after_discounts,

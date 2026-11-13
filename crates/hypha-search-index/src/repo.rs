@@ -44,8 +44,10 @@ pub trait SearchIndex {
     async fn count(&self) -> Result<u64, IndexError>;
 
     /// Whether `market` has any document in `language`: a language a market just began
-    /// to offer has none until the sync job has built them, and a search falls back to
-    /// one that has.
+    /// to offer has none until the sync job has built them, and a search that found
+    /// nothing in it falls back to one that has. An engine whose last search wasn't
+    /// answered from these documents (a search app with an index of its own) answers
+    /// `true`: the language asked was searched.
     async fn has_documents(
         &self,
         market: MarketId,

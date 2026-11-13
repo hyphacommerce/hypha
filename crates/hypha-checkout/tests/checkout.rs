@@ -1063,7 +1063,8 @@ fn a_cart_lists_the_methods_offered_to_it_by_position() {
         &(ManualProvider,),
         cart,
     ))
-    .unwrap();
+    .unwrap()
+    .methods;
     let ids: Vec<PaymentMethodId> = listed.iter().map(PaymentMethod::id).collect();
     assert_eq!(ids, [cod, bank_transfer()]);
 }
@@ -1135,7 +1136,8 @@ fn listing_a_carts_methods_asks_each_provider_once() {
         &providers,
         cart,
     ))
-    .unwrap();
+    .unwrap()
+    .methods;
     let ids: Vec<PaymentMethodId> = listed.iter().map(PaymentMethod::id).collect();
     assert_eq!(ids, [cod, bank_transfer(), other]);
     assert_eq!(providers.asked.borrow().as_slice(), [ProviderKey::manual()]);

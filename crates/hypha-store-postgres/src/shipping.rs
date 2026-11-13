@@ -91,10 +91,13 @@ impl<C: PgConnection> ShippingZoneRepo for PgStore<C> {
 
     async fn delete(&self, zone: &mut ShippingZone) -> Result<(), RepoError> {
         let id = zone.id();
+        let version = version_to_db(zone.version())?;
         let events = zone.take_events();
         let stamp = self.event_stamp();
         in_transaction!(self, |tx| {
-            delete_zone(tx, id).await?;
+            if !delete_zone(tx, id, version).await? {
+                return Ok(());
+            }
             // No version: the zone is gone.
             insert_events(tx, &events, None, stamp).await
         })
@@ -170,14 +173,34 @@ pub(crate) async fn update_zone(
 
 /// `ShippingZoneRepo::delete` inside the caller's transaction; its children go with it
 /// (CASCADE).
-pub(crate) async fn delete_zone(tx: &impl Queries, id: ShippingZoneId) -> Result<(), RepoError> {
-    tx.query_typed(
-        "DELETE FROM shipping_zones WHERE id = $1",
-        &[(&id.as_uuid(), Type::UUID)],
-    )
-    .await
-    .map_err(repo_error)?;
-    Ok(())
+/// Deletes the zone at `version` (its options and tiers go by cascade): `true` when it
+/// did, `false` when there was no zone; `StaleVersion` for one at another version.
+pub(crate) async fn delete_zone(
+    tx: &impl Queries,
+    id: ShippingZoneId,
+    version: i64,
+) -> Result<bool, RepoError> {
+    let deleted = tx
+        .query_typed_opt(
+            "DELETE FROM shipping_zones WHERE id = $1 AND version = $2 RETURNING id",
+            &[(&id.as_uuid(), Type::UUID), (&version, Type::INT8)],
+        )
+        .await
+        .map_err(repo_error)?;
+    if deleted.is_some() {
+        return Ok(true);
+    }
+    let exists = tx
+        .query_typed_opt(
+            "SELECT 1 AS found FROM shipping_zones WHERE id = $1",
+            &[(&id.as_uuid(), Type::UUID)],
+        )
+        .await
+        .map_err(repo_error)?;
+    match exists {
+        Some(_) => Err(RepoError::StaleVersion),
+        None => Ok(false),
+    }
 }
 
 /// Countries, options and tiers, a statement each however many there are.

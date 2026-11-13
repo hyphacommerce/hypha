@@ -765,6 +765,7 @@ contains "in the market's languages" '"languages":["en","de"]'
 step "the US address form" 200 - "$BASE/storefront/address-formats/US"
 contains "city, state and ZIP code on one row" '["city","province","postal_code"]'
 contains "its labels" '"postal_code":"ZIP code","province":"State"'
+contains "and their keys, to translate them by" '"postal_code":"zip_code","province":"state"'
 contains "states to choose from" '{"code":"CA","name":"California"}'
 contains "a ZIP code is required" '"postal_code":"required","postal_code_example":"90210"'
 step "cached for five minutes" 200 - -i "$BASE/storefront/address-formats/US"
@@ -1110,7 +1111,7 @@ DE_GROUP=$(shgrp)
 step "its email" 200 - -X PUT "$DE/email" -H "$JSON" -d '{"email":"lukas@example.de"}'
 step "a German address without a house number" 200 - -X PUT "$DE/shipping-address" -H "$JSON" \
     -d '{"address":{"last_name":"Weber","line1":"Torstraße","city":"Berlin","postal_code":"10119","country":"DE"}}'
-contains "warns under the first line" '"messages":[{"severity":"warning","code":"house_number_missing","path":"$.shipping_address.line1","message":"Add a house number","source":{"type":"format"}}]'
+contains "warns under the first line" '"messages":[{"severity":"warning","code":"house_number_missing","path":"$.shipping_address.line1","message":"Add a house number","source":{"type":"format"},"params":{"field":"line1"}}]'
 step "read again" 200 - "$DE"
 contains "the warning is worked out on every read" '"code":"house_number_missing"'
 step "ship it standard" 200 - -X PUT "$DE/shipping/$DE_GROUP" -H "$JSON" -d "{\"option\":\"$STANDARD\"}"
@@ -2313,6 +2314,11 @@ contains "the layout first" '"items":[{"key":"layout"'
 step "one template" 200 - "$BASE/admin/notification-templates/order_shipped"
 contains "with its variables" '"variables":{'
 step "an unknown template" 404 template_unknown "$BASE/admin/notification-templates/nope"
+step "a template in the store's default language" 200 - \
+    "$BASE/admin/notification-templates/order_shipped?language=en"
+contains "is the default language's" '"language":null'
+step "a template in a language the store doesn't have" 422 language_not_listed \
+    "$BASE/admin/notification-templates/order_shipped?language=ja"
 TEMPLATES="$BASE/admin/notification-templates/order_shipped"
 BROKEN='{"subject":"Shipped","html":"{% extends \"layout\" %}{% block content %}{{ order.nope }}{% endblock %}"}'
 GOOD='{"subject":"Shipped: {{ order.number }}","html":"{% extends \"layout\" %}{% block content %}<p>{{ order.number }}</p>{% endblock %}"}'
@@ -2843,15 +2849,17 @@ step "same email in another case" 409 customer_exists -X POST "$BASE/admin/custo
 step "invalid customer email" 422 invalid_email -X POST "$BASE/admin/customers" -H "$JSON" -d '{"email":"ana"}'
 step "address without a city" 422 invalid_address -X POST "$BASE/admin/customers/$CUSTOMER/addresses" \
     -H "$JSON" -d '{"last_name":"Horvat","line1":"Ilica 1","city":" ","country":"HR"}'
-contains "every problem by field" '"problems":[{"code":"required","field":"city","message":"Enter a city"},{"code":"required","field":"postal_code","message":"Enter a postal code"}]'
+contains "every problem by field" '"problems":[{"code":"required","field":"city","message":"Enter a city","params":{"field":"city"}},{"code":"required","field":"postal_code","message":"Enter a postal code","params":{"field":"postal_code"}}]'
 step "a state and ZIP code that don't fit" 422 invalid_address -X POST \
     "$BASE/admin/customers/$CUSTOMER/addresses" -H "$JSON" \
     -d '{"last_name":"Horvat","line1":"1 Main St","city":"Springfield","province":"Kalifornia","postal_code":"1","country":"US"}'
 contains "the state unknown" '"code":"unknown_region","field":"province"'
 contains "the ZIP code in the wrong shape" '"code":"invalid_format","field":"postal_code","message":"Enter a valid ZIP code, like 90210"'
+contains "with the example to word it by" '"params":{"example":"90210","field":"postal_code"}'
 step "a ZIP code of another state" 422 invalid_address -X POST "$BASE/admin/customers/$CUSTOMER/addresses" \
     -H "$JSON" -d '{"last_name":"Horvat","line1":"1 Main St","city":"New York","province":"NY","postal_code":"94043","country":"US"}'
 contains "doesn't match" '"code":"region_mismatch","field":"postal_code"'
+contains "naming the state it gave" '"params":{"field":"postal_code","region":"NY","region_name":"New York"}'
 step "unknown customer" 404 customer_not_found "$BASE/admin/customers/cus_00000000000000000000000000000063"
 step "remove unknown address" 404 address_not_found -X DELETE \
     "$BASE/admin/customers/$CUSTOMER/addresses/addr_00000000000000000000000000000063"
@@ -3026,6 +3034,10 @@ step "ask for a sign-in code" 202 - -X POST "$BASE/storefront/auth/code" -H "$JS
 contains "always says sent" '"sent":true'
 step "whatever the address" 202 - -X POST "$BASE/storefront/auth/code" -H "$JSON" \
     -d '{"email":"not an address"}'
+step "asked for in the storefront's language" 202 - -X POST "$BASE/storefront/auth/code" -H "$JSON" \
+    -d '{"email":"lena@example.de","language":"de-AT"}'
+step "in one the store doesn't publish" 202 - -X POST "$BASE/storefront/auth/code" -H "$JSON" \
+    -d '{"email":"luc@example.fr","language":"fr"}'
 step "a made-up code" 401 invalid_code -X POST "$BASE/storefront/auth/login" -H "$JSON" \
     -d '{"email":"nobody@example.com","code":"000000"}'
 step "signing out needs a session" 401 account_required -X POST "$BASE/storefront/account/logout"
@@ -3093,6 +3105,12 @@ AUTH=()
 step "owner logs in again" 200 - -X POST "$BASE/admin/auth/login" -H "$JSON" \
     -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"$OWNER_PASSWORD\"}"
 AUTH=(-H "authorization: Bearer $(token)")
+step "the customer who asked for a code in German" 200 - "$BASE/admin/customers?q=lena"
+step "reads German" 200 - "$BASE/admin/customers/$(sed -E 's/.*"items":\[\{"id":"([^"]+)".*/\1/' <<<"$BODY")"
+contains "the language without its region, as the store publishes it" '"language":"de"'
+step "the one who asked in French" 200 - "$BASE/admin/customers?q=luc"
+step "reads the store's default, as it changes" 200 - "$BASE/admin/customers/$(sed -E 's/.*"items":\[\{"id":"([^"]+)".*/\1/' <<<"$BODY")"
+contains "keeping no language: never an error" '"language":null'
 step "create an autonomous agent" 201 - -X POST "$BASE/admin/agents" -H "$JSON" \
     -d '{"name":"Restocker","grant":{"read":["orders:read"],"write":{"inventory:write":"apply","products:write":"propose"}}}'
 contains "its key is shown once" '"key":"hypha_ak_'
