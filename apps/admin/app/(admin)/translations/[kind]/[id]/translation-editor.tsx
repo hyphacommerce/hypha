@@ -33,6 +33,7 @@ import {
   draftOf,
   grouped,
   isDirty,
+  isTranslatable,
   lengthOf,
   putBody,
   translateHref,
@@ -103,7 +104,9 @@ export function TranslationEditor({
 
   const isChanged = canWrite && isDirty(data.fields, language, draft);
   const isOver = data.fields.some(
-    (field) => lengthOf(draft[field.key]?.value ?? "", field.format) > field.max_length,
+    (field) =>
+      isTranslatable(field) &&
+      lengthOf(draft[field.key]?.value ?? "", field.format) > field.max_length,
   );
   const saved = data.translations.find((state) => state.language === language);
   const sections = grouped(data.fields, (valueId) => options[valueId]);
@@ -297,13 +300,7 @@ function FieldRow({
 }) {
   const stored = field.translations[language];
   const isHtml = field.format === "html";
-  const length = lengthOf(entry.value, field.format);
-  const isOver = length > field.max_length;
-  // Edited text is saved against the source as shown, so only an untouched outdated
-  // translation is left to mark by hand.
-  const isUntouched = stored !== undefined && entry.value === stored.value;
   const inputLabel = t("translations.translation_label", { field: label, language: languageName });
-  const status = problem || isOver ? ({ type: "error" } as const) : undefined;
 
   return (
     <div className="translation-row">
@@ -319,101 +316,163 @@ function FieldRow({
           )}
         </div>
       </VStack>
-      <VStack gap={1}>
-        <div lang={language}>
-          {!canWrite && isHtml ? (
-            <VStack gap={1}>
-              <Text type="label">{inputLabel}</Text>
-              <div className="translation-source">
-                {entry.value === "" ? (
-                  <Text color="secondary">{t("translations.not_translated")}</Text>
-                ) : (
-                  <Html html={entry.value} />
-                )}
-              </div>
-            </VStack>
-          ) : isHtml ? (
-            <RichTextField
-              label={inputLabel}
-              value={entry.value}
-              onChange={(value) => onChange({ value })}
-              isOptional
-            />
-          ) : field.max_length > SINGLE_LINE_MAX ? (
-            <TextArea
-              label={inputLabel}
-              rows={4}
-              value={entry.value}
-              onChange={(value) => onChange({ value })}
-              isReadOnly={!canWrite}
-              placeholder={canWrite ? undefined : t("translations.not_translated")}
-              status={status}
-            />
-          ) : (
-            <TextInput
-              label={inputLabel}
-              value={entry.value}
-              onChange={(value) => onChange({ value })}
-              isReadOnly={!canWrite}
-              placeholder={canWrite ? undefined : t("translations.not_translated")}
-              status={status}
-            />
+      {isTranslatable(field) ? (
+        <TranslationInput
+          t={t}
+          field={field}
+          inputLabel={inputLabel}
+          language={language}
+          entry={entry}
+          stored={stored}
+          problem={problem}
+          canWrite={canWrite}
+          onChange={onChange}
+        />
+      ) : (
+        // The API refuses a translation of empty source text (`source_empty`).
+        <VStack gap={1}>
+          <Text type="label">{inputLabel}</Text>
+          <div className="translation-source">
+            <Text color="secondary">{t("translations.not_translatable")}</Text>
+          </div>
+          {problem && (
+            <span className="translation-problem">
+              <Text type="supporting" color="inherit">
+                {problemText(t, problem)}
+              </Text>
+            </span>
           )}
-        </div>
-        <HStack gap={2} vAlign="center" hAlign="between" wrap="wrap">
-          <HStack gap={2} vAlign="center" wrap="wrap">
-            {stored?.outdated && isUntouched && !entry.reviewed && (
-              <>
-                <Badge label={t("translations.outdated")} variant="warning" />
-                {canWrite && (
-                  <Button
-                    label={t("translations.mark_reviewed")}
-                    tooltip={t("translations.mark_reviewed_tooltip")}
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onChange({ reviewed: true })}
-                  />
-                )}
-              </>
-            )}
-            {stored?.outdated && isUntouched && entry.reviewed && (
-              <>
-                <Badge label={t("translations.reviewed")} variant="success" />
+        </VStack>
+      )}
+    </div>
+  );
+}
+
+/** A translatable field's input, its outdated state, its problem and its counter. */
+function TranslationInput({
+  t,
+  field,
+  inputLabel,
+  language,
+  entry,
+  stored,
+  problem,
+  canWrite,
+  onChange,
+}: {
+  t: EditorT;
+  field: TranslatableField;
+  inputLabel: string;
+  language: string;
+  entry: DraftField;
+  stored: TranslatableField["translations"][string] | undefined;
+  problem: FieldProblem | undefined;
+  canWrite: boolean;
+  onChange: (change: Partial<DraftField>) => void;
+}) {
+  const isHtml = field.format === "html";
+  const length = lengthOf(entry.value, field.format);
+  const isOver = length > field.max_length;
+  // Edited text is saved against the source as shown, so only an untouched outdated
+  // translation is left to mark by hand.
+  const isUntouched = stored !== undefined && entry.value === stored.value;
+  const status = problem || isOver ? ({ type: "error" } as const) : undefined;
+
+  return (
+    <VStack gap={1}>
+      <div lang={language}>
+        {!canWrite && isHtml ? (
+          <VStack gap={1}>
+            <Text type="label">{inputLabel}</Text>
+            <div className="translation-source">
+              {entry.value === "" ? (
+                <Text color="secondary">{t("translations.not_translated")}</Text>
+              ) : (
+                <Html html={entry.value} />
+              )}
+            </div>
+          </VStack>
+        ) : isHtml ? (
+          <RichTextField
+            label={inputLabel}
+            value={entry.value}
+            onChange={(value) => onChange({ value })}
+            isOptional
+          />
+        ) : field.max_length > SINGLE_LINE_MAX ? (
+          <TextArea
+            label={inputLabel}
+            rows={4}
+            value={entry.value}
+            onChange={(value) => onChange({ value })}
+            isReadOnly={!canWrite}
+            placeholder={canWrite ? undefined : t("translations.not_translated")}
+            status={status}
+          />
+        ) : (
+          <TextInput
+            label={inputLabel}
+            value={entry.value}
+            onChange={(value) => onChange({ value })}
+            isReadOnly={!canWrite}
+            placeholder={canWrite ? undefined : t("translations.not_translated")}
+            status={status}
+          />
+        )}
+      </div>
+      <HStack gap={2} vAlign="center" hAlign="between" wrap="wrap">
+        <HStack gap={2} vAlign="center" wrap="wrap">
+          {stored?.outdated && isUntouched && !entry.reviewed && (
+            <>
+              <Badge label={t("translations.outdated")} variant="warning" />
+              {canWrite && (
                 <Button
-                  label={t("translations.undo_reviewed")}
+                  label={t("translations.mark_reviewed")}
+                  tooltip={t("translations.mark_reviewed_tooltip")}
                   variant="ghost"
                   size="sm"
-                  onClick={() => onChange({ reviewed: false })}
+                  onClick={() => onChange({ reviewed: true })}
                 />
-              </>
-            )}
-            {problem && (
-              <span className="translation-problem">
-                <Text type="supporting" color="inherit">
-                  {problemText(t, problem)}
-                </Text>
-              </span>
-            )}
-            {!problem && isOver && (
-              <span className="translation-problem">
-                <Text type="supporting" color="inherit">
-                  {isHtml
-                    ? t("translations.too_long_html")
-                    : t("translations.too_long", { max: field.max_length })}
-                </Text>
-              </span>
-            )}
-          </HStack>
-          {canWrite && !isHtml && (
-            <span className={isOver ? "translation-problem" : undefined}>
-              <Text type="supporting" color={isOver ? "inherit" : "secondary"}>
-                {t("translations.counter", { count: length, max: field.max_length })}
+              )}
+            </>
+          )}
+          {stored?.outdated && isUntouched && entry.reviewed && (
+            <>
+              <Badge label={t("translations.reviewed")} variant="success" />
+              <Button
+                label={t("translations.undo_reviewed")}
+                variant="ghost"
+                size="sm"
+                onClick={() => onChange({ reviewed: false })}
+              />
+            </>
+          )}
+          {problem && (
+            <span className="translation-problem">
+              <Text type="supporting" color="inherit">
+                {problemText(t, problem)}
+              </Text>
+            </span>
+          )}
+          {!problem && isOver && (
+            <span className="translation-problem">
+              <Text type="supporting" color="inherit">
+                {isHtml
+                  ? t("translations.too_long_html")
+                  : t("translations.too_long", { max: field.max_length })}
               </Text>
             </span>
           )}
         </HStack>
-      </VStack>
-    </div>
+        {canWrite && !isHtml && (
+          <span className={isOver ? "translation-problem" : undefined}>
+            <Text type="supporting" color={isOver ? "inherit" : "secondary"}>
+              {t("translations.counter", { count: length, max: field.max_length })}
+            </Text>
+          </span>
+        )}
+      </HStack>
+    </VStack>
   );
 }
 

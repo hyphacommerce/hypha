@@ -10,6 +10,7 @@ import {
   grouped,
   isDirty,
   isKind,
+  isTranslatable,
   lengthOf,
   problemsOf,
   putBody,
@@ -237,6 +238,29 @@ test("blank over nothing saved isn't a change", () => {
 test("another language's values never reach the body", () => {
   const fields = [field("title", "Mug", { fr: upToDate("Tasse", "title") })];
   assert.deepEqual(putBody(fields, "de", draftOf(fields, "de")), { fields: {} });
+});
+
+test("a field without source text can't be translated", () => {
+  assert.equal(isTranslatable(field("alt", "")), false);
+  assert.equal(isTranslatable(field("alt", " \n ")), false);
+  assert.equal(isTranslatable(field("alt", "A mug")), true);
+});
+
+test("a field without source text is never sent, so the API has nothing to refuse", () => {
+  // A translation kept from before the source was emptied is dropped by the save.
+  const fields = [
+    field("title", "Mug", { de: upToDate("Becher", "title") }),
+    field("alt", "", { de: upToDate("Ein Becher", "alt") }),
+  ];
+  const draft = { ...draftOf(fields, "de"), title: { value: "Tasse", reviewed: false } };
+  assert.deepEqual(putBody(fields, "de", draft), {
+    fields: { title: { value: "Tasse", source_digest: "digest-of-title" } },
+  });
+});
+
+test("a field without source text never makes the draft dirty", () => {
+  const fields = [field("alt", "")];
+  assert.equal(isDirty(fields, "de", { alt: { value: "Ein Becher", reviewed: true } }), false);
 });
 
 test("text is counted in characters, HTML in bytes", () => {

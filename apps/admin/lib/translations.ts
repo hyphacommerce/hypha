@@ -187,6 +187,14 @@ function isBlank(value: string): boolean {
   return value.trim() === "";
 }
 
+/**
+ * Whether a field can be translated: the API refuses a translation of empty source text
+ * (`source_empty`), since there's nothing for it to stand in for.
+ */
+export function isTranslatable(field: { source: string }): boolean {
+  return !isBlank(field.source);
+}
+
 /** Whether the editor's value differs from what's saved (blank and absent are one). */
 function isEdited(field: TranslatableField, language: string, entry: DraftField | undefined) {
   const saved = field.translations[language]?.value ?? "";
@@ -201,6 +209,8 @@ export function isDirty(
   draft: Draft,
 ): boolean {
   return fields.some((field) => {
+    // Nobody edits a field without source text (the editor disables it).
+    if (!isTranslatable(field)) return false;
     const entry = draft[field.key];
     if (isEdited(field, language, entry)) return true;
     // Marking an up-to-date or absent translation reviewed changes nothing.
@@ -214,7 +224,9 @@ export function isDirty(
  * dealt with it against the source shown (typed a new value, or marked it reviewed):
  * the API then records it as up to date, and refuses the save (`source_changed`) if the
  * source moved meanwhile. An untouched field goes without one and stays as it was,
- * outdated if it was.
+ * outdated if it was. A field whose source is empty is left out: the API would refuse
+ * it (`source_empty`), and leaving it out drops a translation kept from before the
+ * source was emptied.
  */
 export function putBody(
   fields: readonly TranslatableField[],
@@ -224,7 +236,7 @@ export function putBody(
   const body: PutTranslation = { fields: {} };
   for (const field of fields) {
     const entry = draft[field.key];
-    if (!entry || isBlank(entry.value)) continue;
+    if (!entry || isBlank(entry.value) || !isTranslatable(field)) continue;
     const touched = entry.reviewed || isEdited(field, language, entry);
     body.fields[field.key] = touched
       ? { value: entry.value, source_digest: field.digest }
