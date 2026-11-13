@@ -1,9 +1,10 @@
 "use client";
 
 // An address form's fields as the country lays them out (`GET
-// /admin/address-formats/{country}`): its order, rows, labels and required fields,
-// the region as a select where the country lists regions. Problems come from the API's
-// `invalid_address` (`details.problems`), each under its field. Where the store has an
+// /admin/address-formats/{country}`): its order, rows, labels (in the staff member's
+// language, by the format's `label_keys`) and required fields, the region as a select
+// where the country lists regions. Problems come from the API's `invalid_address`
+// (`details.problems`), each under its field, worded from its code. Where the store has an
 // autocomplete app, line 1 offers addresses as staff type, and picking one fills the
 // form (`onFill`).
 
@@ -20,6 +21,8 @@ import {
   type AddressValues,
   type FieldProblems,
   asField,
+  fieldLabel,
+  wordAddressMessage,
 } from "@/lib/address";
 import { useT } from "@/lib/use-t";
 
@@ -49,16 +52,19 @@ export function AddressFields({
 }) {
   const t = useT();
   const required = new Set(format.required);
+  const labelOf = (field: string) => fieldLabel(t, format, field);
   const status = (field: Field) => {
     const problem = problems?.[field];
-    if (problem) return { type: "error" as const, message: problem };
+    if (problem) {
+      return { type: "error" as const, message: wordAddressMessage(t, problem, labelOf) };
+    }
     if (tried && required.has(field) && values[field].trim() === "") {
       return { type: "error" as const, message: t("common.required") };
     }
     return undefined;
   };
   const input = (field: Field) => {
-    const label = format.labels[field] ?? field;
+    const label = labelOf(field);
     const isRequired = required.has(field);
     if (field === "line1" && format.autocomplete && onFill) {
       return (

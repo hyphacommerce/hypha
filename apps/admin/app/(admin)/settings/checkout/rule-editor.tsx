@@ -30,8 +30,9 @@ import {
   ADDRESS_FIELDS,
   type AddressFormat,
   type AddressValues,
-  type FieldProblems,
-  asField,
+  fieldLabel,
+  problemsByField,
+  wordAddressMessage,
 } from "@/lib/address";
 import {
   CONDITION_TYPES,
@@ -664,12 +665,7 @@ function TryPanel({
   const [isPending, startTransition] = useTransition();
   const [isLoadingFormat, startLoading] = useTransition();
   // A format problem from the last try, under its field.
-  const problems: FieldProblems = Object.fromEntries(
-    (result?.problems ?? []).flatMap((p) => {
-      const field = asField(p.field);
-      return field ? [[field, p.message]] : [];
-    }),
-  );
+  const problems = problemsByField(result?.problems ?? []);
 
   const chooseCountry = (next: string) => {
     setCountry(next);
@@ -769,21 +765,32 @@ function TryPanel({
           />
         </HStack>
         {error && <Banner status="error" title={error} />}
-        {result && <TryResult result={result} />}
+        {result && <TryResult result={result} format={format} />}
       </VStack>
     </Card>
   );
 }
 
-function TryResult({ result }: { result: TestResult }) {
+function TryResult({
+  result,
+  format: addressFormat,
+}: {
+  result: TestResult;
+  /** The address's country's form, for its fields' labels. */
+  format: AddressFormat | null;
+}) {
   const t = useT<"checkout">();
   const format = useFormat();
+  const label = (field: string) => fieldLabel(t, addressFormat, field);
   if (result.problems.length > 0) {
     return (
       <Banner
         status="error"
         title={t("checkout.try_refused_title")}
-        description={result.problems.map((p) => p.message).join(" ")}
+        description={format.list(
+          result.problems.map((p) => wordAddressMessage(t, p, label)),
+          "unit",
+        )}
       />
     );
   }
@@ -818,7 +825,7 @@ function TryResult({ result }: { result: TestResult }) {
             // A rule says one thing, and the format one thing per field.
             key={`${m.source.type}:${"rule" in m.source ? m.source.rule : ""}:${m.code}:${m.path}`}
             status={m.severity === "error" ? "error" : "warning"}
-            title={m.message}
+            title={wordAddressMessage(t, m, label)}
             description={[
               m.severity === "error" ? t("checkout.try_blocks") : t("checkout.try_warning"),
               m.path,
