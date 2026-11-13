@@ -26,17 +26,41 @@ impl Overlay {
     }
 
     /// Reads the translations of `resources` into `language` and into the language it
-    /// falls back to (`de` for `de-AT`), in one read.
+    /// falls back to (`de` for `de-AT`), in one read. The fallback is read whatever the
+    /// store says of it: a caller serving shoppers, who mustn't see an unpublished
+    /// language, uses `load_within`.
     pub async fn load<S: HasTranslations>(
         ports: &S,
         language: &Language,
         resources: &[ResourceRef],
     ) -> Result<Self, RepoError> {
+        let mut chain = vec![language.clone()];
+        chain.extend(language.without_region());
+        Self::load_chain(ports, chain, resources).await
+    }
+
+    /// `load`, falling back only to a language among `served` (the languages shoppers
+    /// may be served: the store's published ones). `language` itself is the caller's to
+    /// have checked.
+    pub async fn load_within<S: HasTranslations>(
+        ports: &S,
+        language: &Language,
+        served: &[Language],
+        resources: &[ResourceRef],
+    ) -> Result<Self, RepoError> {
+        let mut chain = vec![language.clone()];
+        chain.extend(language.without_region().filter(|l| served.contains(l)));
+        Self::load_chain(ports, chain, resources).await
+    }
+
+    async fn load_chain<S: HasTranslations>(
+        ports: &S,
+        chain: Vec<Language>,
+        resources: &[ResourceRef],
+    ) -> Result<Self, RepoError> {
         if resources.is_empty() {
             return Ok(Self::none());
         }
-        let mut chain = vec![language.clone()];
-        chain.extend(language.without_region());
         let loaded = ports.translations().load(resources, &chain).await?;
         let mut translations: HashMap<ResourceRef, Vec<Translation>> = HashMap::new();
         for translation in loaded {

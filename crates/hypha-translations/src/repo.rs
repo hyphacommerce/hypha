@@ -124,8 +124,8 @@ pub trait TranslationRepo {
         filter: &TranslationFilter,
         page: PageRequest<TranslationKey>,
     ) -> Result<Page<Translation>, RepoError>;
-    /// Whether the store has any translation at all.
-    async fn any(&self) -> Result<bool, RepoError>;
+    /// Whether the store has a translation into any of `languages`.
+    async fn any_in(&self, languages: &[Language]) -> Result<bool, RepoError>;
     /// Stores a new translation (version 1) with its events. Enforces `TRANSLATION`.
     async fn insert(&self, translation: &mut Translation) -> Result<(), RepoError>;
     /// Stores its changes with their events when still at the version loaded; otherwise

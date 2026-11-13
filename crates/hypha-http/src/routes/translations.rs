@@ -318,7 +318,15 @@ pub async fn put<S: Storage>(
         fields,
     )
     .await?;
-    Ok(Json(view(&state, &ctx, &ports, resource).await?))
+    // The write found the resource, so the source is there.
+    let source = source.unwrap_or_default();
+    let translations = get_translations(&ctx, &ports, resource).await?;
+    Ok(Json(TranslationsResponse::new(
+        resource,
+        &languages,
+        &source,
+        &translations,
+    )?))
 }
 
 /// Removes a resource's translation into one language: its source text shows again.

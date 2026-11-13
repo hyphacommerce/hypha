@@ -103,8 +103,9 @@ const ASSET: &[FieldSpec] = &[text("alt", MAX_TEXT_LEN)];
 const STORE: &[FieldSpec] = &[text("description", 500), text("email_footer", 1000)];
 const SEARCH_FACET: &[FieldSpec] = &[child("facets", "label", MAX_TEXT_LEN)];
 
-/// The longest field key: a child's ID is at most a custom field's full key.
-pub const MAX_KEY_LEN: usize = 255;
+/// The longest field key, in bytes: room for a facet on an option whose name is the
+/// longest text there is, in any script.
+pub const MAX_KEY_LEN: usize = 1100;
 
 impl ResourceKind {
     pub const ALL: [ResourceKind; 10] = [
@@ -300,10 +301,13 @@ mod tests {
             .field("facets.option.Color.label")
             .unwrap();
         assert_eq!(child, Some("option.Color"));
+        // The longest option name, in a script of three bytes a character.
+        let long = format!("facets.option.{}.label", "色".repeat(255));
+        assert!(ResourceKind::SearchFacet.field(&long).is_some());
     }
 
     #[test]
-    fn a_key_is_at_most_255_bytes_without_control_characters() {
+    fn a_key_has_a_longest_length_and_no_control_characters() {
         let long = format!("choices.{}.label", "a".repeat(MAX_KEY_LEN));
         assert_eq!(ResourceKind::CustomFieldDefinition.field(&long), None);
         assert_eq!(

@@ -232,8 +232,24 @@ pub async fn update<S: Storage>(
     };
     // Every translation is one from the default language, which fixes it; checked like
     // the currency, before the write.
+    // Only translations into the languages the store keeps count: the others go with
+    // their language (and may still be there, waiting for that cleanup).
     let has_translations = match req.default_language {
-        Some(_) => ports.translations().any().await?,
+        Some(_) => {
+            let kept: Vec<Language> = match &req.languages {
+                Some(languages) => languages
+                    .iter()
+                    .filter_map(|l| Language::new(&l.language).ok())
+                    .collect(),
+                None => store_as_system(&state, &ports)
+                    .await?
+                    .languages()
+                    .iter()
+                    .map(|l| l.language.clone())
+                    .collect(),
+            };
+            ports.translations().any_in(&kept).await?
+        }
         None => false,
     };
     let input = UpdateStore {

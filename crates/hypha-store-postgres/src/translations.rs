@@ -260,11 +260,15 @@ impl<C: PgConnection> TranslationRepo for PgStore<C> {
         Ok(Page::from_overfetch(found, page.limit))
     }
 
-    async fn any(&self) -> Result<bool, RepoError> {
+    async fn any_in(&self, languages: &[Language]) -> Result<bool, RepoError> {
+        let languages: Vec<&str> = languages.iter().map(Language::as_str).collect();
         let mut conn = self.conn().await;
         let row = conn
             .db()
-            .query_typed_opt("SELECT 1 FROM translations LIMIT 1", &[])
+            .query_typed_opt(
+                "SELECT 1 FROM translations WHERE language = ANY($1::text[]) LIMIT 1",
+                &[(&languages, Type::TEXT_ARRAY)],
+            )
             .await
             .map_err(repo_error)?;
         Ok(row.is_some())
@@ -291,7 +295,9 @@ impl<C: PgConnection> TranslationRepo for PgStore<C> {
             .await
             .map_err(repo_error)?;
             translation_stamps(tx, &v, &s).await?;
-            insert_events(tx, &events, Some(version), stamp).await
+            // No subject version: the subject is the resource, whose languages each
+            // count their own versions, so they order nothing between them.
+            insert_events(tx, &events, None, stamp).await
         })?;
         translation.set_version(version);
         Ok(())
@@ -324,7 +330,7 @@ impl<C: PgConnection> TranslationRepo for PgStore<C> {
                 .ok_or(RepoError::StaleVersion)?;
             translation_stamps(tx, &v, &s).await?;
             let version = version_from_db(col(&row, "version")?)?;
-            insert_events(tx, &events, Some(version), stamp).await?;
+            insert_events(tx, &events, None, stamp).await?;
             Ok(version)
         })?;
         translation.set_version(version);

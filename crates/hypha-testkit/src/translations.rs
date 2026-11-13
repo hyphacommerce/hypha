@@ -79,8 +79,9 @@ impl TranslationRepo for InMemoryTranslations {
         Ok(Page::from_overfetch(found, page.limit))
     }
 
-    async fn any(&self) -> Result<bool, RepoError> {
-        Ok(!self.rows.lock().unwrap().is_empty())
+    async fn any_in(&self, languages: &[Language]) -> Result<bool, RepoError> {
+        let rows = self.rows.lock().unwrap();
+        Ok(rows.keys().any(|key| languages.contains(&key.language)))
     }
 
     async fn insert(&self, translation: &mut Translation) -> Result<(), RepoError> {
@@ -93,7 +94,8 @@ impl TranslationRepo for InMemoryTranslations {
             keys::TRANSLATION,
             &no_unique_keys,
         )?;
-        self.outbox.write(events, Some(translation.version()));
+        // No subject version: a resource's languages each count their own.
+        self.outbox.write(events, None);
         Ok(())
     }
 
@@ -106,7 +108,8 @@ impl TranslationRepo for InMemoryTranslations {
             translation,
             &no_unique_keys,
         )?;
-        self.outbox.write(events, Some(translation.version()));
+        // No subject version: a resource's languages each count their own.
+        self.outbox.write(events, None);
         Ok(())
     }
 

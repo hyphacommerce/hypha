@@ -97,8 +97,8 @@ where
     overlay_falls_back(&make().await).await;
     scenario("translations: listed in key order, by kind and language, paged");
     lists(&make().await).await;
-    scenario("translations: any says whether the store has one");
-    any(&make().await).await;
+    scenario("translations: any_in says whether there's one into the languages named");
+    any_in(&make().await).await;
     scenario("translations: a resource's go together, without events");
     deletes_resources(&make().await).await;
     scenario("translations: languages off the list go, without events");
@@ -136,7 +136,8 @@ async fn round_trip<S: HasTranslations + HasOutbox>(ports: &S) {
     assert_eq!(events[0].event_type, "translation.updated");
     assert_eq!(events[0].subject_kind, "translation");
     assert_eq!(events[0].subject_id, product(1).id);
-    assert_eq!(events[0].subject_version, Some(Version::new(1)));
+    // The subject is the resource, and its languages each count their own versions.
+    assert_eq!(events[0].subject_version, None);
     assert_eq!(
         events[0].data["fields"],
         serde_json::json!(["description", "options.opt_1.name", "title"])
@@ -194,7 +195,7 @@ async fn versions<S: HasTranslations + HasOutbox>(ports: &S) {
 
     let events = ports.outbox().events_after(0, 100).await.unwrap();
     let versions: Vec<_> = events.iter().map(|e| e.subject_version).collect();
-    assert_eq!(versions, [Some(Version::new(1)), Some(Version::new(2))]);
+    assert_eq!(versions, [None, None]);
 }
 
 async fn deletes<S: HasTranslations + HasOutbox>(ports: &S) {
@@ -310,6 +311,18 @@ async fn overlay_falls_back<S: HasTranslations>(ports: &S) {
     assert_eq!(austrian.text(product(3), "title"), None);
     assert_eq!(austrian.text(product(9), "title"), None);
 
+    // Shoppers aren't served a fallback that isn't among the languages they may get.
+    let unpublished = Overlay::load_within(ports, &lang("de-AT"), &[lang("de-AT")], &resources)
+        .await
+        .unwrap();
+    assert_eq!(unpublished.text(product(1), "title"), Some("Häferl"));
+    assert_eq!(unpublished.text(product(2), "title"), None);
+    let published = [lang("de-AT"), lang("de")];
+    let served = Overlay::load_within(ports, &lang("de-AT"), &published, &resources)
+        .await
+        .unwrap();
+    assert_eq!(served.text(product(2), "title"), Some("Teller"));
+
     // A language never falls forward to a region's wording.
     let german = Overlay::load(ports, &lang("de"), &resources).await.unwrap();
     assert_eq!(german.text(product(1), "title"), Some("Tasse"));
@@ -421,15 +434,18 @@ async fn lists<S: HasTranslations>(ports: &S) {
     assert_eq!(found(of(Some(Vec::new()), None)).await, []);
 }
 
-async fn any<S: HasTranslations>(ports: &S) {
+async fn any_in<S: HasTranslations>(ports: &S) {
     let repo = ports.translations();
-    assert_eq!(repo.any().await, Ok(false));
+    let both = [lang("de"), lang("fr")];
+    assert_eq!(repo.any_in(&both).await, Ok(false));
     let mut t = translation(product(1), "de", "Tasse");
     repo.insert(&mut t).await.unwrap();
-    assert_eq!(repo.any().await, Ok(true));
+    assert_eq!(repo.any_in(&both).await, Ok(true));
+    assert_eq!(repo.any_in(&[lang("fr")]).await, Ok(false));
+    assert_eq!(repo.any_in(&[]).await, Ok(false));
     t.mark_deleted();
     repo.delete(&mut t).await.unwrap();
-    assert_eq!(repo.any().await, Ok(false));
+    assert_eq!(repo.any_in(&both).await, Ok(false));
 }
 
 async fn deletes_resources<S: HasTranslations + HasOutbox>(ports: &S) {
@@ -483,5 +499,5 @@ async fn retains_languages<S: HasTranslations + HasOutbox>(ports: &S) {
 
     // No languages on the list: every translation goes.
     repo.retain_languages(&[]).await.unwrap();
-    assert_eq!(repo.any().await, Ok(false));
+    assert_eq!(repo.any_in(&[lang("de"), lang("fr")]).await, Ok(false));
 }

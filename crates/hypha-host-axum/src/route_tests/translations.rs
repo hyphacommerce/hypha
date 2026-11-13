@@ -747,11 +747,15 @@ async fn the_default_language_is_fixed_while_anything_is_translated() {
         StatusCode::OK
     );
 
-    // Once nothing is translated it changes again.
-    let (status, _) = send(&app, "DELETE", &format!("{path}/fr"), None).await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
+    // Translations into a language the same request takes off the list don't count:
+    // they go with it.
     assert_eq!(
-        patch(r#"{"default_language":"es"}"#).await.0,
+        patch(r#"{"default_language":"es","languages":[{"language":"de"}]}"#)
+            .await
+            .0,
         StatusCode::OK
     );
+    hypha_http::jobs::dispatch(&app.state).await.unwrap();
+    let (_, page) = send(&app, "GET", "/admin/translations", None).await;
+    assert_eq!(page["items"], json!([]));
 }
