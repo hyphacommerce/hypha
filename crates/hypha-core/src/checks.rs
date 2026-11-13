@@ -513,8 +513,10 @@ struct RawMessage {
     path: MessagePath,
     message: String,
     source: MessageSource,
+    /// Read leniently (`MessageParams::stored`): a param is help for wording a message,
+    /// never a reason for the cart or order holding it not to load.
     #[serde(default)]
-    params: MessageParams,
+    params: serde_json::Value,
 }
 
 impl TryFrom<RawMessage> for Message {
@@ -522,8 +524,35 @@ impl TryFrom<RawMessage> for Message {
 
     fn try_from(raw: RawMessage) -> Result<Self, Self::Error> {
         let mut message = Message::new(raw.severity, raw.code, raw.path, &raw.message, raw.source)?;
-        message.params = raw.params;
+        message.params = MessageParams::stored(raw.params);
         Ok(message)
+    }
+}
+
+impl MessageParams {
+    /// Params as a stored message holds them. One that no longer reads (a field since
+    /// renamed or removed, a row from a later version rolled back) is dropped and the
+    /// rest kept; anything but an object reads as none. Building params stays typed.
+    fn stored(json: serde_json::Value) -> Self {
+        let serde_json::Value::Object(map) = json else {
+            return Self::default();
+        };
+        if let Ok(params) = serde_json::from_value(serde_json::Value::Object(map.clone())) {
+            return params;
+        }
+        let mut params = Self::default();
+        for (key, value) in map {
+            let one = serde_json::Value::Object([(key, value)].into_iter().collect());
+            let Ok(read) = serde_json::from_value::<Self>(one) else {
+                continue;
+            };
+            params.field = params.field.or(read.field);
+            params.example = params.example.or(read.example);
+            params.region = params.region.or(read.region);
+            params.region_name = params.region_name.or(read.region_name);
+            params.max = params.max.or(read.max);
+        }
+        params
     }
 }
 
@@ -900,9 +929,27 @@ mod tests {
     }
 
     #[test]
-    fn a_stored_param_naming_no_field_doesnt_read() {
-        let json = r#"{"severity":"warning","code":"x","path":"$","message":"m","source":{"type":"format"},"params":{"field":"street"}}"#;
-        assert!(serde_json::from_str::<Message>(json).is_err());
+    fn a_stored_param_naming_no_field_is_dropped_and_the_message_loads() {
+        let json = r#"{"severity":"warning","code":"x","path":"$","message":"m","source":{"type":"format"},"params":{"field":"street","max":40}}"#;
+        let message = serde_json::from_str::<Message>(json).unwrap();
+        assert_eq!(
+            message.params(),
+            &MessageParams {
+                max: Some(40),
+                ..MessageParams::default()
+            }
+        );
+    }
+
+    #[test]
+    fn stored_params_that_arent_an_object_read_as_none() {
+        for params in ["\"field\"", "[1]", "null", r#"{"max":"forty"}"#] {
+            let json = format!(
+                r#"{{"severity":"warning","code":"x","path":"$","message":"m","source":{{"type":"format"}},"params":{params}}}"#
+            );
+            let message = serde_json::from_str::<Message>(&json).unwrap();
+            assert!(message.params().is_empty(), "{params}");
+        }
     }
 
     #[test]
