@@ -3,9 +3,9 @@
 // renders (`lib/use-t.ts`). Never import this from a "use client" file.
 //
 // Two languages, never mixed up:
-// - The page's language is `pageLanguage(segment, countries)` (`lib/site.ts`), read from
-//   the URL's locale segment: one of the country's own (`pageLocale` in `lib/api.ts`
-//   answers it with the country). A call to the API that names a language takes this one.
+// - The page's language is `pageLocale(segment)`'s (`lib/api.ts`, with the country),
+//   read from the URL's locale segment: one of the country's own. A call to the API that
+//   names a language takes this one.
 // - A translator's `language` (`t.language`, `useLanguage()`) is the catalog's: what the
 //   words are written in, `sr-Latn` for a page in `sr`, `en-XA` under the
 //   pseudo-language. It's for formats and `<html lang>`, and is never sent to the API,

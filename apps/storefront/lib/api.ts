@@ -124,10 +124,16 @@ export async function countryOf(segment: string): Promise<Country> {
 }
 
 /**
- * The place a locale segment names, for the API: the country and the language to ask in
- * (`pageLanguage`'s, one of the country's own). A segment naming a country nobody sells
- * to answers the store's default language: its page is a 404 (`countryOf`), which still
+ * The place a locale segment names, for the API: the country and the language to ask in.
+ * The one place that decides a page's language: the one the segment names when the
+ * country offers it (or one it comes to), else the country's default, always one of the
+ * country's own in the API's spelling. Only the path decides it, never a cookie or a
+ * header, so static pages stay static. A segment naming a country nobody sells to
+ * answers the store's default language: its page is a 404 (`countryOf`), which still
  * has to be written in something.
+ *
+ * What the page's words are written in is another matter (`lib/i18n.ts`): the catalog
+ * nearest to this language, English when there's none.
  */
 export const pageLocale = cache(async (segment: string): Promise<Locale> => {
   const place = localeOfSegment(segment, await loadCountries());

@@ -3,14 +3,7 @@
 import { cookies } from "next/headers";
 
 import { cartFlagCookie } from "./cart-flag";
-import {
-  type Offer,
-  segmentCountry as countryOfSegment,
-  defaultLanguage,
-  href,
-  localeOfSegment,
-  routing,
-} from "./routing";
+import { segmentCountry as countryOfSegment, href, routing } from "./routing";
 
 /** The routing mode this deployment uses (`STOREFRONT_ROUTING`). */
 export function mode() {
@@ -26,25 +19,8 @@ export function link(place: string, path: string): string {
   return href(mode(), place, path);
 }
 
-/**
- * The language a page is in, to ask the API with: the one place that decides it.
- * `segment` is the URL's locale segment (`params.country`), `countries` the store's
- * (`loadCountries`). It's one of the country's own languages, in the API's spelling:
- * the one the segment names, or the country's default (its first). Only the path
- * decides it, never a cookie or a header, so static pages stay static.
- *
- * What the page's words are written in is another matter (`lib/i18n.ts`): the catalog
- * nearest to this language, English when there's none.
- */
-export function pageLanguage(segment: string, countries: readonly Offer[]): string {
-  const found = localeOfSegment(segment, countries);
-  if (found) return found.language;
-  const [first] = countries;
-  return first ? defaultLanguage(first) : "en";
-}
-
 /** The country code a URL's locale segment names (`hr` and `en-hr` → `HR`): the one
- * place that reads it, as `pageLanguage` is for the language. */
+ * place that reads it, as `pageLocale` (`lib/api.ts`) is for the language. */
 export function segmentCountry(segment: string): string {
   return countryOfSegment(segment);
 }
