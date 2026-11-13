@@ -153,7 +153,7 @@ export async function OrderDetails({
                 <>
                   <Text>
                     {t("order.payment_line", {
-                      method: payment.method_name ?? t("order.payment"),
+                      method: payment.method_name ?? t("order.payment_method_fallback"),
                       amount: formatMoney(payment.amount, digits, t.locale),
                     })}
                   </Text>
