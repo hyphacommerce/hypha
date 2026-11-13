@@ -79,7 +79,7 @@ export default async function ProductPage({ params }: Props) {
       product.custom_fields,
       ...product.variants.map((v) => v.custom_fields),
     ),
-    relatedProducts(product, code),
+    relatedProducts(product, place),
   ]);
   const url = absolute(link(folder, `/p/${product.handle}`));
   const fields = {

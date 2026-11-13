@@ -65,12 +65,11 @@ export default async function CategoryPage({ params }: Props) {
     load(handle, folder),
     pageT(folder),
   ]);
-  const code = country.country;
   const ancestors = category.ancestors.toReversed();
   const [first, context] = await Promise.all([
     readListingPage({
       t,
-      country: code,
+      place,
       digits: country.minor_units,
       params: {},
       category: category.id,

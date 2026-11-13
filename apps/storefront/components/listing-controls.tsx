@@ -41,8 +41,9 @@ import { useT } from "@/lib/use-t";
 export type Facet = {
   key: string;
   label?: string | null;
-  /** `label`: what to show for the value (a choice field's label), when it isn't the
-   * value itself. */
+  /** `label`: what to show for the value (a choice field's label, an option value's in
+   * the page's language), when it isn't the value itself. `value` is the same in every
+   * language: it's what the filter and the URL hold. */
   values: { value: string; label?: string | null; count: number }[];
 };
 

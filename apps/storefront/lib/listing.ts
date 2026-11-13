@@ -118,6 +118,21 @@ export function toMinor(value: string | undefined, digits: number): number | und
   return Number.isSafeInteger(minor) ? minor : undefined;
 }
 
+/**
+ * A search's cache key: its country and language, then every parameter in name order (one
+ * search written in another order is one entry). Hits read differently in each language
+ * (titles, options, facet labels), so a language is its own entry; none is the market's
+ * default.
+ */
+export function searchKey(
+  query: { country: string; language?: string } & Record<string, unknown>,
+): string[] {
+  const names = Object.keys(query)
+    .filter((k) => query[k] !== undefined)
+    .toSorted();
+  return ["search", query.country, query.language ?? "", JSON.stringify(query, names)];
+}
+
 /** The filter that keeps only what's shown with a compare-at price. */
 export const ON_SALE = "on_sale:true";
 
