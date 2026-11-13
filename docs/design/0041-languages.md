@@ -259,8 +259,11 @@ label's translation.
   - Staff read orders in the store's language. The buyer's emails and confirmation
     page read `localized`.
   - Old orders have no language and no `localized`: they read as the default.
-- **Customer:** `language`, set from their latest cart or their account profile; used
-  for emails that aren't about one order (the login code).
+- **Customer:** `language`, set from their latest cart or their account profile, the
+  latest wins (a checkout replaces what the profile said); used for emails that aren't
+  about one order (the login code).
+- **One rule decides a cart's language** (the market's offered languages, filtered by
+  what the store may serve), for its responses, its order and what apps are told.
 - **Admin:** an order shows its language; the customer page too.
 
 ## 6. Search (ML10)
@@ -399,6 +402,13 @@ is about 150 lines and has no framework in it (Q4).
   in another (`/en-de/…`, `/sr-latn-rs/…`: the last part is the country). One dynamic
   segment as now, parsed by `lib/site.ts`. In `single` routing: no prefix for the
   default language, `/{language}/…` for another.
+- **A URL naming a language the country doesn't offer** redirects to the nearest one it
+  does (`/en-gb-de` → `/en-de`), else to the country's default; never a 404, so old
+  links keep working. In a single tree, `hreflang` is left out when the countries'
+  default languages differ (the unprefixed URL would mean two languages).
+- **A content language without a UI catalog** (`de` while the storefront ships only
+  English words) renders `lang` as the content language: the page's content is German,
+  only the chrome is English.
 - **Choosing:** the proxy picks a language only when it redirects a bare path: the
   `language` cookie, then `Accept-Language` against the market's languages, then the
   market's default. A URL that names a language is never redirected by headers.
