@@ -16933,20 +16933,31 @@
       "TranslatableFieldResponse": {
         "description": "One translatable field of a resource: its source text and its translations.",
         "properties": {
+          "custom_field": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TranslatedValue",
+                "description": "For a custom field value, which one: its definition and variant. `null` for\nevery other field."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "digest": {
             "description": "SHA-256 of `source`, in hex: send it back as a field's `source_digest` to say\nwhich text was translated.",
             "type": "string"
           },
           "format": {
-            "description": "`text` (plain, trimmed) or `html` (sanitised like a description).",
+            "description": "`text` (plain, trimmed) or `html` (sanitised like a description). A custom field\nvalue's follows its definition's type: `text` for `text` (one line) and\n`multiline_text`, `html` for `rich_text`.",
             "type": "string"
           },
           "key": {
-            "description": "`title`, or a child's field by the child's ID: `options.<opt_…>.name`,\n`option_values.<optval_…>.label`, `choices.<key>.label`, `facets.<key>.label`.",
+            "description": "`title`, or a child's field by the child's ID: `options.<opt_…>.name`,\n`option_values.<optval_…>.label`, `choices.<key>.label`, `facets.<key>.label`,\na custom field value's `custom_fields.<cfdef_…>.value` (a product's or a\ncategory's) or `variant_custom_fields.<var_…>.<cfdef_…>.value` (a variant's, in\nits product's).",
             "type": "string"
           },
           "max_length": {
-            "description": "The longest translation: characters for `text`, bytes of HTML for `html`.",
+            "description": "The longest translation: characters for `text`, bytes of HTML for `html`. A\ncustom field value's is its definition's `max_length` in characters, else its\ntype's cap (255 characters for `text`, 16 KiB for the others), and its\n`min_length` holds too.",
             "minimum": 0,
             "type": "integer"
           },
@@ -16990,6 +17001,51 @@
         "required": [
           "kind",
           "id"
+        ],
+        "type": "object"
+      },
+      "TranslatedValue": {
+        "description": "The custom field value a translatable field is, for an editor to label it: its\ndefinition, and the variant whose value it is (in a product's translation).",
+        "properties": {
+          "definition": {
+            "$ref": "#/components/schemas/CustomFieldDefinitionId"
+          },
+          "key": {
+            "description": "The field's key, `custom.material`.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The definition's name, in the store's default language.",
+            "type": "string"
+          },
+          "type": {
+            "description": "`text`, `multiline_text` or `rich_text`.",
+            "type": "string"
+          },
+          "variant": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/VariantId",
+                "description": "The variant whose value it is, in a product's translation; `null` for the\nresource's own."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "variant_title": {
+            "description": "That variant's title as stored (\"M / Blue\"); `null` for the resource's own value\nand a variant without options.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "definition",
+          "key",
+          "name",
+          "type"
         ],
         "type": "object"
       },

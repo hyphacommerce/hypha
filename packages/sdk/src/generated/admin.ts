@@ -10328,19 +10328,32 @@ export interface components {
         };
         /** @description One translatable field of a resource: its source text and its translations. */
         TranslatableFieldResponse: {
+            custom_field?: components["schemas"]["TranslatedValue"] | null;
             /**
              * @description SHA-256 of `source`, in hex: send it back as a field's `source_digest` to say
              *     which text was translated.
              */
             digest: string;
-            /** @description `text` (plain, trimmed) or `html` (sanitised like a description). */
+            /**
+             * @description `text` (plain, trimmed) or `html` (sanitised like a description). A custom field
+             *     value's follows its definition's type: `text` for `text` (one line) and
+             *     `multiline_text`, `html` for `rich_text`.
+             */
             format: string;
             /**
              * @description `title`, or a child's field by the child's ID: `options.<opt_…>.name`,
-             *     `option_values.<optval_…>.label`, `choices.<key>.label`, `facets.<key>.label`.
+             *     `option_values.<optval_…>.label`, `choices.<key>.label`, `facets.<key>.label`,
+             *     a custom field value's `custom_fields.<cfdef_…>.value` (a product's or a
+             *     category's) or `variant_custom_fields.<var_…>.<cfdef_…>.value` (a variant's, in
+             *     its product's).
              */
             key: string;
-            /** @description The longest translation: characters for `text`, bytes of HTML for `html`. */
+            /**
+             * @description The longest translation: characters for `text`, bytes of HTML for `html`. A
+             *     custom field value's is its definition's `max_length` in characters, else its
+             *     type's cap (255 characters for `text`, 16 KiB for the others), and its
+             *     `min_length` holds too.
+             */
             max_length: number;
             /** @description The text in the store's default language; empty when the resource has none. */
             source: string;
@@ -10358,6 +10371,25 @@ export interface components {
              *     `payment_method`, `discount`, `checkout_rule`, `asset`, `store` or `search_facet`.
              */
             kind: string;
+        };
+        /**
+         * @description The custom field value a translatable field is, for an editor to label it: its
+         *     definition, and the variant whose value it is (in a product's translation).
+         */
+        TranslatedValue: {
+            definition: components["schemas"]["CustomFieldDefinitionId"];
+            /** @description The field's key, `custom.material`. */
+            key: string;
+            /** @description The definition's name, in the store's default language. */
+            name: string;
+            /** @description `text`, `multiline_text` or `rich_text`. */
+            type: string;
+            variant?: components["schemas"]["VariantId"] | null;
+            /**
+             * @description That variant's title as stored ("M / Blue"); `null` for the resource's own value
+             *     and a variant without options.
+             */
+            variant_title?: string | null;
         };
         /** @description One language's translation of a resource, as a whole. */
         TranslationStateResponse: {
