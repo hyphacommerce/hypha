@@ -16,13 +16,13 @@ import { type ReactNode, use } from "react";
 
 import { loadAstryxCatalog } from "@/lib/astryx-locales";
 import { loadCatalog } from "@/lib/catalogs";
-import { localeOf } from "@/lib/pick-language";
+import { formatLocale } from "@/lib/pick-language";
 
 type Catalogs = {
   messages: Messages;
   /**
-   * Astryx's catalog under the language, as its provider takes it; none for English or a
-   * language Astryx lacks. One object per language, so the provider's memo holds.
+   * Astryx's catalog under the page's locale, as its provider takes it; none for English
+   * or a language Astryx lacks. One object per language, so the provider's memo holds.
    */
   astryx: Record<string, Readonly<Record<string, string>>> | undefined;
 };
@@ -40,7 +40,9 @@ function catalogsOf(language: string): Promise<Catalogs> {
       loadAstryxCatalog(language).catch(() => undefined),
     ]).then(([messages, astryx]) => ({
       messages,
-      astryx: astryx && { [language]: astryx },
+      // Astryx looks a catalog up by its locale and that tag's shorter forms, so the
+      // catalog sits under the locale it's given below.
+      astryx: astryx && { [formatLocale(language)]: astryx },
     }));
     catalogs.set(language, loading);
     // A chunk that failed to load (a new deploy) may load after the reload.
@@ -58,9 +60,12 @@ if (typeof document !== "undefined" && document.documentElement.lang) {
 /** Gives the components under it their translator and Astryx's, both in `language`. */
 export function I18n({ language, children }: { language: string; children: ReactNode }) {
   const { messages, astryx } = use(catalogsOf(language));
+  // One locale for the page: the admin's formats and Astryx's (its calendar, its
+  // numbers) write the same way.
+  const locale = formatLocale(language);
   return (
-    <I18nProvider language={language} locale={localeOf(language)} messages={messages}>
-      <InternationalizationProvider locale={language} messages={astryx}>
+    <I18nProvider language={language} locale={locale} messages={messages}>
+      <InternationalizationProvider locale={locale} messages={astryx}>
         {children}
       </InternationalizationProvider>
     </I18nProvider>

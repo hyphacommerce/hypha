@@ -12,7 +12,7 @@ import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
-import { type FormEvent, type ReactNode, startTransition, useState, useTransition } from "react";
+import { type SubmitEvent, type ReactNode, startTransition, useState, useTransition } from "react";
 
 import { DateTime } from "@/components/date-time";
 import { NewPasswordFields, fieldText, newPasswordProblem } from "@/components/new-password";
@@ -202,7 +202,7 @@ export function PasswordCard() {
   // Bumped after a change, so the fields start empty again.
   const [round, setRound] = useState(0);
 
-  const submit = (e: FormEvent<HTMLFormElement>) => {
+  const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     const fields = new FormData(e.currentTarget);
     const currentPassword = fieldText(fields, "current-password");

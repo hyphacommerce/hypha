@@ -108,6 +108,9 @@ export default defineConfig({
         jsPlugins: ["./scripts/oxlint-i18n.mjs"],
         rules: {
           "i18n/no-literal-text": "error",
+          // The format functions that name no locale (`lib/format.ts`, `lib/regions.ts`)
+          // write English: extracted code asks its `Format`.
+          "typescript/no-deprecated": "error",
           // A message's tags are given as functions (`t.rich(key, { link: (chunks, key) =>
           // <a key={key}>…</a> })`): called while rendering, never mounted as components.
           "react/no-unstable-nested-components": ["warn", { allowAsProps: true }],

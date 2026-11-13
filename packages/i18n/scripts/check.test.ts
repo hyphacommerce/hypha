@@ -88,6 +88,18 @@ test("a directory with both layouts is refused", () => {
   assert.match(err, /mixes two layouts: en\/ \(a folder per language\) and de\.json/);
 });
 
+test("an empty translation is listed as missing, and fails --complete", () => {
+  const listed = check(fixture("empty"));
+  assert.equal(listed.status, 0, listed.err);
+  assert.equal(
+    listed.out,
+    "de: 2 messages, 1 missing\n  cart.empty\nen: 2 messages (the source)\n",
+  );
+  const strict = check(fixture("empty"), "--complete", "de");
+  assert.equal(strict.status, 1);
+  assert.match(strict.err, /error: de: cart\.empty: must be translated \(missing_key\)/);
+});
+
 test("another source language", () => {
   const { status, err } = check(fixture("flat"), "--source", "de");
   assert.equal(status, 1);
