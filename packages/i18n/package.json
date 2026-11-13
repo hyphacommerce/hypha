@@ -1,7 +1,6 @@
 {
   "name": "@hyphacommerce/i18n",
   "version": "0.1.0-beta.4",
-  "private": true,
   "description": "Translations for Hypha's apps: ICU MessageFormat catalogs with typed keys, language matching and storefront locale segments, a React provider, a pseudo-language and a catalog check. Web APIs only, so it runs on Node, Workers and in browsers.",
   "homepage": "https://hyphacommerce.com",
   "bugs": "https://github.com/hyphacommerce/hypha/issues",

@@ -75,6 +75,24 @@ test("the locale formats numbers, the language stays the language", () => {
   assert.equal(createTranslator("de", en).locale, "de");
 });
 
+test("a locale the runtime has no data for formats as English", () => {
+  // `tlh` (Klingon) is a valid tag no runtime ships plural rules or number formats for.
+  assert.deepEqual(Intl.PluralRules.supportedLocalesOf(["tlh"]), []);
+  const t = createTranslator("tlh", en);
+  assert.equal(t.language, "tlh");
+  assert.equal(t.locale, "tlh");
+  assert.equal(t("cart.items_count", { count: 1 }), "1 item");
+  assert.equal(t("cart.items_count", { count: 1234 }), "1,234 items");
+  assert.equal(t("cart.total", { amount: 1234.5 }), "Total: €1,234.50");
+});
+
+test("a locale the runtime knows is not replaced by English", () => {
+  const t = createTranslator("sr-Latn", {
+    count: "{count, plural, one {# artikal} few {# artikla} other {# artikala}}",
+  });
+  assert.equal(t("count", { count: 1234 }), "1.234 artikla");
+});
+
 test("a missing key falls back to the fallback catalog, then to the key", () => {
   const missing: Missing[] = [];
   const de: Messages = { "cart.title": "Ihr Warenkorb" };

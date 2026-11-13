@@ -77,6 +77,8 @@ t("cart.titel"); // doesn't compile
 
 - A key the language lacks is read from `fallback`; a key no catalog has is shown as the
   key. `onMissing({key, language, shown})` is told once per key.
+- Where a runtime has no data for the locale, plurals and numbers follow English
+  (not the runtime's default), so a server and a browser show the same.
 - Plurals, numbers and dates follow `language`, or `locale` when given
   (`createTranslator("de", messages, {locale: localeOf("de", "CH")})` formats for `de-CH`).
 - A message that can't be formatted (broken syntax, a value it needs wasn't given)
@@ -161,7 +163,8 @@ with its last parts taken off (`de-CH` → `de`, `sr-Latn-RS` → `sr-Latn` → 
 when that finds nothing for any wanted tag does the second widen: the first wanted tag
 whose language an available tag shares gets the first such tag (`sr` or `sr-RS` →
 `sr-Latn`, `de` → `de-AT`). So a match of the first kind for a later wanted tag beats a
-widened one for an earlier tag.
+widened one for an earlier tag. Widening never crosses scripts: a wanted `sr-Cyrl` or
+`zh-Hant` only gets a tag with that script or with none, never `sr-Latn` or `zh-Hans`.
 
 A tag sent to the API as a `language` must be one of the API's own (the store's or the
 market's languages), picked with `matchLanguage(wanted, thoseLanguages)`: it answers in

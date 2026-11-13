@@ -109,6 +109,11 @@
           "type": "json",
           "path": "packages/emails/package.json",
           "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "packages/i18n/package.json",
+          "jsonpath": "$.version"
         }
       ]
     }

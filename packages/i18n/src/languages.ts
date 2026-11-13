@@ -44,6 +44,8 @@ export function parseAcceptLanguage(header: string | null | undefined): string[]
  * whose language some available tag shares gets the first such tag (`sr` or `sr-RS`
  * → `sr-Latn`, `de` → `de-AT`). Two passes over all of `wanted`, so an exact or
  * shortened match for a later wanted tag beats a widened one for an earlier tag.
+ * Widening never crosses scripts: a wanted tag that names one (`sr-Cyrl`, `zh-Hant`)
+ * only gets a tag with that script or with none, since its reader may not read another.
  */
 export function matchLanguage(
   wanted: readonly string[],
@@ -65,12 +67,22 @@ export function matchLanguage(
     }
   }
   for (const tag of wanted) {
-    const primary = tag.trim().toLowerCase().split("-")[0];
+    const { primary, script } = subtags(tag);
     if (!primary) continue;
-    const found = available.find((other) => other.toLowerCase().split("-")[0] === primary);
+    const found = available.find((other) => {
+      const has = subtags(other);
+      if (has.primary !== primary) return false;
+      return script === undefined || has.script === undefined || has.script === script;
+    });
     if (found !== undefined) return found;
   }
   return undefined;
+}
+
+/** A tag's language and, when it names one, its script (four letters, right after the language). */
+function subtags(tag: string): { primary: string; script: string | undefined } {
+  const [primary = "", second = ""] = tag.trim().toLowerCase().split("-");
+  return { primary, script: /^[a-z]{4}$/.test(second) ? second : undefined };
 }
 
 export type Direction = "ltr" | "rtl";

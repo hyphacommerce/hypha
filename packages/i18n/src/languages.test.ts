@@ -61,6 +61,28 @@ test("matchLanguage widens to the same language as a last resort", () => {
   assert.equal(matchLanguage(["DE-ch"], ["en", "de-AT", "de-DE"]), "de-AT");
 });
 
+test("matchLanguage never widens across scripts", () => {
+  assert.equal(matchLanguage(["sr-Cyrl"], ["sr-Latn"]), undefined);
+  assert.equal(matchLanguage(["sr-Cyrl-RS"], ["en", "sr-Latn"]), undefined);
+  assert.equal(matchLanguage(["zh-Hant"], ["zh-Hans"]), undefined);
+  assert.equal(matchLanguage(["zh-Hant-TW"], ["zh-Hans-CN", "zh-Hant-HK"]), "zh-Hant-HK");
+});
+
+test("matchLanguage: a wanted script widens to a tag without one", () => {
+  assert.equal(matchLanguage(["sr-Cyrl"], ["sr-RS"]), "sr-RS");
+  assert.equal(matchLanguage(["sr-Cyrl"], ["sr-Latn", "sr-RS"]), "sr-RS");
+});
+
+test("matchLanguage: a wanted tag without a script widens to any script", () => {
+  assert.equal(matchLanguage(["sr"], ["sr-Latn"]), "sr-Latn");
+  assert.equal(matchLanguage(["sr-RS"], ["sr-Cyrl"]), "sr-Cyrl");
+  assert.equal(matchLanguage(["zh-TW"], ["zh-Hans"]), "zh-Hans");
+});
+
+test("matchLanguage: a script refused for one wanted tag doesn't stop the next", () => {
+  assert.equal(matchLanguage(["sr-Cyrl", "de"], ["sr-Latn", "de-AT"]), "de-AT");
+});
+
 test("matchLanguage: any exact or shortened match beats a widened one", () => {
   assert.equal(matchLanguage(["sr", "en-GB"], ["en", "sr-Latn"]), "en");
   assert.equal(matchLanguage(["de", "fr"], ["de-AT", "fr"]), "fr");
