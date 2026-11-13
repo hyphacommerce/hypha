@@ -1,3 +1,5 @@
+import { createTranslator } from "@hyphacommerce/i18n";
+
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -9,6 +11,10 @@ import {
   sortedBreaks,
   unitPriceFor,
 } from "./prices.ts";
+import { en } from "./messages.ts";
+
+/** English, formatted for `en`: what the expected strings are written in. */
+const t = createTranslator("en", en);
 
 const eur = (amount: number) => ({ amount, currency: "EUR" });
 const breaks = [
@@ -42,11 +48,11 @@ test("breaks are listed from the smallest quantity", () => {
 });
 
 test("a break reads as a quantity and a unit price", () => {
-  assert.equal(breakLabel({ min_quantity: 2, price: eur(900) }, 2), "Buy 2+: €9.00 each");
+  assert.equal(breakLabel(t, { min_quantity: 2, price: eur(900) }, 2), "Buy 2+: €9.00 each");
 });
 
 test("a sale reads as was and now", () => {
-  assert.equal(saleLabel("€40.00", "€30.00"), "Was €40.00, now €30.00");
+  assert.equal(saleLabel(t, "€40.00", "€30.00"), "Was €40.00, now €30.00");
 });
 
 test("a compare-at is struck through only above the price", () => {

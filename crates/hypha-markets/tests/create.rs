@@ -11,8 +11,9 @@
 use std::collections::{HashMap, HashSet};
 
 use hypha_core::{
-    Actor, AuthError, CatalogId, CountryCode, CountryError, Ctx, Currency, MarketId, Money,
-    MoneyError, Price, PriceListId, ProductId, Scope, Timestamp, UserId, VariantId,
+    Actor, AuthError, CatalogId, CountryCode, CountryError, Ctx, Currency, Language, LanguageError,
+    MarketId, Money, MoneyError, Price, PriceListId, ProductId, Scope, Timestamp, UserId,
+    VariantId,
 };
 use hypha_markets::{
     AdjustmentInput, AppliesTo, CatalogContext, CatalogRepo, CommandError, CompareAtMode,
@@ -673,8 +674,8 @@ fn update_market_stores_prices_include_tax() {
         &markets,
         market.id(),
         UpdateMarket {
-            name: None,
             prices_include_tax: Some(false),
+            ..UpdateMarket::default()
         },
     ))
     .unwrap();
@@ -707,6 +708,110 @@ fn update_market_rejects_unknown_market() {
             UpdateMarket::default()
         )),
         Err(CommandError::MarketNotFound(unknown))
+    );
+}
+
+fn lang(tag: &str) -> Language {
+    Language::new(tag).unwrap()
+}
+
+/// Sets `market`'s languages in a store whose default is `en`, with `de` and `sr-Latn`
+/// published.
+fn offer(
+    markets: &InMemoryMarketRepo,
+    market: MarketId,
+    languages: &[&str],
+) -> Result<Market, CommandError> {
+    block_on(update_market(
+        &Ctx::system(),
+        markets,
+        market,
+        UpdateMarket {
+            languages: Some(languages.iter().map(|l| l.to_string()).collect()),
+            store_languages: vec![lang("en"), lang("de"), lang("sr-Latn")],
+            ..UpdateMarket::default()
+        },
+    ))
+}
+
+#[test]
+fn update_market_sets_the_languages_in_order() {
+    let markets = InMemoryMarketRepo::default();
+    let ids = SequentialIds::default();
+    let market = block_on(create_market(
+        &Ctx::system(),
+        &markets,
+        &ids,
+        balkans(&["RS"]),
+    ))
+    .unwrap();
+    assert_eq!(market.languages(), &[]);
+
+    // Spelled loosely: stored in canonical case, the store's default not first.
+    let changed = offer(&markets, market.id(), &["SR-latn", "en"]).unwrap();
+    assert_eq!(changed.languages(), &[lang("sr-Latn"), lang("en")]);
+    assert_eq!(block_on(markets.get(market.id())), Ok(Some(changed)));
+
+    let kept = block_on(update_market(
+        &Ctx::system(),
+        &markets,
+        market.id(),
+        UpdateMarket::default(),
+    ))
+    .unwrap();
+    assert_eq!(kept.languages().len(), 2, "an absent field keeps its value");
+
+    let cleared = offer(&markets, market.id(), &[]).unwrap();
+    assert_eq!(cleared.languages(), &[]);
+}
+
+#[test]
+fn update_market_refuses_languages_the_store_doesnt_offer() {
+    let markets = InMemoryMarketRepo::default();
+    let ids = SequentialIds::default();
+    let market = block_on(create_market(
+        &Ctx::system(),
+        &markets,
+        &ids,
+        balkans(&["RS"]),
+    ))
+    .unwrap();
+
+    assert_eq!(
+        offer(&markets, market.id(), &["en", "fr"]),
+        Err(CommandError::LanguageNotOffered(lang("fr")))
+    );
+    assert_eq!(
+        offer(&markets, market.id(), &["en", "de_DE"]),
+        Err(CommandError::Language(LanguageError::Invalid(
+            "de_DE".to_string()
+        )))
+    );
+    assert_eq!(
+        offer(&markets, market.id(), &["de", "en", "DE"]),
+        Err(CommandError::Market(MarketError::DuplicateLanguage(lang(
+            "de"
+        ))))
+    );
+    // Without the host's list nothing is on offer, so nothing is accepted.
+    assert_eq!(
+        block_on(update_market(
+            &Ctx::system(),
+            &markets,
+            market.id(),
+            UpdateMarket {
+                languages: Some(vec!["en".to_string()]),
+                ..UpdateMarket::default()
+            },
+        )),
+        Err(CommandError::LanguageNotOffered(lang("en")))
+    );
+    assert_eq!(
+        block_on(markets.get(market.id()))
+            .unwrap()
+            .unwrap()
+            .languages(),
+        &[]
     );
 }
 

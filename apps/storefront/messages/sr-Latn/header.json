@@ -1,0 +1,15 @@
+{
+  "store_nav": "Prodavnica",
+  "menu": "Meni",
+  "search": "Pretraga",
+  "account": "Nalog",
+  "cart": "Korpa",
+  "cart_count": "{count, plural, =0 {Korpa} one {Korpa, # artikal} few {Korpa, # artikla} other {Korpa, # artikala}}",
+  "subcategories": "{category}: potkategorije",
+  "categories": "Kategorije",
+  "all_products": "Svi proizvodi",
+  "currency": "Valuta",
+  "search_for": "Pretraži „{words}”",
+  "search_placeholder": "Pretražite proizvode",
+  "language": "Jezik"
+}

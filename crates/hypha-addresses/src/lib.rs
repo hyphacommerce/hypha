@@ -8,18 +8,20 @@
 mod countries;
 mod data;
 mod flags;
+mod labels;
 
 use std::sync::OnceLock;
 
 use hypha_core::address::{in_sentence, with_article};
 use hypha_core::{
     Address, AddressField, AddressFormats, AddressParts, AddressProblem, AddressProblemCode,
-    AddressWarning, AddressWarningCode, CheckedAddress, CountryCode,
+    AddressWarning, AddressWarningCode, CheckedAddress, CountryCode, MessageParams,
 };
 use regex::Regex;
 
 pub use data::PostalCode;
 use data::{Country, OTHER, Region};
+pub use labels::LabelKey;
 
 /// The address formats of every country, compiled in.
 #[derive(Debug, Clone, Copy, Default)]
@@ -140,6 +142,15 @@ impl Form {
             .collect()
     }
 
+    /// The key of each field's label, as `labels` lists them: what a client translates
+    /// the label by. `None` for a label without one.
+    pub fn label_keys(&self) -> Vec<(AddressField, Option<LabelKey>)> {
+        self.labels()
+            .into_iter()
+            .map(|(field, label)| (field, LabelKey::of(label)))
+            .collect()
+    }
+
     pub fn postal_code_example(&self) -> Option<&'static str> {
         self.format.postal_example
     }
@@ -190,6 +201,7 @@ fn normalise_region(
                 field: AddressField::Province,
                 code: AddressProblemCode::Required,
                 message: format!("Select {}", with_article(label)),
+                params: MessageParams::field(AddressField::Province),
             });
         }
         return None;
@@ -215,6 +227,7 @@ fn normalise_region(
                 field: AddressField::Province,
                 code: AddressProblemCode::UnknownRegion,
                 message: format!("Select a valid {}", in_sentence(label)),
+                params: MessageParams::field(AddressField::Province),
             });
             None
         }
@@ -246,6 +259,7 @@ fn check_postal_code(
                 field: AddressField::PostalCode,
                 code: AddressProblemCode::Required,
                 message: format!("Enter {}", with_article(label)),
+                params: MessageParams::field(AddressField::PostalCode),
             });
         }
         return;
@@ -262,6 +276,10 @@ fn check_postal_code(
             field: AddressField::PostalCode,
             code: AddressProblemCode::InvalidFormat,
             message,
+            params: MessageParams {
+                example: country.postal_example.map(str::to_string),
+                ..MessageParams::field(AddressField::PostalCode)
+            },
         });
     } else if let Some(region) = region
         && placed(country, &code)
@@ -271,6 +289,11 @@ fn check_postal_code(
             field: AddressField::PostalCode,
             code: AddressProblemCode::RegionMismatch,
             message: format!("This {} isn't in {}", in_sentence(label), region.name),
+            params: MessageParams {
+                region: Some(region.code.to_string()),
+                region_name: Some(region.name.to_string()),
+                ..MessageParams::field(AddressField::PostalCode)
+            },
         });
     }
     parts.postal_code = Some(code);

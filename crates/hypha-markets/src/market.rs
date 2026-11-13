@@ -1,8 +1,8 @@
 use std::collections::{BTreeSet, HashSet};
 
 use hypha_core::{
-    CountryCode, Currency, MarketId, PendingEvent, Recorded, Stamped, Stamps, Subject, Version,
-    Versioned, required_text,
+    CountryCode, Currency, Language, MarketId, PendingEvent, Recorded, Stamped, Stamps, Subject,
+    Version, Versioned, required_text,
 };
 
 use crate::{
@@ -20,6 +20,9 @@ pub struct Market {
     countries: Vec<CountryCode>,
     currency: Currency,
     prices_include_tax: bool,
+    /// The languages shoppers are served here, the first being the market's default;
+    /// empty for the store's default language alone.
+    languages: Vec<Language>,
     changes: Changes,
 }
 
@@ -100,6 +103,7 @@ impl Market {
             countries,
             currency,
             prices_include_tax: false,
+            languages: Vec::new(),
             changes: Changes::default(),
         };
         market.changed("created");
@@ -125,6 +129,22 @@ impl Market {
             self.prices_include_tax = include;
             self.changed("prices_include_tax");
         }
+    }
+
+    /// The languages the market offers, in order (the first is its default); none means
+    /// the store's default language alone. Each may be listed once. Whether the store
+    /// offers them is the command's to check: a market can't see the store.
+    pub fn set_languages(&mut self, languages: Vec<Language>) -> Result<(), MarketError> {
+        for (i, language) in languages.iter().enumerate() {
+            if languages[..i].contains(language) {
+                return Err(MarketError::DuplicateLanguage(language.clone()));
+            }
+        }
+        if self.languages != languages {
+            self.languages = languages;
+            self.changed("languages");
+        }
+        Ok(())
     }
 
     pub fn covers(&self, country: CountryCode) -> bool {
@@ -174,6 +194,33 @@ impl Market {
     pub fn prices_include_tax(&self) -> bool {
         self.prices_include_tax
     }
+
+    pub fn languages(&self) -> &[Language] {
+        &self.languages
+    }
+
+    /// What shoppers are offered here, out of what the store offers (`store_languages`,
+    /// its default first): the market's languages in order, or the store's default when
+    /// it lists none. A language the store stopped offering since (the store's check and
+    /// a market's write don't share a transaction) is left out rather than promised.
+    pub fn offered_languages(&self, store_languages: &[Language]) -> Vec<Language> {
+        offered_languages(&self.languages, store_languages)
+    }
+}
+
+/// What a market listing `listed` offers shoppers, out of what the store offers
+/// (`servable`, its default first): the listed languages in order that the store still
+/// offers, or the store's default when none is left.
+pub fn offered_languages(listed: &[Language], servable: &[Language]) -> Vec<Language> {
+    let offered: Vec<Language> = listed
+        .iter()
+        .filter(|l| servable.contains(l))
+        .cloned()
+        .collect();
+    if offered.is_empty() {
+        return servable.first().cloned().into_iter().collect();
+    }
+    offered
 }
 
 /// Plain-data form of a `Market` for storage adapters.
@@ -186,6 +233,7 @@ pub struct MarketSnapshot {
     pub countries: Vec<CountryCode>,
     pub currency: Currency,
     pub prices_include_tax: bool,
+    pub languages: Vec<Language>,
 }
 
 impl Market {
@@ -198,6 +246,7 @@ impl Market {
             countries: self.countries.clone(),
             currency: self.currency,
             prices_include_tax: self.prices_include_tax,
+            languages: self.languages.clone(),
         }
     }
 
@@ -205,6 +254,7 @@ impl Market {
     pub fn restore(s: MarketSnapshot) -> Result<Market, MarketError> {
         let mut market = Market::new(s.id, s.name, s.countries, s.currency)?;
         market.prices_include_tax = s.prices_include_tax;
+        market.set_languages(s.languages)?;
         market.version = s.version;
         market.stamps = s.stamps;
         // Built through `new`, which records a change that didn't happen.
@@ -304,10 +354,98 @@ mod tests {
         assert!(m.countries.len() == 1);
     }
 
+    fn lang(tag: &str) -> Language {
+        Language::new(tag).unwrap()
+    }
+
+    fn fields(m: &mut Market) -> Vec<String> {
+        m.take_events()
+            .iter()
+            .flat_map(|e| e.data["fields"].as_array().cloned().unwrap_or_default())
+            .filter_map(|f| f.as_str().map(str::to_string))
+            .collect()
+    }
+
+    #[test]
+    fn a_new_market_lists_no_languages() {
+        assert_eq!(market(1, &["RS"]).unwrap().languages(), &[]);
+    }
+
+    #[test]
+    fn languages_keep_their_order_and_are_recorded_as_a_change() {
+        let mut m = market(1, &["RS"]).unwrap();
+        m.take_events();
+        assert_eq!(m.set_languages(vec![lang("sr-Latn"), lang("en")]), Ok(()));
+        assert_eq!(m.languages(), &[lang("sr-Latn"), lang("en")]);
+        assert_eq!(fields(&mut m), vec!["languages"]);
+
+        // The same list again is no change; another order is one.
+        assert_eq!(m.set_languages(vec![lang("sr-Latn"), lang("en")]), Ok(()));
+        assert_eq!(fields(&mut m), Vec::<String>::new());
+        assert_eq!(m.set_languages(vec![lang("en"), lang("sr-Latn")]), Ok(()));
+        assert_eq!(fields(&mut m), vec!["languages"]);
+    }
+
+    #[test]
+    fn a_language_is_listed_once_whatever_its_spelling() {
+        let mut m = market(1, &["RS"]).unwrap();
+        assert_eq!(
+            m.set_languages(vec![lang("en"), lang("de"), lang("EN")]),
+            Err(MarketError::DuplicateLanguage(lang("en")))
+        );
+        assert_eq!(m.languages(), &[]);
+    }
+
+    #[test]
+    fn a_market_offers_what_it_lists_that_the_store_offers() {
+        assert_eq!(
+            offered_languages(
+                &[lang("de"), lang("fr"), lang("en")],
+                &[lang("en"), lang("de")]
+            ),
+            vec![lang("de"), lang("en")]
+        );
+    }
+
+    #[test]
+    fn a_market_listing_nothing_the_store_offers_offers_the_stores_default() {
+        let store = [lang("en"), lang("de")];
+        assert_eq!(offered_languages(&[lang("fr")], &store), vec![lang("en")]);
+        assert_eq!(offered_languages(&[], &store), vec![lang("en")]);
+        assert!(offered_languages(&[], &[]).is_empty());
+    }
+
+    #[test]
+    fn shoppers_are_offered_the_markets_languages_the_store_still_offers() {
+        let store = [lang("en"), lang("de"), lang("fr")];
+        let mut m = market(1, &["RS"]).unwrap();
+        assert_eq!(m.offered_languages(&store), vec![lang("en")], "none listed");
+        m.set_languages(vec![lang("fr"), lang("hr"), lang("en")])
+            .unwrap();
+        assert_eq!(m.offered_languages(&store), vec![lang("fr"), lang("en")]);
+        m.set_languages(vec![lang("hr")]).unwrap();
+        assert_eq!(
+            m.offered_languages(&store),
+            vec![lang("en")],
+            "none left: the store's default"
+        );
+    }
+
+    #[test]
+    fn restore_rejects_a_repeated_language() {
+        let mut s = market(1, &["RS"]).unwrap().snapshot();
+        s.languages = vec![lang("en"), lang("en")];
+        assert_eq!(
+            Market::restore(s),
+            Err(MarketError::DuplicateLanguage(lang("en")))
+        );
+    }
+
     #[test]
     fn restore_round_trips() {
         let mut m = market(1, &["RS", "HR"]).unwrap();
         m.set_prices_include_tax(true);
+        m.set_languages(vec![lang("sr-Latn"), lang("en")]).unwrap();
         m.set_version(Version::new(3));
         assert_eq!(Market::restore(m.snapshot()), Ok(m));
     }

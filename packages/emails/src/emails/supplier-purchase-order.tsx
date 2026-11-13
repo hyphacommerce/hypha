@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Column, Row, Section, Text } from "react-email";
-import type { Email } from "../email.ts";
+import type { Template } from "../email.ts";
 import { For, If, v } from "../jinja.tsx";
 import { colours, heading, muted, paragraph, preformatted, subheading } from "../styles.ts";
 import * as text from "../text.ts";
@@ -63,135 +63,138 @@ function AddressPart(props: { name: string }) {
   );
 }
 
-export const supplierPurchaseOrder: Email = {
+export const supplierPurchaseOrder: Template = {
   key: "supplier_purchase_order",
-  subject:
-    "Purchase order {{ purchase_order.number }} from {{ shop.name }}{% if purchase_order.revision %} (revision {{ purchase_order.revision }}){% endif %}",
-  preheader:
-    "{{ shop.name }}'s order {{ purchase_order.number }} for {{ purchase_order.total.formatted }}.",
-  Content: () => (
-    <>
-      <Text style={heading}>Purchase order {v("purchase_order.number")}</Text>
-      <Text style={paragraph}>
-        Hello {v("supplier.name")}, here is our purchase order
-        <If test="purchase_order.revision" inline>
-          {" "}
-          (revision {v("purchase_order.revision")}, replacing the earlier one)
-        </If>
-        . Please confirm it and tell us if anything can't be delivered as listed.
-      </Text>
-      <If test="message">
-        <Panel path="message" />
-      </If>
-      <Detail
-        label="Ordered"
-        path="purchase_order.ordered_at.formatted"
-        test="purchase_order.ordered_at"
-      />
-      <Detail
-        label="Expected by"
-        path="purchase_order.expected_at.formatted"
-        test="purchase_order.expected_at"
-      />
-      <Detail label="Your reference" path="purchase_order.supplier_reference" />
-      <If test="purchase_order.payment_terms">
-        <Text style={{ ...paragraph, margin: "0 0 4px" }}>
-          <span style={{ color: colours.muted }}>Payment terms:</span>{" "}
-          {v("purchase_order.payment_terms.summary")}
-          <If test="purchase_order.payment_terms.note" inline>
+  translated: false,
+  email: () => ({
+    key: "supplier_purchase_order",
+    subject:
+      "Purchase order {{ purchase_order.number }} from {{ shop.name }}{% if purchase_order.revision %} (revision {{ purchase_order.revision }}){% endif %}",
+    preheader:
+      "{{ shop.name }}'s order {{ purchase_order.number }} for {{ purchase_order.total.formatted }}.",
+    Content: () => (
+      <>
+        <Text style={heading}>Purchase order {v("purchase_order.number")}</Text>
+        <Text style={paragraph}>
+          Hello {v("supplier.name")}, here is our purchase order
+          <If test="purchase_order.revision" inline>
             {" "}
-            ({v("purchase_order.payment_terms.note")})
+            (revision {v("purchase_order.revision")}, replacing the earlier one)
           </If>
+          . Please confirm it and tell us if anything can't be delivered as listed.
         </Text>
-      </If>
-      <Text style={subheading}>Items</Text>
-      <Section>
-        <For each="line in purchase_order.lines">
-          <Row style={lineRow}>
-            <Column style={cell}>
-              <Text style={{ ...paragraph, margin: 0 }}>{v("line.title")}</Text>
-              <If test="line.variant">
-                <Text style={muted}>{v("line.variant")}</Text>
-              </If>
-              <If test="line.supplier_sku or line.sku">
-                <Text style={muted}>
-                  <If test="line.supplier_sku" inline>
-                    Your code {v("line.supplier_sku")}
-                  </If>
-                  <If test="line.supplier_sku and line.sku" inline>
-                    {" · "}
-                  </If>
-                  <If test="line.sku" inline>
-                    Our SKU {v("line.sku")}
-                  </If>
-                </Text>
-              </If>
-            </Column>
-            <Column style={{ ...cell, width: "56px" }} align="right">
-              <Text style={{ ...muted, fontSize: "15px", lineHeight: "24px" }}>
-                × {v("line.quantity")}
-              </Text>
-            </Column>
-            <Column style={{ ...cell, width: "130px" }} align="right">
-              <Text style={amount}>{v("line.total.formatted")}</Text>
-              <Text style={{ ...muted, margin: 0 }}>{v("line.unit_cost.formatted")} each</Text>
-            </Column>
-          </Row>
-        </For>
-      </Section>
-      <Section style={{ marginTop: "12px" }}>
-        <TotalRow label="Subtotal" value={v("purchase_order.subtotal.formatted")} />
-        <For each="cost in purchase_order.costs">
-          <TotalRow
-            label={
-              <>
-                {v("cost.label")}
-                <If test="cost.description" inline>
-                  {" "}
-                  ({v("cost.description")})
-                </If>
-              </>
-            }
-            value={v("cost.amount.formatted")}
-          />
-        </For>
-        <If test="purchase_order.tax">
-          <TotalRow label="Tax" value={v("purchase_order.tax.formatted")} />
+        <If test="message">
+          <Panel path="message" />
         </If>
-        <TotalRow label="Total" value={v("purchase_order.total.formatted")} strong />
-      </Section>
-      <If test="purchase_order.ship_to">
-        <Text style={subheading}>Ship to</Text>
-        <Text style={{ ...paragraph, margin: "0 0 8px" }}>
-          {v("purchase_order.ship_to.name")}
-          <br />
-          <If test="purchase_order.ship_to.address" inline>
-            <AddressPart name="contact" />
-            <AddressPart name="company" />
-            {v("purchase_order.ship_to.address.line1")}
-            <br />
-            <AddressPart name="line2" />
-            <If test="purchase_order.ship_to.address.postal_code" inline>
-              {v("purchase_order.ship_to.address.postal_code")}{" "}
+        <Detail
+          label="Ordered"
+          path="purchase_order.ordered_at.formatted"
+          test="purchase_order.ordered_at"
+        />
+        <Detail
+          label="Expected by"
+          path="purchase_order.expected_at.formatted"
+          test="purchase_order.expected_at"
+        />
+        <Detail label="Your reference" path="purchase_order.supplier_reference" />
+        <If test="purchase_order.payment_terms">
+          <Text style={{ ...paragraph, margin: "0 0 4px" }}>
+            <span style={{ color: colours.muted }}>Payment terms:</span>{" "}
+            {v("purchase_order.payment_terms.summary")}
+            <If test="purchase_order.payment_terms.note" inline>
+              {" "}
+              ({v("purchase_order.payment_terms.note")})
             </If>
-            {v("purchase_order.ship_to.address.city")}
-            <br />
-            <AddressPart name="province" />
-            {v("purchase_order.ship_to.address.country")}
-            <If test="purchase_order.ship_to.address.phone" inline>
-              <br />
-              {v("purchase_order.ship_to.address.phone")}
-            </If>
+          </Text>
+        </If>
+        <Text style={subheading}>Items</Text>
+        <Section>
+          <For each="line in purchase_order.lines">
+            <Row style={lineRow}>
+              <Column style={cell}>
+                <Text style={{ ...paragraph, margin: 0 }}>{v("line.title")}</Text>
+                <If test="line.variant">
+                  <Text style={muted}>{v("line.variant")}</Text>
+                </If>
+                <If test="line.supplier_sku or line.sku">
+                  <Text style={muted}>
+                    <If test="line.supplier_sku" inline>
+                      Your code {v("line.supplier_sku")}
+                    </If>
+                    <If test="line.supplier_sku and line.sku" inline>
+                      {" · "}
+                    </If>
+                    <If test="line.sku" inline>
+                      Our SKU {v("line.sku")}
+                    </If>
+                  </Text>
+                </If>
+              </Column>
+              <Column style={{ ...cell, width: "56px" }} align="right">
+                <Text style={{ ...muted, fontSize: "15px", lineHeight: "24px" }}>
+                  × {v("line.quantity")}
+                </Text>
+              </Column>
+              <Column style={{ ...cell, width: "130px" }} align="right">
+                <Text style={amount}>{v("line.total.formatted")}</Text>
+                <Text style={{ ...muted, margin: 0 }}>{v("line.unit_cost.formatted")} each</Text>
+              </Column>
+            </Row>
+          </For>
+        </Section>
+        <Section style={{ marginTop: "12px" }}>
+          <TotalRow label="Subtotal" value={v("purchase_order.subtotal.formatted")} />
+          <For each="cost in purchase_order.costs">
+            <TotalRow
+              label={
+                <>
+                  {v("cost.label")}
+                  <If test="cost.description" inline>
+                    {" "}
+                    ({v("cost.description")})
+                  </If>
+                </>
+              }
+              value={v("cost.amount.formatted")}
+            />
+          </For>
+          <If test="purchase_order.tax">
+            <TotalRow label="Tax" value={v("purchase_order.tax.formatted")} />
           </If>
-        </Text>
-      </If>
-      <If test="purchase_order.note_to_supplier">
-        <Text style={subheading}>Notes</Text>
-        <Panel path="purchase_order.note_to_supplier" />
-      </If>
-    </>
-  ),
-  text: `Purchase order {{ purchase_order.number }}{% if purchase_order.revision %} (revision {{ purchase_order.revision }}, replacing the earlier one){% endif %}
+          <TotalRow label="Total" value={v("purchase_order.total.formatted")} strong />
+        </Section>
+        <If test="purchase_order.ship_to">
+          <Text style={subheading}>Ship to</Text>
+          <Text style={{ ...paragraph, margin: "0 0 8px" }}>
+            {v("purchase_order.ship_to.name")}
+            <br />
+            <If test="purchase_order.ship_to.address" inline>
+              <AddressPart name="contact" />
+              <AddressPart name="company" />
+              {v("purchase_order.ship_to.address.line1")}
+              <br />
+              <AddressPart name="line2" />
+              <If test="purchase_order.ship_to.address.postal_code" inline>
+                {v("purchase_order.ship_to.address.postal_code")}{" "}
+              </If>
+              {v("purchase_order.ship_to.address.city")}
+              <br />
+              <AddressPart name="province" />
+              {v("purchase_order.ship_to.address.country")}
+              <If test="purchase_order.ship_to.address.phone" inline>
+                <br />
+                {v("purchase_order.ship_to.address.phone")}
+              </If>
+            </If>
+          </Text>
+        </If>
+        <If test="purchase_order.note_to_supplier">
+          <Text style={subheading}>Notes</Text>
+          <Panel path="purchase_order.note_to_supplier" />
+        </If>
+      </>
+    ),
+    text: `Purchase order {{ purchase_order.number }}{% if purchase_order.revision %} (revision {{ purchase_order.revision }}, replacing the earlier one){% endif %}
 
 Hello {{ supplier.name }}, here is our purchase order. Please confirm it and tell us if anything can't be delivered as listed.
 {%- if message %}
@@ -258,4 +261,5 @@ Notes:
 
 ${text.footer}
 `,
+  }),
 };

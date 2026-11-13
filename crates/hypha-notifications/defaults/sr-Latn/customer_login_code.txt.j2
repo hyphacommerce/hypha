@@ -1,0 +1,15 @@
+Unesite ovaj kod za prijavu u prodavnicu {{ shop.name }}. Kod važi {{ expires_in_minutes }} min.
+
+    {{ code }}
+{%- if shop.url %}
+
+Ili se prijavite jednim klikom: {{ link }}
+{%- endif %}
+
+Ako niste tražili kod, zanemarite ovaj imejl: bez koda niko ne može da se prijavi.
+
+--
+{{ shop.name }}{% if shop.email %} · {{ shop.email }}{% endif %}
+{%- if brand.footer %}
+{{ brand.footer }}
+{%- endif %}

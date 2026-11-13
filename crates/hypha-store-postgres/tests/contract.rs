@@ -139,6 +139,12 @@ async fn store_repo() {
 }
 
 #[tokio::test]
+async fn store_events() {
+    let Some(url) = database_url() else { return };
+    contract::store_events(async || fresh_store(&url, "contract_store_events").await).await;
+}
+
+#[tokio::test]
 async fn batch() {
     let Some(url) = database_url() else { return };
     contract::batch(async || fresh_store(&url, "contract_batch").await).await;
@@ -499,6 +505,12 @@ async fn receipt_repo() {
 async fn transfer_repo() {
     let Some(url) = database_url() else { return };
     contract::transfer_repo(async || fresh_store(&url, "contract_transfers").await).await;
+}
+
+#[tokio::test]
+async fn translation_repo() {
+    let Some(url) = database_url() else { return };
+    contract::translation_repo(async || fresh_store(&url, "contract_translations").await).await;
 }
 
 #[tokio::test]

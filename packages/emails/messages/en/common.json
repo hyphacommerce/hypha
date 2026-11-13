@@ -1,0 +1,20 @@
+{
+  "greeting_named": "Hi {name},",
+  "greeting": "Hi,",
+  "view_order": "View your order",
+  "order_number": "Order {number}",
+  "in_shipment": "In this shipment",
+  "subtotal": "Subtotal",
+  "shipping": "Shipping",
+  "tax": "Tax",
+  "total": "Total",
+  "including_tax": "Including {amount} in taxes",
+  "discounts_included": "Discounts included above",
+  "was": "(was {amount})",
+  "delivery": "Delivery",
+  "shipping_to": "Shipping to",
+  "shipping_method": "Shipping method",
+  "payment": "Payment",
+  "tracking": "Tracking",
+  "plain_link": "If the button doesn't work, copy this link into your browser:"
+}

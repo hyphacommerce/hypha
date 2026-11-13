@@ -159,6 +159,7 @@ async fn cart(
         country: "HR".to_string(),
         idempotency: None,
         customer: None,
+        language: None,
     };
     let cart = create_cart(&ctx, store, ids, clock, input)
         .await
@@ -236,6 +237,9 @@ async fn carts_racing_for_the_last_units_never_oversell() {
             expected_total: None,
             return_url: None,
             idempotency: None,
+            languages: hypha_checkout::ContentLanguages::only(
+                hypha_core::Language::new("en").unwrap(),
+            ),
         };
         checkout(
             &ctx,
@@ -319,6 +323,9 @@ async fn one_cart_checked_out_at_once_becomes_one_order() {
             expected_total: None,
             return_url: None,
             idempotency: None,
+            languages: hypha_checkout::ContentLanguages::only(
+                hypha_core::Language::new("en").unwrap(),
+            ),
         };
         checkout(
             &ctx,
@@ -380,6 +387,9 @@ async fn retries_with_the_same_key_all_get_the_one_order() {
                 key: "checkout-1".to_string(),
                 fingerprint: [7; 32],
             }),
+            languages: hypha_checkout::ContentLanguages::only(
+                hypha_core::Language::new("en").unwrap(),
+            ),
         };
         checkout(
             &ctx,

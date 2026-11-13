@@ -1,7 +1,7 @@
 //! Roles, staff users and invites.
 
 use axum::{Json, extract::State, http::StatusCode};
-use hypha_core::{Email, InviteId, RoleId, Scope, UserId};
+use hypha_core::{Email, InviteId, Language, RoleId, Scope, UserId};
 use hypha_users::{
     HasInvites, HasRoles, HasUsers, Invite, InviteUser, Role, RoleScopes, UpdateRole, UpdateUser,
     User, UserStatus, create_role, get_role, get_user, invite_user, list_invites, list_roles,
@@ -159,6 +159,9 @@ pub struct UserResponse {
     name: String,
     role: RoleId,
     status: &'static str,
+    /// The language they read the admin in (a BCP 47 tag), as they chose it in their
+    /// profile; `null` leaves it to their browser's languages.
+    language: Option<Language>,
     created_at: String,
 }
 
@@ -170,6 +173,7 @@ impl UserResponse {
             name: u.name().to_string(),
             role: u.role(),
             status: u.status().as_str(),
+            language: u.language().cloned(),
             created_at: rfc3339(u.created_at())?,
         })
     }

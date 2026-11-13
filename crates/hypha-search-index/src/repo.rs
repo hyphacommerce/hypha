@@ -1,7 +1,9 @@
 //! Search's ports (sections 4 to 6): the engine, the queue of what to rebuild, and the
 //! merchant's settings.
 
-use hypha_core::{CategoryId, ChannelId, MarketId, ProductId, RepoError, Timestamp, VariantId};
+use hypha_core::{
+    CategoryId, ChannelId, Language, MarketId, ProductId, RepoError, Timestamp, VariantId,
+};
 
 use crate::{IndexError, SearchDocument, SearchQuery, SearchResults, SearchSettings};
 
@@ -14,9 +16,10 @@ use crate::{IndexError, SearchDocument, SearchQuery, SearchResults, SearchSettin
 #[allow(async_fn_in_trait)]
 pub trait SearchIndex {
     /// Makes `documents` the documents of `products` in `market`: each product's
-    /// documents there are replaced by its ones in `documents` (removed when it has
-    /// none). Every document is of one of `products`, in `market`. One call per market
-    /// for a whole batch, so an engine can write it at once.
+    /// documents there, in every language, are replaced by its ones in `documents`
+    /// (removed when it has none, so a language the market stopped offering goes with
+    /// the rebuild). Every document is of one of `products`, in `market`. One call per
+    /// market for a whole batch, so an engine can write it at once.
     async fn replace(
         &self,
         market: MarketId,
@@ -26,8 +29,8 @@ pub trait SearchIndex {
 
     async fn search(&self, query: &SearchQuery) -> Result<SearchResults, IndexError>;
 
-    /// The option names (lowercased) documents in `market` have, most documents first, then
-    /// by name: the default facets. With a `channel`, only its documents count, so a
+    /// The option names (lowercased) documents in `market` have, in any language (names
+    /// are as stored), most documents first, then by name: the default facets. With a `channel`, only its documents count, so a
     /// storefront's facets are its own products'. `reference::option_names` says exactly
     /// what.
     async fn option_names(
@@ -39,6 +42,17 @@ pub trait SearchIndex {
     /// How many documents it holds, over every market: none means a new engine, which
     /// the host fills with a full rebuild.
     async fn count(&self) -> Result<u64, IndexError>;
+
+    /// Whether `market` has any document in `language`: a language a market just began
+    /// to offer has none until the sync job has built them, and a search that found
+    /// nothing in it falls back to one that has. An engine whose last search wasn't
+    /// answered from these documents (a search app with an index of its own) answers
+    /// `true`: the language asked was searched.
+    async fn has_documents(
+        &self,
+        market: MarketId,
+        language: &Language,
+    ) -> Result<bool, IndexError>;
 }
 
 /// A borrowed engine is an engine, so a host can lend the request's ports out as one.
@@ -67,6 +81,14 @@ impl<T: SearchIndex + ?Sized> SearchIndex for &T {
     async fn count(&self) -> Result<u64, IndexError> {
         (**self).count().await
     }
+
+    async fn has_documents(
+        &self,
+        market: MarketId,
+        language: &Language,
+    ) -> Result<bool, IndexError> {
+        (**self).has_documents(market, language).await
+    }
 }
 
 /// What a mark asks to rebuild.
@@ -79,6 +101,9 @@ pub enum Target {
     /// The products in this category or below it, whose ancestor lists changed when it
     /// moved (resolved when the mark is worked).
     Category(CategoryId),
+    /// The products this market's catalog sells, whose documents there changed with the
+    /// languages it offers (resolved when the mark is worked).
+    Market(MarketId),
     /// Every product.
     All,
 }

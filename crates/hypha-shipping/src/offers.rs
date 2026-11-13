@@ -370,6 +370,7 @@ mod tests {
                 weight: weight.map(Weight::from_grams),
             }],
             subtotal: Money::new(2000, Currency::EUR).unwrap(),
+            language: None,
         }
     }
 

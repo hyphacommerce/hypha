@@ -43,8 +43,8 @@ pub use address::{
 pub use app_key::{AppKey, AppKeyError, AppKind, AppPoints};
 pub use callback_url::{CallbackUrl, CallbackUrlError};
 pub use checks::{
-    AppCheck, Message, MessageCode, MessageError, MessagePath, MessageSource, Severity,
-    ValidationStep,
+    AppCheck, Message, MessageCode, MessageError, MessageParams, MessagePath, MessageSource,
+    Severity, ValidationStep,
 };
 pub use country::{CountryCode, CountryError};
 pub use ctx::{Actor, AuthError, Ctx};

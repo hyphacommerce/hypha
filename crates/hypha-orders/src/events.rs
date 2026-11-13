@@ -1,7 +1,7 @@
 //! What happens to orders, as events. Contract types: a reshaped field is a new `VERSION`,
 //! never an edit.
 
-use hypha_core::{Address, ChannelId, CustomerId, Event, Money, OrderId};
+use hypha_core::{Address, ChannelId, CustomerId, Event, Language, Money, OrderId};
 use serde::Serialize;
 
 pub const ORDER: &str = "order";
@@ -19,6 +19,8 @@ pub struct OrderPlaced {
     pub discount_codes: Vec<String>,
     /// What discounts took off it: an added field.
     pub discount_total: Money,
+    /// The language the buyer checked out in (a BCP 47 tag): an added field.
+    pub language: Option<Language>,
 }
 
 impl Event for OrderPlaced {

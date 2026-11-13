@@ -319,6 +319,7 @@ fn gateway_payment(ports: &InMemoryPorts, prepare: impl FnOnce(&mut Payment)) ->
         provider: ProviderKey::new("app_gateway").unwrap(),
         amount: Money::new(1000, Currency::EUR).unwrap(),
         instructions: None,
+        localized: None,
     })
     .unwrap();
     prepare(&mut payment);

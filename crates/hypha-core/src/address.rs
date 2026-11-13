@@ -81,6 +81,7 @@ impl AddressError {
                 field: AddressField::Country,
                 code: AddressProblemCode::InvalidFormat,
                 message: e.to_string(),
+                params: crate::MessageParams::field(AddressField::Country),
             }],
         }
     }
@@ -236,29 +237,38 @@ impl std::fmt::Display for AddressProblemCode {
     }
 }
 
-/// One field's problem, with a message for the person filling the form in.
+/// One field's problem, with a message for the person filling the form in and the data a
+/// client needs to word it itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AddressProblem {
     pub field: AddressField,
     pub code: AddressProblemCode,
     pub message: String,
+    /// `field` always; `max` for `too_long`, `example` for `invalid_format` where the
+    /// country has one, `region` and `region_name` for `region_mismatch`.
+    pub params: crate::MessageParams,
 }
 
 impl AddressProblem {
     /// One of `Address::new`'s own problems, worded with the field's default label.
     fn structural(field: AddressField, code: AddressProblemCode) -> Self {
+        let mut params = crate::MessageParams::field(field);
         let message = match code {
-            AddressProblemCode::TooLong => format!(
-                "{} is too long (at most {} characters)",
-                field.label(),
-                Address::MAX_FIELD_LEN
-            ),
+            AddressProblemCode::TooLong => {
+                params.max = u32::try_from(Address::MAX_FIELD_LEN).ok();
+                format!(
+                    "{} is too long (at most {} characters)",
+                    field.label(),
+                    Address::MAX_FIELD_LEN
+                )
+            }
             _ => format!("Enter {}", with_article(field.label())),
         };
         Self {
             field,
             code,
             message,
+            params,
         }
     }
 }
@@ -599,6 +609,7 @@ mod tests {
                     field: AddressField::PostalCode,
                     code: AddressProblemCode::InvalidFormat,
                     message: "Five digits".to_string(),
+                    params: crate::MessageParams::field(AddressField::PostalCode),
                 }]
             };
             CheckedAddress {

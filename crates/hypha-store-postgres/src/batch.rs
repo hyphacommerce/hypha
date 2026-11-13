@@ -983,14 +983,17 @@ impl<C: PgConnection> HasBatch for PgStore<C> {
 impl StageNotificationSettings for PgBatch {
     fn insert_notification_settings(&mut self, settings: &mut NotificationSettings) {
         stamp_insert(settings, self.now);
+        self.stage_events_of(settings, Version::NEW.next());
         self.stage(Staged::NewNotificationSettings(settings.snapshot()));
         settings.set_version(Version::NEW.next());
     }
 
     fn update_notification_settings(&mut self, settings: &mut NotificationSettings) {
         stamp_update(settings, self.now);
+        let version = settings.version().next();
+        self.stage_events_of(settings, version);
         self.stage(Staged::NotificationSettings(settings.snapshot()));
-        settings.set_version(settings.version().next());
+        settings.set_version(version);
     }
 }
 

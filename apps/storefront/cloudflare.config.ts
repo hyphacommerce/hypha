@@ -48,6 +48,11 @@ export default defineConfig({
       ...(deploy.STOREFRONT_ROUTING
         ? { STOREFRONT_ROUTING: bindings.text(deploy.STOREFRONT_ROUTING) }
         : {}),
+      // Development's pseudo-language (`lib/site.ts`), from the environment the dev
+      // server is started in.
+      ...(deploy.HYPHA_I18N_PSEUDO
+        ? { HYPHA_I18N_PSEUDO: bindings.text(deploy.HYPHA_I18N_PSEUDO) }
+        : {}),
       // The API through a Service Binding (lib/api-fetch.workerd.ts), with the
       // deployment's caller key, so the API believes the shopper's address we pass on (not the
       // binding's props: Cloudflare drops them for a Worker with a placement, as the API's).

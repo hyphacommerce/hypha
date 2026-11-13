@@ -176,6 +176,7 @@ const UNIQUE_KEYS: &[(&str, &str)] = &[
         "checkout_settings_pkey",
         checkout_rule_keys::CHECKOUT_SETTINGS,
     ),
+    ("translations_pkey", hypha_translations::keys::TRANSLATION),
 ];
 
 /// Maps a driver error to the repo error the ports promise. A spore's query error as a

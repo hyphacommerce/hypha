@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use hypha_cart::{PricedCart, PricingPorts, product_categories};
+use hypha_cart::{ContentLanguages, PricedCart, PricingPorts, product_categories};
 use hypha_checkout_rules::{
     CheckoutRuleRepo, HasCheckoutRules, RuleInput, RuleLine, VerifiedFacts, evaluate,
     names_categories,
@@ -67,14 +67,16 @@ impl<F: AddressFormats, V: CheckoutValidators> CartChecks for Checks<F, V> {
 /// The cart's messages, in the order a storefront shows them: the address's format
 /// warnings, what its verification found (kept with the cart, never asked again here),
 /// the merchant's checkout rules in their order, then what each validation app last said
-/// (kept with the cart: nobody is asked here). A checked-out cart has none: nothing about
-/// it can change.
+/// (kept with the cart: nobody is asked here; `languages`, the store's, decide what they
+/// were told, which their kept answers are matched by). A checked-out cart has none:
+/// nothing about it can change.
 ///
 /// The address isn't checked again for its problems: it passed them when it was set, and
 /// an address stored before a format changed still reads.
 pub async fn cart_messages<S: PricingPorts + HasCheckoutRules>(
     ports: &S,
     checks: &impl CartChecks,
+    languages: &ContentLanguages,
     cart: &PricedCart,
 ) -> Result<Vec<Message>, RepoError> {
     if cart.order.is_some() {
@@ -137,7 +139,10 @@ pub async fn cart_messages<S: PricingPorts + HasCheckoutRules>(
         };
         messages.extend(evaluate(&input, &rules));
     }
-    let validators = checks.validators().validators(cart).await?;
+    let validators = checks
+        .validators()
+        .validators(cart, languages.told(cart).as_ref())
+        .await?;
     messages.extend(app_messages(&validators, cart));
     Ok(without_echoed_warnings(messages))
 }
