@@ -32,6 +32,8 @@ import {
   onSaleOnly,
   withOnSale,
 } from "@/lib/listing";
+import type { TFor } from "@/lib/messages";
+import { useT } from "@/lib/use-t";
 
 /** The phones' filter sheet, loaded the first time it opens: wide screens never need
  * it, and it's the listing's heaviest piece. */
@@ -59,9 +61,9 @@ export type Props = {
 
 /** A facet's heading: the merchant's label for an option or a custom field, else its name.
  * */
-function facetLabel(facet: Facet): string {
+function facetLabel(t: TFor<"listing">, facet: Facet): string {
   const labelled = facet.key.startsWith("option.") || facet.key.startsWith("field.");
-  return labelled && facet.label ? facet.label : facetName(facet.key);
+  return labelled && facet.label ? facet.label : facetName(t, facet.key);
 }
 
 /** How many values a facet shows before "Show all". */
@@ -85,13 +87,14 @@ function FacetList({
   selected: string[];
   onChange: (values: string[]) => void;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const values = open ? facet.values : facet.values.slice(0, SHOWN);
   const prefix = `${facet.key}:`;
   return (
     <VStack gap={1}>
       <CheckboxList
-        label={facetLabel(facet)}
+        label={facetLabel(t, facet)}
         density="compact"
         value={selected.filter((f) => f.startsWith(prefix))}
         onChange={(picked) =>
@@ -110,7 +113,9 @@ function FacetList({
       {facet.values.length > SHOWN && (
         <div>
           <Button
-            label={open ? "Show fewer" : `Show all ${facet.values.length}`}
+            label={
+              open ? t("listing.show_fewer") : t("listing.show_all", { count: facet.values.length })
+            }
             variant="ghost"
             size="sm"
             clickAction={() => setOpen(!open)}
@@ -137,18 +142,21 @@ function PriceRange({
   currency?: string;
   onApply: (min?: string, max?: string) => void;
 }) {
+  const t = useT();
   const [min, setMin] = useState(state.min ?? "");
   const [max, setMax] = useState(state.max ?? "");
   const ok = isPrice(min) && isPrice(max);
   return (
     <VStack gap={2}>
-      <Text type="label">Price{currency ? ` (${currency})` : ""}</Text>
+      <Text type="label">
+        {currency ? t("listing.price_currency", { currency }) : t("listing.price")}
+      </Text>
       <HStack gap={2} vAlign="center">
         <StackItem size="fill">
           <TextInput
-            label="Lowest price"
+            label={t("listing.lowest_price")}
             isLabelHidden
-            placeholder={priceHint ? priceHint.min : "Min"}
+            placeholder={priceHint ? priceHint.min : t("listing.min")}
             value={min}
             onChange={setMin}
           />
@@ -156,9 +164,9 @@ function PriceRange({
         <Text color="secondary">–</Text>
         <StackItem size="fill">
           <TextInput
-            label="Highest price"
+            label={t("listing.highest_price")}
             isLabelHidden
-            placeholder={priceHint ? priceHint.max : "Max"}
+            placeholder={priceHint ? priceHint.max : t("listing.max")}
             value={max}
             onChange={setMax}
           />
@@ -166,7 +174,7 @@ function PriceRange({
       </HStack>
       <div>
         <Button
-          label="Apply price"
+          label={t("listing.apply_price")}
           size="sm"
           isDisabled={!ok}
           clickAction={() => onApply(min.trim() || undefined, max.trim() || undefined)}
@@ -189,6 +197,7 @@ export function FacetPanel({
 }: Props & {
   onDone?: () => void;
 }) {
+  const t = useT();
   const apply = (change: Partial<ListingState>) => {
     go(base, changed(state, change));
     onDone?.();
@@ -199,8 +208,12 @@ export function FacetPanel({
       {!saleOnly && (
         <>
           <Switch
-            label="On sale"
-            description={onSaleCount === undefined ? undefined : `${onSaleCount} on sale`}
+            label={t("listing.on_sale")}
+            description={
+              onSaleCount === undefined
+                ? undefined
+                : t("listing.on_sale_count", { count: onSaleCount })
+            }
             value={onSaleOnly(state)}
             onChange={(on) => {
               go(base, withOnSale(state, on));
@@ -230,7 +243,7 @@ export function FacetPanel({
       {narrowed && (
         <div>
           <Button
-            label="Clear filters"
+            label={t("listing.clear_filters")}
             variant="ghost"
             clickAction={() => apply({ filters: [], min: undefined, max: undefined })}
           />
@@ -243,19 +256,20 @@ export function FacetPanel({
 /** Above the results: the count, the sort, and (on phones, by CSS) the filters in a
  * sheet. */
 export function ListingToolbar(props: Props & { total: number; sort: Sort; isBusy: boolean }) {
+  const t = useT();
   const [sheet, setSheet] = useState(false);
   // Once opened, the sheet stays mounted (closed), so it opens again at once.
   const [sheetLoaded, setSheetLoaded] = useState(false);
   const active = props.state.filters.length + (props.state.min || props.state.max ? 1 : 0);
   return (
     <HStack gap={3} vAlign="center" hAlign="between" wrap="wrap">
-      <Text color="secondary">
-        {props.total} {props.total === 1 ? "product" : "products"}
-      </Text>
+      <Text color="secondary">{t("listing.total", { count: props.total })}</Text>
       <HStack gap={2} vAlign="center">
         <div className="shop-listing-filters">
           <Button
-            label={active > 0 ? `Filters (${active})` : "Filters"}
+            label={
+              active > 0 ? t("listing.filters_count", { count: active }) : t("listing.filters")
+            }
             icon={<Icon icon={AdjustmentsHorizontalIcon} />}
             clickAction={() => {
               setSheetLoaded(true);
@@ -265,14 +279,14 @@ export function ListingToolbar(props: Props & { total: number; sort: Sort; isBus
           {sheetLoaded && <FilterSheet {...props} isOpen={sheet} onOpenChange={setSheet} />}
         </div>
         <Selector
-          label="Sort"
+          label={t("listing.sort")}
           isLabelHidden
           variant="secondary"
           isLoading={props.isBusy}
           value={props.sort}
           options={SORTS.filter((s) => s.value !== "relevance" || props.state.q).map((s) => ({
             value: s.value,
-            label: s.label,
+            label: t(s.label),
           }))}
           onChange={(sort) => {
             if (isSort(sort)) go(props.base, changed(props.state, { sort }));
@@ -292,12 +306,18 @@ function FilterSheet({
   onOpenChange,
   ...props
 }: Props & { isOpen: boolean; onOpenChange: (open: boolean) => void }) {
+  const t = useT();
   return (
     <>
       {/* Leaving the listing (a product, another category) closes it; filtering here,
         which changes only the query, doesn't. */}
       <CloseOnNavigate pathOnly onNavigate={() => onOpenChange(false)} />
-      <BottomSheet label="Filters" isOpen={isOpen} onOpenChange={onOpenChange} height="tall">
+      <BottomSheet
+        label={t("listing.filters")}
+        isOpen={isOpen}
+        onOpenChange={onOpenChange}
+        height="tall"
+      >
         <FacetPanel {...props} onDone={() => onOpenChange(false)} />
       </BottomSheet>
     </>

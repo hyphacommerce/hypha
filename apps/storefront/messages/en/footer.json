@@ -1,0 +1,10 @@
+{
+  "shop": "Shop",
+  "all_products": "All products",
+  "sale": "Sale",
+  "help": "Help",
+  "cart": "Cart",
+  "account": "Account",
+  "credit": "© {store} · Built with <link>Hypha</link>",
+  "shipping_to": "Shipping to {country} · Prices in {currency}"
+}

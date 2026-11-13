@@ -7,26 +7,35 @@ import { AccountShell } from "@/components/account/account-shell";
 import { ProfileForm } from "@/components/account/forms";
 import { loadAccount } from "@/lib/account";
 import { countryOf } from "@/lib/api";
+import { pageT } from "@/lib/i18n";
 import { link } from "@/lib/site";
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = { title: "Profile" };
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ country: string }>;
+}): Promise<Metadata> {
+  const t = await pageT((await params).country);
+  return { title: t("account.profile_meta_title") };
+}
 
 export default async function ProfilePage({ params }: { params: Promise<{ country: string }> }) {
-  const country = await countryOf((await params).country);
+  const folder = (await params).country;
+  const [country, t] = await Promise.all([countryOf(folder), pageT(folder)]);
   const code = country.country;
   const to = (path: string) => link(code, path);
   const account = await loadAccount();
   if (!account) redirect(to("/account"));
   return (
-    <AccountShell title="Profile" current="/account/profile" link={to}>
+    <AccountShell t={t} title={t("account.profile")} current="/account/profile" link={to}>
       <VStack gap={5}>
         <VStack gap={1}>
-          <Text weight="bold">Email</Text>
+          <Text weight="bold">{t("account.email")}</Text>
           <Text>{account.email}</Text>
           <Text type="supporting" color="secondary">
-            You sign in with this address, so it can&apos;t be changed here.
+            {t("account.email_note")}
           </Text>
         </VStack>
         <ProfileForm

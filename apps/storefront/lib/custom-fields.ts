@@ -2,7 +2,7 @@
 // `custom_fields` (`{"custom.material": "wool"}`), only those the merchant shows
 // storefronts. Their definitions (`/storefront/custom-field- definitions`) give each
 // field its name, its place and a choice's label; a value is shown by its shape: a
-// boolean as Yes/No, a date in the store's language, money with its currency's minor
+// boolean as Yes/No, a date in the page's locale, money with its currency's minor
 // units, a measurement as "1.5 kg", a URL as a link, rich text as HTML (when it's the
 // sanitised kind), a reference to a product or a category as a link to its page, a list
 // joined; JSON isn't shown.
@@ -31,8 +31,10 @@ export type FieldEntry = {
 };
 
 export type FieldContext = {
-  /** The store's language (`default_language`), for dates and numbers. */
+  /** The page's locale (its translator's), for dates, numbers and money. */
   locale: string;
+  /** What a boolean shows as, in the page's language. */
+  words: { yes: string; no: string };
   /** The shopper's country's currency and its minor units, for money in it. */
   currency: string;
   digits: number;
@@ -77,7 +79,7 @@ function humanise(word: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
-/** A locale `Intl` takes: the store's language, else English. */
+/** A locale `Intl` takes: the page's, else English when it isn't a tag `Intl` knows. */
 function localeOf(language: string): string {
   try {
     return Intl.getCanonicalLocales(language)[0] ?? "en";
@@ -208,7 +210,8 @@ function isMeasurement(value: object): value is Measurement {
   );
 }
 
-/** A currency's minor units, as `Intl` knows them (the country's own when it's theirs). */
+/** A currency's minor units, as `Intl` knows them (the country's own when it's theirs): a
+ * fact about the currency, the same whatever locale is asked. */
 function digitsOf(currency: string, context: FieldContext): number {
   if (currency === context.currency) return context.digits;
   try {
@@ -289,7 +292,7 @@ function part(
   context: FieldContext,
   definition?: FieldDefinition,
 ): FieldPart | null {
-  if (typeof value === "boolean") return { text: value ? "Yes" : "No" };
+  if (typeof value === "boolean") return { text: value ? context.words.yes : context.words.no };
   if (typeof value === "number") {
     return { text: numberFormat(localeOf(context.locale)).format(value) };
   }

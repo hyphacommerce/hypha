@@ -1,3 +1,5 @@
+import { createTranslator } from "@hyphacommerce/i18n";
+
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -20,6 +22,10 @@ import {
   subtotalRows,
   typedCode,
 } from "./discounts.ts";
+import { en } from "./messages.ts";
+
+/** English, formatted for `en`: what the expected strings are written in. */
+const t = createTranslator("en", en);
 
 const eur = (amount: number) => ({ amount, currency: "EUR" });
 const welcome: Application = {
@@ -38,7 +44,8 @@ const freeShipping: Application = {
   summary: "Free shipping on orders over €50",
   amount: eur(500),
 };
-const message = (code: CartCode, applied: Application[] = []) => codeMessage(code, applied, 2).text;
+const message = (code: CartCode, applied: Application[] = []) =>
+  codeMessage(t, code, applied, 2).text;
 const emptyCart: CartFields = {
   discount_codes: [],
   discounts: [],
@@ -168,7 +175,7 @@ test("a discounted line shows its total after, the original struck and a note pe
     after: eur(2160),
     allocations: [{ application: 0, amount: eur(240) }],
   };
-  assert.deepEqual(lineView(eur(2400), line, [welcome], 2), {
+  assert.deepEqual(lineView(t, eur(2400), line, [welcome], 2), {
     price: eur(2160),
     struck: eur(2400),
     notes: ["−€2.40 Welcome offer"],
@@ -176,7 +183,7 @@ test("a discounted line shows its total after, the original struck and a note pe
 });
 
 test("a line without discounts shows its total alone", () => {
-  assert.deepEqual(lineView(eur(2400), undefined, [], 2), {
+  assert.deepEqual(lineView(t, eur(2400), undefined, [], 2), {
     price: eur(2400),
     struck: null,
     notes: [],
@@ -192,7 +199,7 @@ test("a zero allocation adds no note", () => {
       { application: 1, amount: eur(0) },
     ],
   };
-  assert.deepEqual(lineView(eur(1000), line, [welcome, freeShipping], 2).notes, [
+  assert.deepEqual(lineView(t, eur(1000), line, [welcome, freeShipping], 2).notes, [
     "−€1.00 Welcome offer",
   ]);
 });
@@ -204,7 +211,7 @@ test("a discounted line strikes its total before discounts, not its compare-at",
     after: eur(2160),
     allocations: [{ application: 0, amount: eur(240) }],
   };
-  assert.deepEqual(linePrice(line, discount, [welcome], 2), {
+  assert.deepEqual(linePrice(t, line, discount, [welcome], 2), {
     price: eur(2160),
     compareAt: eur(2400),
     notes: ["−€2.40 Welcome offer"],
@@ -213,7 +220,7 @@ test("a discounted line strikes its total before discounts, not its compare-at",
 
 test("a line on sale without discounts strikes its compare-at total", () => {
   const line = { total: eur(2400), quantity: 2, compare_at_price: eur(1500) };
-  assert.deepEqual(linePrice(line, undefined, [], 2), {
+  assert.deepEqual(linePrice(t, line, undefined, [], 2), {
     price: eur(2400),
     compareAt: eur(3000),
     notes: [],
@@ -221,8 +228,8 @@ test("a line on sale without discounts strikes its compare-at total", () => {
 });
 
 test("minus uses a minus sign and the currency's digits", () => {
-  assert.equal(minus(eur(240), 2), "−€2.40");
-  assert.equal(minus({ amount: 240, currency: "JPY" }, 0), "−¥240");
+  assert.equal(minus(eur(240), 2, "en"), "−€2.40");
+  assert.equal(minus({ amount: 240, currency: "JPY" }, 0, "en"), "−¥240");
 });
 
 test("the Discounts row is what came off the goods, the subtotal shown before it", () => {
@@ -244,7 +251,7 @@ test("without discounts on goods there's no Discounts row", () => {
 });
 
 test("the drawer's subtotal is before discounts, as the cart page's", () => {
-  assert.deepEqual(subtotalRows(eur(2160), { total: eur(740), shipping: eur(500) }, 2), [
+  assert.deepEqual(subtotalRows(t, eur(2160), { total: eur(740), shipping: eur(500) }, 2), [
     { label: "Subtotal", value: "€24.00", strong: false },
     { label: "Discounts", value: "−€2.40", strong: false },
     { label: "Subtotal after discounts", value: "€21.60", strong: true },
@@ -252,26 +259,26 @@ test("the drawer's subtotal is before discounts, as the cart page's", () => {
 });
 
 test("without discounts on goods the drawer shows one subtotal", () => {
-  assert.deepEqual(subtotalRows(eur(2400), { total: eur(500), shipping: eur(500) }, 2), [
+  assert.deepEqual(subtotalRows(t, eur(2400), { total: eur(500), shipping: eur(500) }, 2), [
     { label: "Subtotal", value: "€24.00", strong: true },
   ]);
 });
 
 test("shipping a discount took all of is Free, the price struck", () => {
-  assert.deepEqual(shippingPrice(eur(0), eur(500), 2), { text: "Free", was: "€5.00" });
+  assert.deepEqual(shippingPrice(t, eur(0), eur(500), 2), { text: "Free", was: "€5.00" });
 });
 
 test("shipping partly discounted shows both amounts", () => {
-  assert.deepEqual(shippingPrice(eur(200), eur(500), 2), { text: "€2.00", was: "€5.00" });
+  assert.deepEqual(shippingPrice(t, eur(200), eur(500), 2), { text: "€2.00", was: "€5.00" });
 });
 
 test("a rate that's free anyway isn't called Free", () => {
-  assert.deepEqual(shippingPrice(eur(0), null, 2), { text: "€0.00", was: null });
-  assert.deepEqual(shippingPrice(eur(0), eur(0), 2), { text: "€0.00", was: null });
+  assert.deepEqual(shippingPrice(t, eur(0), null, 2), { text: "€0.00", was: null });
+  assert.deepEqual(shippingPrice(t, eur(0), eur(0), 2), { text: "€0.00", was: null });
 });
 
 test("an applied code names its discount", () => {
-  assert.deepEqual(codeMessage({ code: "WELCOME10", state: "applied" }, [welcome], 2), {
+  assert.deepEqual(codeMessage(t, { code: "WELCOME10", state: "applied" }, [welcome], 2), {
     text: "Applied: Welcome offer",
     tone: "success",
   });
@@ -335,7 +342,7 @@ test("each other state has its message", () => {
 });
 
 test("only an applied code is good news", () => {
-  assert.equal(codeMessage({ code: "ONCE", state: "limit_reached" }, [], 2).tone, "warning");
+  assert.equal(codeMessage(t, { code: "ONCE", state: "limit_reached" }, [], 2).tone, "warning");
 });
 
 test("promotion badges list each title once, at most two", () => {

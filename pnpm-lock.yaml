@@ -369,6 +369,9 @@ importers:
       '@hyphacommerce/app':
         specifier: workspace:*
         version: link:../../packages/app
+      '@hyphacommerce/i18n':
+        specifier: workspace:*
+        version: link:../../packages/i18n
       '@hyphacommerce/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk

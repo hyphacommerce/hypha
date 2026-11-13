@@ -1,8 +1,9 @@
+import { directionOf } from "@hyphacommerce/i18n";
 import type { Metadata } from "next";
 
 import "./globals.css";
 import { loadStore } from "@/lib/api";
-import { siteUrl } from "@/lib/site";
+import { pageLanguage, siteUrl } from "@/lib/site";
 
 import { Providers } from "./providers";
 
@@ -40,13 +41,14 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  // The language the store's content is written in.
-  const store = await storeOrDefaults();
+  // The page's language. This layout is above the URL's locale segment, so it knows
+  // the store's only: what every page is in today.
+  const language = pageLanguage(undefined, await storeOrDefaults());
   return (
     // `data-astryx-theme` on <html> from the server: the theme's tokens are scoped to it,
     // and Astryx's Theme only sets it there once hydrated, so until then the body showed
     // the default theme's background.
-    <html lang={store.default_language} data-astryx-theme="shop" data-theme="light">
+    <html lang={language} dir={directionOf(language)} data-astryx-theme="shop" data-theme="light">
       <head>
         {/* The Latin typeface (globals.css) fetched with the page, not once the CSS
           has been parsed: less time in the fallback font. */}
@@ -59,7 +61,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         />
       </head>
       <body>
-        <Providers>{children}</Providers>
+        <Providers language={language}>{children}</Providers>
       </body>
     </html>
   );

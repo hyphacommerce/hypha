@@ -5,7 +5,7 @@
 import type { StorefrontPaths, StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 import { unstable_cache } from "next/cache";
 
-import { api } from "./api";
+import { api, describe } from "./api";
 import { FRESH_SECONDS, TAGS } from "./cache-tags";
 import {
   ON_SALE,
@@ -15,6 +15,7 @@ import {
   sortOf,
   toMinor,
 } from "./listing";
+import type { T } from "./messages";
 import { rankRelated } from "./related";
 
 export type ListingPage = {
@@ -72,6 +73,8 @@ function major(amount: number, digits: number): string {
 }
 
 export async function readListingPage(input: {
+  /** For the message when the API refuses the listing. */
+  t: T;
   country: string;
   digits: number;
   params: ListingParams;
@@ -94,7 +97,14 @@ export async function readListingPage(input: {
     limit: 24,
   });
   if (error) {
-    return { state, items: [], total: 0, facets: [], nextCursor: null, error: error.error };
+    return {
+      state,
+      items: [],
+      total: 0,
+      facets: [],
+      nextCursor: null,
+      error: describe(input.t, error),
+    };
   }
   return {
     state,

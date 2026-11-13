@@ -14,6 +14,8 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 
+import { useT } from "@/lib/use-t";
+
 import { CloseOnNavigate } from "./close-on-navigate";
 import { type CountryOption, CurrencySwitcher } from "./currency-switcher";
 import type { NavCategory } from "./nav-menu";
@@ -36,6 +38,7 @@ export default function MobileNav({
   country: string;
   countries: CountryOption[];
 }) {
+  const t = useT();
   return (
     <>
       {/* Following a link closes it. */}
@@ -48,19 +51,19 @@ export default function MobileNav({
         maxHeight="100dvh"
         style={{ height: "100dvh", borderRadius: 0 }}
         padding={0}
-        aria-label="Menu"
+        aria-label={t("header.menu")}
       >
         <VStack gap={4} padding={5} className="shop-mobile-menu">
           <HStack hAlign="between" vAlign="center">
-            <Heading level={2}>Menu</Heading>
+            <Heading level={2}>{t("header.menu")}</Heading>
             <Button
-              label="Close"
+              label={t("common.close")}
               variant="ghost"
               size="sm"
               clickAction={() => onOpenChange(false)}
             />
           </HStack>
-          <nav className="shop-mobile-nav" aria-label="Categories">
+          <nav className="shop-mobile-nav" aria-label={t("header.categories")}>
             {categories.map((c) => (
               <VStack key={c.id} gap={0}>
                 <SiteLink href={c.href} className="shop-mobile-nav-link" data-level="1">
@@ -80,15 +83,15 @@ export default function MobileNav({
             ))}
             <Divider />
             <SiteLink href={searchHref} className="shop-mobile-nav-link" data-level="1">
-              All products
+              {t("header.all_products")}
             </SiteLink>
             <SiteLink href={accountHref} className="shop-mobile-nav-link" data-level="1">
-              Account
+              {t("header.account")}
             </SiteLink>
           </nav>
           <Divider />
           <VStack gap={2}>
-            <Text color="secondary">Currency</Text>
+            <Text color="secondary">{t("header.currency")}</Text>
             <CurrencySwitcher current={country} countries={countries} layout="segments" />
           </VStack>
         </VStack>

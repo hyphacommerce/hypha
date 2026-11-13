@@ -38,7 +38,12 @@ import {
 } from "@/lib/address";
 import { type CartMessage, type PlacedMessages, statusOf } from "@/lib/cart-messages";
 import { saleLabel } from "@/lib/prices";
+import { useT } from "@/lib/use-t";
 import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
+
+/** Checkout's messages and the address form's, beside the shared ones: the checkout's
+ * layout sends them. */
+const useCheckoutT = () => useT<"checkout" | "address">();
 
 /** Contact and shipping address, saved together; the address laid out as its country
  * does (`format`). */
@@ -68,6 +73,7 @@ export function DetailsForm({
   /** A corrected address the store's verification app is confident of. */
   suggestion?: Suggestion;
 }) {
+  const t = useCheckoutT();
   const [details, setDetails] = useState(initial);
   const [optIn, setOptIn] = useState(initialOptIn);
   const [error, setError] = useState<string>();
@@ -96,7 +102,7 @@ export function DetailsForm({
   };
   const required = (key: keyof Details) =>
     tried && details[key].trim() === ""
-      ? { type: "error" as const, message: "Required" }
+      ? { type: "error" as const, message: t("common.required") }
       : undefined;
   const fieldMessages: PlacedMessages["fields"] = {};
   for (const field of ADDRESS_FIELDS) {
@@ -157,24 +163,26 @@ export function DetailsForm({
     <VStack gap={6}>
       <VStack gap={3}>
         <Text type="large" weight="bold">
-          Contact
+          {t("checkout.contact")}
         </Text>
-        {field("email", "Email", { required: true, type: "email", disabled: emailFixed })}
+        {field("email", t("checkout.email"), {
+          required: true,
+          type: "email",
+          disabled: emailFixed,
+        })}
         {emailFixed && (
           <Text type="supporting" color="secondary">
-            Your order goes to your account&apos;s email.
+            {t("checkout.email_fixed")}
           </Text>
         )}
-        <CheckboxInput label="Email me with news and offers" value={optIn} onChange={setOptIn} />
+        <CheckboxInput label={t("checkout.marketing_opt_in")} value={optIn} onChange={setOptIn} />
       </VStack>
       <VStack gap={3}>
         <VStack gap={1}>
           <Text type="large" weight="bold">
-            Shipping address
+            {t("checkout.shipping_address")}
           </Text>
-          <Text type="supporting">
-            Ships to {countryName}. To ship elsewhere, switch the currency at the top.
-          </Text>
+          <Text type="supporting">{t("checkout.ships_to", { country: countryName })}</Text>
         </VStack>
         {suggesting ? (
           <AddressSuggestion
@@ -206,7 +214,7 @@ export function DetailsForm({
       {error && <Banner status="error" title={error} />}
       <div>
         <Button
-          label={saved ? "Update details" : "Continue to shipping"}
+          label={saved ? t("checkout.update_details") : t("checkout.continue_to_shipping")}
           variant={saved ? "secondary" : "primary"}
           size="lg"
           isLoading={pending}
@@ -232,6 +240,7 @@ function AddressSuggestion({
   onAccept: () => void;
   onKeep: () => void;
 }) {
+  const t = useCheckoutT();
   const lines = [
     suggestion.company,
     suggestion.line1,
@@ -243,19 +252,19 @@ function AddressSuggestion({
     <div className="shop-address-suggestion">
       <VStack gap={3}>
         <VStack gap={1}>
-          <Text weight="bold">Did you mean this address?</Text>
+          <Text weight="bold">{t("checkout.suggestion_title")}</Text>
           {lines.map((line) => (
             <Text key={line}>{line}</Text>
           ))}
         </VStack>
         <HStack gap={2} wrap="wrap">
           <Button
-            label="Use this address"
+            label={t("checkout.use_suggestion")}
             variant="primary"
             isLoading={pending}
             clickAction={onAccept}
           />
-          <Button label="Use as entered" variant="ghost" clickAction={onKeep} />
+          <Button label={t("checkout.use_as_entered")} variant="ghost" clickAction={onKeep} />
         </HStack>
       </VStack>
     </div>
@@ -285,6 +294,7 @@ export function ShippingChoice({
   /** The cart's messages about this group and its chosen option. */
   messages?: CartMessage[];
 }) {
+  const t = useCheckoutT();
   const [value, setValue] = useState(selected ?? "");
   const [error, setError] = useState<string>();
   const [pending, start] = useTransition();
@@ -298,13 +308,13 @@ export function ShippingChoice({
   };
 
   if (offers.length === 0) {
-    return <Banner status="warning" title="No way to ship this here yet." />;
+    return <Banner status="warning" title={t("checkout.no_shipping")} />;
   }
   return (
     <VStack gap={2}>
-      {problem && <Banner status="warning" title="That option can't be used now: choose again." />}
+      {problem && <Banner status="warning" title={t("checkout.option_unavailable")} />}
       <RadioList
-        label={heading ?? "Shipping method"}
+        label={heading ?? t("checkout.shipping_method")}
         isLabelHidden={!heading}
         containerClassName="shop-choice-cards"
         value={value}
@@ -319,7 +329,7 @@ export function ShippingChoice({
             endContent={
               o.was ? (
                 <span>
-                  <VisuallyHidden>{saleLabel(o.was, o.price)}</VisuallyHidden>
+                  <VisuallyHidden>{saleLabel(t, o.was, o.price)}</VisuallyHidden>
                   <HStack as="span" gap={2} vAlign="center" aria-hidden="true">
                     <Text type="body" color="secondary" hasStrikethrough hasTabularNumbers>
                       {o.was}
@@ -367,6 +377,7 @@ export function PaymentChoice({
   /** What the saved method's card holds below its name (the online payment form). */
   detail?: React.ReactNode;
 }) {
+  const t = useCheckoutT();
   const [value, setValue] = useState(selected ?? "");
   const [error, setError] = useState<string>();
   const [pending, start] = useTransition();
@@ -381,14 +392,9 @@ export function PaymentChoice({
 
   return (
     <VStack gap={2}>
-      {problem && (
-        <Banner
-          status="warning"
-          title="The payment method you chose can't be used now: choose again."
-        />
-      )}
+      {problem && <Banner status="warning" title={t("checkout.method_unavailable")} />}
       <RadioList
-        label="Payment method"
+        label={t("checkout.payment_method")}
         isLabelHidden
         containerClassName="shop-choice-cards"
         value={value}
@@ -451,12 +457,13 @@ export function PlaceOrder({
   /** What's left to do before the order can be placed. */
   missing?: string;
 }) {
+  const t = useCheckoutT();
   const [error, setError] = useState<string>();
   const [pending, start] = useTransition();
   return (
     <VStack gap={2}>
       <Button
-        label="Place order"
+        label={t("checkout.place_order")}
         variant="primary"
         size="lg"
         width="100%"
@@ -530,6 +537,7 @@ export function CheckoutPayment({
   attempt: string;
   children: React.ReactNode;
 }) {
+  const t = useCheckoutT();
   const [element, setElement] = useState<HTMLElement | null>(null);
   const [ready, setReady] = useState(false);
   const [redirect, setRedirect] = useState<string | null>(null);
@@ -553,9 +561,7 @@ export function CheckoutPayment({
         await new Promise((resolve) => setTimeout(resolve, CONFIRM_DELAY_MS));
       }
       setPaying(false);
-      setError(
-        "Your payment is still being confirmed. You'll get an email once your order is placed.",
-      );
+      setError(t("checkout.payment_confirming"));
     };
     return {
       element,
@@ -575,7 +581,7 @@ export function CheckoutPayment({
       setError,
       place,
     };
-  }, [element, ready, redirect, committed, paying, error, country, amount, currency, attempt]);
+  }, [element, ready, redirect, committed, paying, error, country, amount, currency, attempt, t]);
   return <PaymentContext.Provider value={value}>{children}</PaymentContext.Provider>;
 }
 
@@ -592,6 +598,7 @@ export function OnlinePaymentForm({
   country: string;
   total: { amount: number; currency: string };
 }) {
+  const t = useCheckoutT();
   const payment = usePayment();
   const [started, setStarted] = useState<CartPaymentResult | null>(null);
   const [round, setRound] = useState(0);
@@ -640,7 +647,7 @@ export function OnlinePaymentForm({
   const next = started.nextAction;
   if (next?.type === "client_widget") {
     if (!started.module) {
-      return <Text color="secondary">This payment can&apos;t be shown here. Try again later.</Text>;
+      return <Text color="secondary">{t("checkout.payment_not_shown")}</Text>;
     }
     // A failure before it's ready (Stripe.js didn't load) shows under the button.
     const waiting = !loaded && !payment.error;
@@ -659,15 +666,15 @@ export function OnlinePaymentForm({
     );
   }
   if (next?.type === "redirect") {
-    return <Text color="secondary">You'll finish paying on the provider's page.</Text>;
+    return <Text color="secondary">{t("checkout.finish_on_provider")}</Text>;
   }
-  if (started.committed) return <Text color="secondary">Your payment is in. Place the order.</Text>;
+  if (started.committed) return <Text color="secondary">{t("checkout.payment_in")}</Text>;
   return (
     <VStack gap={2}>
       {started.error && <Banner status="error" title={started.error} />}
       <div>
         <Button
-          label="Try again"
+          label={t("checkout.try_again")}
           variant="secondary"
           clickAction={() => {
             setStarted(null);
@@ -692,8 +699,9 @@ function FieldSkeleton({ index, label }: { index: number; label: string }) {
 /** A card form's outline while it loads: the methods' tabs, then number, expiry and
  * security code, and country, as the provider's form lays them out. */
 function PaymentFormSkeleton() {
+  const t = useCheckoutT();
   return (
-    <output className="shop-payment-skeleton" aria-label="Loading the payment form">
+    <output className="shop-payment-skeleton" aria-label={t("checkout.loading_payment")}>
       <VStack gap={4}>
         <Grid columns={3} gap={3}>
           {[0, 1, 2].map((i) => (
@@ -727,6 +735,7 @@ export function PayButton({
   missing?: string;
   label: string;
 }) {
+  const t = useCheckoutT();
   const payment = usePayment();
   const canPay = ready && (payment.ready || payment.redirect !== null || payment.committed);
   const pay = () => {
@@ -749,7 +758,7 @@ export function PayButton({
   return (
     <VStack gap={2}>
       <Button
-        label={payment.paying ? "Processing…" : label}
+        label={payment.paying ? t("checkout.processing") : label}
         variant="primary"
         size="lg"
         width="100%"
@@ -759,7 +768,7 @@ export function PayButton({
       />
       {!ready && missing && <Text type="supporting">{missing}</Text>}
       {ready && !canPay && !payment.error && (
-        <Text type="supporting">Enter your payment details above.</Text>
+        <Text type="supporting">{t("checkout.enter_payment_details")}</Text>
       )}
       {payment.error && <Banner status="error" title={payment.error} />}
     </VStack>

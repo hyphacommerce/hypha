@@ -3,6 +3,7 @@
 import { cookies } from "next/headers";
 
 import { cartFlagCookie } from "./cart-flag";
+import { PSEUDO } from "./messages";
 import { href, routing } from "./routing";
 
 /** The routing mode this deployment uses (`STOREFRONT_ROUTING`). */
@@ -13,6 +14,30 @@ export function mode() {
 /** A link to `path` in `country`, for this deployment's routing. */
 export function link(country: string, path: string): string {
   return href(mode(), country, path);
+}
+
+/**
+ * The language a page is shown in: the one place that decides it. `segment` is the
+ * URL's first segment (`params.country`), absent where there's none (the root layout,
+ * an action). Every page is in the store's default language until URLs name one; only
+ * the path may decide it, never a cookie or a header, so static pages stay static.
+ *
+ * In development, `HYPHA_I18N_PSEUDO=1` shows the pseudo-language instead: text still
+ * in plain English didn't come from a catalog.
+ */
+export function pageLanguage(
+  segment: string | undefined,
+  store: { default_language: string },
+): string {
+  if (process.env.NODE_ENV === "development" && process.env.HYPHA_I18N_PSEUDO === "1") {
+    return PSEUDO;
+  }
+  return store.default_language;
+}
+
+/** The country code a URL's first segment names (`hr` → `HR`). */
+export function segmentCountry(segment: string): string {
+  return segment.toUpperCase();
 }
 
 /** The cart's cookie: one cart per country, since a cart's country sets its market. */

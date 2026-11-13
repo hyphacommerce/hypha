@@ -14,6 +14,9 @@ import type { Metadata } from "next";
 import { JsonLd } from "@/components/json-ld";
 import { ProductGrid } from "@/components/product-grid";
 import { countryOf, loadCategories, loadCategory, loadStore } from "@/lib/api";
+import { countryName } from "@/lib/format";
+import { pageT } from "@/lib/i18n";
+import type { T } from "@/lib/messages";
 import { search } from "@/lib/listing-data";
 import { pageMetadata } from "@/lib/metadata";
 import { storeLd } from "@/lib/seo";
@@ -58,6 +61,7 @@ export async function generateMetadata({
 
 /** A row of products under a heading, with a link to all of them. */
 function Shelf({
+  t,
   title,
   description,
   href,
@@ -65,6 +69,7 @@ function Shelf({
   digits,
   productBase,
 }: {
+  t: T;
   title: string;
   description?: string;
   href: string;
@@ -81,13 +86,13 @@ function Shelf({
           {description && <Text color="secondary">{description}</Text>}
         </VStack>
         <Button
-          label="View all"
+          label={t("home.view_all")}
           href={href}
           variant="ghost"
           endContent={<ArrowRightIcon width={16} height={16} aria-hidden />}
         />
       </HStack>
-      <ProductGrid hits={hits} digits={digits} productBase={productBase} minWidth={200} />
+      <ProductGrid t={t} hits={hits} digits={digits} productBase={productBase} minWidth={200} />
     </VStack>
   );
 }
@@ -102,8 +107,9 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
   // categories are in, without waiting for the other reads.
   const folder = (await params).country;
   const code = folder.toUpperCase();
-  const [country, store, categories, newest, value, shelves] = await Promise.all([
+  const [country, t, store, categories, newest, value, shelves] = await Promise.all([
     countryOf(folder),
+    pageT(folder),
     loadStore(),
     loadCategories(),
     shelf({ country: code, sort: "newest", limit: 8 }),
@@ -126,8 +132,10 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
   if (newest.length === 0) {
     return (
       <EmptyState
-        title={`Welcome to ${store.name}`}
-        description={`Products sold in ${country.name} will show up here.`}
+        title={t("home.welcome_title", { store: store.name })}
+        description={t("home.welcome_description", {
+          country: countryName(code, country.name, t.locale),
+        })}
       />
     );
   }
@@ -149,7 +157,7 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
           </VStack>
           <HStack gap={3} wrap="wrap">
             <Button
-              label="Shop everything"
+              label={t("home.shop_everything")}
               href={link(code, "/search")}
               variant="primary"
               size="lg"
@@ -157,7 +165,7 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
             />
             {featured[0] && (
               <Button
-                label={`Browse ${featured[0].name}`}
+                label={t("home.browse_category", { category: featured[0].name })}
                 href={link(code, `/c/${featured[0].handle}`)}
                 variant="secondary"
                 size="lg"
@@ -176,7 +184,7 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
 
       {categories.length > 0 && (
         <VStack gap={4}>
-          <Heading level={2}>Shop by category</Heading>
+          <Heading level={2}>{t("home.shop_by_category")}</Heading>
           <Grid columns={{ minWidth: 200, repeat: "fill" }} gap={3}>
             {categories.map((c) => (
               <ClickableCard
@@ -193,7 +201,7 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
                   <Text type="supporting" color="secondary">
                     {c.children.length > 0
                       ? c.children.map((child) => child.name).join(", ")
-                      : "Shop now"}
+                      : t("home.shop_now")}
                   </Text>
                 </VStack>
               </ClickableCard>
@@ -203,8 +211,9 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
       )}
 
       <Shelf
-        title="New arrivals"
-        description="The latest additions to the store."
+        t={t}
+        title={t("home.new_arrivals")}
+        description={t("home.new_arrivals_description")}
         href={link(code, "/search?sort=newest")}
         hits={newest}
         digits={digits}
@@ -213,6 +222,7 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
 
       {featured.map((c, i) => (
         <Shelf
+          t={t}
           key={c.id}
           title={c.name}
           href={link(code, `/c/${c.handle}`)}
@@ -224,8 +234,9 @@ export default async function HomePage({ params }: { params: Promise<{ country: 
 
       <Section variant="muted" padding={8}>
         <Shelf
-          title="Best prices"
-          description={`Our most affordable picks in ${country.currency}.`}
+          t={t}
+          title={t("home.best_prices")}
+          description={t("home.best_prices_description", { currency: country.currency })}
           href={link(code, "/search?sort=price_asc")}
           hits={value}
           digits={digits}

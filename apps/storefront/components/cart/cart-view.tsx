@@ -15,12 +15,14 @@ import { CartMessages } from "@/components/cart-messages";
 import { Totals } from "@/components/totals";
 import { readCartDiscounts } from "@/lib/discounts";
 import { placeMessages } from "@/lib/cart-messages";
+import { useT } from "@/lib/use-t";
 
 import { CartLines } from "./cart-lines";
 import { useCart } from "./cart-provider";
 import { DiscountCodeField } from "./discount-code-field";
 
 export function CartView() {
+  const t = useT();
   const { cart, isLoading, digits, base, error } = useCart();
   if (isLoading) {
     return (
@@ -34,9 +36,9 @@ export function CartView() {
   if (!cart || cart.lines.length === 0) {
     return (
       <EmptyState
-        title="Your cart is empty"
-        description="Find something you like and add it here."
-        actions={<Button label="Keep shopping" href={`${base}/`} variant="primary" />}
+        title={t("cart.empty_title")}
+        description={t("cart.empty_description")}
+        actions={<Button label={t("common.keep_shopping")} href={`${base}/`} variant="primary" />}
       />
     );
   }
@@ -55,9 +57,10 @@ export function CartView() {
       <VStack width={360} gap={4}>
         <Card padding={5}>
           <VStack gap={4}>
-            <Heading level={2}>Summary</Heading>
+            <Heading level={2}>{t("cart.summary")}</Heading>
             <DiscountCodeField discounts={discounts} />
             <Totals
+              t={t}
               subtotal={cart.subtotal}
               shipping={cart.shipping_total}
               tax={cart.tax_total}
@@ -68,16 +71,21 @@ export function CartView() {
             />
             {cart.fully_available ? (
               <Button
-                label="Check out"
+                label={t("cart.check_out")}
                 href={`${base}/checkout`}
                 variant="primary"
                 size="lg"
                 width="100%"
               />
             ) : (
-              <Banner status="warning" title="Remove what can't be bought to check out." />
+              <Banner status="warning" title={t("cart.remove_unavailable")} />
             )}
-            <Button label="Keep shopping" href={`${base}/`} variant="ghost" width="100%" />
+            <Button
+              label={t("common.keep_shopping")}
+              href={`${base}/`}
+              variant="ghost"
+              width="100%"
+            />
           </VStack>
         </Card>
       </VStack>

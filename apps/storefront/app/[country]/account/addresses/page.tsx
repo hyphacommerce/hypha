@@ -5,23 +5,33 @@ import { AccountShell } from "@/components/account/account-shell";
 import { AddressBook } from "@/components/account/forms";
 import { loadAccount } from "@/lib/account";
 import { countryOf, loadAddressFormat } from "@/lib/api";
+import { countryName } from "@/lib/format";
+import { pageT } from "@/lib/i18n";
 import { link } from "@/lib/site";
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = { title: "Addresses" };
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ country: string }>;
+}): Promise<Metadata> {
+  const t = await pageT((await params).country);
+  return { title: t("account.addresses_meta_title") };
+}
 
 export default async function AddressesPage({ params }: { params: Promise<{ country: string }> }) {
-  const country = await countryOf((await params).country);
+  const folder = (await params).country;
+  const [country, t] = await Promise.all([countryOf(folder), pageT(folder)]);
   const code = country.country;
   const to = (path: string) => link(code, path);
   const [account, format] = await Promise.all([loadAccount(), loadAddressFormat(code)]);
   if (!account) redirect(to("/account"));
   return (
-    <AccountShell title="Addresses" current="/account/addresses" link={to}>
+    <AccountShell t={t} title={t("account.addresses")} current="/account/addresses" link={to}>
       <AddressBook
         country={code}
-        countryName={country.name}
+        countryName={countryName(code, country.name, t.locale)}
         format={format}
         addresses={account.addresses.map((a) => ({
           id: a.id,

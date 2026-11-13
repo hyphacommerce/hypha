@@ -14,11 +14,14 @@ import { useMemo, useState } from "react";
 
 import { suggest } from "@/app/[country]/actions";
 
+import { useT } from "@/lib/use-t";
+
 import { useNavigationProgress } from "./navigation-progress";
 
 type Item = SearchableItem<{ href: string }>;
 
 export function SearchBox({ country, searchHref }: { country: string; searchHref: string }) {
+  const t = useT();
   const router = useRouter();
   const { start } = useNavigationProgress();
   const [value, setValue] = useState<Item | null>(null);
@@ -30,7 +33,7 @@ export function SearchBox({ country, searchHref }: { country: string; searchHref
         const words = query.trim();
         const all: Item = {
           id: "search",
-          label: `Search for “${words}”`,
+          label: t("header.search_for", { words }),
           auxiliaryData: { href: `${searchHref}?q=${encodeURIComponent(words)}` },
         };
         const found = await suggest(country, words);
@@ -61,14 +64,14 @@ export function SearchBox({ country, searchHref }: { country: string; searchHref
         ];
       },
     }),
-    [country, searchHref],
+    [country, searchHref, t],
   );
 
   return (
     <Typeahead
-      label="Search"
+      label={t("header.search")}
       isLabelHidden
-      placeholder="Search products"
+      placeholder={t("header.search_placeholder")}
       startIcon={MagnifyingGlassIcon}
       searchSource={source}
       debounceMs={200}

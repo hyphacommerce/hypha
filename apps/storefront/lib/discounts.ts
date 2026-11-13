@@ -7,6 +7,7 @@
 
 import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 
+import type { TFor } from "./messages.ts";
 import { type Money, formatMoney } from "./money.ts";
 import { lineCompareAt } from "./prices.ts";
 
@@ -234,13 +235,14 @@ export function readPromotions(product: {
 // ---- What's shown ---------------------------------------------------------------------
 
 /** "−€2.40": an amount taken off (a minus sign, not a hyphen). */
-export function minus(amount: Money, digits: number): string {
-  return `−${formatMoney(amount, digits)}`;
+export function minus(amount: Money, digits: number, locale: string): string {
+  return `−${formatMoney(amount, digits, locale)}`;
 }
 
 /** What a line shows: its total after discounts, the total before struck through, and a
  * note per discount ("−€2.40 Welcome offer"). Without discounts, `price` is `total`. */
 export function lineView(
+  t: TFor<"discounts">,
   total: Money,
   line: LineDiscount | undefined,
   applied: Application[],
@@ -252,8 +254,9 @@ export function lineView(
   const notes = line.allocations
     .filter((a) => a.amount.amount > 0)
     .map((a) => {
-      const title = applied.find((x) => x.index === a.application)?.title ?? "Discount";
-      return `${minus(a.amount, digits)} ${title}`;
+      const title =
+        applied.find((x) => x.index === a.application)?.title ?? t("discounts.fallback_title");
+      return t("discounts.note", { amount: minus(a.amount, digits, t.locale), title });
     });
   return { price: line.after, struck: line.before, notes };
 }
@@ -261,12 +264,13 @@ export function lineView(
 /** A cart or order line's price as shown: after discounts, struck through beside the
  * total before them, else beside its compare-at total (a sale) as before. */
 export function linePrice(
+  t: TFor<"discounts">,
   line: { total: Money; quantity: number; compare_at_price?: Money | null },
   discount: LineDiscount | undefined,
   applied: Application[],
   digits: number,
 ): { price: Money; compareAt: Money | null; notes: string[] } {
-  const view = lineView(line.total, discount, applied, digits);
+  const view = lineView(t, line.total, discount, applied, digits);
   return {
     price: view.price,
     compareAt: view.struck ?? lineCompareAt(line.compare_at_price, line.quantity, view.price),
@@ -294,37 +298,46 @@ export function discountedTotals(
  * discounts, then "Discounts" and "Subtotal after discounts" when something came off the
  * goods. `subtotal` is after discounts, as the API sends it. */
 export function subtotalRows(
+  t: TFor<"cart">,
   subtotal: Money,
   discounts: Pick<Discounts, "total" | "shipping">,
   digits: number,
 ): { label: string; value: string; strong: boolean }[] {
   const shown = discountedTotals(subtotal, discounts);
+  const money = (amount: Money) => formatMoney(amount, digits, t.locale);
   if (!shown.goods) {
-    return [{ label: "Subtotal", value: formatMoney(subtotal, digits), strong: true }];
+    return [{ label: t("cart.subtotal"), value: money(subtotal), strong: true }];
   }
   return [
-    { label: "Subtotal", value: formatMoney(shown.subtotal, digits), strong: false },
-    { label: "Discounts", value: minus(shown.goods, digits), strong: false },
-    { label: "Subtotal after discounts", value: formatMoney(subtotal, digits), strong: true },
+    { label: t("cart.subtotal"), value: money(shown.subtotal), strong: false },
+    { label: t("cart.discounts"), value: minus(shown.goods, digits, t.locale), strong: false },
+    { label: t("cart.subtotal_after_discounts"), value: money(subtotal), strong: true },
   ];
 }
 
 /** A shipping price: "Free" when a discount took all of it, else the amount, with the
  * price before a discount struck through. A rate that's free anyway stays "€0.00". */
 export function shippingPrice(
+  t: TFor<"cart">,
   amount: Money,
   before: Money | null | undefined,
   digits: number,
 ): { text: string; was: string | null } {
   const discounted = before && before.amount > amount.amount ? before : null;
   return {
-    text: discounted && amount.amount <= 0 ? "Free" : formatMoney(amount, digits),
-    was: discounted ? formatMoney(discounted, digits) : null,
+    text:
+      discounted && amount.amount <= 0
+        ? t("cart.shipping_free")
+        : formatMoney(amount, digits, t.locale),
+    was: discounted ? formatMoney(discounted, digits, t.locale) : null,
   };
 }
 
+const warning = (text: string) => ({ text, tone: "warning" as const });
+
 /** What a code's state tells the shopper, and whether it's good news. */
 export function codeMessage(
+  t: TFor<"discounts">,
   code: CartCode,
   applied: Application[],
   digits: number,
@@ -333,58 +346,60 @@ export function codeMessage(
   switch (code.state) {
     case "applied": {
       const title = applied.find((a) => a.code === c)?.title;
-      return { text: title ? `Applied: ${title}` : "Applied", tone: "success" };
+      return {
+        text: title ? t("discounts.applied_title", { title }) : t("discounts.applied"),
+        tone: "success",
+      };
     }
     case "minimum_not_met": {
       const { subtotal, quantity } = code.needed;
       if (subtotal && subtotal.amount > 0) {
-        return { text: `Add ${formatMoney(subtotal, digits)} more to use ${c}`, tone: "warning" };
+        const amount = formatMoney(subtotal, digits, t.locale);
+        return warning(t("discounts.add_amount", { amount, code: c }));
       }
       if (quantity && quantity > 0) {
-        const items = quantity === 1 ? "1 more item" : `${quantity} more items`;
-        return { text: `Add ${items} to use ${c}`, tone: "warning" };
+        return warning(t("discounts.add_items", { count: quantity, code: c }));
       }
-      return { text: `Add more to your cart to use ${c}`, tone: "warning" };
+      return warning(t("discounts.add_more", { code: c }));
     }
     case "not_eligible":
-      return { text: notEligible(c, code.condition), tone: "warning" };
+      return warning(notEligible(t, c, code.condition));
     case "no_matching_items":
-      return { text: `Nothing in your cart qualifies for ${c}`, tone: "warning" };
+      return warning(t("discounts.nothing_qualifies", { code: c }));
     case "blocked_by_other": {
       const other = applied.find((a) => a.discount === code.discount)?.title;
-      return {
-        text: `Can't be combined with ${other ?? "another discount in your cart"}`,
-        tone: "warning",
-      };
+      return warning(
+        other ? t("discounts.cant_combine", { other }) : t("discounts.cant_combine_another"),
+      );
     }
     case "limit_reached":
-      return { text: `${c} can't be used any more`, tone: "warning" };
+      return warning(t("discounts.limit_reached", { code: c }));
     case "no_saving":
-      return { text: `${c} wouldn't lower your total`, tone: "warning" };
+      return warning(t("discounts.no_saving", { code: c }));
     case "not_available_in_market":
-      return { text: `${c} can't be used in this country`, tone: "warning" };
+      return warning(t("discounts.not_in_country", { code: c }));
     case "expired":
-      return { text: `${c} has expired`, tone: "warning" };
+      return warning(t("discounts.expired", { code: c }));
     case "invalid":
-      return { text: `${c} is no longer valid`, tone: "warning" };
+      return warning(t("discounts.invalid", { code: c }));
     case "unknown":
-      return { text: `${c} doesn't apply to this cart right now`, tone: "warning" };
+      return warning(t("discounts.not_applicable", { code: c }));
   }
 }
 
-function notEligible(code: string, condition: string): string {
+function notEligible(t: TFor<"discounts">, code: string, condition: string): string {
   switch (condition) {
     case "signed_in":
-      return `Sign in to use ${code}`;
+      return t("discounts.sign_in", { code });
     case "customer_groups":
     case "customers":
-      return `${code} isn't available for your account`;
+      return t("discounts.not_for_account", { code });
     case "markets":
-      return `${code} can't be used in this country`;
+      return t("discounts.not_in_country", { code });
     case "channels":
-      return `${code} can't be used here`;
+      return t("discounts.not_here", { code });
     default:
-      return `${code} doesn't apply to this cart right now`;
+      return t("discounts.not_applicable", { code });
   }
 }
 

@@ -6,6 +6,7 @@ import type { Metadata } from "next";
 
 import { Listing } from "@/components/listing";
 import { countryOf } from "@/lib/api";
+import { pageT } from "@/lib/i18n";
 import { readListingPage } from "@/lib/listing-data";
 import { pageMetadata } from "@/lib/metadata";
 import { link } from "@/lib/site";
@@ -24,11 +25,13 @@ export async function generateMetadata({
 }: {
   params: Promise<{ country: string }>;
 }): Promise<Metadata> {
+  const folder = (await params).country;
+  const t = await pageT(folder);
   return pageMetadata({
-    country: (await params).country.toUpperCase(),
+    country: folder.toUpperCase(),
     path: "/sale",
-    title: "Sale",
-    description: "Everything on sale now, at its reduced price.",
+    title: t("sale.title"),
+    description: t("sale.meta_description"),
   });
 }
 
@@ -38,9 +41,11 @@ export async function generateMetadata({
  * paging read the rest in the browser (`Listing`), on sale always.
  */
 export default async function SalePage({ params }: { params: Promise<{ country: string }> }) {
-  const country = await countryOf((await params).country);
+  const folder = (await params).country;
+  const [country, t] = await Promise.all([countryOf(folder), pageT(folder)]);
   const code = country.country;
   const first = await readListingPage({
+    t,
     country: code,
     digits: country.minor_units,
     params: {},
@@ -51,13 +56,13 @@ export default async function SalePage({ params }: { params: Promise<{ country: 
     <VStack gap={6}>
       <VStack gap={3}>
         <Breadcrumbs variant="supporting">
-          <BreadcrumbItem href={link(code, "/")}>Home</BreadcrumbItem>
-          <BreadcrumbItem isCurrent>Sale</BreadcrumbItem>
+          <BreadcrumbItem href={link(code, "/")}>{t("common.home")}</BreadcrumbItem>
+          <BreadcrumbItem isCurrent>{t("sale.title")}</BreadcrumbItem>
         </Breadcrumbs>
         <Heading level={1} type="display-2">
-          Sale
+          {t("sale.title")}
         </Heading>
-        <Text color="secondary">Reduced prices, while they last.</Text>
+        <Text color="secondary">{t("sale.intro")}</Text>
       </VStack>
       <Listing
         country={code}

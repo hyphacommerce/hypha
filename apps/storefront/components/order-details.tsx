@@ -20,6 +20,8 @@ import { Price } from "@/components/price";
 import { SummaryLine, Totals } from "@/components/totals";
 import { type Country } from "@/lib/api";
 import { linePrice, readOrderDiscounts } from "@/lib/discounts";
+import { countryName, formatDate } from "@/lib/format";
+import { type T, isKey } from "@/lib/messages";
 import { formatMoney } from "@/lib/money";
 import { elementsFor } from "@/lib/app-elements";
 
@@ -27,41 +29,42 @@ export type PlacedOrder = StorefrontSchemas["PlacedOrderResponse"];
 type PaymentStatus = StorefrontSchemas["PaymentStatusDto"];
 
 /** A payment's status for the buyer (an unknown one shows as it is: the enum is open). */
-function paymentStatus(status: PaymentStatus): {
+function paymentStatus(
+  t: T,
+  status: PaymentStatus,
+): {
   label: string;
   variant: "success" | "warning" | "error" | "neutral";
 } {
+  const key = `order.payment_${status}`;
+  const label = isKey(key) ? t(key) : status;
   switch (status) {
     case "pending":
-      return { label: "Awaiting payment", variant: "warning" };
-    case "authorized":
-      return { label: "Authorized", variant: "neutral" };
-    case "processing":
-      return { label: "Processing", variant: "neutral" };
+      return { label, variant: "warning" };
     case "paid":
-      return { label: "Paid", variant: "success" };
+      return { label, variant: "success" };
     case "failed":
-      return { label: "Payment failed", variant: "error" };
-    case "voided":
-      return { label: "Cancelled", variant: "neutral" };
-    case "partially_refunded":
-      return { label: "Partly refunded", variant: "neutral" };
-    case "refunded":
-      return { label: "Refunded", variant: "neutral" };
+      return { label, variant: "error" };
     default:
-      return { label: status, variant: "neutral" };
+      return { label, variant: "neutral" };
   }
 }
 
-/** When the order was placed: "18 October 2026". */
-export const PLACED_DATE = new Intl.DateTimeFormat("en-GB", { dateStyle: "long" });
+/** An order's status word in a list (`order.fulfillment_fulfilled`); one this build
+ * doesn't know shows as the API names it, its underscores as spaces. */
+export function statusLabel(t: T, kind: "fulfillment" | "financial", status: string): string {
+  const key = `order.${kind}_${status}`;
+  return isKey(key) ? t(key) : status.replace(/_/g, " ");
+}
 
 /** The order's details, as two columns; `after` goes under them (a button). */
 export async function OrderDetails({
+  t,
   order,
   country,
   after,
 }: {
+  t: T;
   order: PlacedOrder;
   country: Country;
   after?: React.ReactNode;
@@ -73,16 +76,17 @@ export async function OrderDetails({
   // An order paid online was paid before it existed; one paid by hand shows its
   // instructions (bank transfer, cash on delivery).
   const confirmationElements = await elementsFor("order.confirmation");
-  const status = payment ? paymentStatus(payment.status) : undefined;
-  const placed = PLACED_DATE.format(new Date(order.placed_at));
+  const status = payment ? paymentStatus(t, payment.status) : undefined;
+  const placed = formatDate(order.placed_at, t.locale);
   return (
     <>
       <Grid columns={{ minWidth: 320, repeat: "fit" }} gap={6}>
         <Card padding={5}>
           <VStack gap={4}>
-            <Heading level={2}>Your order</Heading>
+            <Heading level={2}>{t("order.your_order")}</Heading>
             {order.lines.map((line) => {
               const shown = linePrice(
+                t,
                 line,
                 discounts.lines[line.id],
                 discounts.applications,
@@ -90,18 +94,22 @@ export async function OrderDetails({
               );
               return (
                 <SummaryLine
+                  t={t}
                   key={line.id}
                   quantity={line.quantity}
                   title={line.product_title}
                   image={lineImage(line.image)}
                   variant={line.variant_title}
                   notes={shown.notes}
-                  total={<Price price={shown.price} compareAt={shown.compareAt} digits={digits} />}
+                  total={
+                    <Price t={t} price={shown.price} compareAt={shown.compareAt} digits={digits} />
+                  }
                 />
               );
             })}
             <Divider />
             <Totals
+              t={t}
               subtotal={order.subtotal}
               shipping={order.shipping_total}
               tax={order.tax_total}
@@ -110,18 +118,23 @@ export async function OrderDetails({
               digits={digits}
               discounts={discounts}
             />
-            <AppliedDiscounts applications={discounts.applications} digits={digits} />
+            <AppliedDiscounts t={t} applications={discounts.applications} digits={digits} />
           </VStack>
         </Card>
         <VStack gap={4}>
           <Card padding={5}>
             <VStack gap={2}>
-              <Heading level={2}>Details</Heading>
-              <Text color="secondary">Placed {placed}</Text>
+              <Heading level={2}>{t("order.details")}</Heading>
+              <Text color="secondary">{t("order.placed_on", { date: placed })}</Text>
               {order.shipping_lines.map((s) => (
                 <Text key={s.group} color="secondary">
-                  {s.name}
-                  {s.estimate ? `, ${s.estimate.min_days}–${s.estimate.max_days} days` : ""}
+                  {s.estimate
+                    ? t("order.shipping_estimate", {
+                        name: s.name,
+                        min: s.estimate.min_days,
+                        max: s.estimate.max_days,
+                      })
+                    : s.name}
                 </Text>
               ))}
             </VStack>
@@ -129,17 +142,20 @@ export async function OrderDetails({
           <Card padding={5}>
             <VStack gap={3}>
               <HStack gap={3} vAlign="center" wrap="wrap">
-                <Heading level={2}>Payment</Heading>
+                <Heading level={2}>{t("order.payment")}</Heading>
                 {status && <Badge label={status.label} variant={status.variant} />}
               </HStack>
               {!payment ? (
                 <Text color="secondary">
-                  {order.financial_status === "paid" ? "Paid" : "Nothing to pay for this order."}
+                  {order.financial_status === "paid" ? t("order.paid") : t("order.nothing_to_pay")}
                 </Text>
               ) : (
                 <>
                   <Text>
-                    {payment.method_name ?? "Payment"}: {formatMoney(payment.amount, digits)}
+                    {t("order.payment_line", {
+                      method: payment.method_name ?? t("order.payment"),
+                      amount: formatMoney(payment.amount, digits, t.locale),
+                    })}
                   </Text>
                   {payment.instructions && payment.status === "pending" && (
                     <Text color="secondary">
@@ -147,9 +163,7 @@ export async function OrderDetails({
                     </Text>
                   )}
                   {payment.status === "processing" && (
-                    <Text color="secondary">
-                      Your payment is on its way. We&apos;ll email you once it arrives.
-                    </Text>
+                    <Text color="secondary">{t("order.processing_note")}</Text>
                   )}
                 </>
               )}
@@ -158,7 +172,7 @@ export async function OrderDetails({
           {to && (
             <Card padding={5}>
               <VStack gap={1}>
-                <Heading level={2}>Ships to</Heading>
+                <Heading level={2}>{t("order.ships_to")}</Heading>
                 <Text>{[to.first_name, to.last_name].filter(Boolean).join(" ")}</Text>
                 {[
                   to.company,
@@ -173,7 +187,9 @@ export async function OrderDetails({
                       {line}
                     </Text>
                   ))}
-                <Text color="secondary">{country.name}</Text>
+                <Text color="secondary">
+                  {countryName(country.country, country.name, t.locale)}
+                </Text>
               </VStack>
             </Card>
           )}

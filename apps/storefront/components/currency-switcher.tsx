@@ -12,6 +12,8 @@ import { useTransition } from "react";
 
 import { setCountry } from "@/app/[country]/actions";
 
+import { useT } from "@/lib/use-t";
+
 import { useNavigationProgress } from "./navigation-progress";
 
 export type CountryOption = { code: string; name: string; currency: string };
@@ -27,6 +29,7 @@ export function CurrencySwitcher({
    * menu drawer, where a dropdown at the bottom opens below the screen). */
   layout?: "menu" | "segments";
 }) {
+  const t = useT();
   const path = usePathname();
   const [pending, start] = useTransition();
   const progress = useNavigationProgress();
@@ -45,7 +48,7 @@ export function CurrencySwitcher({
   if (layout === "segments") {
     return (
       <SegmentedControl
-        label="Currency"
+        label={t("header.currency")}
         size="sm"
         value={currency ?? ""}
         onChange={pick}
@@ -59,7 +62,7 @@ export function CurrencySwitcher({
   }
   return (
     <Selector
-      label="Currency"
+      label={t("header.currency")}
       isLabelHidden
       variant="ghost"
       size="sm"

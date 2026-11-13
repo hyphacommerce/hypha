@@ -10,6 +10,7 @@ import { JsonLd } from "@/components/json-ld";
 import { Listing } from "@/components/listing";
 import { countryOf, fieldContext, loadCategory } from "@/lib/api";
 import { presentFields } from "@/lib/custom-fields";
+import { pageT } from "@/lib/i18n";
 import { readListingPage } from "@/lib/listing-data";
 import { pageMetadata } from "@/lib/metadata";
 import { breadcrumbLd, plainText } from "@/lib/seo";
@@ -57,17 +58,22 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
  */
 export default async function CategoryPage({ params }: Props) {
   const { country: folder, handle } = await params;
-  const [country, category] = await Promise.all([countryOf(folder), load(handle)]);
+  const [country, category, t] = await Promise.all([
+    countryOf(folder),
+    load(handle),
+    pageT(folder),
+  ]);
   const code = country.country;
   const ancestors = category.ancestors.toReversed();
   const [first, context] = await Promise.all([
     readListingPage({
+      t,
       country: code,
       digits: country.minor_units,
       params: {},
       category: category.id,
     }),
-    fieldContext(country, category.custom_fields),
+    fieldContext(country, t, category.custom_fields),
   ]);
   // The merchant's custom fields shown to storefronts.
   const fields = presentFields("category", category.custom_fields, context);
@@ -77,14 +83,14 @@ export default async function CategoryPage({ params }: Props) {
     <VStack gap={6}>
       <JsonLd
         data={breadcrumbLd([
-          { name: "Home", url: absolute(link(code, "/")) },
+          { name: t("common.home"), url: absolute(link(code, "/")) },
           ...ancestors.map((a) => ({ name: a.name, url: absolute(link(code, `/c/${a.handle}`)) })),
           { name: category.name, url: absolute(link(code, `/c/${category.handle}`)) },
         ])}
       />
       <VStack gap={3}>
         <Breadcrumbs variant="supporting">
-          <BreadcrumbItem href={link(code, "/")}>Home</BreadcrumbItem>
+          <BreadcrumbItem href={link(code, "/")}>{t("common.home")}</BreadcrumbItem>
           {ancestors.map((a) => (
             <BreadcrumbItem key={a.id} href={link(code, `/c/${a.handle}`)}>
               {a.name}

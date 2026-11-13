@@ -12,7 +12,8 @@ import { cache } from "react";
 import { type AddressFormat, type FieldProblems, problemsOf } from "./address";
 import { FRESH_SECONDS, TAGS } from "./cache-tags";
 import { type FieldContext, type FieldPart, referenceIds } from "./custom-fields";
-import { link } from "./site";
+import type { T as Translator } from "./messages";
+import { link, segmentCountry } from "./site";
 
 export type Country = StorefrontSchemas["StorefrontCountryResponse"];
 
@@ -91,7 +92,7 @@ export const loadCountries = cache(
 
 /** The country of a URL folder (`hr`), or 404 when no market sells there. */
 export async function countryOf(folder: string): Promise<Country> {
-  const code = folder.toUpperCase();
+  const code = segmentCountry(folder);
   const country = (await loadCountries()).find((c) => c.country === code);
   if (!country) notFound();
   return country;
@@ -201,21 +202,21 @@ function flatten(nodes: CategoryNode[]): CategoryNode[] {
 }
 
 /**
- * What custom fields need to be shown on a page: the store's language, the country's
- * currency, and the product and category references among `values` as links to their
+ * What custom fields need to be shown on a page: the page's locale and words (`t`), the
+ * country's currency, and the product and category references among `values` as links to their
  * pages (categories from the shown tree; products read by ID, at most `MAX_REFERENCES`).
  * A reference that can't be read isn't shown: a field is decoration, so its failure
  * never fails the page.
  */
 export async function fieldContext(
   country: Country,
+  t: Translator,
   ...values: (Record<string, unknown> | undefined)[]
 ): Promise<FieldContext> {
   const ids = referenceIds(...values.filter((v) => v !== undefined));
   const code = country.country;
   const refs: Record<string, FieldPart> = {};
-  const [store, categories, definitions] = await Promise.all([
-    loadStore(),
+  const [categories, definitions] = await Promise.all([
     ids.some((id) => id.startsWith("pcat_")) ? loadCategories() : Promise.resolve([]),
     loadFieldDefinitions(),
   ]);
@@ -231,7 +232,8 @@ export async function fieldContext(
     if (product) refs[id] = { text: product.title, href: link(code, `/p/${product.handle}`) };
   });
   return {
-    locale: store.default_language,
+    locale: t.locale,
+    words: { yes: t("common.yes"), no: t("common.no") },
     currency: country.currency,
     digits: country.minor_units,
     refs,
@@ -253,88 +255,100 @@ export async function fieldContext(
  * An action's refusal: the message to show and, for an address, each field's problem
  * (the banner then only points at them).
  */
-export function refusedWith(error: { code: string; error: string; details?: unknown }): {
+export function refusedWith(
+  t: Translator,
+  error: { code: string; error: string; details?: unknown },
+): {
   error: string;
   problems?: FieldProblems;
 } {
   const problems = problemsOf(error);
   if (problems && Object.keys(problems).length > 0) {
-    return { error: "Check the highlighted fields.", problems };
+    return { error: t("errors.check_fields"), problems };
   }
-  return { error: describe(error) };
+  return { error: describe(t, error) };
 }
 
-/** A message for the shopper, by the API's stable error code. */
-export function describe(error: { code: string; error: string }): string {
+/**
+ * A message for the shopper, by the API's stable error code. The API's own `error` text
+ * is for developers and always English: for a code this storefront doesn't know, it's
+ * shown as it is only on an English page, and a general sentence stands in elsewhere.
+ */
+export function describe(t: Translator, error: { code: string; error: string }): string {
   switch (error.code) {
     case "out_of_stock":
-      return "There isn't enough of that in stock.";
+      return t("errors.out_of_stock");
     case "product_not_published":
     case "product_not_active":
     case "product_not_found":
-      return "That product isn't for sale here any more.";
+      return t("errors.product_unavailable");
     case "invalid_email":
-      return "Enter an email address, like ana@example.com.";
+      return t("errors.invalid_email");
     case "invalid_code":
-      return "That code is wrong or has expired. Ask for a new one.";
+      return t("errors.invalid_code");
     case "account_required":
     case "invalid_token":
-      return "Please sign in again.";
+      return t("errors.sign_in_again");
     case "cart_email_fixed":
-      return "This order goes to your account's email address.";
+      return t("errors.cart_email_fixed");
     case "consent_needs_phone":
-      return "Add a phone number to your profile first.";
+      return t("errors.consent_needs_phone");
     case "erasure_already_requested":
-      return "Your data is already set to be erased.";
+      return t("errors.erasure_already_requested");
     case "erasure_not_requested":
-      return "There's no erasure to cancel.";
+      return t("errors.erasure_not_requested");
     case "customer_erased":
-      return "This account is closed.";
+      return t("errors.customer_erased");
     case "rate_limited":
-      return "Too many tries. Wait a moment and try again.";
+      return t("errors.rate_limited");
     case "invalid_address":
     case "field_required":
-      return "Fill in your name, street address and city.";
+      return t("errors.invalid_address");
     case "no_shipping_to_country":
-      return "We don't ship to this country yet.";
+      return t("errors.no_shipping_to_country");
     case "discount_code_invalid":
-      return "That code isn't valid. Check it and try again.";
+      return t("errors.discount_code_invalid");
     case "checkout_blocked":
-      return "Some things need fixing before you can place your order: see what's marked.";
+      return t("errors.checkout_blocked");
     case "discounts_changed":
-      return "A discount changed since you looked. Check the total and place the order again.";
+      return t("errors.discounts_changed");
     case "total_changed":
-      return "Prices or shipping changed since you looked. Check the total and place the order again.";
+      return t("errors.total_changed");
     case "cart_completed":
-      return "This cart was already checked out.";
+      return t("errors.cart_completed");
     case "cart_empty":
-      return "Your cart is empty.";
+      return t("errors.cart_empty");
     case "cart_unavailable":
-      return "Something in your cart can't be bought right now. Remove it to continue.";
+      return t("errors.cart_unavailable");
     case "email_required":
     case "cart_email_missing":
-      return "Enter your email address.";
+      return t("errors.email_required");
     case "shipping_address_required":
-      return "Enter where your order ships.";
+      return t("errors.shipping_address_required");
     case "shipping_option_required":
     case "shipping_option_unavailable":
-      return "Choose how your order ships.";
+      return t("errors.shipping_option_required");
     case "address_country_mismatch":
-      return "The address must be in the country you're shopping in.";
+      return t("errors.address_country_mismatch");
     case "payment_method_required":
-      return "Choose how you'll pay.";
+      return t("errors.payment_method_required");
     case "payment_method_unavailable":
     case "payment_method_not_found":
-      return "That payment method can't be used for this order now. Choose another.";
+      return t("errors.payment_method_unavailable");
     case "app_unavailable":
-      return "The payment service didn't answer. Try again in a moment.";
+      return t("errors.app_unavailable");
     case "order_not_payable":
-      return "There's nothing left to pay for this order.";
+      return t("errors.order_not_payable");
     case "order_cancelled":
-      return "This order was cancelled.";
+      return t("errors.order_cancelled");
     case "order_not_found":
-      return "We can't find this order. Open it from its email.";
+      return t("errors.order_not_found");
     default:
-      return error.error;
+      return isEnglish(t.language) ? error.error : t("errors.generic");
   }
+}
+
+/** Whether a page in `language` reads English (the pseudo-language included). */
+function isEnglish(language: string): boolean {
+  return /^en(-|$)/i.test(language);
 }

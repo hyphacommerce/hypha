@@ -19,6 +19,8 @@ import {
 } from "@heroicons/react/24/outline";
 import { useState } from "react";
 
+import { useT } from "@/lib/use-t";
+
 import { useCart } from "./cart/cart-provider";
 import { CloseOnNavigate } from "./close-on-navigate";
 import { type CountryOption, CurrencySwitcher } from "./currency-switcher";
@@ -41,6 +43,7 @@ export type HeaderProps = {
 };
 
 export function SiteHeader(props: HeaderProps) {
+  const t = useT();
   const { count, open } = useCart();
   const [isSearching, setIsSearching] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -58,12 +61,12 @@ export function SiteHeader(props: HeaderProps) {
         }}
       />
       <TopNav
-        label="Store"
+        label={t("header.store_nav")}
         heading={
           <HStack gap={1} vAlign="center">
             <div className="shop-nav-menu-button">
               <Button
-                label="Menu"
+                label={t("header.menu")}
                 variant="ghost"
                 isIconOnly
                 icon={<Icon icon={Bars3Icon} />}
@@ -106,14 +109,14 @@ export function SiteHeader(props: HeaderProps) {
             <Popover
               isOpen={isSearching}
               onOpenChange={setIsSearching}
-              label="Search"
+              label={t("header.search")}
               placement="below"
               alignment="end"
               width={420}
               content={<SearchBox country={props.country} searchHref={props.searchHref} />}
             >
               <Button
-                label="Search"
+                label={t("header.search")}
                 variant="ghost"
                 isIconOnly
                 icon={<Icon icon={MagnifyingGlassIcon} />}
@@ -124,15 +127,15 @@ export function SiteHeader(props: HeaderProps) {
             </div>
             <div className="shop-nav-account">
               <TopNavItem
-                label="Account"
+                label={t("header.account")}
                 href={props.accountHref}
                 isIconOnly
                 icon={<Icon icon={UserIcon} />}
               />
             </div>
             <Button
-              label="Cart"
-              aria-label={count > 0 ? `Cart, ${count} items` : "Cart"}
+              label={t("header.cart")}
+              aria-label={t("header.cart_count", { count })}
               variant="ghost"
               icon={<Icon icon={ShoppingBagIcon} />}
               endContent={count > 0 ? <Badge label={String(count)} /> : undefined}

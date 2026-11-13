@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 
 import { Listing } from "@/components/listing";
 import { countryOf } from "@/lib/api";
+import { pageT } from "@/lib/i18n";
 import type { ListingParams } from "@/lib/listing";
 import { readListingPage } from "@/lib/listing-data";
 import { link } from "@/lib/site";
@@ -11,7 +12,14 @@ import { link } from "@/lib/site";
 /** Per request: it reads the shopper's query. */
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = { title: "Search" };
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ country: string }>;
+}): Promise<Metadata> {
+  const t = await pageT((await params).country);
+  return { title: t("search.meta_title") };
+}
 
 /** The listing parameters of `params`, as `Listing` keys them, to skip a second read. */
 function queryOf(params: ListingParams): string {
@@ -33,15 +41,21 @@ export default async function SearchPage({
   params: Promise<{ country: string }>;
   searchParams: Promise<ListingParams>;
 }) {
-  const country = await countryOf((await params).country);
+  const folder = (await params).country;
+  const [country, t] = await Promise.all([countryOf(folder), pageT(folder)]);
   const code = country.country;
   const query = await searchParams;
-  const page = await readListingPage({ country: code, digits: country.minor_units, params: query });
+  const page = await readListingPage({
+    t,
+    country: code,
+    digits: country.minor_units,
+    params: query,
+  });
 
   return (
     <VStack gap={6}>
       <Heading level={1} type="display-2">
-        {page.state.q ? `Results for “${page.state.q}”` : "All products"}
+        {page.state.q ? t("search.results_for", { query: page.state.q }) : t("search.all_products")}
       </Heading>
       <Listing
         country={code}
