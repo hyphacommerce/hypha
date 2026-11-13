@@ -1,0 +1,11 @@
+Zatražili ste od prodavnice {{ shop.name }} da obriše vaše lične podatke. To ćemo uraditi {{ due_at.formatted }}: vaše ime, kontakt podaci, adrese i podešavanja za marketing biće uklonjeni iz vašeg naloga i vaših porudžbina, a nalog će biti zatvoren. Same porudžbine ostaju u evidenciji, bez ičega što vas identifikuje.
+
+Predomislili ste se? Pre tog datuma se prijavite na svoj nalog i otkažite zahtev.
+
+Ako niste vi poslali ovaj zahtev, prijavite se i otkažite ga ili nas kontaktirajte.
+
+--
+{{ shop.name }}{% if shop.email %} · {{ shop.email }}{% endif %}
+{%- if brand.footer %}
+{{ brand.footer }}
+{%- endif %}

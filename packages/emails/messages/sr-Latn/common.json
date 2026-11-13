@@ -1,0 +1,20 @@
+{
+  "greeting_named": "Zdravo, {name},",
+  "greeting": "Zdravo,",
+  "view_order": "Pogledaj porudžbinu",
+  "order_number": "Porudžbina {number}",
+  "in_shipment": "U ovoj pošiljci",
+  "subtotal": "Međuzbir",
+  "shipping": "Dostava",
+  "tax": "Porez",
+  "total": "Ukupno",
+  "including_tax": "Od toga porez: {amount}",
+  "discounts_included": "Popusti uračunati u iznose iznad",
+  "was": "(pre popusta: {amount})",
+  "delivery": "Dostava",
+  "shipping_to": "Adresa za dostavu",
+  "shipping_method": "Način dostave",
+  "payment": "Plaćanje",
+  "tracking": "Praćenje pošiljke",
+  "plain_link": "Ako dugme ne radi, kopirajte ovaj link u pregledač:"
+}

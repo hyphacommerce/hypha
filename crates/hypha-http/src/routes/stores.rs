@@ -2,6 +2,7 @@ use axum::{Json, extract::State};
 use hypha_core::{Ctx, Currency, Email, Language, Scope, StoreId, Timezone};
 use hypha_inventory::{HasStockMovements, StockMovementRepo};
 use hypha_markets::{HasMarkets, MarketRepo};
+use hypha_notifications::{HasNotificationTemplates, NotificationTemplateRepo};
 use hypha_purchasing::{HasPurchaseOrders, PurchaseOrderRepo};
 use hypha_stores::{
     LanguageInput, MarketLanguages, Store, StoreLanguage, UpdateStore, get_store, update_store,
@@ -15,7 +16,8 @@ use super::{
 };
 use crate::{
     error::ApiError,
-    extract::{Caller, JsonBody, Storefront},
+    extract::{Caller, JsonBody, Query, Storefront},
+    language::{self, LanguageParams, Localized},
     patch,
     state::{AppState, SharedState, Storage},
 };
@@ -232,11 +234,13 @@ pub async fn update<S: Storage>(
     };
     // Every translation is one from the default language, which fixes it; checked like
     // the currency, before the write.
-    // Only translations into the languages the store keeps count: the others go with
-    // their language (and may still be there, waiting for that cleanup).
-    let has_translations = match req.default_language {
-        Some(_) => {
-            let kept: Vec<Language> = match &req.languages {
+    // Translations into a language the request removes from the store altogether don't
+    // count: they go with it (and may still be there, waiting for that cleanup). Those
+    // into the new default do: the cleanup keeps only listed languages, so a swap of the
+    // default with a listed language would delete every translation into it.
+    let has_translations = match &req.default_language {
+        Some(default) => {
+            let mut remaining: Vec<Language> = match &req.languages {
                 Some(languages) => languages
                     .iter()
                     .filter_map(|l| Language::new(&l.language).ok())
@@ -248,7 +252,15 @@ pub async fn update<S: Storage>(
                     .map(|l| l.language.clone())
                     .collect(),
             };
-            ports.translations().any_in(&kept).await?
+            // An invalid tag is refused by the command.
+            remaining.extend(Language::new(default).ok());
+            // A merchant's email template for another language is one too: the default
+            // language is the `''` row, so the new default's row would never be read.
+            let templates = ports.notification_templates().list().await?;
+            ports.translations().any_in(&remaining).await?
+                || templates
+                    .iter()
+                    .any(|t| t.locale().is_some_and(|l| remaining.contains(l)))
         }
         None => false,
     };
@@ -310,25 +322,42 @@ pub struct StorefrontStoreResponse {
     default_language: Language,
 }
 
-/// The store's public details.
+/// The store's public details, its description in `language`.
 #[utoipa::path(
     get,
     path = "/storefront/store",
-    responses((status = 200, description = "OK", body = StorefrontStoreResponse)),
+    params(LanguageParams),
+    responses((
+        status = 200,
+        description = "OK",
+        body = StorefrontStoreResponse,
+        headers(("Content-Language" = String, description = "The language the response is in.")),
+    )),
     extensions(("x-hypha-scopes" = json!(["stores:read"]))),
 )]
 pub async fn fetch_storefront<S: Storage>(
     State(state): State<SharedState<S>>,
     caller: Caller<Storefront>,
-) -> Result<Json<StorefrontStoreResponse>, ApiError> {
+    query: Query<LanguageParams>,
+) -> Result<Localized<StorefrontStoreResponse>, ApiError> {
+    use hypha_translations::{ResourceKind, ResourceRef, fields as keys};
     let (ports, ctx) = caller.authenticate(&state).await?;
-    let store = read_store(&state, &ctx, ports).await?;
-    Ok(Json(StorefrontStoreResponse {
+    let params = query.parse()?;
+    let store = store_for(&state, &ctx, &ports).await?;
+    // The store read once: the language is chosen from the same one.
+    let market = language::market_in(&ports, &params).await?;
+    let served = language::ServedLanguage::of(params.language.as_deref(), &store, market.as_ref());
+    let of_store = ResourceRef::new(ResourceKind::Store, state.store.as_uuid());
+    let overlay = served.overlay(&ports, &[of_store]).await?;
+    let response = StorefrontStoreResponse {
         name: store.name().to_string(),
-        description: store.description().map(str::to_string),
+        description: overlay
+            .optional(of_store, keys::store::DESCRIPTION, store.description())
+            .map(str::to_string),
         contact_email: store.contact_email().cloned(),
         default_language: store.default_language().clone(),
-    }))
+    };
+    Ok(served.respond(response))
 }
 
 /// The store's details: through the request's `ports` when the storage keeps the
@@ -370,12 +399,21 @@ pub(crate) async fn store_as_system<S: Storage>(
     state: &AppState<S>,
     ports: &S::Ports<'_>,
 ) -> Result<Store, ApiError> {
-    let ctx = Ctx::system();
+    store_for(state, &Ctx::system(), ports).await
+}
+
+/// The store's details for `ctx`, keeping `ports`: through them when they hold the
+/// directory, else through the directory beside them.
+pub(crate) async fn store_for<S: Storage>(
+    state: &AppState<S>,
+    ctx: &Ctx,
+    ports: &S::Ports<'_>,
+) -> Result<Store, ApiError> {
     Ok(match state.storage.directory_in(ports) {
-        Some(directory) => get_store(&ctx, directory, state.store).await?,
+        Some(directory) => get_store(ctx, directory, state.store).await?,
         None => {
             let directory = state.storage.directory().await?;
-            get_store(&ctx, &directory, state.store).await?
+            get_store(ctx, &directory, state.store).await?
         }
     })
 }

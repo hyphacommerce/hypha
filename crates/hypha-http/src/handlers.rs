@@ -13,7 +13,10 @@ use hypha_merchandising::CategoryImageCleanup;
 use hypha_search::SearchIndexer;
 use hypha_translations::TranslationCleanup;
 
-use crate::{mail::MailHost, translations::LanguageCleanup};
+use crate::{
+    mail::MailHost,
+    translations::{LanguageCleanup, TranslationSourceSync, ValueTranslationCleanup},
+};
 
 /// Core's handlers, in no particular order (names must be unique, spores' included; a
 /// test and startup check). A tuple, not a list of trait objects, so `Send` stays provable.
@@ -24,12 +27,15 @@ pub type CoreHandlers = (
     CustomFieldCleanup,
     TranslationCleanup,
     LanguageCleanup,
+    ValueTranslationCleanup,
+    TranslationSourceSync,
     Mailer<Arc<MailHost>>,
 );
 
 /// Core's handlers, built once the store is known: the `Mailer` holds the host's mail
-/// environment (the sender, the store, the links).
+/// environment (the sender, the store, the links), the worklist's sync the store's ID.
 pub fn core_handlers(mail: Arc<MailHost>) -> CoreHandlers {
+    let store = hypha_mail::MailEnv::store(&*mail);
     (
         VariantCleanup,
         SearchIndexer,
@@ -37,6 +43,8 @@ pub fn core_handlers(mail: Arc<MailHost>) -> CoreHandlers {
         CustomFieldCleanup,
         TranslationCleanup,
         LanguageCleanup,
+        ValueTranslationCleanup,
+        TranslationSourceSync::new(store),
         Mailer::new(mail),
     )
 }

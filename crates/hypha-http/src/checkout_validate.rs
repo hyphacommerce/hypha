@@ -15,7 +15,7 @@ use hypha_checkout_rules::{
     CheckoutSettings, CheckoutSettingsRepo, HasCheckoutSettings, ValidationAppSetting,
     room_for_validation_app,
 };
-use hypha_core::{Message, MessageSource, RepoError, ValidationStep};
+use hypha_core::{Language, Message, MessageSource, RepoError, ValidationStep};
 use hypha_extensions::{
     CheckoutValidate, CheckoutValidateRequest, ExtensionPoint, HasExtensionCalls, PostalAddress,
     ValidatedAddressCheck, ValidatedCart, ValidatedLine, ValidatedShippingGroup, call,
@@ -81,6 +81,7 @@ where
     async fn validators(
         &self,
         cart: &PricedCart,
+        language: Option<&Language>,
     ) -> Result<Vec<Validator<ValidatedCart>>, RepoError> {
         Ok(self
             .asked()
@@ -88,7 +89,7 @@ where
             .iter()
             .filter(|(_, setting)| setting.enabled)
             .map(|(app, setting)| {
-                let body = validated_cart(cart, Redaction::for_app(app));
+                let body = validated_cart(cart, Redaction::for_app(app), language);
                 Validator {
                     app: app.key().clone(),
                     block_on_failure: setting.block_on_failure,
@@ -293,8 +294,13 @@ pub async fn ensure_room_for_app<P: HasApps + HasExtensionEndpoints>(
     ensure_room_for(ports, app.key()).await
 }
 
-/// The cart as `checkout.validate` sends it, with `redaction`'s personal fields left out.
-pub fn validated_cart(cart: &PricedCart, redaction: Redaction) -> ValidatedCart {
+/// The cart as `checkout.validate` sends it, with `redaction`'s personal fields left out,
+/// telling the app the shopper reads `language` (`ContentLanguages::told`).
+pub fn validated_cart(
+    cart: &PricedCart,
+    redaction: Redaction,
+    language: Option<&Language>,
+) -> ValidatedCart {
     let shipping_address = cart.shipping_address.as_ref().map(|a| {
         let mut address = PostalAddress::from(a);
         redaction.postal_address(&mut address);
@@ -357,6 +363,7 @@ pub fn validated_cart(cart: &PricedCart, redaction: Redaction) -> ValidatedCart 
         subtotal: cart.subtotal,
         total: cart.total,
         redacted: removes_email.then(|| vec!["email".to_string()]),
+        language: language.cloned(),
     }
 }
 

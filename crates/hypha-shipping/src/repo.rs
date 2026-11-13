@@ -29,8 +29,10 @@ pub trait ShippingZoneRepo {
     /// Stores changes and bumps the version, or fails with `StaleVersion`. Enforces
     /// `ZONE_COUNTRY`.
     async fn update(&self, zone: &mut ShippingZone) -> Result<(), RepoError>;
-    /// Removes the zone and its options, writing the events it recorded
-    /// (`ShippingZone::delete`); one that doesn't exist any more is fine.
+    /// Removes the zone and its options at the version it was loaded at, writing the
+    /// events it recorded (`ShippingZone::delete`, one per option); `StaleVersion` for a
+    /// zone changed since, whose events would miss an option added meanwhile. One that
+    /// doesn't exist any more is fine.
     async fn delete(&self, zone: &mut ShippingZone) -> Result<(), RepoError>;
 }
 

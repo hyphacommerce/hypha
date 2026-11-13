@@ -2,15 +2,15 @@
 //! renders and records; the send job sends.
 
 use hypha_core::{
-    Email, Event, EventHandler, EventId, FulfillmentId, OrderId, PurchaseOrderId, StoredEvent,
-    Timezone,
+    Email, Event, EventHandler, EventId, FulfillmentId, Language, OrderId, PurchaseOrderId,
+    StoredEvent,
 };
 use hypha_fulfillment::{
     Fulfillment, FulfillmentCreated, FulfillmentRepo, FulfillmentUpdated, HasFulfillments,
 };
 use hypha_media::HasAssets;
 use hypha_notifications::{
-    HasNotificationSettings, HasNotificationTemplates, HasNotifications, Notification,
+    Audience, HasNotificationSettings, HasNotificationTemplates, HasNotifications, Notification,
     NotificationRepo, TemplateKey,
 };
 use hypha_orders::{HasOrders, Order, OrderCancelled, OrderPlaced, OrderRepo};
@@ -25,9 +25,9 @@ use serde::Deserialize;
 use crate::{
     CommandError, MailEnv,
     context::{
-        CancellationContext, CancellationMail, CustomerContext, FulfillmentContext, MailContext,
-        NewOrderMail, OrderContext, OrderMail, PurchaseOrderContext, ShipmentMail, SupplierContext,
-        SupplierOrderMail,
+        CancellationContext, CancellationMail, CustomerContext, FulfillmentContext, Locale,
+        MailContext, NewOrderMail, OrderContext, OrderMail, OrderReading, PurchaseOrderContext,
+        Reader, ShipmentMail, SupplierContext, SupplierOrderMail,
     },
     send::{Branding, Message, Sources, branding, queue, render_for_sending, skip},
 };
@@ -229,7 +229,9 @@ async fn queue_template<E: MailEnv, P: MailPorts>(
     if slots.iter().all(|(_, earlier)| earlier.is_some()) {
         return Ok((slots.into_iter().filter_map(|(_, e)| e).collect(), false));
     }
-    let sources = Sources::load(ports, template).await?;
+    let language = reading_language(template, &about.order, &about.branding);
+    let default = about.branding.store.default_language();
+    let sources = Sources::load(ports, template, &language, default).await?;
     let rendering = match sources.template.enabled {
         true => {
             let context = order_context(
@@ -240,6 +242,7 @@ async fn queue_template<E: MailEnv, P: MailPorts>(
                 &about.order,
                 about.payment.as_ref(),
                 about.fulfillment.as_ref(),
+                &sources.locale,
             )
             .await?;
             Some(render_for_sending(&sources, &context)?)
@@ -302,8 +305,8 @@ async fn queue_supplier_order<E: MailEnv, P: MailPorts>(
     }
     let po = load_purchase_order(ports, sent.purchase_order).await?;
     let branding = branding(env, ports).await?;
-    let context = supplier_order_context(ports, &branding, &po, &sent).await?;
-    let sources = Sources::load(ports, template).await?;
+    let sources = Sources::load_default(ports, template, branding.store.default_language()).await?;
+    let context = supplier_order_context(ports, &branding, &po, &sent, &sources.locale).await?;
     let rendering = render_for_sending(&sources, &context)?;
     let mut records = Vec::with_capacity(slots.len());
     let mut queued = false;
@@ -336,6 +339,7 @@ pub async fn supplier_order_context<P: HasSuppliers>(
     branding: &Branding,
     po: &PurchaseOrder,
     sent: &PurchaseOrderSent,
+    locale: &Locale,
 ) -> Result<MailContext, CommandError> {
     let name = match po.supplier_name() {
         Some(name) => name.to_string(),
@@ -346,6 +350,8 @@ pub async fn supplier_order_context<P: HasSuppliers>(
             .map_or_else(String::new, |s| s.name().to_string()),
     };
     Ok(MailContext::SupplierOrder(SupplierOrderMail {
+        language: locale.tag(),
+        dir: locale.dir(),
         shop: branding.shop.clone(),
         brand: branding.brand.clone(),
         supplier: SupplierContext { name },
@@ -353,6 +359,7 @@ pub async fn supplier_order_context<P: HasSuppliers>(
             po,
             sent.ship_to.as_ref(),
             branding.store.timezone(),
+            locale.formats,
         )?,
         message: sent.message.clone(),
     }))
@@ -404,11 +411,26 @@ pub(crate) async fn newest_fulfillment<P: HasFulfillments>(
         .ok_or(CommandError::NoFulfillment(order))
 }
 
+/// The language `template` about `order` is for: the order's for the buyer (the store's
+/// default for an order from before orders had one), the store's default for staff.
+pub fn reading_language(template: TemplateKey, order: &Order, branding: &Branding) -> Language {
+    let default = branding.store.default_language();
+    match template.audience() {
+        Some(Audience::Buyer) => order.language().unwrap_or(default).clone(),
+        Some(Audience::Staff | Audience::Supplier) | None => default.clone(),
+    }
+}
+
 /// The context of `template` (an order template or `staff_new_order`) for `order` as it
-/// is now, with its newest `payment`; the shipping templates need `fulfillment` (the
-/// order's newest without one). Staff emails get no `order.url`: the link carries the
-/// buyer's access token, which isn't staff's to forward (they have the admin's
-/// `admin_url`).
+/// is now, with its newest `payment`, written in `locale`; the shipping templates need
+/// `fulfillment` (the order's newest without one). A buyer's email reads the order's
+/// names in the buyer's language, `staff_new_order` the store's. Staff emails get no
+/// `order.url`: the link carries the buyer's access token, which isn't staff's to forward
+/// (they have the admin's `admin_url`).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "what one email is about, each a value its callers hold apart"
+)]
 pub async fn order_context<E: MailEnv, P: HasFulfillments>(
     env: &E,
     ports: &P,
@@ -417,8 +439,17 @@ pub async fn order_context<E: MailEnv, P: HasFulfillments>(
     order: &Order,
     payment: Option<&Payment>,
     fulfillment: Option<&Fulfillment>,
+    locale: &Locale,
 ) -> Result<MailContext, CommandError> {
-    let zone: Option<Timezone> = branding.store.timezone();
+    let reading = OrderReading {
+        reader: match template {
+            TemplateKey::StaffNewOrder => Reader::Staff,
+            _ => Reader::Buyer,
+        },
+        locale,
+        zone: branding.store.timezone(),
+        default_language: branding.store.default_language(),
+    };
     let url = match template {
         TemplateKey::StaffNewOrder => None,
         _ => branding
@@ -427,9 +458,11 @@ pub async fn order_context<E: MailEnv, P: HasFulfillments>(
             .map(|pattern| pattern.link(order.id(), &env.order_token(order.id()))),
     };
     let mail = OrderMail {
+        language: locale.tag(),
+        dir: locale.dir(),
         shop: branding.shop.clone(),
         brand: branding.brand.clone(),
-        order: OrderContext::of(order, payment, url, zone),
+        order: OrderContext::of(order, payment, url, reading),
         customer: CustomerContext::of(order),
     };
     Ok(match template {
@@ -448,7 +481,7 @@ pub async fn order_context<E: MailEnv, P: HasFulfillments>(
             })
         }
         TemplateKey::OrderCancelled => MailContext::Cancellation(CancellationMail {
-            cancellation: CancellationContext::of(order.cancelled().map(|c| c.reason)),
+            cancellation: CancellationContext::of(order.cancelled().map(|c| c.reason), locale),
             mail,
         }),
         TemplateKey::StaffNewOrder => MailContext::NewOrder(NewOrderMail {

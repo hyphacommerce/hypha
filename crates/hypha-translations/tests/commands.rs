@@ -20,7 +20,7 @@ use hypha_testkit::InMemoryPorts;
 use hypha_translations::{
     CommandError, FieldInput, ResourceKind, ResourceRef, Source, SourceField, StoreLanguages,
     Translation, TranslationCleanup, TranslationRepo, delete_translation, get_translations,
-    list_translations, put_translation,
+    list_translations, patch_translation, put_translation,
 };
 use pollster::block_on;
 use serde_json::json;
@@ -37,7 +37,7 @@ fn lang(tag: &str) -> Language {
 fn source() -> Source {
     Source::new(vec![
         SourceField::new("title", Some("Mug")),
-        SourceField::new("description", None),
+        SourceField::new("description", Some("<p>A mug.</p>")),
         SourceField::new("name", Some("Mugs")),
     ])
 }
@@ -127,6 +127,95 @@ fn a_second_write_replaces_the_fields() {
     assert_eq!(written.version(), Version::new(2));
     assert_eq!(written.text("title"), Some("Becher"));
     assert_eq!(written.text("description"), None);
+}
+
+fn patch(
+    ports: &InMemoryPorts,
+    resource: ResourceRef,
+    language: &str,
+    input: &[(&str, Option<&str>)],
+) -> Result<Option<Translation>, CommandError> {
+    let others = [lang("de"), lang("de-AT"), lang("fr")];
+    let input = input
+        .iter()
+        .map(|(key, value)| {
+            (
+                key.to_string(),
+                value.map(|value| FieldInput {
+                    value: value.to_string(),
+                    source_digest: None,
+                }),
+            )
+        })
+        .collect();
+    block_on(patch_translation(
+        &Ctx::system(),
+        ports,
+        resource,
+        language,
+        StoreLanguages {
+            default: &lang("en"),
+            others: &others,
+        },
+        Some(&source()),
+        input,
+    ))
+}
+
+#[test]
+fn a_patch_changes_only_the_fields_it_names() {
+    let ports = InMemoryPorts::default();
+    put(
+        &ports,
+        product(1),
+        "de",
+        &[("title", "Tasse"), ("description", "<p>Eine Tasse.</p>")],
+    )
+    .unwrap();
+    let written = patch(&ports, product(1), "de", &[("title", Some("Becher"))])
+        .unwrap()
+        .unwrap();
+    assert_eq!(written.version(), Version::new(2));
+    assert_eq!(written.text("title"), Some("Becher"));
+    assert_eq!(written.text("description"), Some("<p>Eine Tasse.</p>"));
+    let last = ports.outbox.events().pop().unwrap();
+    assert_eq!(last.data["fields"], json!(["title"]));
+}
+
+#[test]
+fn a_patch_creates_the_translation_and_deletes_it_when_none_is_left() {
+    let ports = InMemoryPorts::default();
+    let created = patch(&ports, product(1), "de", &[("title", Some("Tasse"))])
+        .unwrap()
+        .unwrap();
+    assert_eq!(created.version(), Version::new(1));
+    assert_eq!(
+        patch(&ports, product(1), "de", &[("title", None)]),
+        Ok(None)
+    );
+    assert_eq!(
+        block_on(get_translations(&Ctx::system(), &ports, product(1))),
+        Ok(Vec::new())
+    );
+    // Removing what isn't there stores nothing.
+    assert_eq!(
+        patch(&ports, product(1), "de", &[("title", None)]),
+        Ok(None)
+    );
+    assert_eq!(ports.outbox.events().len(), 2);
+}
+
+#[test]
+fn a_patch_takes_the_same_languages_as_a_put() {
+    let ports = InMemoryPorts::default();
+    assert_eq!(
+        patch(&ports, product(1), "en", &[("title", Some("Mug"))]),
+        Err(CommandError::DefaultLanguage(lang("en")))
+    );
+    assert_eq!(
+        patch(&ports, product(1), "es", &[("title", Some("Taza"))]),
+        Err(CommandError::LanguageNotListed(lang("es")))
+    );
 }
 
 #[test]

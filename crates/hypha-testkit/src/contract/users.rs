@@ -1,7 +1,8 @@
 use hypha_auth::{AuthSettings, TokenHash};
 use hypha_auth::{HasSessions, SessionRepo};
 use hypha_core::{
-    Actor, Email, InviteId, RepoError, RoleId, Scope, Timestamp, UserId, Version, Versioned,
+    Actor, Email, InviteId, Language, RepoError, RoleId, Scope, Timestamp, UserId, Version,
+    Versioned,
 };
 use hypha_users::{
     HasRoles, HasStaffSessions, HasUsers, Invite, InviteRepo, Role, RoleRepo, StaffSessionRecord,
@@ -74,6 +75,7 @@ async fn user_list<R: UserRepo>(repo: &R) {
 
 async fn user_round_trips<R: UserRepo>(repo: &R) {
     let mut u = user(1, "ana@example.com", 1);
+    u.set_language(Some(Language::new("sr-Latn-RS").unwrap()));
     repo.insert(&mut u).await.unwrap();
     assert_eq!(u.version(), Version::new(1));
     assert_eq!(repo.get(u.id()).await, Ok(Some(u.clone())));
@@ -89,10 +91,15 @@ async fn user_update<R: UserRepo>(repo: &R) {
     u.rename("Ana B.").unwrap();
     u.set_role(role_id(2));
     u.set_status(UserStatus::Disabled);
+    u.set_language(Some(Language::new("de-AT").unwrap()));
     repo.update(&mut u).await.unwrap();
     assert_eq!(u.version(), Version::new(2));
-    assert_eq!(repo.get(u.id()).await, Ok(Some(u)));
+    assert_eq!(repo.get(u.id()).await, Ok(Some(u.clone())));
     assert_eq!(repo.update(&mut old).await, Err(RepoError::StaleVersion));
+    // Clearing it stores no language again.
+    u.set_language(None);
+    repo.update(&mut u).await.unwrap();
+    assert_eq!(repo.get(u.id()).await, Ok(Some(u)));
 }
 
 async fn user_keys<R: UserRepo>(repo: &R) {
@@ -347,6 +354,8 @@ where
     ports.roles().insert(&mut r).await.unwrap();
     ports.roles().insert(&mut role(6, "Other")).await.unwrap();
     let mut u = user(1, "ana@example.com", 5);
+    // Read through the session's join too: the admin picks its language from it.
+    u.set_language(Some(Language::new("de").unwrap()));
     ports.users().insert(&mut u).await.unwrap();
     ports
         .users()

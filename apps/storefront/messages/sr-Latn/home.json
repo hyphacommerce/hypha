@@ -1,0 +1,13 @@
+{
+  "welcome_title": "Dobro došli u prodavnicu {store}",
+  "welcome_description": "Ovde će se pojaviti proizvodi koji se prodaju u ovoj zemlji ({country}).",
+  "shop_everything": "Pogledaj sve",
+  "browse_category": "Pogledaj: {category}",
+  "shop_by_category": "Kupujte po kategorijama",
+  "shop_now": "Kupi odmah",
+  "new_arrivals": "Novo u ponudi",
+  "new_arrivals_description": "Najnoviji proizvodi u prodavnici.",
+  "best_prices": "Najbolje cene",
+  "best_prices_description": "Naši najpovoljniji proizvodi u valuti {currency}.",
+  "view_all": "Prikaži sve"
+}

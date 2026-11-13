@@ -1,0 +1,8 @@
+{
+  "subject": "Porudžbina {number} je otkazana",
+  "preheader": "Vaša porudžbina {number} je otkazana.",
+  "heading": "Vaša porudžbina je otkazana",
+  "cancelled": "Vaša porudžbina {number} je otkazana.",
+  "reason": "Razlog: {reason}.",
+  "questions": "Ako imate pitanja o tome, samo odgovorite na ovaj imejl."
+}
