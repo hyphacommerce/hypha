@@ -6,20 +6,23 @@ import { type Messages, createTranslator, localeOf } from "@hyphacommerce/i18n";
 import { cache } from "react";
 
 import { loadStore } from "./api";
-import { type Key, type Namespace, type T, en, loadMessages, pick } from "./messages";
+import { type Key, type Namespace, type T, en, loadMessages, pick, writtenIn } from "./messages";
 import { pageLanguage, segmentCountry } from "./site";
 
 /**
  * The translator for `language`, formatting for `country` (`de` in `CH` formats as
  * `de-CH`): one per request, so each message is compiled once. Its `locale` is what
- * every money, number and date format takes.
+ * every money, number and date format takes. A message that can't be formatted (a value
+ * it needs wasn't given) shows its key and is logged: it mustn't take the page down.
  */
-export const getT = cache(async (language: string, country?: string): Promise<T> =>
-  createTranslator<Key>(language, await loadMessages(language), {
+export const getT = cache(async (language: string, country?: string): Promise<T> => {
+  const written = writtenIn(language);
+  return createTranslator<Key>(written, await loadMessages(written), {
     fallback: en,
-    locale: localeOf(language, country),
-  }),
-);
+    locale: localeOf(written, country),
+    onError: (error, key) => console.error(`i18n: ${key} (${written})`, error),
+  });
+});
 
 /** A page's translator, from the URL's first segment (`params.country`): it reads
  * nothing of the request, so a static page stays static. */

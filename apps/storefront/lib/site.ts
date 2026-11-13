@@ -3,7 +3,7 @@
 import { cookies } from "next/headers";
 
 import { cartFlagCookie } from "./cart-flag";
-import { PSEUDO } from "./messages";
+import { PSEUDO } from "./pseudo";
 import { href, routing } from "./routing";
 
 /** The routing mode this deployment uses (`STOREFRONT_ROUTING`). */

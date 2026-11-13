@@ -22,7 +22,11 @@ export function MessagesProvider({
   children: React.ReactNode;
 }) {
   const above = useContext(Sent);
-  const all = useMemo(() => ({ ...above, ...messages }), [above, messages]);
+  // By content, not identity: every server render of the layout (a navigation, an
+  // action's `refresh()`) sends an equal catalog as a new object, and a new translator
+  // would compile every message again and re-render everything that reads one.
+  const sent = JSON.stringify(messages);
+  const all = useMemo<Messages>(() => ({ ...above, ...JSON.parse(sent) }), [above, sent]);
   return (
     <Sent value={all}>
       <I18nProvider language={language} locale={locale} messages={all}>

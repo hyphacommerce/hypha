@@ -1,9 +1,27 @@
 import assert from "node:assert/strict";
+import { readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
 
 import { createTranslator } from "@hyphacommerce/i18n";
 
-import { PSEUDO, SHARED_NAMESPACES, en, isKey, loadMessages, pick } from "./messages.ts";
+import { PSEUDO, SHARED_NAMESPACES, en, isKey, loadMessages, pick, writtenIn } from "./messages.ts";
+
+/** The keys of a language's catalog files, as the catalog check reads them. */
+function keysOnDisk(language: string): string[] {
+  const folder = new URL(`../messages/${language}/`, import.meta.url);
+  return readdirSync(folder)
+    .filter((file) => file.endsWith(".json"))
+    .flatMap((file) => {
+      const messages: unknown = JSON.parse(readFileSync(new URL(file, folder), "utf8"));
+      return Object.keys(Object(messages)).map((key) => `${file.slice(0, -5)}.${key}`);
+    })
+    .toSorted();
+}
+
+test("every catalog file is imported: a namespace added to a folder is one the app reads", async () => {
+  assert.deepEqual(Object.keys(en).toSorted(), keysOnDisk("en"));
+  assert.deepEqual(Object.keys(await loadMessages("sr-Latn")).toSorted(), keysOnDisk("sr-Latn"));
+});
 
 test("English is the catalog for a language without one", async () => {
   assert.equal(await loadMessages("en"), en);
@@ -18,6 +36,15 @@ test("Serbian in Latin script has every English message", async () => {
 
 test("a language with a region reads its language's catalog", async () => {
   assert.equal(await loadMessages("sr-Latn-RS"), await loadMessages("sr-Latn"));
+});
+
+test("a page is formatted in the language its catalog is written in", () => {
+  assert.equal(writtenIn("sr-Latn"), "sr-Latn");
+  assert.equal(writtenIn("sr-Latn-RS"), "sr-Latn-RS");
+  // Plain Serbian formats in Cyrillic: beside the Latin catalog, Latin it is.
+  assert.equal(writtenIn("sr"), "sr-Latn");
+  assert.equal(writtenIn("en-GB"), "en-GB");
+  assert.equal(writtenIn("de"), "de");
 });
 
 test("Serbian counts one, few and other", async () => {

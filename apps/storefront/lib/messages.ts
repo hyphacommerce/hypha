@@ -27,6 +27,8 @@ import product from "../messages/en/product.json" with { type: "json" };
 import sale from "../messages/en/sale.json" with { type: "json" };
 import search from "../messages/en/search.json" with { type: "json" };
 
+import { PSEUDO } from "./pseudo.ts";
+
 const namespaces = {
   account,
   address,
@@ -83,20 +85,37 @@ export const SHARED_NAMESPACES = [
 
 export type SharedNamespace = (typeof SHARED_NAMESPACES)[number];
 
-/** The pseudo-language's tag: English accented, for development. */
-export const PSEUDO = "en-XA";
+export { PSEUDO };
 
 /** The languages with a catalog, English apart. */
 const TRANSLATED = ["sr-Latn"] as const;
 
+/** The translated catalog `language` reads, if there's one: its own, or the nearest
+ * (`sr-Latn-RS` and plain `sr` both read `sr-Latn`). */
+function translated(language: string): string | undefined {
+  return matchLanguage([language], TRANSLATED);
+}
+
+/**
+ * The language a page in `language` is written and formatted in: the language itself,
+ * unless its catalog is another's. A store in plain `sr` reads the `sr-Latn` catalog, so
+ * its dates and names are Latin too: `sr` alone would format them in Cyrillic beside
+ * Latin words.
+ */
+export function writtenIn(language: string): string {
+  const catalog = translated(language);
+  if (catalog === undefined) return language;
+  return language.toLowerCase().startsWith(catalog.toLowerCase()) ? language : catalog;
+}
+
 /**
  * A language's catalog, loaded when a request asks for it: the language's own, or the
- * nearest one there is (`sr-Latn-RS` reads `sr-Latn`). English for a language without
- * one; a translator falls back to English key by key for what a catalog lacks.
+ * nearest one there is. English for a language without one; a translator falls back to
+ * English key by key for what a catalog lacks.
  */
 export async function loadMessages(language: string): Promise<Messages> {
   if (language === PSEUDO) return pseudo(en);
-  switch (matchLanguage([language], TRANSLATED)) {
+  switch (translated(language)) {
     case "sr-Latn":
       return (await import("../messages/sr-Latn.ts")).default;
     default:

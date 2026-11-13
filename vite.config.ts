@@ -68,9 +68,6 @@ export default defineConfig({
           "react/capitalized-calls": "off",
           // Images are the store's media (S3/R2, sized by the API), not `next/image`'s.
           "nextjs/no-img-element": "off",
-          // A message's tags are given as functions (`t.rich(key, { link: (chunks, key) =>
-          // <a key={key}>…</a> })`): called while rendering, never mounted as components.
-          "react/no-unstable-nested-components": ["warn", { allowAsProps: true }],
         },
       },
       {
@@ -79,8 +76,14 @@ export default defineConfig({
         files: ["apps/storefront/app/**/*.tsx", "apps/storefront/components/**/*.tsx"],
         // Oxlint has no `react/jsx-no-literals`: the rule is ours (text between tags and
         // in the props people read; punctuation and symbols pass).
+        plugins: ["react", "jsx-a11y", "nextjs"],
         jsPlugins: ["./scripts/oxlint-i18n.mjs"],
-        rules: { "i18n/no-literal-text": "error" },
+        rules: {
+          "i18n/no-literal-text": "error",
+          // A message's tags are given as functions (`t.rich(key, { link: (chunks, key) =>
+          // <a key={key}>…</a> })`): called while rendering, never mounted as components.
+          "react/no-unstable-nested-components": ["warn", { allowAsProps: true }],
+        },
       },
       {
         files: [
