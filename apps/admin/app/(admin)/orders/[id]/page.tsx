@@ -647,7 +647,7 @@ async function Order({ id }: { id: string }) {
           {order.shipping_address && (
             <Card>
               <MetadataList title={t("orders.detail_ships_to")}>
-                <MetadataListItem label={t("common.name")}>
+                <MetadataListItem label={t("common.person_name")}>
                   {[order.shipping_address.first_name, order.shipping_address.last_name]
                     .filter(Boolean)
                     .join(" ")}

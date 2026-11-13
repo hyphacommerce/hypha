@@ -1,5 +1,7 @@
 {
   "group": "Group",
+  "list_sort_name_asc": "Name A–Z",
+  "list_sort_name_desc": "Name Z–A",
   "list_sort_email_asc": "Email A–Z",
   "list_sort_email_desc": "Email Z–A",
   "list_search_placeholder": "Search customers by email, name or phone",

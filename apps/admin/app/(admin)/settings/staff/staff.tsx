@@ -72,7 +72,7 @@ export function Staff({
   for (const u of users) memberCount.set(u.role, (memberCount.get(u.role) ?? 0) + 1);
 
   const userColumns: TableColumn<User>[] = [
-    { key: "name", header: t("common.name") },
+    { key: "name", header: t("common.person_name") },
     { key: "email", header: t("common.email") },
     { key: "role", header: t("common.role"), renderCell: (u) => roleName.get(u.role) ?? u.role },
     {
