@@ -18,6 +18,14 @@ async fn a_countrys_form_follows_its_format() {
     );
     assert_eq!(form["labels"]["province"], "State");
     assert_eq!(form["labels"]["postal_code"], "ZIP code");
+    assert_eq!(form["label_keys"]["province"], "state");
+    assert_eq!(form["label_keys"]["postal_code"], "zip_code");
+    assert_eq!(form["label_keys"]["line1"], "address1");
+    assert_eq!(
+        form["label_keys"].as_object().map(|keys| keys.len()),
+        form["labels"].as_object().map(|labels| labels.len()),
+        "a key for every label"
+    );
     assert_eq!(form["postal_code"], "required");
     assert_eq!(form["postal_code_example"], "90210");
     assert_eq!(form["regions"][0], json!({"code": "AL", "name": "Alabama"}));

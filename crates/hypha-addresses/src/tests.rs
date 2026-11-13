@@ -374,3 +374,21 @@ fn a_country_worldwide_lacks_gets_the_common_form() {
         assert!(problems(parts("AQ")).is_empty());
     }
 }
+
+#[test]
+fn a_forms_labels_have_keys() {
+    let keys = Form::of(CountryCode::new("US").unwrap()).label_keys();
+    let key = |field| keys.iter().find(|(f, _)| *f == field).and_then(|(_, k)| *k);
+    assert_eq!(
+        (
+            key(AddressField::Province),
+            key(AddressField::PostalCode),
+            key(AddressField::Line1)
+        ),
+        (
+            Some(LabelKey::State),
+            Some(LabelKey::ZipCode),
+            Some(LabelKey::Address1)
+        )
+    );
+}

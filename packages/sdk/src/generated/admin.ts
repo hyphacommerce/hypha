@@ -4479,7 +4479,15 @@ export interface components {
             country: components["schemas"]["CountryCode"];
             /** @description Whether the first line is expected to hold a house number. */
             house_number_required: boolean;
-            /** @description Each field's label, by field ("State", "ZIP code"). English for now. */
+            /**
+             * @description Each label's key, by field, for the same fields as `labels` (`province: "state"`,
+             *     `postal_code: "zip_code"`): what a form in another language translates the label
+             *     by. `null` for a label outside the set, which is then shown as `labels` has it.
+             */
+            label_keys: {
+                [key: string]: components["schemas"]["LabelKeyOrNull"];
+            };
+            /** @description Each field's label, by field ("State", "ZIP code"), in English. */
             labels: {
                 [key: string]: string;
             };
@@ -7221,6 +7229,15 @@ export interface components {
         };
         /** @enum {string} */
         KindRequest: "secret" | "publishable";
+        /**
+         * @description What a field's label says, by meaning: a closed set for a client to translate labels
+         *     by, the English `labels` being one rendering of it. Values are added, never renamed.
+         *
+         *     Known values: `first_name`, `last_name`, `company`, `address1`, `address2`, `street_and_house_number`, `full_address`, `additional_address`, `city`, `city_town`, `city_ward_town_village`, `ward`, `district`, `suburb`, `area`, `region`, `province`, `state`, `state_territory`, `county`, `prefecture`, `emirate`, `governorate`, `department`, `postal_code`, `postcode`, `zip_code`, `pin_code`, `phone`. More may be added: treat an unknown one as you would an unexpected state, not as an error.
+         * @enum {string}
+         */
+        LabelKeyDto: string;
+        LabelKeyOrNull: components["schemas"]["LabelKeyDto"] | null;
         /**
          * @description A BCP 47 language tag: a language, then optionally a script, region and variants (`en`, `en-GB`, `sr-Latn`). Responses show it in canonical case.
          * @example en-GB

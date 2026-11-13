@@ -8,6 +8,7 @@
 mod countries;
 mod data;
 mod flags;
+mod labels;
 
 use std::sync::OnceLock;
 
@@ -20,6 +21,7 @@ use regex::Regex;
 
 pub use data::PostalCode;
 use data::{Country, OTHER, Region};
+pub use labels::LabelKey;
 
 /// The address formats of every country, compiled in.
 #[derive(Debug, Clone, Copy, Default)]
@@ -137,6 +139,15 @@ impl Form {
             .iter()
             .flat_map(|row| row.iter().copied())
             .map(|field| (field, label(self.format, field)))
+            .collect()
+    }
+
+    /// The key of each field's label, as `labels` lists them: what a client translates
+    /// the label by. `None` for a label without one.
+    pub fn label_keys(&self) -> Vec<(AddressField, Option<LabelKey>)> {
+        self.labels()
+            .into_iter()
+            .map(|(field, label)| (field, LabelKey::of(label)))
             .collect()
     }
 

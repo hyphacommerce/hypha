@@ -765,6 +765,7 @@ contains "in the market's languages" '"languages":["en","de"]'
 step "the US address form" 200 - "$BASE/storefront/address-formats/US"
 contains "city, state and ZIP code on one row" '["city","province","postal_code"]'
 contains "its labels" '"postal_code":"ZIP code","province":"State"'
+contains "and their keys, to translate them by" '"postal_code":"zip_code","province":"state"'
 contains "states to choose from" '{"code":"CA","name":"California"}'
 contains "a ZIP code is required" '"postal_code":"required","postal_code_example":"90210"'
 step "cached for five minutes" 200 - -i "$BASE/storefront/address-formats/US"

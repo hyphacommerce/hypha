@@ -363,11 +363,21 @@
             "description": "Whether the first line is expected to hold a house number.",
             "type": "boolean"
           },
+          "label_keys": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LabelKeyOrNull"
+            },
+            "description": "Each label's key, by field, for the same fields as `labels` (`province: \"state\"`,\n`postal_code: \"zip_code\"`): what a form in another language translates the label\nby. `null` for a label outside the set, which is then shown as `labels` has it.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
           "labels": {
             "additionalProperties": {
               "type": "string"
             },
-            "description": "Each field's label, by field (\"State\", \"ZIP code\"). English for now.",
+            "description": "Each field's label, by field (\"State\", \"ZIP code\"), in English.",
             "propertyNames": {
               "type": "string"
             },
@@ -413,6 +423,7 @@
           "rows",
           "required",
           "labels",
+          "label_keys",
           "postal_code",
           "regions",
           "house_number_required",
@@ -7907,6 +7918,53 @@
           "publishable"
         ],
         "type": "string"
+      },
+      "LabelKeyDto": {
+        "description": "What a field's label says, by meaning: a closed set for a client to translate labels\nby, the English `labels` being one rendering of it. Values are added, never renamed.\n\nKnown values: `first_name`, `last_name`, `company`, `address1`, `address2`, `street_and_house_number`, `full_address`, `additional_address`, `city`, `city_town`, `city_ward_town_village`, `ward`, `district`, `suburb`, `area`, `region`, `province`, `state`, `state_territory`, `county`, `prefecture`, `emirate`, `governorate`, `department`, `postal_code`, `postcode`, `zip_code`, `pin_code`, `phone`. More may be added: treat an unknown one as you would an unexpected state, not as an error.",
+        "enum": [
+          "first_name",
+          "last_name",
+          "company",
+          "address1",
+          "address2",
+          "street_and_house_number",
+          "full_address",
+          "additional_address",
+          "city",
+          "city_town",
+          "city_ward_town_village",
+          "ward",
+          "district",
+          "suburb",
+          "area",
+          "region",
+          "province",
+          "state",
+          "state_territory",
+          "county",
+          "prefecture",
+          "emirate",
+          "governorate",
+          "department",
+          "postal_code",
+          "postcode",
+          "zip_code",
+          "pin_code",
+          "phone"
+        ],
+        "type": "string",
+        "x-hypha-open-enum": true
+      },
+      "LabelKeyOrNull": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/LabelKeyDto",
+            "description": "A label's key, or `null` for a label outside the set."
+          },
+          {
+            "type": "null"
+          }
+        ]
       },
       "Language": {
         "description": "A BCP 47 language tag: a language, then optionally a script, region and variants (`en`, `en-GB`, `sr-Latn`). Responses show it in canonical case.",
