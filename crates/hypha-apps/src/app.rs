@@ -846,6 +846,11 @@ mod tests {
     }
 
     #[test]
+    fn translation_events_need_translations_read() {
+        assert_eq!(event_scope("translation"), Some(Scope::TranslationsRead));
+    }
+
+    #[test]
     fn a_hand_made_app_gets_no_cost_changes() {
         let app = App::new(NewApp {
             key: AppKey::new("app_stock").unwrap(),
