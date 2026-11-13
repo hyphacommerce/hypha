@@ -1,0 +1,568 @@
+//! A resource's text in one of the store's other languages: the translated fields, each
+//! remembering the source text it translated.
+
+use std::collections::BTreeMap;
+
+use hypha_core::{
+    Description, DescriptionError, Language, PendingEvent, Recorded, Recorder, Stamped, Stamps,
+    Subject, Version, Versioned,
+};
+
+use crate::{
+    catalog::{FieldRule, ResourceRef},
+    error::{Problem, TranslationError},
+    events::{TRANSLATION, TranslationDeleted, TranslationUpdated},
+    source::Source,
+};
+
+/// One translated field.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TranslatedField {
+    /// The translation, by the rule of the field it replaces; never empty.
+    pub value: String,
+    /// The digest of the source text it translates. Another one than the source's now
+    /// means the source changed since: the translation is outdated, and still served.
+    pub source_digest: String,
+}
+
+/// What a write says about one field.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldInput {
+    /// Blank (or HTML with nothing left once sanitised) removes the field.
+    pub value: String,
+    /// The digest of the source text the translator saw. Given, it must be the
+    /// source's now, and the field is recorded as translating it. Left out, a new or
+    /// changed value is recorded against the source as it is now, and an unchanged one
+    /// keeps what it had (so saving a form again doesn't hide that a field is outdated).
+    pub source_digest: Option<String>,
+}
+
+/// Identified by its resource and language; there's no ID of its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Translation {
+    resource: ResourceRef,
+    language: Language,
+    version: Version,
+    stamps: Option<Stamps>,
+    fields: BTreeMap<String, TranslatedField>,
+    events: Recorder,
+}
+
+impl Translation {
+    /// A translation with no fields yet. It's stored once `replace` gave it some.
+    pub fn new(resource: ResourceRef, language: Language) -> Self {
+        Self {
+            resource,
+            language,
+            version: Version::NEW,
+            stamps: None,
+            fields: BTreeMap::new(),
+            events: Recorder::default(),
+        }
+    }
+
+    /// Replaces the translated fields with `input`, checked against the resource as it
+    /// is now (`source`), every problem reported at once. A field left out or sent
+    /// blank is removed, so a key whose child is gone drops out on the next write.
+    /// Returns whether anything changed; when it did, `translation.updated` names the
+    /// fields.
+    pub fn replace(
+        &mut self,
+        source: &Source,
+        input: BTreeMap<String, FieldInput>,
+    ) -> Result<bool, TranslationError> {
+        let mut problems = Vec::new();
+        let mut problem = |key: &str, code: &'static str, message: String| {
+            problems.push(Problem {
+                key: key.to_string(),
+                code,
+                message,
+            });
+        };
+        let mut fields = BTreeMap::new();
+        for (key, field) in input {
+            let Some((spec, child)) = self.resource.kind.field(&key) else {
+                problem(
+                    &key,
+                    "unknown_field",
+                    format!("a {} has no such field", self.resource.kind),
+                );
+                continue;
+            };
+            let value = match spec.rule {
+                FieldRule::Text { max_chars } => {
+                    let value = field.value.trim();
+                    if value.chars().count() > max_chars {
+                        problem(&key, "too_long", format!("at most {max_chars} characters"));
+                        continue;
+                    }
+                    value.to_string()
+                }
+                FieldRule::Html { max_bytes } => match Description::new(&field.value) {
+                    Ok(html) => html.map(|h| h.as_html().to_string()).unwrap_or_default(),
+                    Err(DescriptionError::TooLong { .. }) => {
+                        problem(
+                            &key,
+                            "too_long",
+                            format!("at most {max_bytes} bytes of HTML"),
+                        );
+                        continue;
+                    }
+                },
+            };
+            if value.is_empty() {
+                continue;
+            }
+            let Some(now) = source.field(&key) else {
+                let code = match child {
+                    Some(_) => "unknown_child",
+                    None => "unknown_field",
+                };
+                problem(&key, code, "the resource has no such field now".to_string());
+                continue;
+            };
+            let source_digest = match (field.source_digest, self.fields.get(&key)) {
+                (Some(seen), _) if seen != now.digest => {
+                    problem(
+                        &key,
+                        "source_changed",
+                        "the source text changed since it was read".to_string(),
+                    );
+                    continue;
+                }
+                (None, Some(stored)) if stored.value == value => stored.source_digest.clone(),
+                _ => now.digest.clone(),
+            };
+            fields.insert(
+                key,
+                TranslatedField {
+                    value,
+                    source_digest,
+                },
+            );
+        }
+        if !problems.is_empty() {
+            return Err(TranslationError::Invalid(problems));
+        }
+        let mut changed: Vec<String> = fields
+            .iter()
+            .filter(|(key, field)| self.fields.get(*key) != Some(field))
+            .map(|(key, _)| key.clone())
+            .chain(
+                self.fields
+                    .keys()
+                    .filter(|key| !fields.contains_key(*key))
+                    .cloned(),
+            )
+            .collect();
+        if changed.is_empty() {
+            return Ok(false);
+        }
+        changed.sort_unstable();
+        self.fields = fields;
+        // One event per write: a second change before the write replaces the first's.
+        let earlier = self.events.take();
+        let mut named: Vec<String> = earlier
+            .iter()
+            .filter_map(|e| e.data["fields"].as_array())
+            .flatten()
+            .filter_map(|f| f.as_str().map(str::to_string))
+            .chain(changed)
+            .collect();
+        named.sort_unstable();
+        named.dedup();
+        self.events.record(
+            self.subject(),
+            &TranslationUpdated {
+                resource: self.resource.into(),
+                language: self.language.clone(),
+                fields: named,
+            },
+        );
+        Ok(true)
+    }
+
+    /// Records `translation.deleted` in place of anything pending, for the repo's delete.
+    pub fn mark_deleted(&mut self) {
+        self.events.take();
+        self.events.record(
+            self.subject(),
+            &TranslationDeleted {
+                resource: self.resource.into(),
+                language: self.language.clone(),
+            },
+        );
+    }
+
+    fn subject(&self) -> Subject {
+        Subject::new(TRANSLATION, self.resource.id)
+    }
+
+    pub fn resource(&self) -> ResourceRef {
+        self.resource
+    }
+
+    pub fn language(&self) -> &Language {
+        &self.language
+    }
+
+    /// The translated fields by key. A stored translation has at least one.
+    pub fn fields(&self) -> &BTreeMap<String, TranslatedField> {
+        &self.fields
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.fields.is_empty()
+    }
+
+    /// The translation of `key`, if it has one.
+    pub fn text(&self, key: &str) -> Option<&str> {
+        self.fields.get(key).map(|f| f.value.as_str())
+    }
+
+    pub fn snapshot(&self) -> TranslationSnapshot {
+        TranslationSnapshot {
+            resource: self.resource,
+            language: self.language.clone(),
+            version: self.version,
+            stamps: self.stamps,
+            fields: self.fields.clone(),
+        }
+    }
+
+    /// A stored translation. Its keys are read by the kind's catalog again; the values
+    /// are trusted as `replace` stored them (HTML isn't sanitised twice), and keys of
+    /// children that have since gone stay until the next write: readers ask only for
+    /// the fields a resource has.
+    pub fn restore(s: TranslationSnapshot) -> Result<Self, TranslationError> {
+        let problems: Vec<Problem> = s
+            .fields
+            .iter()
+            .filter_map(|(key, field)| {
+                let (code, message) = if s.resource.kind.field(key).is_none() {
+                    ("unknown_field", "no such field")
+                } else if field.value.is_empty() {
+                    ("empty", "an empty translation")
+                } else {
+                    return None;
+                };
+                Some(Problem {
+                    key: key.clone(),
+                    code,
+                    message: message.to_string(),
+                })
+            })
+            .collect();
+        if !problems.is_empty() {
+            return Err(TranslationError::Invalid(problems));
+        }
+        Ok(Self {
+            resource: s.resource,
+            language: s.language,
+            version: s.version,
+            stamps: s.stamps,
+            fields: s.fields,
+            events: Recorder::default(),
+        })
+    }
+}
+
+/// Plain-data form for storage adapters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TranslationSnapshot {
+    pub resource: ResourceRef,
+    pub language: Language,
+    pub version: Version,
+    pub stamps: Option<Stamps>,
+    pub fields: BTreeMap<String, TranslatedField>,
+}
+
+impl Recorded for Translation {
+    fn take_events(&mut self) -> Vec<PendingEvent> {
+        self.events.take()
+    }
+}
+
+impl Versioned for Translation {
+    fn version(&self) -> Version {
+        self.version
+    }
+
+    fn set_version(&mut self, version: Version) {
+        self.version = version;
+    }
+}
+
+impl Stamped for Translation {
+    fn stamps(&self) -> Option<Stamps> {
+        self.stamps
+    }
+
+    fn set_stamps(&mut self, stamps: Stamps) {
+        self.stamps = Some(stamps);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::{
+        catalog::ResourceKind,
+        source::{SourceField, source_digest},
+    };
+
+    fn product() -> ResourceRef {
+        ResourceRef::new(ResourceKind::Product, Uuid::from_u128(1))
+    }
+
+    fn source() -> Source {
+        Source::new(vec![
+            SourceField::new("title", Some("Mug")),
+            SourceField::new("description", Some("<p>A mug.</p>")),
+            SourceField::new("options.opt_1.name", Some("Colour")),
+        ])
+    }
+
+    fn german() -> Translation {
+        Translation::new(product(), Language::new("de").unwrap())
+    }
+
+    fn input(fields: &[(&str, &str)]) -> BTreeMap<String, FieldInput> {
+        fields
+            .iter()
+            .map(|(key, value)| {
+                (
+                    key.to_string(),
+                    FieldInput {
+                        value: value.to_string(),
+                        source_digest: None,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    fn problems(result: Result<bool, TranslationError>) -> Vec<(String, &'static str)> {
+        match result {
+            Err(TranslationError::Invalid(problems)) => {
+                problems.into_iter().map(|p| (p.key, p.code)).collect()
+            }
+            Ok(_) => Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_field_is_trimmed_and_remembers_the_sources_digest() {
+        let mut t = german();
+        assert_eq!(
+            t.replace(&source(), input(&[("title", "  Tasse ")])),
+            Ok(true)
+        );
+        assert_eq!(
+            t.fields().get("title"),
+            Some(&TranslatedField {
+                value: "Tasse".to_string(),
+                source_digest: source_digest("Mug"),
+            })
+        );
+    }
+
+    #[test]
+    fn html_is_sanitised_like_a_description() {
+        let mut t = german();
+        let html = "<p>Eine Tasse.</p><script>alert(1)</script>";
+        assert_eq!(
+            t.replace(&source(), input(&[("description", html)])),
+            Ok(true)
+        );
+        assert_eq!(t.text("description"), Some("<p>Eine Tasse.</p>"));
+    }
+
+    #[test]
+    fn text_is_capped_at_the_fields_limit_in_characters() {
+        let mut t = german();
+        let max = "ž".repeat(255);
+        assert_eq!(t.replace(&source(), input(&[("title", &max)])), Ok(true));
+        let over = format!("{max}ž");
+        assert_eq!(
+            problems(t.replace(&source(), input(&[("title", &over)]))),
+            vec![("title".to_string(), "too_long")]
+        );
+    }
+
+    #[test]
+    fn html_over_the_descriptions_cap_is_too_long() {
+        let mut t = german();
+        let over = "a".repeat(Description::MAX_LEN + 1);
+        assert_eq!(
+            problems(t.replace(&source(), input(&[("description", &over)]))),
+            vec![("description".to_string(), "too_long")]
+        );
+    }
+
+    #[test]
+    fn every_problem_is_reported_at_once() {
+        let mut t = german();
+        let result = t.replace(
+            &source(),
+            input(&[("name", "Tasse"), ("options.opt_9.name", "Farbe")]),
+        );
+        assert_eq!(
+            problems(result),
+            vec![
+                ("name".to_string(), "unknown_field"),
+                ("options.opt_9.name".to_string(), "unknown_child"),
+            ]
+        );
+        assert!(t.is_empty());
+    }
+
+    #[test]
+    fn a_blank_value_removes_the_field_even_for_a_child_that_is_gone() {
+        let mut t = german();
+        t.replace(&source(), input(&[("title", "Tasse")])).unwrap();
+        assert_eq!(
+            t.replace(
+                &source(),
+                input(&[("title", " "), ("options.opt_9.name", "")])
+            ),
+            Ok(true)
+        );
+        assert!(t.is_empty());
+    }
+
+    #[test]
+    fn a_field_left_out_is_removed() {
+        let mut t = german();
+        t.replace(
+            &source(),
+            input(&[("title", "Tasse"), ("options.opt_1.name", "Farbe")]),
+        )
+        .unwrap();
+        t.replace(&source(), input(&[("title", "Tasse")])).unwrap();
+        assert_eq!(t.fields().keys().collect::<Vec<_>>(), vec!["title"]);
+    }
+
+    #[test]
+    fn an_unchanged_value_keeps_its_digest_when_the_source_changed() {
+        let mut t = german();
+        t.replace(&source(), input(&[("title", "Tasse")])).unwrap();
+        let changed = Source::new(vec![SourceField::new("title", Some("Cup"))]);
+        assert_eq!(t.replace(&changed, input(&[("title", "Tasse")])), Ok(false));
+        assert_eq!(t.fields()["title"].source_digest, source_digest("Mug"));
+    }
+
+    #[test]
+    fn a_changed_value_translates_the_source_as_it_is_now() {
+        let mut t = german();
+        t.replace(&source(), input(&[("title", "Tasse")])).unwrap();
+        let changed = Source::new(vec![SourceField::new("title", Some("Cup"))]);
+        assert_eq!(t.replace(&changed, input(&[("title", "Becher")])), Ok(true));
+        assert_eq!(t.fields()["title"].source_digest, source_digest("Cup"));
+    }
+
+    #[test]
+    fn the_digest_sent_confirms_an_unchanged_value() {
+        let mut t = german();
+        t.replace(&source(), input(&[("title", "Tasse")])).unwrap();
+        let changed = Source::new(vec![SourceField::new("title", Some("Cup"))]);
+        let mut confirmed = input(&[("title", "Tasse")]);
+        confirmed.get_mut("title").unwrap().source_digest = Some(source_digest("Cup"));
+        assert_eq!(t.replace(&changed, confirmed), Ok(true));
+        assert_eq!(t.fields()["title"].source_digest, source_digest("Cup"));
+    }
+
+    #[test]
+    fn a_digest_that_isnt_the_sources_now_is_refused() {
+        let mut t = german();
+        let mut stale = input(&[("title", "Tasse")]);
+        stale.get_mut("title").unwrap().source_digest = Some(source_digest("Jug"));
+        assert_eq!(
+            problems(t.replace(&source(), stale)),
+            vec![("title".to_string(), "source_changed")]
+        );
+    }
+
+    #[test]
+    fn a_write_records_one_event_naming_what_changed() {
+        let mut t = german();
+        t.replace(
+            &source(),
+            input(&[("title", "Tasse"), ("options.opt_1.name", "Farbe")]),
+        )
+        .unwrap();
+        t.take_events();
+        t.replace(
+            &source(),
+            input(&[("title", "Becher"), ("description", "<p>Eine Tasse.</p>")]),
+        )
+        .unwrap();
+        let events = t.take_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "translation.updated");
+        assert_eq!(events[0].subject, Subject::new("translation", product().id));
+        assert_eq!(
+            events[0].data,
+            serde_json::json!({
+                "resource": {"kind": "product", "id": product().id_string()},
+                "language": "de",
+                "fields": ["description", "options.opt_1.name", "title"],
+            })
+        );
+    }
+
+    #[test]
+    fn writing_the_same_fields_records_nothing() {
+        let mut t = german();
+        t.replace(&source(), input(&[("title", "Tasse")])).unwrap();
+        t.take_events();
+        assert_eq!(
+            t.replace(&source(), input(&[("title", "Tasse")])),
+            Ok(false)
+        );
+        assert!(t.take_events().is_empty());
+    }
+
+    #[test]
+    fn deleting_records_translation_deleted_alone() {
+        let mut t = german();
+        t.replace(&source(), input(&[("title", "Tasse")])).unwrap();
+        t.mark_deleted();
+        let events = t.take_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "translation.deleted");
+        assert_eq!(
+            events[0].data,
+            serde_json::json!({
+                "resource": {"kind": "product", "id": product().id_string()},
+                "language": "de",
+            })
+        );
+    }
+
+    #[test]
+    fn a_stored_translation_keeps_a_gone_childs_field_but_not_an_unknown_one() {
+        let field = TranslatedField {
+            value: "Farbe".to_string(),
+            source_digest: source_digest("Colour"),
+        };
+        let snapshot = |key: &str| TranslationSnapshot {
+            resource: product(),
+            language: Language::new("de").unwrap(),
+            version: Version::NEW.next(),
+            stamps: None,
+            fields: BTreeMap::from([(key.to_string(), field.clone())]),
+        };
+        assert!(Translation::restore(snapshot("options.opt_9.name")).is_ok());
+        assert_eq!(
+            Translation::restore(snapshot("name")).map(|_| ()),
+            Err(TranslationError::Invalid(vec![Problem {
+                key: "name".to_string(),
+                code: "unknown_field",
+                message: "no such field".to_string(),
+            }]))
+        );
+    }
+}

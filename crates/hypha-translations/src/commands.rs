@@ -1,0 +1,190 @@
+use std::collections::BTreeMap;
+
+use hypha_core::{
+    AuthError, Ctx, ErrorCode, Language, LanguageError, Page, PageRequest, RepoError, Scope,
+};
+
+use crate::{
+    catalog::{ResourceKind, ResourceRef},
+    error::TranslationError,
+    repo::{HasTranslations, TranslationFilter, TranslationKey, TranslationRepo, keys},
+    source::Source,
+    translation::{FieldInput, Translation},
+};
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum CommandError {
+    #[error(transparent)]
+    Auth(#[from] AuthError),
+    #[error(transparent)]
+    Repo(#[from] RepoError),
+    #[error(transparent)]
+    Translation(#[from] TranslationError),
+    #[error(transparent)]
+    Language(#[from] LanguageError),
+    #[error("no {} {}", .0.kind, .0.id_string())]
+    ResourceNotFound(ResourceRef),
+    #[error("{} {} has no translation into {language}", resource.kind, resource.id_string())]
+    NotFound {
+        resource: ResourceRef,
+        language: Language,
+    },
+    #[error("{0} is the store's default language: its text is the content itself")]
+    DefaultLanguage(Language),
+    #[error("{0} isn't one of the store's languages")]
+    LanguageNotListed(Language),
+}
+
+impl ErrorCode for CommandError {
+    fn code(&self) -> &'static str {
+        match self {
+            CommandError::Auth(e) => e.code(),
+            CommandError::Repo(e) => e.code(),
+            CommandError::Translation(e) => e.code(),
+            CommandError::Language(e) => e.code(),
+            CommandError::ResourceNotFound(_) => "resource_not_found",
+            CommandError::NotFound { .. } => "translation_not_found",
+            CommandError::DefaultLanguage(_) => "translation_into_default_language",
+            CommandError::LanguageNotListed(_) => "language_not_listed",
+        }
+    }
+}
+
+/// The store's languages, as plain values: the leaf can't see the store.
+#[derive(Debug, Clone, Copy)]
+pub struct StoreLanguages<'a> {
+    /// The language the content itself is in.
+    pub default: &'a Language,
+    /// The other languages on its list, published or not.
+    pub others: &'a [Language],
+}
+
+/// Whether the caller may read `kind`'s translations: `translations:read` and what
+/// reading the resource takes. Hosts ask before reading the resource for its source.
+pub fn require_read(ctx: &Ctx, kind: ResourceKind) -> Result<(), AuthError> {
+    ctx.require(Scope::TranslationsRead)?;
+    kind.read_scopes().iter().try_for_each(|s| ctx.require(*s))
+}
+
+/// Whether the caller may write `kind`'s translations: `translations:write` and what
+/// reading the resource takes.
+pub fn require_write(ctx: &Ctx, kind: ResourceKind) -> Result<(), AuthError> {
+    ctx.require(Scope::TranslationsWrite)?;
+    kind.read_scopes().iter().try_for_each(|s| ctx.require(*s))
+}
+
+/// Every translation of a resource, by language tag.
+pub async fn get_translations<S: HasTranslations>(
+    ctx: &Ctx,
+    ports: &S,
+    resource: ResourceRef,
+) -> Result<Vec<Translation>, CommandError> {
+    require_read(ctx, resource.kind)?;
+    Ok(ports.translations().for_resource(resource).await?)
+}
+
+/// A page of the store's translations, of the kinds the caller may read: `kind` alone,
+/// or every kind whose resources they read.
+pub async fn list_translations<S: HasTranslations>(
+    ctx: &Ctx,
+    ports: &S,
+    kind: Option<ResourceKind>,
+    language: Option<Language>,
+    page: PageRequest<TranslationKey>,
+) -> Result<Page<Translation>, CommandError> {
+    ctx.require(Scope::TranslationsRead)?;
+    let kinds = match kind {
+        Some(kind) => {
+            require_read(ctx, kind)?;
+            vec![kind]
+        }
+        None => ResourceKind::ALL
+            .into_iter()
+            .filter(|kind| require_read(ctx, *kind).is_ok())
+            .collect(),
+    };
+    let filter = TranslationFilter {
+        kinds: Some(kinds),
+        language,
+    };
+    Ok(ports.translations().list(&filter, page).await?)
+}
+
+/// How many times a write starts over after another write of the same translation got
+/// in first.
+const ATTEMPTS: u32 = 3;
+
+/// Sets a resource's translation into `language` to `fields`, replacing what it had: a
+/// field left out or blank is removed, and a translation left with none is deleted
+/// (`None`). `source` is the resource as the host read it, `None` when there's no such
+/// resource.
+pub async fn put_translation<S: HasTranslations>(
+    ctx: &Ctx,
+    ports: &S,
+    resource: ResourceRef,
+    language: &str,
+    languages: StoreLanguages<'_>,
+    source: Option<&Source>,
+    fields: BTreeMap<String, FieldInput>,
+) -> Result<Option<Translation>, CommandError> {
+    require_write(ctx, resource.kind)?;
+    let language = Language::new(language)?;
+    let source = source.ok_or(CommandError::ResourceNotFound(resource))?;
+    if language == *languages.default {
+        return Err(CommandError::DefaultLanguage(language));
+    }
+    if !languages.others.contains(&language) {
+        return Err(CommandError::LanguageNotListed(language));
+    }
+    let repo = ports.translations();
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        let stored = repo.get(resource, &language).await?;
+        let is_new = stored.is_none();
+        let mut translation =
+            stored.unwrap_or_else(|| Translation::new(resource, language.clone()));
+        if !translation.replace(source, fields.clone())? {
+            return Ok((!is_new).then_some(translation));
+        }
+        let written = if translation.is_empty() {
+            translation.mark_deleted();
+            repo.delete(&mut translation).await.map(|()| None)
+        } else if is_new {
+            repo.insert(&mut translation)
+                .await
+                .map(|()| Some(translation))
+        } else {
+            repo.update(&mut translation)
+                .await
+                .map(|()| Some(translation))
+        };
+        match written {
+            // Someone wrote the same translation in between: this write replaces the
+            // fields whole, so it starts over from theirs.
+            Err(RepoError::StaleVersion | RepoError::Duplicate(keys::TRANSLATION))
+                if attempt < ATTEMPTS => {}
+            other => return Ok(other?),
+        }
+    }
+}
+
+/// Removes a resource's translation into `language`. The resource itself isn't asked
+/// for: a translation may outlive it until the cleanup runs.
+pub async fn delete_translation<S: HasTranslations>(
+    ctx: &Ctx,
+    ports: &S,
+    resource: ResourceRef,
+    language: &str,
+) -> Result<(), CommandError> {
+    require_write(ctx, resource.kind)?;
+    let language = Language::new(language)?;
+    let repo = ports.translations();
+    let mut translation = repo
+        .get(resource, &language)
+        .await?
+        .ok_or(CommandError::NotFound { resource, language })?;
+    translation.mark_deleted();
+    repo.delete(&mut translation).await?;
+    Ok(())
+}

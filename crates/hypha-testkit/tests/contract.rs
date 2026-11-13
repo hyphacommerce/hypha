@@ -454,6 +454,13 @@ fn transfer_repo() {
 }
 
 #[test]
+fn translation_repo() {
+    block_on(contract::translation_repo(async || {
+        InMemoryPorts::default()
+    }));
+}
+
+#[test]
 fn checkout_rule_repo() {
     block_on(contract::checkout_rule_repo(async || {
         InMemoryPorts::default()
