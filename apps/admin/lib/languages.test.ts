@@ -5,11 +5,14 @@ import {
   COMMON_LANGUAGES,
   addedLanguage,
   canonicalTag,
+  languageLabel,
   marketsInUse,
   moved,
   offeredLanguages,
   sameTag,
 } from "./languages.ts";
+import { createFormat } from "./format.ts";
+import { formatLocale } from "./pick-language.ts";
 
 test("a typed tag is put in canonical case", () => {
   assert.equal(canonicalTag("de"), "de");
@@ -95,4 +98,29 @@ test("an answer naming no markets gives none", () => {
   assert.deepEqual(marketsInUse(null), []);
   assert.deepEqual(marketsInUse({}), []);
   assert.deepEqual(marketsInUse({ markets: "mkt_1" }), []);
+});
+
+const names: Record<string, string> = {
+  de: "German",
+  "sr-Latn": "Serbian (Latin)",
+  "zh-Hant": "中文（繁體）",
+};
+const named = { languageName: (tag: string) => names[tag] ?? tag };
+
+test("a language is labelled by its name with the tag in parentheses", () => {
+  assert.equal(languageLabel(named, "de"), "German (de)");
+});
+
+test("a name with parentheses of its own gets the tag after a dot", () => {
+  assert.equal(languageLabel(named, "sr-Latn"), "Serbian (Latin) · sr-Latn");
+  assert.equal(languageLabel(named, "zh-Hant"), "中文（繁體） · zh-Hant");
+});
+
+test("a language without a name is labelled by its tag alone", () => {
+  assert.equal(languageLabel(named, "x-unknown"), "x-unknown");
+});
+
+test("Intl's own name for Serbian (Latin) isn't bracketed twice", () => {
+  const format = createFormat(formatLocale("en"));
+  assert.equal(languageLabel(format, "sr-Latn"), "Serbian (Latin) · sr-Latn");
 });

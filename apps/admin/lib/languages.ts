@@ -107,11 +107,15 @@ export function moved<T>(list: readonly T[], index: number, delta: number): T[] 
 
 /**
  * A language as lists and selects show it: its name in the reader's language with the
- * tag after it, "Serbian (Latin) (sr-Latn)"; the tag alone when `Intl` has no name.
+ * tag after it, "German (de)"; the tag alone when `Intl` has no name. A name that has
+ * parentheses of its own ("Serbian (Latin)", "Chinese (Traditional)", or full-width ones
+ * in Chinese and Japanese) gets the tag after a dot instead, "Serbian (Latin) · sr-Latn",
+ * so the two never read as doubled brackets.
  */
 export function languageLabel(format: { languageName(tag: string): string }, tag: string): string {
   const name = format.languageName(tag);
-  return name === tag ? tag : `${name} (${tag})`;
+  if (name === tag) return tag;
+  return /[(（]/.test(name) ? `${name} · ${tag}` : `${name} (${tag})`;
 }
 
 /**
