@@ -3,12 +3,19 @@
 // would crowd out the products. The sitemap lists the rest.
 
 import { loadCountries } from "@/lib/api";
+import { NOINDEX_ROBOTS, indexable } from "@/lib/indexing";
 import { prefixes } from "@/lib/routing";
 import { mode, siteUrl } from "@/lib/site";
 
 const PRIVATE = ["/cart", "/checkout", "/account", "/search", "/order/"];
 
+const HEADERS = {
+  "content-type": "text/plain; charset=utf-8",
+  "cache-control": "public, max-age=3600",
+};
+
 export async function GET(request: Request) {
+  if (!indexable()) return new Response(NOINDEX_ROBOTS, { headers: HEADERS });
   const origin = siteUrl()?.origin ?? new URL(request.url).origin;
   // Each place's prefix spelled out (`/de`, `/en-de`; in a single tree none and `/en`):
   // a `/*/search` wildcard would also match a product whose handle starts with "search".
@@ -22,10 +29,5 @@ export async function GET(request: Request) {
     `Sitemap: ${origin}/sitemap.xml`,
     "",
   ];
-  return new Response(lines.join("\n"), {
-    headers: {
-      "content-type": "text/plain; charset=utf-8",
-      "cache-control": "public, max-age=3600",
-    },
-  });
+  return new Response(lines.join("\n"), { headers: HEADERS });
 }

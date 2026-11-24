@@ -4,6 +4,7 @@
 // page's other copies as alternates, by their `hreflang` tags (`hreflangPlaces`).
 
 import { loadCategories, loadCountries } from "@/lib/api";
+import { indexable } from "@/lib/indexing";
 import { search } from "@/lib/listing-data";
 import { alternatePlaces, duplicateOf, hreflangPlaces } from "@/lib/routing";
 import { localeAlternates } from "@/lib/seo";
@@ -47,6 +48,8 @@ const escape = (s: string) =>
 type Place = { tag: string; segment: string };
 
 export async function GET(request: Request) {
+  // A store kept out of search lists nothing.
+  if (!indexable()) return new Response("Not found", { status: 404 });
   const origin = siteUrl()?.origin ?? new URL(request.url).origin;
   const [countries, categories] = await Promise.all([loadCountries(), loadCategories()]);
   // A duplicate's canonical is the page it duplicates: only that one is listed.

@@ -7,6 +7,7 @@ import { ClientMessages } from "@/components/messages";
 import { loadStore, pageLocale } from "@/lib/api";
 import { astryxMessages } from "@/lib/astryx-messages";
 import { pageT } from "@/lib/i18n";
+import { indexable } from "@/lib/indexing";
 import { SHARED_NAMESPACES } from "@/lib/messages";
 import { link, siteUrl } from "@/lib/site";
 
@@ -36,6 +37,8 @@ export async function generateMetadata({
     title: { default: store.name, template: `%s · ${store.name}` },
     description: store.description ?? undefined,
     applicationName: store.name,
+    // A demo or staging store (`STOREFRONT_NOINDEX`): every page inherits it.
+    ...(indexable() ? {} : { robots: { index: false, follow: false } }),
     // The shop's icons in public/: replace them with the store's own.
     icons: {
       icon: [

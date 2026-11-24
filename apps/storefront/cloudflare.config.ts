@@ -48,6 +48,10 @@ export default defineConfig({
       ...(deploy.STOREFRONT_ROUTING
         ? { STOREFRONT_ROUTING: bindings.text(deploy.STOREFRONT_ROUTING) }
         : {}),
+      // A demo or staging store kept out of search (`hypha.json`'s `noindex`).
+      ...(deploy.STOREFRONT_NOINDEX
+        ? { STOREFRONT_NOINDEX: bindings.text(deploy.STOREFRONT_NOINDEX) }
+        : {}),
       // Development's pseudo-language (`lib/site.ts`), from the environment the dev
       // server is started in.
       ...(deploy.HYPHA_I18N_PSEUDO

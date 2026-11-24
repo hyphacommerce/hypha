@@ -443,6 +443,26 @@ test("a connected storefront keeps its keys and only checks its webhook", async 
   assert.equal(apps.storefront.env.HYPHA_CF_CACHE_KV, "3".repeat(32));
 });
 
+test("a storefront kept out of search is built with STOREFRONT_NOINDEX, the admin isn't", async () => {
+  const d = deployment();
+  d.domains.storefront = "shop.example.com";
+  Object.assign(d.cloudflare!, {
+    accountId: "a".repeat(32),
+    hyperdriveId: "1".repeat(32),
+    kvId: "2".repeat(32),
+    cacheKvId: "3".repeat(32),
+  });
+  const { dir, env } = await folder(d, false);
+  env
+    .set("STOREFRONT_KEY", "hypha_pk_old")
+    .set("HYPHA_WEBHOOK_SECRET", "hypha_as_old")
+    .set("STOREFRONT_NOINDEX", "1");
+  const { tools, apps } = fakeTools();
+  await deployCloudflare(dir, d, env, tools);
+  assert.equal(apps.storefront.env.STOREFRONT_NOINDEX, "1");
+  assert.equal(apps.admin.env.STOREFRONT_NOINDEX, undefined);
+});
+
 test("without an API token, the apps can't deploy and nothing starts", async () => {
   const d = deployment();
   const { dir, env } = await folder(d, false);

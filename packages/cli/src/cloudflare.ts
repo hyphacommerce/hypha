@@ -684,6 +684,10 @@ export async function deployCloudflare(
         HYPHA_CF_DOMAIN: domain,
         HYPHA_CF_API_WORKER: workerName(d),
         ...(app === "storefront" ? { HYPHA_CF_CACHE_KV: cf.cacheKvId! } : {}),
+        // `.env`'s `STOREFRONT_NOINDEX=1` keeps a demo or staging store out of search.
+        ...(app === "storefront" && env.get("STOREFRONT_NOINDEX")
+          ? { STOREFRONT_NOINDEX: env.get("STOREFRONT_NOINDEX")! }
+          : {}),
       };
       // The binding's base URL; the binding itself skips the internet.
       const appSecrets: Record<string, string> = {
