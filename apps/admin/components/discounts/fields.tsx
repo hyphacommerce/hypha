@@ -42,7 +42,10 @@ export const fieldStatus = (message: string | undefined) =>
 
 /** A field's error where the field isn't an input (a list of tokens, a group of inputs). */
 export function FieldError({ message }: { message: string | undefined }) {
-  return message ? <FieldStatus type="error" message={message} variant="detached" /> : null;
+  return message ? (
+    // oxlint-disable-next-line typescript/no-deprecated -- only FieldStatus's `tooltip` overload is deprecated; this is `detached`
+    <FieldStatus type="error" message={message} variant="detached" />
+  ) : null;
 }
 
 /** One amount input per market, labelled with its name and currency. */

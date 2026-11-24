@@ -82,6 +82,7 @@ export function GrantFields({
     hasScope(myScopes, scope) ? undefined : t("agents.grant_lacks_scope", { scope });
   const problemFor = (scope: string) =>
     problem?.scope === scope ? (
+      // oxlint-disable-next-line typescript/no-deprecated -- only FieldStatus's `tooltip` overload is deprecated; this is `detached`
       <FieldStatus type="error" message={problem.error} variant="detached" />
     ) : null;
   const sectionProblem = (field: GrantField) =>

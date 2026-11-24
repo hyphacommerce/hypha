@@ -13,9 +13,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@hono/node-server": "2.1.5",
+    "@hono/node-server": "2.1.9",
     "@hyphacommerce/app": "workspace:*",
-    "hono": "4.13.14"
+    "hono": "4.13.19"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261030.1",

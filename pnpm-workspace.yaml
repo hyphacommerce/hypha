@@ -45,3 +45,14 @@ allowBuilds:
   vue-demi: false
   "@astryxdesign/core": false
   "@astryxdesign/cli": false
+
+# Patched versions of transitive dependencies whose parents pin a vulnerable one; drop
+# each once its parent moves past it.
+overrides:
+  # satori (vinext's @vercel/og) pins 0.7.3: GHSA-px8p-9vwx-vf98, fixed in 0.7.5.
+  "fflate@0.7.3": "0.7.5"
+  # rolldown's wasm binding (astro 7.4.5+) brings a pre-release; pnpm then hands it to
+  # @astrojs/check's wasm runtime beside the stable @emnapi/core, and `astro check`
+  # crashes loading it. Every runtime here accepts ^1.7.1.
+  "@emnapi/core@2.0.0-beta.2": "1.11.3"
+  "@emnapi/runtime@2.0.0-beta.2": "1.11.3"
