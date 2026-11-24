@@ -29,6 +29,8 @@ import {
   missingIn,
 } from "@/lib/address";
 import { type Country, countryName, countryOptions } from "@/lib/regions";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { type AddressRequest, removeAddress, saveAddress } from "../actions";
 
@@ -77,6 +79,8 @@ export function AddressesCard({
   /** `customers:write`. */
   canWrite: boolean;
 }) {
+  const t = useT<"customers">();
+  const format = useFormat();
   const [editing, setEditing] = useState<Address | "new">();
   const [deleting, setDeleting] = useState<Address>();
   return (
@@ -84,11 +88,11 @@ export function AddressesCard({
       <VStack gap={3}>
         <HStack hAlign="between" vAlign="center">
           <Text type="display-3" as="h2">
-            Addresses
+            {t("customers.addresses_title")}
           </Text>
           {canWrite && (
             <Button
-              label="Add address"
+              label={t("customers.addresses_add")}
               variant="secondary"
               size="sm"
               icon={<PlusIcon />}
@@ -97,9 +101,7 @@ export function AddressesCard({
           )}
         </HStack>
         {addresses.length === 0 ? (
-          <Text color="secondary">
-            No saved addresses. Checkout keeps an order&apos;s address on the order.
-          </Text>
+          <Text color="secondary">{t("customers.addresses_empty")}</Text>
         ) : (
           <VStack gap={4}>
             {addresses.map((address) => (
@@ -107,26 +109,30 @@ export function AddressesCard({
                 <VStack gap={2}>
                   {(defaultShipping === address.id || defaultBilling === address.id) && (
                     <HStack gap={1}>
-                      {defaultShipping === address.id && <Badge label="Default shipping" />}
-                      {defaultBilling === address.id && <Badge label="Default billing" />}
+                      {defaultShipping === address.id && (
+                        <Badge label={t("customers.addresses_default_shipping")} />
+                      )}
+                      {defaultBilling === address.id && (
+                        <Badge label={t("customers.addresses_default_billing")} />
+                      )}
                     </HStack>
                   )}
                   <AddressLines
                     address={address}
-                    country={countryName(address.country, countries)}
+                    country={countryName(address.country, countries, format.locale)}
                   />
                 </VStack>
                 {canWrite && (
                   <HStack gap={1}>
                     <IconButton
-                      label="Edit address"
+                      label={t("customers.addresses_edit")}
                       icon={<PencilSquareIcon />}
                       size="sm"
                       variant="ghost"
                       onClick={() => setEditing(address)}
                     />
                     <IconButton
-                      label="Delete address"
+                      label={t("customers.addresses_delete")}
                       icon={<TrashIcon />}
                       size="sm"
                       variant="ghost"
@@ -204,10 +210,12 @@ function AddressDialog({
   onClose: () => void;
 }) {
   const router = useRouter();
+  const t = useT<"customers">();
+  const format = useFormat();
   // No country until chosen: the first of the list is nobody's default.
   const [draft, setDraft] = useState(() => draftOf(address, ""));
   // The chosen country's form: its fields, labels and regions.
-  const [format, setFormat] = useState<AddressFormat | null>(initialFormat ?? null);
+  const [addressFormat, setFormat] = useState<AddressFormat | null>(initialFormat ?? null);
   const [defaultShipping, setDefaultShipping] = useState(isDefaultShipping);
   const [defaultBilling, setDefaultBilling] = useState(isDefaultBilling);
   const [error, setError] = useState<string>();
@@ -228,11 +236,11 @@ function AddressDialog({
 
   const submit = () => {
     setTried(true);
-    if (draft.country === "" || !format) {
-      setError("Choose a country first.");
+    if (draft.country === "" || !addressFormat) {
+      setError(t("customers.addresses_dialog_country_first"));
       return;
     }
-    if (missingIn(format, draft).length > 0) return;
+    if (missingIn(addressFormat, draft).length > 0) return;
     const body: AddressRequest = {
       first_name: optional(draft.first_name),
       last_name: draft.last_name.trim(),
@@ -262,24 +270,28 @@ function AddressDialog({
   return (
     <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={560} purpose="form">
       <DialogHeader
-        title={address ? "Edit address" : "Add address"}
-        subtitle="For the address book. Orders keep the address they were placed with."
+        title={
+          address
+            ? t("customers.addresses_dialog_edit_title")
+            : t("customers.addresses_dialog_add_title")
+        }
+        subtitle={t("customers.addresses_dialog_subtitle")}
         onOpenChange={(open) => !open && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
         <Selector
-          label="Country"
-          options={countryOptions(countries)}
+          label={t("common.country")}
+          options={countryOptions(countries, format.locale)}
           value={draft.country || undefined}
           onChange={chooseCountry}
           hasSearch
-          placeholder="Choose a country"
+          placeholder={t("common.choose_country")}
           isRequired
         />
-        {format && !isLoadingFormat ? (
+        {addressFormat && !isLoadingFormat ? (
           <AddressFields
-            format={format}
+            format={addressFormat}
             values={draft}
             onChange={setField}
             problems={problems}
@@ -290,24 +302,26 @@ function AddressDialog({
             }}
           />
         ) : (
-          draft.country !== "" && <Text color="secondary">Loading the country&apos;s form…</Text>
+          draft.country !== "" && (
+            <Text color="secondary">{t("customers.addresses_dialog_loading")}</Text>
+          )
         )}
         <VStack gap={2}>
           <CheckboxInput
-            label="Default shipping address"
+            label={t("customers.addresses_dialog_default_shipping")}
             value={defaultShipping}
             onChange={setDefaultShipping}
           />
           <CheckboxInput
-            label="Default billing address"
+            label={t("customers.addresses_dialog_default_billing")}
             value={defaultBilling}
             onChange={setDefaultBilling}
           />
         </VStack>
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label={address ? "Save" : "Add address"}
+            label={address ? t("common.save") : t("customers.addresses_add")}
             variant="primary"
             isLoading={isPending}
             onClick={submit}
@@ -328,18 +342,21 @@ function DeleteAddressDialog({
   onClose: () => void;
 }) {
   const router = useRouter();
+  const t = useT<"customers">();
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
   return (
     <AlertDialog
       isOpen
       onOpenChange={(open) => !open && onClose()}
-      title="Delete this address?"
+      title={t("customers.addresses_delete_title")}
       description={
         error ??
-        `${[address.line1, address.city].filter(Boolean).join(", ")} leaves the address book. Orders placed with it keep it.`
+        t("customers.addresses_delete_description", {
+          address: [address.line1, address.city].filter(Boolean).join(", "),
+        })
       }
-      actionLabel="Delete address"
+      actionLabel={t("customers.addresses_delete")}
       isActionLoading={isPending}
       onAction={() =>
         startTransition(async () => {

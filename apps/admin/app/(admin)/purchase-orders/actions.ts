@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { describe, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 
 export type Result = { error?: string };
 
@@ -14,7 +15,10 @@ export async function createPurchaseOrder(
 ): Promise<Result> {
   const client = await sessionClient();
   const { data, error } = await client.POST("/admin/purchase-orders", { body: input });
-  if (!data) return { error: error ? describe(error) : "Couldn't write the purchase order." };
+  if (!data) {
+    const t = await getT();
+    return { error: error ? await describe(error) : t("purchasing.create_failed") };
+  }
   revalidatePath("/purchase-orders");
   redirect(`/purchase-orders/${data.id}`);
 }
@@ -28,7 +32,7 @@ export async function updatePurchaseOrder(id: string, patch: PurchaseOrderPatch)
     params: { path: { id } },
     body: patch,
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/purchase-orders/${id}`);
   return {};
 }
@@ -46,7 +50,7 @@ export async function movePurchaseOrder(
       : action === "close"
         ? await client.POST("/admin/purchase-orders/{id}/close", params)
         : await client.POST("/admin/purchase-orders/{id}/cancel", params);
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/purchase-orders/${id}`);
   revalidatePath("/purchase-orders");
   return {};
@@ -69,7 +73,7 @@ export async function sendPurchaseOrder(
       ...(input.message.trim() ? { message: input.message } : {}),
     },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/purchase-orders/${id}`);
   revalidatePath("/purchase-orders");
   return {};
@@ -81,7 +85,7 @@ export async function deletePurchaseOrder(id: string): Promise<Result> {
   const { error } = await client.DELETE("/admin/purchase-orders/{id}", {
     params: { path: { id } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath("/purchase-orders");
   redirect("/purchase-orders");
 }
@@ -115,7 +119,10 @@ export async function receivePurchaseOrder(
       note: input.note.trim() || null,
     },
   });
-  if (!data) return { error: error ? describe(error) : "Couldn't record the receipt." };
+  if (!data) {
+    const t = await getT();
+    return { error: error ? await describe(error) : t("purchasing.receive_failed") };
+  }
   revalidatePath(`/purchase-orders/${id}`);
   revalidatePath("/purchase-orders");
   return { newItems: data.new_items };
@@ -127,7 +134,7 @@ export async function cancelReceipt(purchaseOrder: string, receipt: string): Pro
   const { error } = await client.POST("/admin/receipts/{id}/cancel", {
     params: { path: { id: receipt } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/purchase-orders/${purchaseOrder}`);
   revalidatePath("/purchase-orders");
   return {};
@@ -145,7 +152,7 @@ export async function trackVariants(variants: string[]): Promise<Result> {
       params: { path: { id: data.id } },
       body: { tracked: true },
     });
-    if (error) return { error: describe(error) };
+    if (error) return { error: await describe(error) };
   }
   revalidatePath("/inventory");
   return {};

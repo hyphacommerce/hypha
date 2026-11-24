@@ -1,6 +1,6 @@
 use hypha_core::{
     Address, AddressParts, AddressVerification, AppCheck, CartId, ChannelId, CountryCode,
-    CustomerId, Email, MarketId, OrderId, PaymentMethodId, Price, ProductId, Quantity,
+    CustomerId, Email, Language, MarketId, OrderId, PaymentMethodId, Price, ProductId, Quantity,
     ShippingGroupId, ShippingOptionId, Stamped, Stamps, Timestamp, VariantId, Version, Versioned,
 };
 use hypha_shipping::ProviderKey;
@@ -108,6 +108,10 @@ pub struct Cart {
     /// `MAX_CODES_PER_CART`. A code stays while it doesn't apply, so it applies once the
     /// cart qualifies; pricing says where each stands.
     discount_codes: Vec<String>,
+    /// The language the shopper reads the cart in, as the host held it to what the
+    /// cart's market offers; `None` follows the market's default. The order is placed
+    /// in it.
+    language: Option<Language>,
 }
 
 impl Versioned for Cart {
@@ -150,7 +154,21 @@ impl Cart {
             payment_method: None,
             marketing_opt_in: false,
             discount_codes: Vec::new(),
+            language: None,
         }
+    }
+
+    /// The language the shopper reads in; `None` goes back to the market's default.
+    /// The caller holds it to what the market offers: the cart can't see that.
+    pub fn set_language(&mut self, language: Option<Language>) -> Result<(), CartError> {
+        self.ensure_open()?;
+        self.language = language;
+        Ok(())
+    }
+
+    /// The language it was given; `None` for the market's default.
+    pub fn language(&self) -> Option<&Language> {
+        self.language.as_ref()
     }
 
     /// Erasure of a cart that was checked out: the buyer's email becomes `placeholder` and
@@ -476,6 +494,8 @@ pub struct CartSnapshot {
     pub marketing_opt_in: bool,
     /// Normalised; at most `MAX_CODES_PER_CART`, each once.
     pub discount_codes: Vec<String>,
+    /// `None` for the market's default, and for carts made before carts had one.
+    pub language: Option<Language>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -516,6 +536,7 @@ impl Cart {
             payment_method: self.payment_method,
             marketing_opt_in: self.marketing_opt_in,
             discount_codes: self.discount_codes.clone(),
+            language: self.language.clone(),
         }
     }
 
@@ -581,6 +602,7 @@ impl Cart {
             payment_method: s.payment_method,
             marketing_opt_in: s.marketing_opt_in,
             discount_codes: s.discount_codes,
+            language: s.language,
         })
     }
 }
@@ -612,6 +634,32 @@ mod tests {
 
     fn qty(n: u32) -> Quantity {
         Quantity::new(n).unwrap()
+    }
+
+    #[test]
+    fn a_cart_starts_without_a_language_and_takes_one() {
+        let mut c = cart();
+        assert_eq!(c.language(), None);
+        let german = Language::new("de").unwrap();
+        c.set_language(Some(german.clone())).unwrap();
+        assert_eq!(c.language(), Some(&german));
+        assert_eq!(
+            Cart::restore(c.snapshot()).unwrap().language(),
+            Some(&german)
+        );
+        c.set_language(None).unwrap();
+        assert_eq!(c.language(), None);
+    }
+
+    #[test]
+    fn a_checked_out_cart_keeps_its_language() {
+        let mut c = cart();
+        let order = OrderId::from_uuid(Uuid::from_u128(9));
+        c.complete(order).unwrap();
+        assert_eq!(
+            c.set_language(Some(Language::new("de").unwrap())),
+            Err(CartError::Completed { order })
+        );
     }
 
     #[test]

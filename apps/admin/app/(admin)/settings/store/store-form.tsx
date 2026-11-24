@@ -3,6 +3,7 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Card } from "@astryxdesign/core/Card";
 import { VStack } from "@astryxdesign/core/Layout";
+import { Link } from "@astryxdesign/core/Link";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
@@ -13,7 +14,11 @@ import { startTransition, useActionState, useState } from "react";
 import { useCurrencies } from "@/components/currencies";
 import { SaveBar } from "@/components/save-bar";
 import { currencyCodes } from "@/lib/format";
+import { languageLabel } from "@/lib/languages";
+import type { KeyIn } from "@/lib/messages";
 import { type Country, countryOptions, currencyOptions } from "@/lib/regions";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { type StorePatch, updateStore } from "./actions";
 
@@ -33,16 +38,20 @@ type AddressDraft = {
   phone: string;
 };
 
-const ADDRESS_FIELDS: { key: keyof AddressDraft; label: string; isRequired?: boolean }[] = [
-  { key: "company", label: "Company" },
-  { key: "first_name", label: "First name" },
-  { key: "last_name", label: "Last name", isRequired: true },
-  { key: "line1", label: "Address", isRequired: true },
-  { key: "line2", label: "Address line 2" },
-  { key: "city", label: "City", isRequired: true },
-  { key: "province", label: "Region or province" },
-  { key: "postal_code", label: "Postal code" },
-  { key: "phone", label: "Phone" },
+const ADDRESS_FIELDS: {
+  key: keyof AddressDraft;
+  label: KeyIn<"settings" | "common">;
+  isRequired?: boolean;
+}[] = [
+  { key: "company", label: "common.company" },
+  { key: "first_name", label: "common.first_name" },
+  { key: "last_name", label: "common.last_name", isRequired: true },
+  { key: "line1", label: "common.address", isRequired: true },
+  { key: "line2", label: "common.address_line2" },
+  { key: "city", label: "common.city", isRequired: true },
+  { key: "province", label: "common.region_or_province" },
+  { key: "postal_code", label: "common.postal_code" },
+  { key: "phone", label: "common.phone" },
 ];
 
 function addressDraft(a: Store["legal_address"]): AddressDraft {
@@ -83,11 +92,11 @@ function addressValue(d: AddressDraft): AdminSchemas["PostalAddressRequest"] | n
 }
 
 /** Every IANA name the browser knows, plus the stored one if it isn't among them. */
-function timezoneOptions(current: string | null | undefined) {
+function timezoneOptions(current: string | null | undefined, none: string) {
   const names = Intl.supportedValuesOf("timeZone");
   if (current && !names.includes(current)) names.push(current);
   return [
-    { value: "", label: "None" },
+    { value: "", label: none },
     ...names.map((name) => ({ value: name, label: name.replaceAll("_", " ") })),
   ];
 }
@@ -98,13 +107,14 @@ function orNull(value: string): string | null {
 }
 
 export function StoreForm({ store, countries }: { store: Store; countries: Country[] }) {
+  const t = useT<"settings" | "languages">();
+  const format = useFormat();
   const [name, setName] = useState(store.name);
   const [email, setEmail] = useState(store.contact_email ?? "");
   const [description, setDescription] = useState(store.description ?? "");
   const [legalName, setLegalName] = useState(store.legal_name ?? "");
   const [address, setAddress] = useState(() => addressDraft(store.legal_address));
   const [timezone, setTimezone] = useState(store.timezone ?? "");
-  const [language, setLanguage] = useState(store.default_language);
   const [currency, setCurrency] = useState(store.currency ?? "");
   const currencies = useCurrencies();
   const [state, save, isPending] = useActionState(updateStore, {});
@@ -119,7 +129,6 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
   if (JSON.stringify(addressValue(address)) !== savedAddress)
     patch.legal_address = addressValue(address);
   if (timezone !== (store.timezone ?? "")) patch.timezone = orNull(timezone);
-  if (language.trim() !== store.default_language) patch.default_language = language;
   if (currency !== (store.currency ?? "")) patch.currency = orNull(currency);
   const isChanged = Object.keys(patch).length > 0;
 
@@ -134,7 +143,6 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
     setLegalName(store.legal_name ?? "");
     setAddress(addressDraft(store.legal_address));
     setTimezone(store.timezone ?? "");
-    setLanguage(store.default_language);
     setCurrency(store.currency ?? "");
   };
   const field = (key: keyof AddressDraft) => (value: string) =>
@@ -150,28 +158,28 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
         onSave={submit}
         onDiscard={discard}
       />
-      {state.saved && !isChanged && <Banner status="success" title="Saved." />}
+      {state.saved && !isChanged && <Banner status="success" title={t("common.saved_notice")} />}
       <Card>
         <VStack gap={4}>
           <Text type="display-3" as="h2">
-            Store
+            {t("settings.store_card_title")}
           </Text>
           <TextInput
-            label="Store name"
-            description="Shown to staff here and to shoppers in the storefront. Up to 100 characters."
+            label={t("settings.store_name_label")}
+            description={t("settings.store_name_description")}
             value={name}
             onChange={setName}
           />
           <TextInput
-            label="Contact email"
-            description="Where shoppers and agents can write to you. Storefronts show it."
-            placeholder="hello@example.com"
+            label={t("settings.store_email_label")}
+            description={t("settings.store_email_description")}
+            placeholder={t("settings.store_email_placeholder")}
             value={email}
             onChange={setEmail}
           />
           <TextArea
-            label="Description"
-            description="Plain text, for your storefront's header or search results."
+            label={t("common.description")}
+            description={t("settings.store_description_description")}
             maxLength={500}
             rows={3}
             value={description}
@@ -183,23 +191,30 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
         <VStack gap={4}>
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Language and time
+              {t("settings.store_language_title")}
             </Text>
             <Text type="supporting" color="secondary">
-              Translations come later; the language says what your content is written in now.
+              {t("languages.store_form_description")}
             </Text>
           </VStack>
           <div className="form-grid">
-            <TextInput
-              label="Content language"
-              description="A BCP 47 tag: en, en-GB, sr-Latn…"
-              value={language}
-              onChange={setLanguage}
-            />
+            <VStack gap={1}>
+              <Text type="label">{t("settings.store_content_language_label")}</Text>
+              <Text>{languageLabel(format, store.default_language)}</Text>
+              <Text type="supporting" color="secondary">
+                {t.rich("languages.store_form_hint", {
+                  link: (chunks, key) => (
+                    <Link key={key} href="/settings/languages">
+                      {chunks}
+                    </Link>
+                  ),
+                })}
+              </Text>
+            </VStack>
             <Selector
-              label="Time zone"
-              description="Times are stored in UTC; this is how your store's clients show them."
-              options={timezoneOptions(store.timezone)}
+              label={t("common.time_zone")}
+              description={t("settings.store_time_zone_description")}
+              options={timezoneOptions(store.timezone, t("common.none"))}
               value={timezone}
               onChange={setTimezone}
               hasSearch
@@ -211,19 +226,18 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
         <VStack gap={4}>
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Costs
+              {t("settings.store_costs_title")}
             </Text>
             <Text type="supporting" color="secondary">
-              What you pay suppliers is converted to one currency, so stock value and margins add up
-              across markets.
+              {t("settings.store_costs_description")}
             </Text>
           </VStack>
           <Selector
-            label="Base currency"
-            description="Purchase orders, unit costs and stock value are kept in it. It can't change once a cost is recorded."
+            label={t("settings.store_base_currency_label")}
+            description={t("settings.store_base_currency_description")}
             options={[
-              { value: "", label: "None yet" },
-              ...currencyOptions(currencyCodes(currencies)),
+              { value: "", label: t("settings.store_base_currency_none") },
+              ...currencyOptions(currencyCodes(currencies), format.locale),
             ]}
             value={currency}
             onChange={setCurrency}
@@ -235,15 +249,15 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
         <VStack gap={4}>
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Legal details
+              {t("settings.store_legal_title")}
             </Text>
             <Text type="supporting" color="secondary">
-              For invoices and legal pages. Leave every address field blank to have none.
+              {t("settings.store_legal_description")}
             </Text>
           </VStack>
           <TextInput
-            label="Legal name"
-            placeholder="Acme d.o.o."
+            label={t("settings.store_legal_name_label")}
+            placeholder={t("settings.store_legal_name_placeholder")}
             value={legalName}
             onChange={setLegalName}
           />
@@ -251,7 +265,7 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
             {ADDRESS_FIELDS.map((f) => (
               <TextInput
                 key={f.key}
-                label={f.label}
+                label={t(f.label)}
                 isOptional={!f.isRequired}
                 value={address[f.key]}
                 onChange={field(f.key)}
@@ -259,12 +273,12 @@ export function StoreForm({ store, countries }: { store: Store; countries: Count
             ))}
           </div>
           <Selector
-            label="Country"
-            options={countryOptions(countries)}
+            label={t("common.country")}
+            options={countryOptions(countries, format.locale)}
             value={address.country || undefined}
             onChange={field("country")}
             hasSearch
-            placeholder="Choose a country"
+            placeholder={t("common.choose_country")}
           />
         </VStack>
       </Card>

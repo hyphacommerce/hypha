@@ -88,7 +88,7 @@ async fn a_host_built_with_a_spore_migrates_registers_and_runs_it() {
     assert!(names.contains(&"variant_cleanup"), "{names:?}");
     assert_eq!(
         EventHandlers::<PgPorts>::wanting(state.storage.handlers(), "product.created"),
-        ["search_index", "spore_test_noop"]
+        ["search_index", "translation_source_sync", "spore_test_noop"]
     );
 
     // Its app, enabled, its scopes its grant.

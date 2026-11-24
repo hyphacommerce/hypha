@@ -3,22 +3,25 @@ import { Button } from "@astryxdesign/core/Button";
 import { HStack } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
 
+import { getT } from "@/lib/i18n";
+
 /**
  * What a page shows when its API reads need a scope the user's role lacks
  * (`forbidden()`, from `loaded` in lib/hypha.ts): a notice inside the frame instead of
  * the error page, so the rest of the admin stays a click away.
  */
-export default function Forbidden() {
+export default async function Forbidden() {
+  const t = await getT();
   return (
     <Section padding={6}>
       <Banner
         status="info"
-        title="Your role can't open this page"
-        description="It needs access your role doesn't include. Ask the store owner to add it to your role. Your own account is always under Your account."
+        title={t("shell.forbidden_title")}
+        description={t("shell.forbidden_description")}
         endContent={
           <HStack gap={2}>
-            <Button label="Home" variant="secondary" href="/" />
-            <Button label="Your account" variant="secondary" href="/account" />
+            <Button label={t("common.home")} variant="secondary" href="/" />
+            <Button label={t("common.your_account")} variant="secondary" href="/account" />
           </HStack>
         }
       />

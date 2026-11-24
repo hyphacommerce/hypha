@@ -5,6 +5,43 @@ use hypha_core::{CartId, Event, Money, OrderId, PaymentId, PaymentMethodId};
 use serde::Serialize;
 
 pub const PAYMENT: &str = "payment";
+pub const PAYMENT_METHOD: &str = "payment_method";
+
+/// `payment_method.created`.
+#[derive(Debug, Serialize)]
+pub struct PaymentMethodCreated {
+    pub payment_method: PaymentMethodId,
+}
+
+impl Event for PaymentMethodCreated {
+    const TYPE: &'static str = "payment_method.created";
+    const VERSION: u16 = 1;
+}
+
+/// `payment_method.updated`: which of `name`, `instructions`, `markets`, `channels`,
+/// `enabled`, `position` and `settings` changed, one event per write. The values aren't
+/// in it (the settings may hold a provider's secrets): read the method.
+#[derive(Debug, Serialize)]
+pub struct PaymentMethodUpdated {
+    pub payment_method: PaymentMethodId,
+    pub fields: Vec<&'static str>,
+}
+
+impl Event for PaymentMethodUpdated {
+    const TYPE: &'static str = "payment_method.updated";
+    const VERSION: u16 = 1;
+}
+
+/// `payment_method.deleted`.
+#[derive(Debug, Serialize)]
+pub struct PaymentMethodDeleted {
+    pub payment_method: PaymentMethodId,
+}
+
+impl Event for PaymentMethodDeleted {
+    const TYPE: &'static str = "payment_method.deleted";
+    const VERSION: u16 = 1;
+}
 
 /// `payment.created`: checkout started collecting `amount` for a cart (an online method,
 /// before the order) or an order (a manual method), or staff recorded money on an order

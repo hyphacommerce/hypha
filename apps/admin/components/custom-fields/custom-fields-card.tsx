@@ -17,6 +17,7 @@ import {
   inputsOf,
   isWritable,
 } from "@/lib/custom-fields";
+import { useT } from "@/lib/use-t";
 
 import { type FieldsPatch, saveCustomFields } from "./actions";
 import { CustomFieldsForm, CustomFieldsFrame } from "./custom-fields-form";
@@ -38,6 +39,7 @@ export function useCustomFields({
   fields: FieldsResponse;
   currency: string;
 }) {
+  const t = useT<"custom_fields">();
   const currencies = useCurrencies();
   const [saved, setSaved] = useState(fields);
   const [inputs, setInputs] = useState(() => inputsOf(definitions, fields, currencies, currency));
@@ -48,7 +50,7 @@ export function useCustomFields({
   // New values from the server (after a save elsewhere, a refresh): take them in unless
   // there are unsaved edits ("adjust state while rendering").
   const [seen, setSeen] = useState(fields);
-  const isDirty = fieldsChanged(definitions, inputs, saved, currencies);
+  const isDirty = fieldsChanged(definitions, inputs, saved, currencies, t);
   if (fields !== seen) {
     setSeen(fields);
     setSaved(fields);
@@ -71,10 +73,10 @@ export function useCustomFields({
   };
   /** The patch saving sends (`null`: nothing changed), or an error after marking the problems. */
   const prepare = (): { patch: FieldsPatch | null } | { error: string } => {
-    const built = fieldsPatch(definitions, inputs, saved, currencies);
+    const built = fieldsPatch(definitions, inputs, saved, currencies, t);
     if ("problems" in built) {
       setProblems(built.problems);
-      return { error: "Some custom fields need fixing first." };
+      return { error: t("custom_fields.card_needs_fixing") };
     }
     return { patch: built.patch };
   };
@@ -145,6 +147,7 @@ export function CustomFieldsCard({
   /** The currency a new money value starts in. */
   currency?: string;
 }) {
+  const t = useT();
   const state = useCustomFields({ ownerType, ownerId, definitions, fields, currency });
   const writable = (d: Definition) => isWritable(d, ownerType, scopes);
   const canWrite = definitions.some(writable);
@@ -157,10 +160,15 @@ export function CustomFieldsCard({
         canWrite && (
           <HStack gap={2}>
             {state.isDirty && (
-              <Button label="Discard" variant="ghost" size="sm" onClick={state.discard} />
+              <Button
+                label={t("common.discard")}
+                variant="ghost"
+                size="sm"
+                onClick={state.discard}
+              />
             )}
             <Button
-              label="Save"
+              label={t("common.save")}
               variant="primary"
               size="sm"
               isDisabled={!state.isDirty}

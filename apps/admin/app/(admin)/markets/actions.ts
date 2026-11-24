@@ -34,7 +34,7 @@ export async function createMarket(input: {
       prices_include_tax: input.pricesIncludeTax,
     },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   await client.POST("/admin/catalogs", { body: { market: market.id } });
   refresh();
   redirect(`/markets/${market.id}`);
@@ -42,14 +42,23 @@ export async function createMarket(input: {
 
 export async function updateMarket(
   id: string,
-  input: { name?: string; pricesIncludeTax?: boolean },
+  input: {
+    name?: string;
+    pricesIncludeTax?: boolean;
+    /** The languages offered, in order, replacing the list; absent keeps it. */
+    languages?: string[];
+  },
 ): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.PATCH("/admin/markets/{id}", {
     params: { path: { id } },
-    body: { name: input.name, prices_include_tax: input.pricesIncludeTax },
+    body: {
+      name: input.name,
+      prices_include_tax: input.pricesIncludeTax,
+      languages: input.languages,
+    },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(id);
   return {};
 }
@@ -71,7 +80,7 @@ export async function setMarketCountries(
     });
     if (error) {
       refresh(id);
-      return { error: describe(error) };
+      return { error: await describe(error) };
     }
   }
   for (const country of current.filter((c) => !countries.includes(c))) {
@@ -80,7 +89,7 @@ export async function setMarketCountries(
     });
     if (error) {
       refresh(id);
-      return { error: describe(error) };
+      return { error: await describe(error) };
     }
   }
   refresh(id);
@@ -90,7 +99,7 @@ export async function setMarketCountries(
 export async function createCatalog(market: string): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.POST("/admin/catalogs", { body: { market } });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(market);
   return {};
 }
@@ -105,7 +114,7 @@ export async function addCatalogProducts(
     params: { path: { id: catalog } },
     body: { products },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(market);
   return {};
 }
@@ -120,7 +129,7 @@ export async function removeCatalogProduct(
     params: { path: { id: catalog } },
     body: { products: [product] },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(market);
   return {};
 }

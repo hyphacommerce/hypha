@@ -15,6 +15,7 @@ use hypha_media::MediaSettings;
 use hypha_notifications::SendSettings;
 use hypha_privacy::PrivacySettings;
 use hypha_search::SyncSettings;
+use hypha_translations::SourceSyncSettings;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -472,6 +473,7 @@ pub struct Jobs {
     pub prune: PruneJob,
     pub media_sweep: Job,
     pub search_sync: SearchSyncJob,
+    pub translation_sources: TranslationSourcesJob,
     pub send_notifications: SendNotificationsJob,
     /// Announcing price lists' windows opening and closing (`price_list.started` /
     /// `.ended`), so search and storefront caches follow. Prices themselves follow the
@@ -493,6 +495,7 @@ impl Default for Jobs {
             dispatch: DispatchJob::default(),
             prune: PruneJob::default(),
             search_sync: SearchSyncJob::default(),
+            translation_sources: TranslationSourcesJob::default(),
             send_notifications: SendNotificationsJob::default(),
             media_sweep: Job {
                 enabled: true,
@@ -573,6 +576,29 @@ impl Default for SearchSyncJob {
             interval: Dur(Duration::from_secs(2)),
             batch: s.batch,
             lease: Dur(s.lease),
+        }
+    }
+}
+
+/// Keeping the translation worklist's sources up to date for the resources queued as a
+/// whole: every resource there was when it was first set up, and every product or
+/// category when a custom field definition's access changes. Single changes follow by
+/// event, without it. A Workers host runs it on the minute's ticks that have work.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct TranslationSourcesJob {
+    pub enabled: bool,
+    pub interval: Dur,
+    /// Resources read again per step (1 to 1,000).
+    pub batch: u32,
+}
+
+impl Default for TranslationSourcesJob {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            interval: Dur(Duration::from_secs(60)),
+            batch: SourceSyncSettings::default().batch,
         }
     }
 }

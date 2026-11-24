@@ -8,6 +8,9 @@ import { VStack } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
 import { useState, useTransition } from "react";
 
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
+
 import { deletePriceList } from "../actions";
 
 /**
@@ -15,6 +18,8 @@ import { deletePriceList } from "../actions";
  * which, so they can be taken off first.
  */
 export function DeletePriceList({ id, name }: { id: string; name: string }) {
+  const t = useT<"price_lists">();
+  const format = useFormat();
   const [isAsking, setIsAsking] = useState(false);
   const [refusal, setRefusal] = useState<{ error: string; markets?: string[] }>();
   const [isPending, startTransition] = useTransition();
@@ -22,10 +27,10 @@ export function DeletePriceList({ id, name }: { id: string; name: string }) {
     <Card>
       <VStack gap={3} hAlign="start">
         <Text type="display-3" as="h2">
-          Delete
+          {t("common.delete")}
         </Text>
         <Text type="supporting" color="secondary">
-          Its fixed prices go with it. Orders placed with its prices keep them.
+          {t("price_lists.delete_description")}
         </Text>
         {refusal && (
           <Banner
@@ -33,19 +38,23 @@ export function DeletePriceList({ id, name }: { id: string; name: string }) {
             title={refusal.error}
             description={
               refusal.markets && refusal.markets.length > 0
-                ? `Used by ${refusal.markets.join(", ")}. Remove it there (under "Markets" on this page), then delete it.`
+                ? t("price_lists.delete_in_use", { markets: format.list(refusal.markets, "unit") })
                 : undefined
             }
           />
         )}
-        <Button label="Delete price list" variant="destructive" onClick={() => setIsAsking(true)} />
+        <Button
+          label={t("price_lists.delete_action")}
+          variant="destructive"
+          onClick={() => setIsAsking(true)}
+        />
       </VStack>
       <AlertDialog
         isOpen={isAsking}
         onOpenChange={(open) => !open && setIsAsking(false)}
-        title={`Delete ${name}?`}
-        description="The list and its fixed prices are deleted for good."
-        actionLabel="Delete price list"
+        title={t("common.delete_named", { name })}
+        description={t("price_lists.delete_confirm_description")}
+        actionLabel={t("price_lists.delete_confirm_action")}
         isActionLoading={isPending}
         onAction={() =>
           startTransition(async () => {

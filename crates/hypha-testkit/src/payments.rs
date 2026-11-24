@@ -17,8 +17,8 @@ pub struct InMemoryPaymentMethodRepo {
     /// The payments, when linked (`linked`, as `InMemoryPorts` does): a method an open
     /// payment uses can't be deleted. Made on its own, it checks nothing.
     pub(crate) payments: Option<Arc<Table<PaymentId, Payment>>>,
-    /// Shared with `InMemoryPorts`' other repos: the clock writes are stamped with
-    /// (methods record no events).
+    /// Shared with `InMemoryPorts`' other repos: the clock writes are stamped with, and
+    /// where a delete's event goes.
     pub(crate) outbox: InMemoryOutbox,
 }
 
@@ -45,20 +45,27 @@ impl PaymentMethodRepo for InMemoryPaymentMethodRepo {
 
     async fn insert(&self, method: &mut PaymentMethod) -> Result<(), RepoError> {
         stamp_insert(method, self.outbox.now());
+        let events = method.take_events();
         self.methods.insert(
             method.id(),
             method,
             keys::PAYMENT_METHOD_ID,
             &no_unique_keys,
-        )
+        )?;
+        self.outbox.write(events, Some(method.version()));
+        Ok(())
     }
 
     async fn update(&self, method: &mut PaymentMethod) -> Result<(), RepoError> {
         stamp_update(method, self.outbox.now());
-        self.methods.update(method.id(), method, &no_unique_keys)
+        let events = method.take_events();
+        self.methods.update(method.id(), method, &no_unique_keys)?;
+        self.outbox.write(events, Some(method.version()));
+        Ok(())
     }
 
-    async fn delete(&self, method: &PaymentMethod) -> Result<(), RepoError> {
+    async fn delete(&self, method: &mut PaymentMethod) -> Result<(), RepoError> {
+        let events = method.take_events();
         let mut rows = self.methods.lock();
         match rows.get(&method.id()) {
             Some(stored) if stored.version() == method.version() => {}
@@ -74,6 +81,7 @@ impl PaymentMethodRepo for InMemoryPaymentMethodRepo {
             return Err(RepoError::Reference(keys::OPEN_PAYMENT_METHOD));
         }
         rows.remove(&method.id());
+        self.outbox.write(events, None);
         Ok(())
     }
 }

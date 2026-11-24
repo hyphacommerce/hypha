@@ -125,6 +125,11 @@ fn store_repo() {
 }
 
 #[test]
+fn store_events() {
+    block_on(contract::store_events(async || InMemoryPorts::default()));
+}
+
+#[test]
 fn outbox() {
     block_on(contract::outbox(async || InMemoryPorts::default()));
 }
@@ -446,6 +451,13 @@ fn receipt_repo() {
 #[test]
 fn transfer_repo() {
     block_on(contract::transfer_repo(async || InMemoryPorts::default()));
+}
+
+#[test]
+fn translation_repo() {
+    block_on(contract::translation_repo(async || {
+        InMemoryPorts::default()
+    }));
 }
 
 #[test]

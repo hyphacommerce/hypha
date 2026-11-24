@@ -1,0 +1,51 @@
+{% if customer and customer.name %}Zdravo, {{ customer.name }},{% else %}Zdravo,{% endif %}
+
+Dobre vesti: artikli iz vaše porudžbine {{ order.number }} su poslati.
+{%- if fulfillment.tracking %}
+
+Praćenje pošiljke:
+{%- for tracking in fulfillment.tracking %}
+- {% if tracking.carrier %}{{ tracking.carrier }}: {% endif %}{{ tracking.number }}{% if tracking.url %} ({{ tracking.url }}){% endif %}
+{%- endfor %}
+{%- endif %}
+
+U ovoj pošiljci:
+{%- for line in fulfillment.lines %}
+- {{ line.quantity }} × {{ line.title }}{% if line.variant %} ({{ line.variant }}){% endif %}
+{%- endfor %}
+{%- if order.url %}
+
+Pogledaj porudžbinu: {{ order.url }}
+{%- endif %}
+{%- if order.shipping_address %}
+
+Adresa za dostavu:
+{%- if order.shipping_address.name %}
+{{ order.shipping_address.name }}
+{%- endif %}
+{%- if order.shipping_address.company %}
+{{ order.shipping_address.company }}
+{%- endif %}
+{{ order.shipping_address.line1 }}
+{%- if order.shipping_address.line2 %}
+{{ order.shipping_address.line2 }}
+{%- endif %}
+{% if order.shipping_address.postal_code %}{{ order.shipping_address.postal_code }} {% endif %}{{ order.shipping_address.city }}
+{%- if order.shipping_address.province %}
+{{ order.shipping_address.province }}
+{%- endif %}
+{{ order.shipping_address.country }}
+{%- if order.shipping_address.phone %}
+{{ order.shipping_address.phone }}
+{%- endif %}
+{%- endif %}
+{%- if order.shipping_method %}
+
+Način dostave: {{ order.shipping_method }}
+{%- endif %}
+
+--
+{{ shop.name }}{% if shop.email %} · {{ shop.email }}{% endif %}
+{%- if brand.footer %}
+{{ brand.footer }}
+{%- endif %}

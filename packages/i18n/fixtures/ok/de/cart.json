@@ -1,0 +1,4 @@
+{
+  "title": "Ihr Warenkorb",
+  "items_count": "{count, plural, one {# Artikel} other {# Artikel}}"
+}

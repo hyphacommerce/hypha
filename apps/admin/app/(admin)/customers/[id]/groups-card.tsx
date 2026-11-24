@@ -13,6 +13,8 @@ import { Token } from "@astryxdesign/core/Token";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
+import { useT } from "@/lib/use-t";
+
 import type { Group } from "../groups/groups";
 import { setCustomerGroups } from "../groups/actions";
 
@@ -31,6 +33,7 @@ export function GroupsCard({
   canEdit: boolean;
 }) {
   const router = useRouter();
+  const t = useT<"customers">();
   const [selected, setSelected] = useState(current);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -43,20 +46,25 @@ export function GroupsCard({
       <VStack gap={3}>
         <VStack gap={1}>
           <Text type="display-3" as="h2">
-            Groups
+            {t("customers.groups_title")}
           </Text>
           <Text type="supporting" color="secondary">
-            Sets that prices and payment methods can refer to.{" "}
-            <Link href="/customers/groups">Manage groups</Link>
+            {t.rich("customers.groups_card_description", {
+              link: (chunks, key) => (
+                <Link key={key} href="/customers/groups">
+                  {chunks}
+                </Link>
+              ),
+            })}
           </Text>
         </VStack>
         {error && <Banner status="error" title={error} />}
         {groups.length === 0 ? (
-          <Text color="secondary">No groups yet.</Text>
+          <Text color="secondary">{t("customers.groups_card_empty")}</Text>
         ) : canEdit ? (
           <>
             <MultiSelector
-              label="Groups"
+              label={t("customers.groups_title")}
               isLabelHidden
               options={groups.map((g) => ({ value: g.id, label: g.name }))}
               value={selected}
@@ -71,13 +79,13 @@ export function GroupsCard({
             {isDirty && (
               <HStack gap={2} hAlign="end">
                 <Button
-                  label="Discard"
+                  label={t("common.discard")}
                   variant="ghost"
                   size="sm"
                   onClick={() => setSelected(current)}
                 />
                 <Button
-                  label="Save"
+                  label={t("common.save")}
                   variant="primary"
                   size="sm"
                   isLoading={isPending}
@@ -93,7 +101,7 @@ export function GroupsCard({
             )}
           </>
         ) : current.length === 0 ? (
-          <Text color="secondary">In no group.</Text>
+          <Text color="secondary">{t("customers.groups_card_none")}</Text>
         ) : (
           <HStack gap={1} wrap="wrap">
             {current.map((id) => (

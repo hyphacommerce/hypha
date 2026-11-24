@@ -1,0 +1,6 @@
+{
+  "subject": "Tracking updated for order {number}",
+  "preheader": "There's new tracking information for your order {number}.",
+  "heading": "Tracking updated",
+  "changed": "The tracking information for a shipment from your order {number} has changed. Here are the latest details."
+}

@@ -4,11 +4,14 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { useEffect, useRef, useState } from "react";
 
+import { useT } from "@/lib/use-t";
+
 /**
  * Searches the media library in a picker: file names, alt text and titles. `onSearch`
  * runs once the user pauses typing, and on Enter.
  */
 export function LibrarySearch({ onSearch }: { onSearch: (q: string) => void }) {
+  const t = useT();
   const [q, setQ] = useState("");
   const searched = useRef("");
   const search = (text: string) => {
@@ -22,9 +25,9 @@ export function LibrarySearch({ onSearch }: { onSearch: (q: string) => void }) {
   });
   return (
     <TextInput
-      label="Search the library"
+      label={t("components.library_search_label")}
       isLabelHidden
-      placeholder="Search names, alt text, titles"
+      placeholder={t("components.library_search_placeholder")}
       startIcon={MagnifyingGlassIcon}
       hasClear
       width="100%"

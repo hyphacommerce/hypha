@@ -20,6 +20,7 @@ import { useMemo, useState, useTransition } from "react";
 
 import { saveCustomFields } from "@/components/custom-fields/actions";
 import { type Definition, type FieldsResponse, filterParam } from "@/lib/custom-fields";
+import { useT } from "@/lib/use-t";
 import { textItems } from "@/lib/well-known-fields";
 
 import { addWellKnownField, labelsInUse } from "../actions";
@@ -46,15 +47,16 @@ export function CustomerLabels({
   /** `custom_fields:write`: the field can be created. */
   canDefine: boolean;
 }) {
+  const t = useT<"customers">();
   const [isEditing, setIsEditing] = useState(false);
   if (!definition) {
-    return canDefine ? <AddWellKnown which="labels" label="Add labels" /> : null;
+    return canDefine ? <AddWellKnown which="labels" label={t("customers.labels_add")} /> : null;
   }
   if (!fields) return null;
   if (fields.redacted?.includes(`custom_fields.${definition.field}`)) {
     return (
       <Text type="supporting" color="secondary">
-        Labels: hidden from your role.
+        {t("customers.labels_hidden")}
       </Text>
     );
   }
@@ -66,12 +68,12 @@ export function CustomerLabels({
       ))}
       {labels.length === 0 && (
         <Text type="supporting" color="secondary">
-          No labels
+          {t("customers.labels_empty")}
         </Text>
       )}
       {canEdit && (
         <IconButton
-          label="Edit labels"
+          label={t("customers.labels_edit")}
           icon={<PencilSquareIcon />}
           size="sm"
           variant="ghost"
@@ -152,6 +154,7 @@ function LabelsDialog({
   onClose: () => void;
 }) {
   const router = useRouter();
+  const t = useT<"customers">();
   const [items, setItems] = useState(() => labels.map(toItem));
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -176,8 +179,8 @@ function LabelsDialog({
   return (
     <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={480} purpose="form">
       <DialogHeader
-        title="Labels"
-        subtitle="Words to find this customer by again. Type a new one, or pick one in use."
+        title={t("customers.labels_dialog_title")}
+        subtitle={t("customers.labels_dialog_subtitle")}
         onOpenChange={(open) => !open && onClose()}
       />
       <VStack gap={4} padding={4}>
@@ -185,7 +188,7 @@ function LabelsDialog({
         <Tokenizer
           label={definition.name}
           isLabelHidden
-          placeholder="Add a label…"
+          placeholder={t("customers.labels_dialog_placeholder")}
           searchSource={source}
           hasCreate
           hasEntriesOnFocus
@@ -204,8 +207,13 @@ function LabelsDialog({
           }}
         />
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
-          <Button label="Save" variant="primary" isLoading={isPending} onClick={submit} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
+          <Button
+            label={t("common.save")}
+            variant="primary"
+            isLoading={isPending}
+            onClick={submit}
+          />
         </HStack>
       </VStack>
     </Dialog>

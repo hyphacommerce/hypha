@@ -1,0 +1,5 @@
+{
+  "greeting": "Hello, {name}!",
+  "terms": "Accept the <link>terms</link>.",
+  "items_count": "{count, plural, one {# item} other {# items}}"
+}

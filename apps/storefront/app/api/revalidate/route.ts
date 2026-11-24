@@ -1,7 +1,7 @@
 // Hypha's webhook for the storefront's static pages. Register the storefront as an app
 // in the admin (Settings → Apps) with this URL as its webhook and the product,
-// inventory, price, catalog, channel, category, market, custom_field_definition and
-// discount events, and put its signing secret in `HYPHA_WEBHOOK_SECRET`. Each event
+// inventory, price, catalog, channel, category, market, custom_field_definition,
+// discount, translation and store events, and put its signing secret in `HYPHA_WEBHOOK_SECRET`. Each event
 // expires the tags of the cached reads it affects (`lib/cache-tags.ts`); the pages that
 // rendered them are re-rendered on their next visit. Nothing is warmed here: a page
 // nobody visits isn't rendered for nothing.
@@ -16,8 +16,9 @@ import { verifySignature } from "@hyphacommerce/app/signature";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { api, loadCategories, loadCountries } from "@/lib/api";
-import { TAGS } from "@/lib/cache-tags";
+import { TAGS, languageChange } from "@/lib/cache-tags";
 import { Deliveries } from "@/lib/deliveries";
+import { locales } from "@/lib/routing";
 import { link } from "@/lib/site";
 
 /** Products resolved one by one before giving up and expiring every product page. */
@@ -94,14 +95,18 @@ const SHOWN_DEFINITION_FIELDS = new Set([
 /** What an event changes, as tags (and paths, for a page that may be cached as a 404). */
 async function affected(event: Envelope): Promise<{ tags: string[]; paths: string[] }> {
   const data = event.data;
+  const language = languageChange(event.type, data);
+  if (language) {
+    return { tags: [...language.tags, ...(await productTags(language.products))], paths: [] };
+  }
   switch (event.type) {
     case "product.created": {
       // Its page may have been visited before it existed: a cached 404 carries no tags.
       const handle = typeof data.handle === "string" ? data.handle : undefined;
-      const countries = handle ? await loadCountries() : [];
+      const places = handle ? locales(await loadCountries()) : [];
       return {
         tags: [TAGS.listings, ...(handle ? [TAGS.product(handle)] : [])],
-        paths: countries.map((c) => link(c.country, `/p/${handle}`)),
+        paths: places.map((p) => link(p.segment, `/p/${handle}`)),
       };
     }
     case "product.deleted": {

@@ -1,0 +1,5 @@
+{
+  "title": "Something went wrong",
+  "description": "The admin ran into a problem. Reload the page to try again.",
+  "retry": "Try again"
+}

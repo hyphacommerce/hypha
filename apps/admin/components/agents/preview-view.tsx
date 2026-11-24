@@ -23,6 +23,11 @@ import {
   recordHref,
   shortId,
 } from "@/lib/agents";
+import type { Format } from "@/lib/format";
+import type { TFor } from "@/lib/messages";
+
+/** A translator with what a preview is written in: its own words, areas and the vocabulary. */
+type Translate = TFor<"agents" | "apps" | "common">;
 
 const NO_NAMES: Record<string, string> = {};
 
@@ -117,8 +122,18 @@ function Sentence({ parts, names }: { parts: Part[]; names: Record<string, strin
   );
 }
 
-function Change({ event, names }: { event: PreviewEvent; names: Record<string, string> }) {
-  const parts = eventSentence(event.type, event.data);
+function Change({
+  t,
+  format,
+  event,
+  names,
+}: {
+  t: Translate;
+  format: Format;
+  event: PreviewEvent;
+  names: Record<string, string>;
+}) {
+  const parts = eventSentence(t, format, event.type, event.data);
   return (
     <div className="change-row">
       <VStack gap={1}>
@@ -126,11 +141,23 @@ function Change({ event, names }: { event: PreviewEvent; names: Record<string, s
           <Sentence parts={parts} names={names} />
         ) : (
           <Text>
-            Records <Text type="code">{event.type}</Text> about{" "}
-            <RecordLink id={event.subject} names={names} />
+            {t.rich("agents.preview_records", {
+              type: (
+                <Text key="type" type="code">
+                  {event.type}
+                </Text>
+              ),
+              subject: <RecordLink key="subject" id={event.subject} names={names} />,
+            })}
           </Text>
         )}
-        <JsonDisclosure label={`${event.type} v${event.version}`} value={event.data} />
+        <JsonDisclosure
+          label={t("agents.preview_event_version", {
+            type: event.type,
+            version: String(event.version),
+          })}
+          value={event.data}
+        />
       </VStack>
     </div>
   );
@@ -142,68 +169,52 @@ function Change({ event, names }: { event: PreviewEvent; names: Record<string, s
  */
 export type PreviewState = "pending" | "applied" | "not_applied";
 
-/** How each card speaks of the write, by where it stands. */
-const WORDING: Record<
-  PreviewState,
-  { changes: string; changesNote: string; emails: string; answer: string; partial: string }
-> = {
-  pending: {
-    changes: "What would change",
-    changesNote: "The changes the write would record, in order. Nothing has changed yet.",
-    emails: "Emails it would send",
-    answer: "What it would answer",
-    partial: "What it did up to there is shown; approving runs it in full, including that step.",
-  },
-  applied: {
-    changes: "What changed",
-    changesNote: "The changes the write recorded, in order, as previewed.",
-    emails: "Emails it sent",
-    answer: "What it answered when previewed",
-    partial: "What it did up to there was shown; it ran in full when approved.",
-  },
-  not_applied: {
-    changes: "What was proposed",
-    changesNote: "The changes the write would have recorded, in order. None was made.",
-    emails: "Emails it would have sent",
-    answer: "What it would have answered",
-    partial: "What it did up to there is shown.",
-  },
-};
-
 /**
- * The preview's parts as cards. `names` are records the page could name (locations);
+ * The preview's parts as cards, each speaking of the write by where it stands
+ * (`agents.preview_*_<state>`). `names` are records the page could name (locations);
  * the response's own record is named from its body. `state` says whether the write is
  * still to decide, was applied or never was.
  */
 export function PreviewView({
+  t,
+  format,
   preview,
   names = NO_NAMES,
   state = "pending",
 }: {
+  t: Translate;
+  format: Format;
   preview: Preview;
   names?: Record<string, string>;
   state?: PreviewState;
 }) {
   const named = previewNames(preview, names);
-  const words = WORDING[state];
   return (
     <VStack gap={5}>
       {!preview.complete && (
         <Banner
           status="warning"
-          title="Only part of this could be previewed"
-          description={`${preview.blocked_by ? blockedLabel(preview.blocked_by) : "It stopped at an effect a preview can't run."} ${words.partial}`}
+          title={t("agents.preview_partial_title")}
+          description={t("agents.preview_partial_description", {
+            blocked: preview.blocked_by
+              ? blockedLabel(t, preview.blocked_by)
+              : t("agents.preview_stopped"),
+            partial: t(`agents.preview_partial_${state}`),
+          })}
         />
       )}
 
-      <PreviewCard title={words.changes} description={words.changesNote}>
+      <PreviewCard
+        title={t(`agents.preview_changes_${state}`)}
+        description={t(`agents.preview_changes_note_${state}`)}
+      >
         {preview.events.length === 0 ? (
-          <Text color="secondary">No recorded changes.</Text>
+          <Text color="secondary">{t("agents.preview_no_changes")}</Text>
         ) : (
           <div>
             {keyed(preview.events, (e) => `${e.type}:${e.subject}:${JSON.stringify(e.data)}`).map(
               ({ key, item }) => (
-                <Change key={key} event={item} names={named} />
+                <Change key={key} t={t} format={format} event={item} names={named} />
               ),
             )}
           </div>
@@ -211,7 +222,10 @@ export function PreviewView({
       </PreviewCard>
 
       {preview.emails.length > 0 && (
-        <PreviewCard title={words.emails} description="Sent while answering the write.">
+        <PreviewCard
+          title={t(`agents.preview_emails_${state}`)}
+          description={t("agents.preview_emails_description")}
+        >
           <VStack gap={2}>
             {keyed(preview.emails, (e) => `${e.template}:${e.to ?? ""}:${e.subject}`).map(
               ({ key, item: email }) => (
@@ -219,7 +233,9 @@ export function PreviewView({
                   <Badge label={email.template} />
                   <Text weight="medium">{email.subject}</Text>
                   <Text color="secondary">
-                    to {email.to ?? "a customer (address hidden from this agent)"}
+                    {email.to
+                      ? t("agents.preview_email_to", { address: email.to })
+                      : t("agents.preview_email_to_hidden")}
                   </Text>
                 </HStack>
               ),
@@ -230,8 +246,8 @@ export function PreviewView({
 
       {preview.calls.length > 0 && (
         <PreviewCard
-          title="Apps it called"
-          description="Read-only calls, made for real while previewing (shipping rates, search, a payment's status)."
+          title={t("agents.preview_calls_title")}
+          description={t("agents.preview_calls_description")}
         >
           <VStack gap={2}>
             {keyed(preview.calls, (c) => `${c.point}:${c.app}`).map(({ key, item: call }) => (
@@ -244,20 +260,23 @@ export function PreviewView({
         </PreviewCard>
       )}
 
-      <PreviewCard title={words.answer}>
+      <PreviewCard title={t(`agents.preview_answer_${state}`)}>
         {preview.response ? (
           <VStack gap={2}>
             <HStack gap={2} vAlign="center">
-              <Text color="secondary">Status</Text>
+              <Text color="secondary">{t("common.status")}</Text>
               <Badge
                 label={String(preview.response.status)}
                 variant={preview.response.status < 300 ? "success" : "warning"}
               />
             </HStack>
-            <JsonDisclosure label="Response body" value={preview.response.body} />
+            <JsonDisclosure
+              label={t("agents.preview_response_body")}
+              value={preview.response.body}
+            />
           </VStack>
         ) : (
-          <Text color="secondary">Nothing: it stopped before answering.</Text>
+          <Text color="secondary">{t("agents.preview_no_answer")}</Text>
         )}
       </PreviewCard>
     </VStack>

@@ -1,0 +1,8 @@
+{
+  "subject": "Vaš zahtev za brisanje podataka u prodavnici {shop}",
+  "preheader": "Vaši lični podaci biće obrisani {date}, osim ako otkažete zahtev.",
+  "heading": "Obrisaćemo vaše podatke",
+  "body": "Zatražili ste od prodavnice {shop} da obriše vaše lične podatke. To ćemo uraditi {date}: vaše ime, kontakt podaci, adrese i podešavanja za marketing biće uklonjeni iz vašeg naloga i vaših porudžbina, a nalog će biti zatvoren. Same porudžbine ostaju u evidenciji, bez ičega što vas identifikuje.",
+  "changed_mind": "Predomislili ste se? Pre tog datuma se prijavite na svoj nalog i otkažite zahtev.",
+  "not_you": "Ako niste vi poslali ovaj zahtev, prijavite se i otkažite ga ili nas kontaktirajte."
+}

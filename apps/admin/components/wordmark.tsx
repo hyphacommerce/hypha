@@ -4,6 +4,9 @@
 // chosen, else the system preference. The SVGs are cropped tight, so the component adds
 // the brand's clear space itself: half the mark's height on every side.
 
+/** The brand's name: the same in every language, so not a message. */
+const BRAND = "Hypha";
+
 /** `height` in pixels; the brand's smallest wordmark is 64px wide (about 20px tall). */
 export function Wordmark({ height = 20 }: { height?: number }) {
   // Sized in style: Astryx's reset (`height: auto`) would override the attribute.
@@ -13,13 +16,13 @@ export function Wordmark({ height = 20 }: { height?: number }) {
       <img
         className="hypha-wordmark-light"
         src="/brand/hypha-wordmark.svg"
-        alt="Hypha"
+        alt={BRAND}
         style={style}
       />
       <img
         className="hypha-wordmark-dark"
         src="/brand/hypha-wordmark-on-dark.svg"
-        alt="Hypha"
+        alt={BRAND}
         style={style}
       />
     </span>

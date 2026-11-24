@@ -4,7 +4,7 @@ import { VStack } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
 import { Suspense } from "react";
 
-import { type Crumb, PageHeader } from "@/components/page-header";
+import { PageHeader } from "@/components/page-header";
 import { type SearchParams, one } from "@/components/resource-table/params";
 import { listPage, pageQuery } from "@/components/resource-table/server";
 import { FormSkeleton } from "@/components/skeletons";
@@ -17,14 +17,13 @@ import {
   sessionClient,
   staffNames,
 } from "@/lib/hypha";
-import { hasScope } from "@/lib/navigation";
+import { getT } from "@/lib/i18n";
+import { agentsCrumb, hasScope } from "@/lib/navigation";
 
 import { ActivityTable } from "./activity-table";
 import { AgentActions } from "./agent-actions";
 import { AgentEditor } from "./agent-editor";
 import { AgentTabs, type AgentTab } from "./agent-tabs";
-
-const BACK: Crumb = { label: "Agents", href: "/agents" };
 
 /** The agents this request read, by ID: the header and the access form share one read. */
 const agentReads = perRequest(async () => new Map<string, Promise<Agent>>());
@@ -52,12 +51,12 @@ export default async function AgentPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<SearchParams>;
 }) {
-  const [{ id }, query] = await Promise.all([params, searchParams]);
+  const [{ id }, query, t] = await Promise.all([params, searchParams, getT()]);
   const tab: AgentTab = one(query, "tab") === "activity" ? "activity" : "access";
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={1080}>
-        <Suspense fallback={<PageHeader back={BACK} />}>
+        <Suspense fallback={<PageHeader back={agentsCrumb(t)} />}>
           <AgentHeader id={id} />
         </Suspense>
         <AgentTabs id={id} tab={tab}>
@@ -78,25 +77,26 @@ export default async function AgentPage({
 
 async function AgentHeader({ id }: { id: string }) {
   const client = await sessionClient();
-  const [agent, me, people, settings] = await Promise.all([
+  const [t, agent, me, people, settings] = await Promise.all([
+    getT(),
     loadAgent(id),
     requireStaff(),
     staffNames(client),
     loadAgentSettings(),
   ]);
-  const state = agentState(agent);
+  const state = agentState(t, agent);
   const person = agent.user ? (people.get(agent.user) ?? agent.user) : undefined;
-  const notice = settings ? capNotice(settings) : null;
+  const notice = settings ? capNotice(t, settings) : null;
   const facts = [
-    kindLabel(agent.kind),
-    person && `acts for ${person}`,
-    agent.client && `connected from ${agent.client.name}`,
+    kindLabel(t, agent.kind),
+    person && t("agents.header_acts_for", { person }),
+    agent.client && t("agents.header_connected_from", { client: agent.client.name }),
   ].filter(Boolean);
   return (
     <>
       <PageHeader
         title={agent.name}
-        back={BACK}
+        back={agentsCrumb(t)}
         badges={<Badge label={state.label} variant={state.variant} />}
         description={facts.join(" · ")}
         actions={
@@ -109,15 +109,19 @@ async function AgentHeader({ id }: { id: string }) {
       {agent.revoked_at && (
         <Banner
           status="error"
-          title="This agent is revoked"
-          description="Its credentials stopped for good and its pending proposals can't be approved. What it did stays in the log."
+          title={t("agents.header_revoked_title")}
+          description={t("agents.header_revoked_description")}
         />
       )}
       {agent.kind === "connected" && !agent.revoked_at && (
         <Banner
           status="info"
-          title={`It never does more than ${person ?? "its staff member"}'s role allows`}
-          description="A connected agent acts for the person who connected it: its grant is narrowed by their role at every request, and it stops if they're deactivated."
+          title={
+            person
+              ? t("agents.header_capped_by_person", { person })
+              : t("agents.header_capped_by_staff")
+          }
+          description={t("agents.header_capped_description")}
         />
       )}
       {notice && <Banner status="info" title={notice.title} description={notice.description} />}
@@ -148,5 +152,5 @@ async function Activity({ id, params }: { id: string; params: SearchParams }) {
   const result = await client.GET("/admin/agents/{id}/calls", {
     params: { path: { id }, query: pageQuery(params) },
   });
-  return <ActivityTable page={listPage(result, `/agents/${id}`, params)} />;
+  return <ActivityTable page={await listPage(result, `/agents/${id}`, params)} />;
 }

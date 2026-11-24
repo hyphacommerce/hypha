@@ -4,6 +4,7 @@ use hypha_core::{
     CartId, FinancialStatus, Money, OrderId, PaymentId, PaymentMethodId, PendingEvent, Recorded,
     Recorder, Stamped, Stamps, Subject, Timestamp, Version, Versioned, optional_text,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::{
     PaymentError, PaymentMethod, ProviderKey,
@@ -143,6 +144,22 @@ pub struct NewPayment {
     pub provider: ProviderKey,
     pub amount: Money,
     pub instructions: Option<String>,
+    /// The method's name and instructions in the buyer's language, where they read
+    /// differently; set by checkout, which knows the language.
+    pub localized: Option<LocalizedPayment>,
+}
+
+/// What a payment copied of its method in the buyer's language, kept beside the copies
+/// in the store's own language that staff read. Stored as JSON: fields are added, never
+/// renamed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalizedPayment {
+    /// `None` where the payment has no name of its own.
+    #[serde(default)]
+    pub method_name: Option<String>,
+    /// `None` where the payment has no instructions of its own.
+    #[serde(default)]
+    pub instructions: Option<String>,
 }
 
 impl NewPayment {
@@ -166,6 +183,7 @@ impl NewPayment {
             provider: method.provider().clone(),
             amount,
             instructions: method.instructions().map(str::to_string),
+            localized: None,
         }
     }
 
@@ -182,6 +200,7 @@ impl NewPayment {
             provider: ProviderKey::manual(),
             amount,
             instructions: None,
+            localized: None,
         }
     }
 }
@@ -226,6 +245,9 @@ pub struct Payment {
     attempt: Option<String>,
     /// The method's instructions at checkout.
     instructions: Option<String>,
+    /// `method_name` and `instructions` in the buyer's language, where they read
+    /// differently: `None` otherwise, and for payments from before languages.
+    localized: Option<LocalizedPayment>,
     paid_at: Option<Timestamp>,
     voided_at: Option<Timestamp>,
     events: Recorder,
@@ -279,6 +301,7 @@ impl Payment {
             instructions: new.instructions,
             paid_at: None,
             voided_at: None,
+            localized: new.localized,
         })?;
         let created = PaymentCreated {
             payment: payment.id,
@@ -607,6 +630,35 @@ impl Payment {
         self.instructions.as_deref()
     }
 
+    /// The method's name and instructions in the buyer's language, where they differ.
+    pub fn localized(&self) -> Option<&LocalizedPayment> {
+        self.localized.as_ref()
+    }
+
+    /// The method's name as the buyer read it.
+    pub fn buyer_method_name(&self) -> Option<&str> {
+        match self
+            .localized
+            .as_ref()
+            .and_then(|l| l.method_name.as_deref())
+        {
+            Some(name) => Some(name),
+            None => self.method_name(),
+        }
+    }
+
+    /// The instructions as the buyer read them.
+    pub fn buyer_instructions(&self) -> Option<&str> {
+        match self
+            .localized
+            .as_ref()
+            .and_then(|l| l.instructions.as_deref())
+        {
+            Some(text) => Some(text),
+            None => self.instructions(),
+        }
+    }
+
     pub fn paid_at(&self) -> Option<Timestamp> {
         self.paid_at
     }
@@ -636,6 +688,7 @@ pub struct PaymentSnapshot {
     pub instructions: Option<String>,
     pub paid_at: Option<Timestamp>,
     pub voided_at: Option<Timestamp>,
+    pub localized: Option<LocalizedPayment>,
 }
 
 impl Payment {
@@ -658,6 +711,7 @@ impl Payment {
             instructions: self.instructions.clone(),
             paid_at: self.paid_at,
             voided_at: self.voided_at,
+            localized: self.localized.clone(),
         }
     }
 
@@ -696,6 +750,23 @@ impl Payment {
             return Err(inconsistent("voided_at doesn't match the status"));
         }
         let instructions = instructions_text(s.instructions)?;
+        let method_name = optional_text("method_name", s.method_name)?;
+        // A copy only of what the payment has, and only where it reads differently.
+        let localized = match s.localized {
+            Some(l) => {
+                let name = optional_text("method_name", l.method_name)?
+                    .filter(|_| method_name.is_some())
+                    .filter(|n| Some(n) != method_name.as_ref());
+                let text = instructions_text(l.instructions)?
+                    .filter(|_| instructions.is_some())
+                    .filter(|t| Some(t) != instructions.as_ref());
+                (name.is_some() || text.is_some()).then_some(LocalizedPayment {
+                    method_name: name,
+                    instructions: text,
+                })
+            }
+            None => None,
+        };
         let mut refund_references = Vec::with_capacity(s.refund_references.len());
         for refund in s.refund_references {
             let refund = optional_text("refund reference", Some(refund))?
@@ -715,7 +786,7 @@ impl Payment {
             cart: s.cart,
             order: s.order,
             method: s.method,
-            method_name: optional_text("method_name", s.method_name)?,
+            method_name,
             provider: s.provider,
             amount: s.amount,
             status: s.status,
@@ -724,6 +795,7 @@ impl Payment {
             refund_references,
             attempt: optional_text("attempt", s.attempt)?,
             instructions,
+            localized,
             paid_at: s.paid_at,
             voided_at: s.voided_at,
             events: Recorder::default(),
@@ -835,6 +907,7 @@ mod tests {
             provider: ProviderKey::manual(),
             amount: eur(1000),
             instructions: None,
+            localized: None,
         })
         .unwrap();
         assert_eq!(p.order(), None);
@@ -880,6 +953,7 @@ mod tests {
             provider: ProviderKey::manual(),
             amount: eur(amount),
             instructions: Some(" IBAN HR12 ".to_string()),
+            localized: None,
         })
         .unwrap();
         p.take_events();

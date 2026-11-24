@@ -1,0 +1,6 @@
+{
+  "subject": "Your order {number} is on its way",
+  "preheader": "Items from your order {number} have shipped.",
+  "heading": "Your order is on its way",
+  "shipped": "Good news: items from your order {number} have shipped."
+}

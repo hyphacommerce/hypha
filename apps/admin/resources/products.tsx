@@ -20,26 +20,27 @@ import {
   type SortOption,
   type View,
 } from "@/components/resource-table/resource-table";
-import { ProductStatusBadge } from "@/components/status";
+import { ProductStatusBadge, statusLabel, statusOptions } from "@/components/status";
 import type { Definition } from "@/lib/custom-fields";
-import { type Currencies, formatMoney } from "@/lib/format";
+import type { KeyIn, TFor } from "@/lib/messages";
+import { type Format, useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { type BulkOutcome, BulkOutcomeBanner, ProductBulkActions } from "./bulk";
 
 /** No filterable custom fields. */
 const NO_FIELDS: Definition[] = [];
 const NO_NAMES: Record<string, string> = {};
-const NO_CURRENCIES: Currencies = {};
 
 type Product = AdminSchemas["ProductSummaryResponse"];
 
-const SORT_OPTIONS: SortOption[] = [
-  { value: "newest", label: "Newest" },
-  { value: "oldest", label: "Oldest" },
-  { value: "updated_desc", label: "Recently changed" },
-  { value: "updated_asc", label: "Least recently changed" },
-  { value: "title_asc", label: "Title A–Z" },
-  { value: "title_desc", label: "Title Z–A" },
+const SORT_OPTIONS: { value: string; label: KeyIn<"common" | "products"> }[] = [
+  { value: "newest", label: "common.sort_newest" },
+  { value: "oldest", label: "common.sort_oldest" },
+  { value: "updated_desc", label: "products.list_sort_updated_desc" },
+  { value: "updated_asc", label: "products.list_sort_updated_asc" },
+  { value: "title_asc", label: "products.list_sort_title_asc" },
+  { value: "title_desc", label: "products.list_sort_title_desc" },
 ];
 
 const SORTS: Record<string, SortDef> = {
@@ -47,35 +48,35 @@ const SORTS: Record<string, SortDef> = {
   updated: { asc: "updated_asc", desc: "updated_desc" },
 };
 
-const STATUSES = [
-  { value: "active", label: "Active" },
-  { value: "draft", label: "Draft" },
-  { value: "archived", label: "Archived" },
-];
-
-const VIEWS: View[] = [
-  { label: "All", params: {} },
-  { label: "Active", params: { status: ["active"] } },
-  { label: "Draft", params: { status: ["draft"] } },
-  { label: "Archived", params: { status: ["archived"] } },
-];
+const STATUSES = ["active", "draft", "archived"] as const;
 
 /** "€9.50", "€9.50 – €14.00" for several prices, one range per currency. */
-function priceRanges(product: Product, currencies: Currencies): string {
-  if (product.price_ranges.length === 0) return "—";
-  return product.price_ranges
-    .map(({ min, max }) =>
+function priceRanges(product: Product, t: TFor<"products" | "common">, format: Format): string {
+  if (product.price_ranges.length === 0) return t("common.empty_value");
+  return format.list(
+    product.price_ranges.map(({ min, max }) =>
       min.amount === max.amount
-        ? formatMoney(min, currencies)
-        : `${formatMoney(min, currencies)} – ${formatMoney(max, currencies)}`,
-    )
-    .join(", ");
+        ? format.money(min)
+        : t("products.price_range", { min: format.money(min), max: format.money(max) }),
+    ),
+    "unit",
+  );
 }
 
 /** Names, at most two then "+N". */
-function names(ids: string[], name: Record<string, string>): string {
-  const shown = ids.slice(0, 2).map((id) => name[id] ?? id);
-  return ids.length > 2 ? `${shown.join(", ")} +${ids.length - 2}` : shown.join(", ");
+function names(
+  ids: string[],
+  name: Record<string, string>,
+  t: TFor<"products">,
+  format: Format,
+): string {
+  const shown = format.list(
+    ids.slice(0, 2).map((id) => name[id] ?? id),
+    "unit",
+  );
+  return ids.length > 2
+    ? t("products.list_names_more", { names: shown, count: ids.length - 2 })
+    : shown;
 }
 
 /** The product's featured image, small; a placeholder for none (or a video). */
@@ -108,14 +109,12 @@ function FeaturedImage({ media }: { media?: AdminSchemas["ProductMediaResponse"]
 
 export function ProductsTable({
   page,
-  currencies = NO_CURRENCIES,
   channels = NO_NAMES,
   categories = NO_NAMES,
   fieldFilters = NO_FIELDS,
 }: {
   /** The page of rows; absent while it loads (the table shows its toolbar meanwhile). */
   page?: { items: Product[]; next_cursor: string | null; error?: string };
-  currencies?: Currencies;
   /** Filterable custom fields, offered as filters. */
   fieldFilters?: Definition[];
   /** Channel names by ID. */
@@ -123,6 +122,8 @@ export function ProductsTable({
   /** Category paths by ID ("Clothing › Shirts"). */
   categories?: Record<string, string>;
 }) {
+  const t = useT<"products">();
+  const format = useFormat();
   const [outcome, setOutcome] = useState<BulkOutcome>();
   const shortName = Object.fromEntries(
     Object.entries(categories).map(([id, path]) => [id, path.split(" › ").at(-1) ?? path]),
@@ -131,33 +132,49 @@ export function ProductsTable({
     {
       kind: "search",
       param: "q",
-      label: "Search",
-      placeholder: "Search products by title, handle or SKU",
+      label: t("common.search"),
+      placeholder: t("products.list_search_placeholder"),
     },
-    { kind: "multi", param: "status", label: "Status", options: STATUSES },
+    {
+      kind: "multi",
+      param: "status",
+      label: t("common.status"),
+      options: statusOptions("product", STATUSES, t),
+    },
     {
       kind: "select",
       param: "category",
-      label: "Category",
+      label: t("common.category"),
       options: Object.entries(categories)
         .map(([value, label]) => ({ value, label }))
-        .toSorted((a, b) => a.label.localeCompare(b.label)),
+        .toSorted((a, b) => format.compare(a.label, b.label)),
     },
     {
       kind: "select",
       param: "channel",
-      label: "Channel",
+      label: t("common.channel"),
       options: Object.entries(channels).map(([value, label]) => ({ value, label })),
     },
-    { kind: "text", param: "vendor", label: "Vendor" },
-    { kind: "text", param: "product_type", label: "Type" },
-    { kind: "text", param: "tag", label: "Tag" },
-    ...customFieldFilters(fieldFilters),
+    { kind: "text", param: "vendor", label: t("products.vendor") },
+    { kind: "text", param: "product_type", label: t("common.type") },
+    { kind: "text", param: "tag", label: t("products.tag") },
+    ...customFieldFilters(fieldFilters, t),
   ];
+  const views: View[] = [
+    { label: t("common.all"), params: {} },
+    ...STATUSES.map((status) => ({
+      label: statusLabel("product", status, t),
+      params: { status: [status] },
+    })),
+  ];
+  const sortOptions: SortOption[] = SORT_OPTIONS.map(({ value, label }) => ({
+    value,
+    label: t(label),
+  }));
   const columns: TableColumn<Product>[] = [
     {
       key: "title",
-      header: "Product",
+      header: t("common.product"),
       width: proportional(3, { minWidth: 240 }),
       renderCell: (product) => (
         <HStack gap={3} vAlign="center">
@@ -175,39 +192,45 @@ export function ProductsTable({
     },
     {
       key: "status",
-      header: "Status",
+      header: t("common.status"),
       width: pixel(110),
-      renderCell: (product) => <ProductStatusBadge status={product.status} />,
+      renderCell: (product) => <ProductStatusBadge status={product.status} t={t} />,
     },
     {
       key: "channels",
-      header: "Channels",
+      header: t("common.channels"),
       renderCell: (product) =>
         product.channels.length === 0 ? (
-          <Text color="secondary">—</Text>
+          <Text color="secondary">{t("common.empty_value")}</Text>
         ) : (
-          names(product.channels, channels)
+          names(product.channels, channels, t, format)
         ),
     },
     {
       key: "categories",
-      header: "Categories",
+      header: t("common.categories"),
       renderCell: (product) =>
         product.categories.length === 0 ? (
-          <Text color="secondary">—</Text>
+          <Text color="secondary">{t("common.empty_value")}</Text>
         ) : (
-          names(product.categories, shortName)
+          names(product.categories, shortName, t, format)
         ),
     },
-    { key: "variant_count", header: "Variants", width: pixel(90), align: "end" },
+    {
+      key: "variant_count",
+      header: t("common.variants"),
+      width: pixel(90),
+      align: "end",
+      renderCell: (product) => format.number(product.variant_count),
+    },
     {
       key: "price",
-      header: "Price",
-      renderCell: (product) => priceRanges(product, currencies),
+      header: t("common.price"),
+      renderCell: (product) => priceRanges(product, t, format),
     },
     {
       key: "updated",
-      header: "Changed",
+      header: t("products.list_column_changed"),
       width: pixel(170),
       renderCell: (product) => (
         <Text color="secondary">
@@ -218,9 +241,7 @@ export function ProductsTable({
   ];
   return (
     <VStack gap={3}>
-      {outcome && (
-        <BulkOutcomeBanner outcome={outcome} noun="product" onClose={() => setOutcome(undefined)} />
-      )}
+      {outcome && <BulkOutcomeBanner outcome={outcome} onClose={() => setOutcome(undefined)} />}
       <ResourceTable<Product>
         renderBulkActions={(selected, clear) => (
           <ProductBulkActions
@@ -239,21 +260,20 @@ export function ProductsTable({
         idKey="id"
         rowHref={(p) => `/products/${p.id}`}
         filters={filters}
-        views={VIEWS}
+        views={views}
         sorts={SORTS}
-        sortOptions={SORT_OPTIONS}
+        sortOptions={sortOptions}
         defaultSort="newest"
         error={page?.error}
         empty={{
           icon: <CubeIcon width={32} />,
-          title: "No products yet",
-          description: "Products you add show up here, newest first.",
-          action: <Button label="Add product" href="/products/new" />,
+          title: t("products.list_empty_title"),
+          description: t("products.list_empty_description"),
+          action: <Button label={t("products.add_product")} href="/products/new" />,
         }}
         noResults={{
-          title: "No products match these filters",
-          description:
-            "Search looks at titles, handles and SKUs; vendor, type and tag match whole.",
+          title: t("products.list_no_results_title"),
+          description: t("products.list_no_results_description"),
         }}
       />
     </VStack>

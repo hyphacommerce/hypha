@@ -1,0 +1,18 @@
+{
+  "command_open": "Search the admin",
+  "command_tooltip": "Go to… (⌘K)",
+  "command_empty": "Type a page's name",
+  "command_group_go_to": "Go to",
+  "command_group_settings": "Settings",
+  "command_group_create": "Create",
+  "command_new_product": "New product",
+  "command_new_market": "New market",
+  "command_account_keywords": "password,two-factor,2fa,profile",
+  "error_stale_title": "A new version of the admin is out",
+  "error_stale_description": "Loading it… If this page stays, reload it.",
+  "error_description": "This page ran into a problem.",
+  "not_found_title": "Page not found",
+  "not_found_description": "There's nothing at this address.",
+  "forbidden_title": "Your role can't open this page",
+  "forbidden_description": "It needs access your role doesn't include. Ask the store owner to add it to your role. Your own account is always under Your account."
+}

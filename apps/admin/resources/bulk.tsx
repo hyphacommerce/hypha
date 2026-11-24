@@ -32,7 +32,10 @@ import { labelsInUse } from "@/app/(admin)/customers/actions";
 import type { Group } from "@/app/(admin)/customers/groups/groups";
 import type { Definition } from "@/lib/custom-fields";
 import { customerName } from "@/lib/format";
+import type { KeyIn } from "@/lib/messages";
 import { canMarkPaid } from "@/lib/payments";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 type Product = AdminSchemas["ProductSummaryResponse"];
 type Order = AdminSchemas["OrderSummaryResponse"];
@@ -41,48 +44,54 @@ type Customer = AdminSchemas["CustomerSummaryResponse"];
 /** No customer groups. */
 const NO_GROUPS: Group[] = [];
 
-/** What a bulk action did, for the banner: `verb` is past tense ("Archived"). */
-export type BulkOutcome = { verb: string; result: BulkResult };
+/**
+ * What a bulk action did, for the banner: `summary` says what was done to how many rows,
+ * already translated ("Archived 3 products").
+ */
+export type BulkOutcome = { summary: string; result: BulkResult };
 
-/** "3 products", "1 product". */
-function count(n: number, noun: string): string {
-  return `${n} ${noun}${n === 1 ? "" : "s"}`;
-}
+/** What an action did to `count` rows, as a sentence without its full stop. */
+type Summary = (count: number) => string;
 
 /** The banner a finished bulk action leaves above the list until it's closed. */
 export function BulkOutcomeBanner({
   outcome,
-  noun,
   onClose,
 }: {
   outcome: BulkOutcome;
-  noun: string;
   onClose: () => void;
 }) {
-  const { verb, result } = outcome;
+  const t = useT<"bulk">();
+  const { summary, result } = outcome;
   if (result.error) {
     return (
       <Banner
         status="error"
-        title={`Nothing changed: ${result.error}`}
+        title={t("bulk.nothing_changed", { error: result.error })}
         isDismissable
         onDismiss={onClose}
       />
     );
   }
-  const parts = [`${verb} ${count(result.changed, noun)}`];
-  if (result.unchanged > 0) parts.push(`${result.unchanged} already so`);
-  if (result.failed.length > 0) parts.push(`${result.failed.length} failed`);
+  const counts = { summary, unchanged: result.unchanged, failed: result.failed.length };
+  const title =
+    result.unchanged > 0
+      ? result.failed.length > 0
+        ? t("bulk.outcome_unchanged_failed", counts)
+        : t("bulk.outcome_unchanged", counts)
+      : result.failed.length > 0
+        ? t("bulk.outcome_failed", counts)
+        : t("bulk.outcome", counts);
   return (
     <Banner
       status={result.failed.length > 0 ? "warning" : "success"}
-      title={`${parts.join(", ")}.`}
+      title={title}
       description={
         result.failed.length > 0 ? (
           <VStack gap={0.5}>
             {result.failed.map((f) => (
               <Text key={f.id} type="supporting">
-                {f.label}: {f.error}
+                {t("bulk.outcome_row_failed", { label: f.label, error: f.error })}
               </Text>
             ))}
           </VStack>
@@ -94,10 +103,14 @@ export function BulkOutcomeBanner({
   );
 }
 
-const STATUSES: { value: AdminSchemas["ProductStatus"]; label: string; verb: string }[] = [
-  { value: "active", label: "Set as active", verb: "Activated" },
-  { value: "draft", label: "Set as draft", verb: "Moved to draft" },
-  { value: "archived", label: "Archive", verb: "Archived" },
+const STATUSES: {
+  value: AdminSchemas["ProductStatus"];
+  label: KeyIn<"bulk" | "common">;
+  done: KeyIn<"bulk">;
+}[] = [
+  { value: "active", label: "bulk.products_status_active", done: "bulk.products_activated" },
+  { value: "draft", label: "bulk.products_status_draft", done: "bulk.products_drafted" },
+  { value: "archived", label: "common.archive", done: "bulk.products_archived" },
 ];
 
 type Confirm = { title: string; description: string; actionLabel: string; run: () => void };
@@ -118,38 +131,47 @@ export function ProductBulkActions({
   categories: Record<string, string>;
   onDone: (outcome: BulkOutcome) => void;
 }) {
+  const t = useT<"bulk">();
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [confirm, setConfirm] = useState<Confirm>();
   const [categoryMode, setCategoryMode] = useState<"add" | "remove">();
   const items = selected.map((p) => ({ id: p.id, label: p.title, status: p.status }));
-  const n = count(selected.length, "product");
+  const count = selected.length;
 
-  const run = (verb: string, action: () => Promise<BulkResult>) =>
+  const run = (summary: Summary, action: () => Promise<BulkResult>) =>
     startTransition(async () => {
       const result = await action();
       setConfirm(undefined);
       setCategoryMode(undefined);
       clear();
-      onDone({ verb, result });
+      onDone({ summary: summary(result.changed), result });
       router.refresh();
     });
 
   return (
     <>
       <DropdownMenu
-        button={{ label: "Status", variant: "secondary", size: "sm", isLoading: isPending }}
+        button={{
+          label: t("common.status"),
+          variant: "secondary",
+          size: "sm",
+          isLoading: isPending,
+        }}
         items={STATUSES.map((s) => ({
-          label: s.label,
+          label: t(s.label),
           variant: s.value === "archived" ? ("destructive" as const) : undefined,
           onClick: () => {
-            const go = () => run(s.verb, () => setProductsStatus(items, s.value));
+            const go = () =>
+              run(
+                (changed) => t(s.done, { count: changed }),
+                () => setProductsStatus(items, s.value),
+              );
             if (s.value === "archived") {
               setConfirm({
-                title: `Archive ${n}?`,
-                description:
-                  "Archived products leave the storefront. A draft can't be archived directly: activate it first.",
-                actionLabel: "Archive",
+                title: t("bulk.products_archive_title", { count }),
+                description: t("bulk.products_archive_description"),
+                actionLabel: t("common.archive"),
                 run: go,
               });
             } else go();
@@ -158,32 +180,42 @@ export function ProductBulkActions({
       />
       {Object.keys(channels).length > 0 && (
         <DropdownMenu
-          button={{ label: "Channels", variant: "secondary", size: "sm", isLoading: isPending }}
+          button={{
+            label: t("common.channels"),
+            variant: "secondary",
+            size: "sm",
+            isLoading: isPending,
+          }}
           menuWidth={240}
           items={[
             {
               type: "section",
-              title: "Publish to",
+              title: t("bulk.products_publish_to"),
               items: Object.entries(channels).map(([id, name]) => ({
                 label: name,
                 onClick: () =>
-                  run(`Published to ${name}:`, () => setProductsPublished(id, items, true)),
+                  run(
+                    (changed) => t("bulk.products_published", { channel: name, count: changed }),
+                    () => setProductsPublished(id, items, true),
+                  ),
               })),
             },
             {
               type: "section",
-              title: "Unpublish from",
+              title: t("bulk.products_unpublish_from"),
               items: Object.entries(channels).map(([id, name]) => ({
                 label: name,
                 variant: "destructive" as const,
                 onClick: () =>
                   setConfirm({
-                    title: `Unpublish ${n} from ${name}?`,
-                    description: `${name} stops showing and selling them. Other channels keep them.`,
-                    actionLabel: "Unpublish",
+                    title: t("bulk.products_unpublish_title", { count, channel: name }),
+                    description: t("bulk.products_unpublish_description", { channel: name }),
+                    actionLabel: t("bulk.products_unpublish_action"),
                     run: () =>
-                      run(`Unpublished from ${name}:`, () =>
-                        setProductsPublished(id, items, false),
+                      run(
+                        (changed) =>
+                          t("bulk.products_unpublished", { channel: name, count: changed }),
+                        () => setProductsPublished(id, items, false),
                       ),
                   }),
               })),
@@ -193,11 +225,16 @@ export function ProductBulkActions({
       )}
       {Object.keys(categories).length > 0 && (
         <DropdownMenu
-          button={{ label: "Categories", variant: "secondary", size: "sm", isLoading: isPending }}
+          button={{
+            label: t("common.categories"),
+            variant: "secondary",
+            size: "sm",
+            isLoading: isPending,
+          }}
           items={[
-            { label: "Add to a category…", onClick: () => setCategoryMode("add") },
+            { label: t("bulk.products_category_add"), onClick: () => setCategoryMode("add") },
             {
-              label: "Remove from a category…",
+              label: t("bulk.products_category_remove"),
               variant: "destructive",
               onClick: () => setCategoryMode("remove"),
             },
@@ -209,14 +246,21 @@ export function ProductBulkActions({
         <CategoryDialog
           mode={categoryMode}
           categories={categories}
-          products={n}
+          count={count}
           isPending={isPending}
           onClose={() => setCategoryMode(undefined)}
           onPick={(id) =>
             run(
-              categoryMode === "add"
-                ? `Added to ${categories[id]}:`
-                : `Removed from ${categories[id]}:`,
+              (changed) =>
+                categoryMode === "add"
+                  ? t("bulk.products_category_added", {
+                      category: categories[id],
+                      count: changed,
+                    })
+                  : t("bulk.products_category_removed", {
+                      category: categories[id],
+                      count: changed,
+                    }),
               () => setProductsInCategory(id, items, categoryMode === "add"),
             )
           }
@@ -241,48 +285,53 @@ export function ProductBulkActions({
 function CategoryDialog({
   mode,
   categories,
-  products,
+  count,
   isPending,
   onClose,
   onPick,
 }: {
   mode: "add" | "remove";
   categories: Record<string, string>;
-  products: string;
+  /** How many products are selected. */
+  count: number;
   isPending: boolean;
   onClose: () => void;
   onPick: (category: string) => void;
 }) {
+  const t = useT<"bulk">();
+  const format = useFormat();
   const [category, setCategory] = useState<string>();
   const options = Object.entries(categories)
     .map(([value, label]) => ({ value, label }))
-    .toSorted((a, b) => a.label.localeCompare(b.label));
+    .toSorted((a, b) => format.compare(a.label, b.label));
   return (
     <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={440} purpose="form">
       <DialogHeader
         title={
-          mode === "add" ? `Add ${products} to a category` : `Remove ${products} from a category`
+          mode === "add"
+            ? t("bulk.products_category_add_title", { count })
+            : t("bulk.products_category_remove_title", { count })
         }
         onOpenChange={(open) => !open && onClose()}
       />
       <VStack gap={4} padding={4}>
         <Selector
-          label="Category"
+          label={t("common.category")}
           options={options}
           value={category}
           onChange={setCategory}
           hasSearch
-          placeholder="Choose a category"
+          placeholder={t("bulk.products_category_placeholder")}
         />
         {mode === "add" && (
           <Text type="supporting" color="secondary">
-            Products already in it stay as they are.
+            {t("bulk.products_category_add_hint")}
           </Text>
         )}
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label={mode === "add" ? "Add" : "Remove"}
+            label={mode === "add" ? t("common.add") : t("common.remove")}
             variant={mode === "add" ? "primary" : "destructive"}
             isDisabled={!category}
             isLoading={isPending}
@@ -304,6 +353,7 @@ export function OrderBulkActions({
   clear: () => void;
   onDone: (outcome: BulkOutcome) => void;
 }) {
+  const t = useT<"bulk">();
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [isConfirming, setIsConfirming] = useState(false);
@@ -311,7 +361,11 @@ export function OrderBulkActions({
   return (
     <>
       <Button
-        label={`Mark as paid${pending.length !== selected.length ? ` (${pending.length})` : ""}`}
+        label={
+          pending.length === selected.length
+            ? t("bulk.orders_mark_paid")
+            : t("bulk.orders_mark_paid_count", { count: pending.length })
+        }
         variant="secondary"
         size="sm"
         isDisabled={pending.length === 0}
@@ -322,9 +376,9 @@ export function OrderBulkActions({
         <AlertDialog
           isOpen
           onOpenChange={(open) => !open && setIsConfirming(false)}
-          title={`Mark ${count(pending.length, "order")} as paid?`}
-          description="Use this for money you collected yourself: cash on delivery, a bank transfer. Paid, cancelled and other orders in the selection are left as they are."
-          actionLabel="Mark as paid"
+          title={t("bulk.orders_mark_paid_title", { count: pending.length })}
+          description={t("bulk.orders_mark_paid_description")}
+          actionLabel={t("bulk.orders_mark_paid")}
           actionVariant="primary"
           isActionLoading={isPending}
           onAction={() =>
@@ -338,7 +392,10 @@ export function OrderBulkActions({
               );
               setIsConfirming(false);
               clear();
-              onDone({ verb: "Marked paid:", result });
+              onDone({
+                summary: t("bulk.orders_marked_paid", { count: result.changed }),
+                result,
+              });
               router.refresh();
             })
           }
@@ -367,52 +424,73 @@ export function CustomerBulkActions({
   groups?: Group[];
   onDone: (outcome: BulkOutcome) => void;
 }) {
+  const t = useT<"bulk">();
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [mode, setMode] = useState<"add" | "remove">();
   const items = selected.map((c) => ({ id: c.id, label: customerName(c) || c.email }));
-  const n = count(selected.length, "customer");
-  const run = (verb: string, action: () => Promise<BulkResult>) =>
+  const run = (summary: Summary, action: () => Promise<BulkResult>) =>
     startTransition(async () => {
       const result = await action();
       setMode(undefined);
       clear();
-      onDone({ verb, result });
+      onDone({ summary: summary(result.changed), result });
       router.refresh();
     });
   return (
     <>
       {labels && (
         <DropdownMenu
-          button={{ label: "Labels", variant: "secondary", size: "sm", isLoading: isPending }}
+          button={{
+            label: t("bulk.customers_labels"),
+            variant: "secondary",
+            size: "sm",
+            isLoading: isPending,
+          }}
           items={[
-            { label: "Add a label…", onClick: () => setMode("add") },
-            { label: "Remove a label…", variant: "destructive", onClick: () => setMode("remove") },
+            { label: t("bulk.customers_label_add"), onClick: () => setMode("add") },
+            {
+              label: t("bulk.customers_label_remove"),
+              variant: "destructive",
+              onClick: () => setMode("remove"),
+            },
           ]}
         />
       )}
       {groups.length > 0 && (
         <DropdownMenu
-          button={{ label: "Groups", variant: "secondary", size: "sm", isLoading: isPending }}
+          button={{
+            label: t("bulk.customers_groups"),
+            variant: "secondary",
+            size: "sm",
+            isLoading: isPending,
+          }}
           menuWidth={240}
           items={[
             {
               type: "section",
-              title: "Add to",
+              title: t("bulk.customers_group_add_to"),
               items: groups.map((g) => ({
                 label: g.name,
                 onClick: () =>
-                  run(`Added to ${g.name}:`, () => setCustomersGroup(g.id, items, true)),
+                  run(
+                    (changed) => t("bulk.customers_group_added", { group: g.name, count: changed }),
+                    () => setCustomersGroup(g.id, items, true),
+                  ),
               })),
             },
             {
               type: "section",
-              title: "Remove from",
+              title: t("bulk.customers_group_remove_from"),
               items: groups.map((g) => ({
                 label: g.name,
                 variant: "destructive" as const,
                 onClick: () =>
-                  run(`Removed from ${g.name}:`, () => setCustomersGroup(g.id, items, false)),
+                  run(
+                    (changed) =>
+                      t("bulk.customers_group_removed", { group: g.name, count: changed }),
+                    () => setCustomersGroup(g.id, items, false),
+                  ),
               })),
             },
           ]}
@@ -422,11 +500,15 @@ export function CustomerBulkActions({
         <LabelDialog
           mode={mode}
           definition={labels}
-          customers={n}
+          count={selected.length}
           onClose={() => setMode(undefined)}
           onPick={(label) =>
-            run(mode === "add" ? `Labelled "${label}":` : `Took "${label}" off`, () =>
-              setCustomersLabel(labels.id, items, label, mode === "add"),
+            run(
+              (changed) =>
+                mode === "add"
+                  ? t("bulk.customers_labelled", { label, count: changed })
+                  : t("bulk.customers_unlabelled", { label, count: changed }),
+              () => setCustomersLabel(labels.id, items, label, mode === "add"),
             )
           }
         />
@@ -438,17 +520,18 @@ export function CustomerBulkActions({
 function LabelDialog({
   mode,
   definition,
-  customers,
+  count,
   onClose,
   onPick,
 }: {
   mode: "add" | "remove";
   definition: Definition;
-  /** "3 customers". */
-  customers: string;
+  /** How many customers are selected. */
+  count: number;
   onClose: () => void;
   onPick: (label: string) => void;
 }) {
+  const t = useT<"bulk">();
   const [label, setLabel] = useState("");
   const [inUse, setInUse] = useState<string[]>();
   useEffect(() => {
@@ -463,22 +546,29 @@ function LabelDialog({
   }, [definition.id]);
   const trimmed = label.trim();
   const submit = () => trimmed !== "" && onPick(trimmed);
-  const title = mode === "add" ? `Label ${customers}` : `Remove a label from ${customers}`;
+  const title =
+    mode === "add"
+      ? t("bulk.customers_label_add_title", { count })
+      : t("bulk.customers_label_remove_title", { count });
   return (
     <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={480} purpose="form">
       <DialogHeader
         title={title}
         subtitle={
           mode === "add"
-            ? "Each gets the label unless it has it already."
-            : "Each loses the label if it has it. Nothing else changes."
+            ? t("bulk.customers_label_add_subtitle")
+            : t("bulk.customers_label_remove_subtitle")
         }
         onOpenChange={(open) => !open && onClose()}
       />
       <VStack gap={4} padding={4}>
         <TextInput
-          label="Label"
-          placeholder={mode === "add" ? "vip, wholesale, newsletter…" : "A label they have"}
+          label={t("bulk.customers_label")}
+          placeholder={
+            mode === "add"
+              ? t("bulk.customers_label_add_placeholder")
+              : t("bulk.customers_label_remove_placeholder")
+          }
           value={label}
           onChange={setLabel}
           onEnter={submit}
@@ -486,7 +576,7 @@ function LabelDialog({
         {inUse && inUse.length > 0 && (
           <VStack gap={1}>
             <Text type="supporting" color="secondary">
-              In use
+              {t("bulk.customers_label_in_use")}
             </Text>
             <HStack gap={1} wrap="wrap">
               {inUse.slice(0, 30).map((l) => (
@@ -496,9 +586,13 @@ function LabelDialog({
           </VStack>
         )}
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label={mode === "add" ? "Add label" : "Remove label"}
+            label={
+              mode === "add"
+                ? t("bulk.customers_label_add_action")
+                : t("bulk.customers_label_remove_action")
+            }
             variant={mode === "add" ? "primary" : "destructive"}
             isDisabled={trimmed === ""}
             onClick={submit}

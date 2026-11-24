@@ -14,7 +14,7 @@
     clippy::cast_sign_loss,
     reason = "a failing test panics, and fixtures cast small counters"
 )]
-use hypha_core::{MarketId, Money, VariantId};
+use hypha_core::{Language, MarketId, Money, VariantId};
 use hypha_search_index::{
     FacetKey, FacetValue, Filter, Group, PriceBounds, SearchQuery, SearchResults, Sort, reference,
     terms,
@@ -29,6 +29,7 @@ fn v(n: u128) -> VariantId {
 fn query() -> SearchQuery {
     SearchQuery {
         market: MarketId::from_uuid(Uuid::from_u128(1)),
+        language: Language::new("en").unwrap(),
         channel: None,
         category: None,
         terms: vec![],
@@ -63,6 +64,7 @@ fn values(pairs: &[(&str, u64)]) -> Vec<FacetValue> {
         .iter()
         .map(|(value, count)| FacetValue {
             value: value.to_string(),
+            label: value.to_string(),
             count: *count,
         })
         .collect()
@@ -210,4 +212,54 @@ fn markets_are_apart() {
     let results = run(&q);
     assert_eq!(hits(&results), [v(31)]);
     assert_eq!(results.hits[0].document.price.amount(), 1100);
+}
+
+#[test]
+fn a_language_searches_its_own_documents_by_its_own_words() {
+    let mut q = query();
+    q.language = Language::new("de").unwrap();
+    q.terms = terms::terms("leinen");
+    // The linen shirt's listings by its title, then the cotton shirt by its
+    // description ("kein Leinen").
+    assert_eq!(hits(&run(&q)), [v(13), v(11), v(21)]);
+    q.terms = terms::terms("hemd");
+    assert_eq!(run(&q).total, 0, "terms start words: Leinenhemd isn't hemd");
+    q.terms = terms::terms("rot");
+    assert_eq!(hits(&run(&q)), [v(11)], "an option value's label is a term");
+    q.terms = terms::terms("hellrot");
+    assert_eq!(hits(&run(&q)), [v(21)]);
+}
+
+#[test]
+fn a_language_filters_by_stored_values_and_labels_them_in_its_words() {
+    let mut q = query();
+    q.language = Language::new("de").unwrap();
+    q.filters = vec![color(&["Red"])];
+    q.facets = vec![FacetKey::Option("color".to_string())];
+    let results = run(&q);
+    assert_eq!(hits(&results), [v(21), v(11)]);
+    let labelled: Vec<(&str, &str, u64)> = results.facets[0]
+        .values
+        .iter()
+        .map(|v| (v.value.as_str(), v.label.as_str(), v.count))
+        .collect();
+    // The two shirts label red "Rot" and "Hellrot": the least in byte order shows.
+    assert_eq!(
+        labelled,
+        [
+            ("Red", "Hellrot", 2),
+            ("Blue", "Blau", 1),
+            ("Green", "Grün", 1)
+        ]
+    );
+    // A label isn't a value.
+    q.filters = vec![color(&["Rot"])];
+    assert_eq!(run(&q).total, 0);
+}
+
+#[test]
+fn a_language_the_market_has_no_documents_in_finds_nothing() {
+    let mut q = query();
+    q.language = Language::new("fr").unwrap();
+    assert_eq!(run(&q).total, 0);
 }

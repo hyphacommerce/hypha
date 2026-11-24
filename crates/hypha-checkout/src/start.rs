@@ -7,7 +7,8 @@
 //! idempotency key, the payment's ID).
 
 use hypha_core::{
-    Attempts, CartId, ChannelId, Clock, CountryCode, Email, MarketId, OrderId, PaymentId, RepoError,
+    Attempts, CartId, ChannelId, Clock, CountryCode, Email, Language, MarketId, OrderId, PaymentId,
+    RepoError,
 };
 use hypha_payments::{
     ActionAnswer, ActionRequest, HasPaymentMethods, HasPayments, NextAction, Payment,
@@ -28,6 +29,8 @@ pub(crate) struct Payer {
     pub market: MarketId,
     pub country: CountryCode,
     pub email: Email,
+    /// The language the buyer reads, as the order or cart was resolved to.
+    pub language: Option<Language>,
 }
 
 /// Asks `payment`'s provider to start collecting it, with its method's `settings`, and
@@ -65,7 +68,9 @@ pub(crate) async fn start<S: HasPayments, Q: PaymentProviders>(
         return_url: return_url.map(str::to_string),
         reference: payment.reference().map(str::to_string),
         attempt: payment.attempt().map(str::to_string),
-        instructions: payment.instructions().map(str::to_string),
+        // As the buyer reads them: a manual method shows them to the buyer.
+        instructions: payment.buyer_instructions().map(str::to_string),
+        language: payer.language.clone(),
         settings,
         // The host fills a spore provider's.
         store_settings: serde_json::Map::new(),

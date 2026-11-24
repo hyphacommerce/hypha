@@ -1,12 +1,12 @@
 "use client";
 
-// Times in the store's time zone: the admin layout loads it once (`loadTimeZone`) and
-// provides it here, so every page and table shows times the same way without fetching
-// anything itself.
+// Times in the store's time zone and the staff member's language: the admin layout loads
+// the zone once (`loadTimeZone`) and provides it here, so every page and table shows
+// times the same way without fetching anything itself.
 
 import { createContext, useContext } from "react";
 
-import { formatDateTime } from "@/lib/format";
+import { useFormat } from "@/lib/use-format";
 
 const TimeZoneContext = createContext("UTC");
 
@@ -30,11 +30,11 @@ export function useTimeZone(): string {
  * (with the zone) on detail pages. Hovering shows the long form.
  */
 export function DateTime({ value, short = false }: { value: string; short?: boolean }) {
-  const timeZone = useTimeZone();
-  const long = formatDateTime(value, timeZone, "long");
+  const format = useFormat();
+  const long = format.dateTime(value, "long");
   return (
     <time dateTime={value} title={long}>
-      {short ? formatDateTime(value, timeZone, "short") : long}
+      {short ? format.dateTime(value, "short") : long}
     </time>
   );
 }
@@ -45,16 +45,10 @@ export function DateTime({ value, short = false }: { value: string; short?: bool
  * `short` "11 Nov" in tables, else "11 Nov 2026".
  */
 export function CalendarDate({ value, short = false }: { value: string; short?: boolean }) {
-  const format = (year: boolean) =>
-    new Intl.DateTimeFormat("en-GB", {
-      day: "numeric",
-      month: "short",
-      ...(year ? { year: "numeric" } : {}),
-      timeZone: "UTC",
-    }).format(new Date(value));
+  const format = useFormat();
   return (
-    <time dateTime={value.slice(0, 10)} title={format(true)}>
-      {format(!short)}
+    <time dateTime={value.slice(0, 10)} title={format.date(value, "long")}>
+      {format.date(value, short ? "short" : "long")}
     </time>
   );
 }

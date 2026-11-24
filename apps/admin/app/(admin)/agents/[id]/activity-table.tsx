@@ -13,6 +13,7 @@ import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { DateTime } from "@/components/date-time";
 import { ResourceTable } from "@/components/resource-table/resource-table";
 import { modeLabel, operationLabel } from "@/lib/agents";
+import { useT } from "@/lib/use-t";
 
 type Call = AdminSchemas["AgentCallResponse"];
 
@@ -26,26 +27,27 @@ export function ActivityTable({
 }: {
   page?: { items: Call[]; next_cursor: string | null; error?: string };
 }) {
+  const t = useT<"agents" | "apps">();
   const columns: TableColumn<Call>[] = [
     {
       key: "operation",
-      header: "Operation",
+      header: t("agents.activity_operation"),
       renderCell: (c) => (
         <VStack gap={0.5}>
-          <Text weight="medium">{operationLabel(c.operation, c.summary)}</Text>
+          <Text weight="medium">{operationLabel(t, c.operation, c.summary)}</Text>
           <Text type="code">{c.operation}</Text>
         </VStack>
       ),
     },
     {
       key: "mode",
-      header: "Mode",
+      header: t("agents.activity_mode"),
       width: pixel(100),
-      renderCell: (c) => <Badge label={modeLabel(c.mode)} />,
+      renderCell: (c) => <Badge label={modeLabel(t, c.mode)} />,
     },
     {
       key: "status",
-      header: "Status",
+      header: t("common.status"),
       width: pixel(220),
       renderCell: (c) => (
         <VStack gap={0.5} hAlign="start">
@@ -56,14 +58,16 @@ export function ActivityTable({
     },
     {
       key: "duration_ms",
-      header: "Took",
+      header: t("agents.activity_took"),
       width: pixel(90),
       align: "end",
-      renderCell: (c) => <Text hasTabularNumbers>{c.duration_ms} ms</Text>,
+      renderCell: (c) => (
+        <Text hasTabularNumbers>{t("agents.activity_duration", { duration: c.duration_ms })}</Text>
+      ),
     },
     {
       key: "created_at",
-      header: "When",
+      header: t("agents.activity_when"),
       width: pixel(170),
       renderCell: (c) => <DateTime value={c.created_at} short />,
     },
@@ -79,8 +83,8 @@ export function ActivityTable({
       error={page?.error}
       empty={{
         icon: <ClockIcon width={32} />,
-        title: "No calls yet",
-        description: "Every operation the agent calls shows up here, reads too, kept for 30 days.",
+        title: t("agents.activity_empty_title"),
+        description: t("agents.activity_empty_description"),
       }}
     />
   );

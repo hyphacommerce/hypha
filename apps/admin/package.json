@@ -16,13 +16,15 @@
     "start": "vite preview",
     "test": "node --test \"lib/**/*.test.ts\"",
     "typecheck": "node scripts/clean-next-types.mjs && tsc --noEmit",
+    "i18n:index": "node scripts/i18n-index.mjs",
+    "i18n:check": "node scripts/i18n-index.mjs --check && node scripts/i18n-check.mjs",
     "theme:build": "astryx theme build theme/hyphaTheme.ts --out theme/hypha.css",
     "theme:check": "astryx theme build theme/hyphaTheme.ts --out theme/hypha.css --check"
   },
   "dependencies": {
-    "@astryxdesign/core": "0.7.3",
-    "@astryxdesign/richtext": "0.7.3",
-    "@astryxdesign/theme-neutral": "0.7.3",
+    "@astryxdesign/core": "0.7.8",
+    "@astryxdesign/richtext": "0.7.8",
+    "@astryxdesign/theme-neutral": "0.7.8",
     "@codemirror/lang-html": "6.4.12",
     "@codemirror/language": "6.13.1",
     "@codemirror/state": "6.7.6",
@@ -32,6 +34,7 @@
     "@heroicons/react": "2.2.0",
     "@hyphacommerce/app-blocks": "workspace:*",
     "@hyphacommerce/app-bridge-host": "workspace:*",
+    "@hyphacommerce/i18n": "workspace:*",
     "@hyphacommerce/sdk": "workspace:*",
     "@lexical/code": "0.53.0",
     "@lexical/extension": "0.53.0",
@@ -56,15 +59,15 @@
     "vinext": "1.4.0"
   },
   "devDependencies": {
-    "@astryxdesign/cli": "0.7.3",
-    "@cloudflare/vite-plugin": "2.0.0-beta.sha-67fa336fd",
+    "@astryxdesign/cli": "0.7.8",
+    "@cloudflare/vite-plugin": "2.0.0-beta.v.12",
     "@types/node": "26.6.6",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.2",
     "@vitejs/plugin-rsc": "0.5.38",
-    "cf": "1.0.0-beta.17",
-    "next": "16.4.3",
+    "cf": "1.0.0-beta.28",
+    "next": "16.4.6",
     "typescript": "5.9.3",
     "vite": "8.3.5"
   }

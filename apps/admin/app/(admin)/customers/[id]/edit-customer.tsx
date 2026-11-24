@@ -12,6 +12,8 @@ import { PencilSquareIcon } from "@heroicons/react/24/outline";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
+import { useT } from "@/lib/use-t";
+
 import { updateCustomer } from "../actions";
 
 type Customer = {
@@ -28,11 +30,12 @@ function orNull(value: string): string | null {
 }
 
 export function EditCustomer({ customer }: { customer: Customer }) {
+  const t = useT<"customers">();
   const [isOpen, setIsOpen] = useState(false);
   return (
     <>
       <Button
-        label="Edit"
+        label={t("common.edit")}
         variant="secondary"
         icon={<PencilSquareIcon />}
         onClick={() => setIsOpen(true)}
@@ -44,6 +47,7 @@ export function EditCustomer({ customer }: { customer: Customer }) {
 
 function EditCustomerDialog({ customer, onClose }: { customer: Customer; onClose: () => void }) {
   const router = useRouter();
+  const t = useT<"customers">();
   const [email, setEmail] = useState(customer.email);
   const [firstName, setFirstName] = useState(customer.first_name ?? "");
   const [lastName, setLastName] = useState(customer.last_name ?? "");
@@ -53,7 +57,7 @@ function EditCustomerDialog({ customer, onClose }: { customer: Customer; onClose
 
   const submit = () => {
     if (email.trim() === "") {
-      setError("A customer needs an email.");
+      setError(t("customers.edit_needs_email"));
       return;
     }
     startTransition(async () => {
@@ -76,21 +80,48 @@ function EditCustomerDialog({ customer, onClose }: { customer: Customer; onClose
   return (
     <Dialog isOpen onOpenChange={(open) => !open && onClose()} width={480} purpose="form">
       <DialogHeader
-        title="Edit customer"
-        subtitle="What the shop knows about them. Orders keep the details they were placed with."
+        title={t("customers.edit_title")}
+        subtitle={t("customers.edit_subtitle")}
         onOpenChange={(open) => !open && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
-        <TextInput label="Email" type="email" isRequired value={email} onChange={setEmail} />
+        <TextInput
+          label={t("common.email")}
+          type="email"
+          isRequired
+          value={email}
+          onChange={setEmail}
+        />
         <div className="form-grid">
-          <TextInput label="First name" isOptional value={firstName} onChange={setFirstName} />
-          <TextInput label="Last name" isOptional value={lastName} onChange={setLastName} />
+          <TextInput
+            label={t("common.first_name")}
+            isOptional
+            value={firstName}
+            onChange={setFirstName}
+          />
+          <TextInput
+            label={t("common.last_name")}
+            isOptional
+            value={lastName}
+            onChange={setLastName}
+          />
         </div>
-        <TextInput label="Phone" isOptional value={phone} onChange={setPhone} onEnter={submit} />
+        <TextInput
+          label={t("common.phone")}
+          isOptional
+          value={phone}
+          onChange={setPhone}
+          onEnter={submit}
+        />
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
-          <Button label="Save" variant="primary" isLoading={isPending} onClick={submit} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
+          <Button
+            label={t("common.save")}
+            variant="primary"
+            isLoading={isPending}
+            onClick={submit}
+          />
         </HStack>
       </VStack>
     </Dialog>

@@ -10,7 +10,8 @@ import { listPage, pageQuery } from "@/components/resource-table/server";
 import { pathsById } from "@/lib/categories";
 import { fieldQuery, isFilterOffered } from "@/lib/custom-fields";
 import { definitionsOf } from "@/lib/custom-fields-server";
-import { channelNames, loadCurrencies, sessionClient } from "@/lib/hypha";
+import { channelNames, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import { ProductsTable } from "@/resources/products";
 
 const STATUSES: AdminSchemas["ProductStatus"][] = ["active", "draft", "archived"];
@@ -29,16 +30,20 @@ export default async function ProductsPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const params = await searchParams;
+  const [params, t] = await Promise.all([searchParams, getT()]);
   return (
     <Section padding={6}>
       <VStack gap={5}>
         <PageHeader
-          title="Products"
+          title={t("common.products")}
           actions={
             <>
-              <Button label="Categories" variant="secondary" href="/products/categories" />
-              <Button label="Add product" variant="primary" href="/products/new" />
+              <Button
+                label={t("common.categories")}
+                variant="secondary"
+                href="/products/categories"
+              />
+              <Button label={t("products.add_product")} variant="primary" href="/products/new" />
             </>
           }
         />
@@ -55,7 +60,7 @@ async function ProductRows({ params }: { params: SearchParams }) {
   // Filterable custom fields: read before the list, which only passes on filters of
   // fields that exist and are filterable.
   const fieldFilters = (await definitionsOf("product")).filter(isFilterOffered);
-  const [result, channelName, currencies, categories] = await Promise.all([
+  const [result, channelName, categories] = await Promise.all([
     client.GET("/admin/products", {
       params: {
         query: {
@@ -73,13 +78,11 @@ async function ProductRows({ params }: { params: SearchParams }) {
       },
     }),
     channelNames(client),
-    loadCurrencies(),
     client.GET("/admin/categories"),
   ]);
   return (
     <ProductsTable
-      page={listPage(result, "/products", params)}
-      currencies={currencies}
+      page={await listPage(result, "/products", params)}
       channels={Object.fromEntries(channelName)}
       categories={Object.fromEntries(pathsById(categories.data?.items ?? []))}
       fieldFilters={fieldFilters}

@@ -7,9 +7,9 @@
 use core::time::Duration;
 
 use hypha_core::{
-    AddressVerdict, CartId, ChannelId, CountryCode, Currency, CustomerId, MarketId, MessageCode,
-    MessagePath, Money, ProductId, Scope, Severity, ShippingOptionId, ValidationStep, VariantId,
-    VerificationFlags,
+    AddressVerdict, CartId, ChannelId, CountryCode, Currency, CustomerId, Language, MarketId,
+    MessageCode, MessagePath, Money, ProductId, Scope, Severity, ShippingOptionId, ValidationStep,
+    VariantId, VerificationFlags,
 };
 use serde::{Deserialize, Serialize};
 
@@ -114,6 +114,13 @@ pub struct ValidatedCart {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "openapi", schema(required = false))]
     pub redacted: Option<Vec<String>>,
+    /// The language the cart's shopper reads (a BCP 47 tag): the one they chose, else
+    /// their market's default. Absent where neither names one (the store's default
+    /// language). Messages are best written in it. An added field: still
+    /// version 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(required = false))]
+    pub language: Option<Language>,
 }
 
 /// A kept verification, as an app needs it.
@@ -220,6 +227,7 @@ mod tests {
                 subtotal: eur(100),
                 total: eur(100),
                 redacted: None,
+                language: None,
             },
         }
     }

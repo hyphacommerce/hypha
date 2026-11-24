@@ -149,18 +149,22 @@ pub fn event_scope(subject_kind: &str) -> Option<Scope> {
     Some(match subject_kind {
         "product" | "category" | "search_settings" => Scope::ProductsRead,
         "channel" => Scope::ChannelsRead,
+        "store" => Scope::StoresRead,
         "catalog" | "market" => Scope::MarketsRead,
         "price_list" => Scope::PricingRead,
         "tax_class" | "tax_region" => Scope::TaxesRead,
         "inventory_item" | "location" => Scope::InventoryRead,
         "customer" | "customer_group" => Scope::CustomersRead,
         "order" | "payment" => Scope::OrdersRead,
+        "payment_method" => Scope::PaymentsRead,
         "fulfillment" => Scope::FulfillmentsRead,
         "shipping_zone" => Scope::ShippingRead,
         "asset" => Scope::MediaRead,
         "supplier" | "purchase_order" | "receipt" => Scope::PurchasingRead,
         "transfer" => Scope::InventoryRead,
         "checkout_rule" | "checkout_settings" => Scope::CheckoutRulesRead,
+        "notification_settings" => Scope::NotificationsRead,
+        "translation" => Scope::TranslationsRead,
         // Definitions; `<owner>.custom_fields_updated` events are about their owner
         // (`product`, `category`, `customer`, `order`) and go by its read scope.
         "custom_field_definition" => Scope::CustomFieldsRead,
@@ -830,12 +834,22 @@ mod tests {
     }
 
     #[test]
+    fn store_events_need_stores_read() {
+        assert_eq!(event_scope("store"), Some(Scope::StoresRead));
+    }
+
+    #[test]
     fn checkout_rule_events_need_checkout_rules_read() {
         assert_eq!(event_scope("checkout_rule"), Some(Scope::CheckoutRulesRead));
         assert_eq!(
             event_scope("checkout_settings"),
             Some(Scope::CheckoutRulesRead)
         );
+    }
+
+    #[test]
+    fn translation_events_need_translations_read() {
+        assert_eq!(event_scope("translation"), Some(Scope::TranslationsRead));
     }
 
     #[test]

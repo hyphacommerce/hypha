@@ -227,8 +227,9 @@ pub async fn delete_payment_method<S: HasPaymentMethods>(
     id: PaymentMethodId,
 ) -> Result<(), CommandError> {
     ctx.require(Scope::PaymentsWrite)?;
-    let method = load(ports.payment_methods(), id).await?;
-    match ports.payment_methods().delete(&method).await {
+    let mut method = load(ports.payment_methods(), id).await?;
+    method.delete();
+    match ports.payment_methods().delete(&mut method).await {
         Err(RepoError::Reference(keys::OPEN_PAYMENT_METHOD)) => {
             Err(CommandError::PaymentMethodInUse(id))
         }

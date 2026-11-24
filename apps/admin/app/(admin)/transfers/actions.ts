@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { describe, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 
 export type Result = { error?: string };
 
@@ -21,7 +22,10 @@ export async function createTransfer(
 ): Promise<Result> {
   const client = await sessionClient();
   const { data, error } = await client.POST("/admin/transfers", { body: input });
-  if (!data) return { error: error ? describe(error) : "Couldn't write the transfer." };
+  if (!data) {
+    const t = await getT();
+    return { error: error ? await describe(error) : t("transfers.create_failed") };
+  }
   revalidatePath("/transfers");
   redirect(`/transfers/${data.id}`);
 }
@@ -35,7 +39,7 @@ export async function updateTransfer(id: string, patch: TransferPatch): Promise<
     params: { path: { id } },
     body: patch,
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/transfers/${id}`);
   return {};
 }
@@ -49,7 +53,7 @@ export async function shipTransfer(id: string, key: string): Promise<Result> {
   const { error } = await client.POST("/admin/transfers/{id}/ship", {
     params: { path: { id }, header: { "Idempotency-Key": key } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/transfers/${id}`);
   revalidatePath("/transfers");
   revalidatePath("/inventory");
@@ -66,7 +70,7 @@ export async function receiveTransfer(
     params: { path: { id }, header: { "Idempotency-Key": input.key } },
     body: { lines: input.lines },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/transfers/${id}`);
   revalidatePath("/transfers");
   revalidatePath("/inventory");
@@ -79,7 +83,7 @@ export async function cancelTransfer(id: string): Promise<Result> {
   const { error } = await client.POST("/admin/transfers/{id}/cancel", {
     params: { path: { id } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/transfers/${id}`);
   revalidatePath("/transfers");
   return {};
@@ -89,7 +93,7 @@ export async function cancelTransfer(id: string): Promise<Result> {
 export async function deleteTransfer(id: string): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.DELETE("/admin/transfers/{id}", { params: { path: { id } } });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath("/transfers");
   redirect("/transfers");
 }

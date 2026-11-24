@@ -28,6 +28,7 @@ import {
   runAppAction,
   runPaymentAction,
 } from "@/app/(admin)/apps/extension-actions";
+import { useT } from "@/lib/use-t";
 
 import { type FormValue, checkValues, inputOf, schemaFields } from "./schema-form";
 
@@ -37,11 +38,12 @@ type Action = AdminSchemas["ActionExtension"];
 function useRunAction(context: ActionContext) {
   const router = useRouter();
   const toast = useToast();
+  const t = useT();
   return async (action: Action, input?: Record<string, unknown>): Promise<ActionResult> => {
     const result = action.point
       ? context.payment_id
         ? await runPaymentAction(action.point, context.payment_id, context.order_id ?? "", input)
-        : { error: `${action.label} needs a payment.` }
+        : { error: t("components.app_action_needs_payment", { action: action.label }) }
       : await runAppAction(action.app, action.id, context, input);
     if (result.error) {
       toast({ body: result.error, type: "error" });
@@ -86,11 +88,12 @@ export function AppBlockCard({
   const router = useRouter();
   const toast = useToast();
   const run = useRunAction(context);
+  const t = useT();
   if (!isTree(tree)) {
     return (
       <Card>
         <Text type="supporting" color="secondary">
-          {appName} didn&apos;t answer.
+          {t("components.app_no_answer", { app: appName })}
         </Text>
       </Card>
     );
@@ -109,7 +112,7 @@ export function AppBlockCard({
       }}
       onNavigate={(path) => {
         if (!pagePath) {
-          toast({ body: `${appName} has no page to open.`, type: "error" });
+          toast({ body: t("components.app_no_page", { app: appName }), type: "error" });
           return;
         }
         const query = path === "/" ? "" : `?path=${encodeURIComponent(path)}`;
@@ -186,6 +189,7 @@ function ActionForm({
   onSubmit: (input: Record<string, unknown>) => Promise<ActionResult>;
   onClose: () => void;
 }) {
+  const t = useT();
   const fields = schemaFields(action.input_schema);
   const [values, setValues] = useState<Record<string, FormValue>>({});
   const [problems, setProblems] = useState<Record<string, string>>({});
@@ -198,7 +202,7 @@ function ActionForm({
   };
 
   const submit = async () => {
-    const found = checkValues(fields, values);
+    const found = checkValues(t, fields, values);
     setProblems(found);
     if (Object.keys(found).length > 0) return;
     setPending(true);
@@ -216,7 +220,7 @@ function ActionForm({
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={480} purpose="form">
       <DialogHeader
         title={action.label}
-        subtitle={`Sent to ${appName}.`}
+        subtitle={t("components.app_sent_to", { app: appName })}
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={3} padding={4}>
@@ -279,7 +283,7 @@ function ActionForm({
           }
         })}
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="secondary" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="secondary" onClick={onClose} />
           <Button label={action.label} variant="primary" isLoading={pending} onClick={submit} />
         </HStack>
       </VStack>

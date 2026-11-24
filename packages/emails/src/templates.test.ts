@@ -6,14 +6,22 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { checkMessage, compareCatalogs, loadCatalogs, translator } from "./i18n.ts";
 
 const dir = new URL("../../../crates/hypha-notifications/defaults/", import.meta.url);
 
-const keys = [
+/** The buyer's emails: built in every catalog's language. */
+const translated = [
   "order_confirmation",
   "order_shipped",
   "order_tracking_updated",
   "order_cancelled",
+  "customer_login_code",
+  "customer_erasure_requested",
+] as const;
+
+const keys = [
+  ...translated,
   "staff_new_order",
   "staff_invite",
   "staff_password_reset",
@@ -26,6 +34,8 @@ const time = ["iso", "formatted"];
 const nested = (root: string, fields: string[]) => fields.map((field) => `${root}.${field}`);
 
 const every = [
+  "language",
+  "dir",
   ...nested("shop", ["name", "email", "url"]),
   ...nested("brand", ["logo_url", "accent", "footer"]),
 ];
@@ -37,6 +47,7 @@ const order = [
     "email",
     "taxes_included",
     "shipping_method",
+    "language",
     "lines[]",
     "discounts[]",
   ]),
@@ -113,6 +124,15 @@ const contexts: Record<Key | "layout", string[]> = {
   order_shipped: [...every, ...order, ...fulfillment],
   order_tracking_updated: [...every, ...order, ...fulfillment],
   order_cancelled: [...every, ...order, "cancellation.reason"],
+  customer_login_code: [
+    ...every,
+    "code",
+    "email",
+    "link",
+    "expires_in_minutes",
+    ...nested("expires_at", time),
+  ],
+  customer_erasure_requested: [...every, ...nested("due_at", time)],
   staff_new_order: [...every, ...order, "admin_url"],
   staff_invite: [...every, ...staff],
   staff_password_reset: [...every, ...staff],
@@ -228,24 +248,49 @@ function verify(name: string, source: string, context: Set<string>): string[] {
 
 const read = (file: string) => readFile(new URL(file, dir), "utf8");
 
+const catalogs = await loadCatalogs();
+const languages = [...catalogs.keys()];
+
 test("the layout defines exactly the preheader and content blocks", async () => {
   const blocks = verify("layout", await read("layout.html.j2"), allowed(contexts.layout));
   assert.deepEqual(blocks, ["preheader", "content"]);
 });
 
-for (const key of keys) {
-  test(`${key}: each file uses only its context's variables`, async () => {
-    const context = allowed(contexts[key]);
-    const subject = await read(`${key}.subject.j2`);
-    assert.ok(!subject.includes("\n"), `${key}: the subject is one line`);
-    verify(`${key}.subject`, subject, context);
+for (const language of languages) {
+  const folder = language === "en" ? "" : `${language}/`;
+  const built = language === "en" ? keys : translated;
+  for (const key of built) {
+    test(`${language} ${key}: each file uses only its context's variables`, async () => {
+      const context = allowed(contexts[key]);
+      const subject = await read(`${folder}${key}.subject.j2`);
+      assert.ok(!subject.includes("\n"), `${key}: the subject is one line`);
+      verify(`${key}.subject`, subject, context);
 
-    const html = await read(`${key}.html.j2`);
-    assert.ok(html.startsWith('{% extends "layout" %}'), `${key}: html extends the layout`);
-    assert.deepEqual(verify(`${key}.html`, html, context), ["preheader", "content"]);
+      const html = await read(`${folder}${key}.html.j2`);
+      assert.ok(html.startsWith('{% extends "layout" %}'), `${key}: html extends the layout`);
+      assert.deepEqual(verify(`${key}.html`, html, context), ["preheader", "content"]);
 
-    const text = await read(`${key}.txt.j2`);
-    assert.ok(text.trim().length > 0, `${key}: a plain-text body`);
-    assert.deepEqual(verify(`${key}.txt`, text, context), [], `${key}: text has no blocks`);
-  });
+      const text = await read(`${folder}${key}.txt.j2`);
+      assert.ok(text.trim().length > 0, `${key}: a plain-text body`);
+      assert.deepEqual(verify(`${key}.txt`, text, context), [], `${key}: text has no blocks`);
+    });
+  }
 }
+
+test("every catalog has English's messages, with the same arguments", () => {
+  assert.deepEqual(compareCatalogs(catalogs), []);
+});
+
+test("a message takes plain arguments only", () => {
+  assert.throws(() => checkMessage("x", "{count, plural, one {# item} other {# items}}"));
+  assert.throws(() => checkMessage("x", "It's '{quoted}'"));
+  assert.doesNotThrow(() => checkMessage("x", "We've sent {number}."));
+});
+
+test("a translator fills each argument and refuses a missing or unknown one", () => {
+  const t = translator("en", { "a.b": "Order {number} for {total}" });
+  assert.equal(t("a.b", { number: "#1", total: "€1" }), "Order #1 for €1");
+  assert.throws(() => t("a.b", { number: "#1" }));
+  assert.throws(() => t("a.b", { number: "#1", total: "€1", extra: "x" }));
+  assert.throws(() => t("a.c"));
+});

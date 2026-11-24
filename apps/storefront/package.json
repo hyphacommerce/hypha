@@ -15,15 +15,17 @@
     "build": "vite build",
     "start": "vite preview",
     "test": "node --test lib/*.test.ts",
+    "i18n:check": "hypha-i18n-check messages --complete sr-Latn",
     "typecheck": "node scripts/clean-next-types.mjs && tsc --noEmit",
     "theme:build": "astryx theme build theme/shopTheme.ts --out theme/shop.css",
     "theme:check": "astryx theme build theme/shopTheme.ts --out theme/shop.css --check"
   },
   "dependencies": {
-    "@astryxdesign/core": "0.7.3",
-    "@astryxdesign/theme-neutral": "0.7.3",
+    "@astryxdesign/core": "0.7.8",
+    "@astryxdesign/theme-neutral": "0.7.8",
     "@heroicons/react": "2.2.0",
     "@hyphacommerce/app": "workspace:*",
+    "@hyphacommerce/i18n": "workspace:*",
     "@hyphacommerce/sdk": "workspace:*",
     "@hyphacommerce/storefront-elements": "workspace:*",
     "@stylexjs/stylex": "0.19.1",
@@ -34,15 +36,15 @@
     "vinext": "1.4.0"
   },
   "devDependencies": {
-    "@astryxdesign/cli": "0.7.3",
-    "@cloudflare/vite-plugin": "2.0.0-beta.sha-67fa336fd",
+    "@astryxdesign/cli": "0.7.8",
+    "@cloudflare/vite-plugin": "2.0.0-beta.v.12",
     "@types/node": "26.6.6",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.2",
     "@vitejs/plugin-rsc": "0.5.38",
-    "cf": "1.0.0-beta.17",
-    "next": "16.4.3",
+    "cf": "1.0.0-beta.28",
+    "next": "16.4.6",
     "typescript": "5.9.3",
     "vite": "8.3.5"
   }

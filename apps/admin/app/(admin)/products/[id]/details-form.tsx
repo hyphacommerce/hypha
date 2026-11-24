@@ -5,6 +5,7 @@ import { VStack } from "@astryxdesign/core/Layout";
 import { TextInput } from "@astryxdesign/core/TextInput";
 
 import { RichTextField } from "@/components/rich-text-field";
+import { useT } from "@/lib/use-t";
 
 import type { Draft } from "./draft";
 
@@ -20,28 +21,33 @@ export function DetailsForm({
   isActive: boolean;
   onChange: (change: Partial<Draft>) => void;
 }) {
+  const t = useT<"products">();
   return (
     <Card>
       <VStack gap={4}>
-        <TextInput label="Title" value={draft.title} onChange={(title) => onChange({ title })} />
+        <TextInput
+          label={t("common.title")}
+          value={draft.title}
+          onChange={(title) => onChange({ title })}
+        />
         <RichTextField
-          label="Description"
-          description="Shown on the product page. Links open in a new tab."
+          label={t("common.description")}
+          description={t("products.details_description_hint")}
           isOptional
           minHeight={200}
           value={draft.description}
           onChange={(description) => onChange({ description })}
         />
         <TextInput
-          label="Handle"
-          description="The product's address in the storefront: lowercase letters, digits and dashes."
+          label={t("common.handle")}
+          description={t("products.handle_description")}
           value={draft.handle}
           onChange={(handle) => onChange({ handle })}
           status={
             isActive && draft.handle !== savedHandle
               ? {
                   type: "warning",
-                  message: "This product is live: links to its old address will stop working.",
+                  message: t("products.details_handle_live_warning"),
                 }
               : undefined
           }

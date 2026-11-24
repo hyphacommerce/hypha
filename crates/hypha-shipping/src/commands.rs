@@ -146,10 +146,21 @@ pub async fn delete_zone<R: ShippingZoneRepo>(
     id: ShippingZoneId,
 ) -> Result<(), CommandError> {
     ctx.require(Scope::ShippingWrite)?;
-    let mut zone = load_zone(zones, id).await?;
-    zone.delete();
-    Ok(zones.delete(&mut zone).await?)
+    // A zone changed meanwhile is loaded again, so every option it's deleted with is
+    // named by an event.
+    for _ in 0..DELETE_ROUNDS {
+        let mut zone = load_zone(zones, id).await?;
+        zone.delete();
+        match zones.delete(&mut zone).await {
+            Err(RepoError::StaleVersion) => {}
+            done => return Ok(done?),
+        }
+    }
+    Err(RepoError::StaleVersion.into())
 }
+
+/// How often `delete_zone` loads a zone changed under it again before giving up.
+const DELETE_ROUNDS: usize = 3;
 
 // ---------- options ----------
 

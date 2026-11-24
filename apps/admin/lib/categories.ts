@@ -3,6 +3,8 @@
 
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
+import type { KeyIn, TFor } from "./messages";
+
 export type CategoryNode = AdminSchemas["CategoryNode"];
 
 /** A category in tree order, with where it sits. */
@@ -90,8 +92,32 @@ export function toHandle(name: string): string {
 }
 
 /** The two visibility choices, Hidden first: a new category starts hidden unless the
- * merchant says otherwise, and the request always states which. */
+ * merchant says otherwise, and the request always states which. Their texts are message
+ * keys: `visibilityOptions` reads them. */
 export const VISIBILITY = [
-  { value: "hidden", label: "Hidden", description: "The storefront doesn't show it yet." },
-  { value: "visible", label: "Visible", description: "Shown in the storefront." },
-] as const;
+  {
+    value: "hidden",
+    label: "categories.visibility_hidden",
+    description: "categories.visibility_hidden_description",
+  },
+  {
+    value: "visible",
+    label: "categories.visibility_visible",
+    description: "categories.visibility_visible_description",
+  },
+] as const satisfies readonly {
+  value: string;
+  label: KeyIn<"categories">;
+  description: KeyIn<"categories">;
+}[];
+
+/** The visibility choices as a selector's options, in the translator's language. */
+export function visibilityOptions(
+  t: TFor<"categories">,
+): { value: string; label: string; description: string }[] {
+  return VISIBILITY.map(({ value, label, description }) => ({
+    value,
+    label: t(label),
+    description: t(description),
+  }));
+}

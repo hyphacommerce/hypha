@@ -1,0 +1,17 @@
+{
+  "required": "Obavezno",
+  "close": "Zatvori",
+  "cancel": "Otkaži",
+  "remove": "Ukloni",
+  "home": "Početna",
+  "sale": "Sniženo",
+  "sold_out": "Rasprodato",
+  "was_now": "Bilo {was}, sada {now}",
+  "keep_shopping": "Nastavi kupovinu",
+  "back_to_shop": "Nazad u prodavnicu",
+  "yes": "Da",
+  "no": "Ne",
+  "product_gone": "Proizvod koji se više ne prodaje",
+  "not_found_title": "Stranica nije pronađena",
+  "not_found_description": "Ovde nema ničega. Možda je premešteno ili se ovde ne prodaje."
+}

@@ -310,6 +310,7 @@ where
     let stale_role = owner.clone();
 
     u.set_status(hypha_users::UserStatus::Disabled);
+    u.set_language(Some(hypha_core::Language::new("fr-CA").unwrap()));
     let mut batch = ports.batch();
     batch.update_user(&mut u);
     batch.update_role(&mut owner);

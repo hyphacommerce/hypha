@@ -15,80 +15,7 @@ import {
   type View,
 } from "@/components/resource-table/resource-table";
 import { type Supplier, daysLabel, primaryContact, termsLabel } from "@/lib/purchasing";
-
-const FILTERS: FilterDef[] = [
-  { kind: "search", param: "q", label: "Search", placeholder: "Search supplier names" },
-  {
-    kind: "select",
-    param: "archived",
-    label: "Status",
-    options: [
-      { value: "false", label: "Active" },
-      { value: "true", label: "Archived" },
-    ],
-  },
-];
-
-const VIEWS: View[] = [
-  { label: "All", params: {} },
-  { label: "Active", params: { archived: ["false"] } },
-  { label: "Archived", params: { archived: ["true"] } },
-];
-
-const COLUMNS: TableColumn<Supplier>[] = [
-  {
-    key: "name",
-    header: "Supplier",
-    width: proportional(2, { minWidth: 200 }),
-    renderCell: (s) => (
-      <Link href={`/suppliers/${s.id}`} weight="semibold" color="primary">
-        {s.name}
-      </Link>
-    ),
-  },
-  {
-    key: "contact",
-    header: "Orders go to",
-    width: proportional(2, { minWidth: 200 }),
-    renderCell: (s) => {
-      const contact = primaryContact(s);
-      return (
-        <Text type="supporting" color={contact ? undefined : "secondary"}>
-          {contact ? (contact.email ?? contact.name) : "No primary contact"}
-        </Text>
-      );
-    },
-  },
-  {
-    key: "currency",
-    header: "Currency",
-    width: pixel(100),
-    renderCell: (s) => <Text>{s.currency}</Text>,
-  },
-  {
-    key: "terms",
-    header: "Terms",
-    width: pixel(130),
-    renderCell: (s) => <Text>{termsLabel(s.payment_terms)}</Text>,
-  },
-  {
-    key: "lead",
-    header: "Lead time",
-    width: pixel(110),
-    renderCell: (s) => <Text>{daysLabel(s.lead_time_days)}</Text>,
-  },
-  {
-    key: "status",
-    header: "Status",
-    width: pixel(110),
-    renderCell: (s) =>
-      s.archived ? (
-        <Badge label="Archived" variant="warning" />
-      ) : (
-        <Badge label="Active" variant="success" />
-      ),
-  },
-];
+import { useT } from "@/lib/use-t";
 
 export function SuppliersTable({
   page,
@@ -98,26 +25,103 @@ export function SuppliersTable({
   page?: { items: Supplier[]; next_cursor: string | null; error?: string };
   canWrite: boolean;
 }) {
+  const t = useT<"suppliers" | "purchasing">();
+  const filters: FilterDef[] = [
+    {
+      kind: "search",
+      param: "q",
+      label: t("common.search"),
+      placeholder: t("suppliers.search_placeholder"),
+    },
+    {
+      kind: "select",
+      param: "archived",
+      label: t("common.status"),
+      options: [
+        { value: "false", label: t("common.active") },
+        { value: "true", label: t("common.archived") },
+      ],
+    },
+  ];
+  const views: View[] = [
+    { label: t("common.all"), params: {} },
+    { label: t("common.active"), params: { archived: ["false"] } },
+    { label: t("common.archived"), params: { archived: ["true"] } },
+  ];
+  const columns: TableColumn<Supplier>[] = [
+    {
+      key: "name",
+      header: t("common.supplier"),
+      width: proportional(2, { minWidth: 200 }),
+      renderCell: (s) => (
+        <Link href={`/suppliers/${s.id}`} weight="semibold" color="primary">
+          {s.name}
+        </Link>
+      ),
+    },
+    {
+      key: "contact",
+      header: t("suppliers.orders_go_to"),
+      width: proportional(2, { minWidth: 200 }),
+      renderCell: (s) => {
+        const contact = primaryContact(s);
+        return (
+          <Text type="supporting" color={contact ? undefined : "secondary"}>
+            {contact ? (contact.email ?? contact.name) : t("suppliers.no_primary_contact")}
+          </Text>
+        );
+      },
+    },
+    {
+      key: "currency",
+      header: t("common.currency"),
+      width: pixel(100),
+      renderCell: (s) => <Text>{s.currency}</Text>,
+    },
+    {
+      key: "terms",
+      header: t("suppliers.terms"),
+      width: pixel(130),
+      renderCell: (s) => <Text>{termsLabel(t, s.payment_terms)}</Text>,
+    },
+    {
+      key: "lead",
+      header: t("suppliers.lead_time"),
+      width: pixel(110),
+      renderCell: (s) => <Text>{daysLabel(t, s.lead_time_days)}</Text>,
+    },
+    {
+      key: "status",
+      header: t("common.status"),
+      width: pixel(110),
+      renderCell: (s) =>
+        s.archived ? (
+          <Badge label={t("common.archived")} variant="warning" />
+        ) : (
+          <Badge label={t("common.active")} variant="success" />
+        ),
+    },
+  ];
   return (
     <ResourceTable<Supplier>
       rows={page?.items}
       nextCursor={page?.next_cursor}
       isLoading={!page}
-      columns={COLUMNS}
+      columns={columns}
       idKey="id"
       rowHref={(s) => `/suppliers/${s.id}`}
       isSelectable={false}
-      filters={FILTERS}
-      views={VIEWS}
+      filters={filters}
+      views={views}
       error={page?.error}
       empty={{
         icon: <TruckIcon width={32} />,
-        title: "No suppliers yet",
+        title: t("suppliers.list_empty_title"),
         description: canWrite
-          ? "Add the businesses you buy stock from, with their contacts, terms and prices."
-          : "Suppliers the store buys from show here.",
+          ? t("suppliers.list_empty_description_write")
+          : t("suppliers.list_empty_description_read"),
       }}
-      noResults={{ title: "No suppliers match these filters" }}
+      noResults={{ title: t("suppliers.list_no_results_title") }}
     />
   );
 }

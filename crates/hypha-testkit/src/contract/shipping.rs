@@ -27,6 +27,8 @@ pub async fn shipping_zone_repo<R: ShippingZoneRepo>(make: impl AsyncFn() -> R) 
     zone_lookups(&make().await).await;
     scenario("shipping zone: stale and missing updates fail");
     zone_stale(&make().await).await;
+    scenario("shipping zone: a delete from a stale zone fails and writes nothing");
+    zone_stale_delete(&make().await).await;
 }
 
 /// Runs every `AppProviderRepo` scenario, each on a fresh store from `make`. A provider is
@@ -204,6 +206,21 @@ async fn zone_country_key<R: ShippingZoneRepo>(repo: &R) {
         repo.insert(&mut zone(1, "Again", &["DE"])).await,
         Err(RepoError::Duplicate(keys::ZONE_ID))
     );
+}
+
+/// A zone changed since it was loaded (an option added) isn't deleted from the old copy:
+/// what it records for its options would miss the new one.
+async fn zone_stale_delete<R: ShippingZoneRepo>(repo: &R) {
+    let mut eu = zone(1, "EU", &["HR"]);
+    repo.insert(&mut eu).await.unwrap();
+    let mut stale = eu.clone();
+    eu.rename("Europe").unwrap();
+    repo.update(&mut eu).await.unwrap();
+    stale.delete();
+    assert_eq!(repo.delete(&mut stale).await, Err(RepoError::StaleVersion));
+    assert_eq!(repo.get(zid(1)).await, Ok(Some(eu.clone())));
+    eu.delete();
+    assert_eq!(repo.delete(&mut eu).await, Ok(()));
 }
 
 async fn zone_lookups<R: ShippingZoneRepo>(repo: &R) {

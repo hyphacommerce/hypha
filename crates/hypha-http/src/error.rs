@@ -85,6 +85,8 @@ pub struct ApiErrorBody {
 ///   `compare_at_not_above_price`, `compare_at_currency_mismatch`, …)
 /// - `too_many_prices`: `{"max"}`, the most one request may set
 /// - `price_list_in_use`: `{"catalogs": ["cat_…"]}`, the catalogs holding it
+/// - `language_in_use`: `{"markets": [{"id": "mkt_…", "languages": ["de"]}]}`, the
+///   markets offering languages the store would stop offering, each with those
 /// - `price_list_name_taken`: `{"price_list": "pl_…"}`, the list that has the name
 /// - `invalid_discount`: `{"problems": [{"path", "code", "message"}]}`, every rule the
 ///   discount breaks at once (`path` like `kind.rewards[0].value.basis_points`)
@@ -266,6 +268,12 @@ impl ApiError {
             "invalid_cart_header",
             "X-Hypha-Cart is a cart ID (`cart_…`)",
         )
+    }
+
+    /// A URL segment that parses as text but isn't what the route takes there (an ID of
+    /// another kind than the path names).
+    pub fn invalid_path(message: impl std::fmt::Display) -> Self {
+        Self::new(StatusCode::BAD_REQUEST, "invalid_path", message)
     }
 
     /// A query string that doesn't parse, or has parameters the route doesn't take.
@@ -602,9 +610,17 @@ fn address_problems(e: &hypha_core::AddressError) -> Value {
     let problems: Vec<Value> = e
         .problems()
         .iter()
-        .map(
-            |p| json!({ "field": p.field.as_str(), "code": p.code.as_str(), "message": p.message }),
-        )
+        .map(|p| {
+            let mut problem = json!({
+                "field": p.field.as_str(),
+                "code": p.code.as_str(),
+                "message": p.message,
+            });
+            if let Some(params) = crate::routes::address::MessageParamsDto::of(&p.params) {
+                problem["params"] = json!(params);
+            }
+            problem
+        })
         .collect();
     json!({ "problems": problems })
 }
@@ -784,6 +800,8 @@ impl From<hypha_markets::CommandError> for ApiError {
             | E::PriceListNameTaken { .. }
             | E::PriceListInUse { .. } => StatusCode::CONFLICT,
             E::Country(_)
+            | E::Language(_)
+            | E::LanguageNotOffered(_)
             | E::Market(_)
             | E::Money(_)
             | E::PriceList(_)
@@ -830,6 +848,10 @@ impl From<hypha_stores::CommandError> for ApiError {
         let status = match &e {
             E::Auth(_) => StatusCode::FORBIDDEN,
             E::StoreNotFound(_) => StatusCode::NOT_FOUND,
+            // The list as stored is in the way, not the language sent.
+            E::Store(hypha_stores::StoreError::DefaultLanguageListed(_)) | E::LanguageInUse(_) => {
+                StatusCode::CONFLICT
+            }
             E::Store(_)
             | E::Email(_)
             | E::Address(_)
@@ -837,6 +859,7 @@ impl From<hypha_stores::CommandError> for ApiError {
             | E::Language(_)
             | E::Currency(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::CurrencyLocked
+            | E::DefaultLanguageInUse
             | E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
             ) => StatusCode::CONFLICT,
@@ -845,6 +868,13 @@ impl From<hypha_stores::CommandError> for ApiError {
         };
         let details = match &e {
             E::Address(a) => Some(address_problems(a)),
+            E::LanguageInUse(markets) => {
+                let markets: Vec<Value> = markets
+                    .iter()
+                    .map(|m| json!({ "id": m.market, "languages": m.languages }))
+                    .collect();
+                Some(json!({ "markets": markets }))
+            }
             _ => None,
         };
         Self::domain(status, e).with_details(details)
@@ -2001,6 +2031,47 @@ fn checkout_rule_details(e: &hypha_checkout_rules::CommandError) -> Option<Value
     }
 }
 
+/// A resource kind in a URL that isn't one.
+impl From<hypha_translations::UnknownKind> for ApiError {
+    fn from(e: hypha_translations::UnknownKind) -> Self {
+        Self::domain(StatusCode::NOT_FOUND, e)
+    }
+}
+
+impl From<hypha_translations::CommandError> for ApiError {
+    fn from(e: hypha_translations::CommandError) -> Self {
+        use hypha_translations::{CommandError as E, TranslationError as T};
+        let status = match &e {
+            E::Auth(_) => StatusCode::FORBIDDEN,
+            // The resource and the translation only arrive in URLs.
+            E::ResourceNotFound(_) | E::NotFound { .. } => StatusCode::NOT_FOUND,
+            E::Translation(T::Invalid(_))
+            | E::Language(_)
+            | E::DefaultLanguage(_)
+            | E::LanguageNotListed(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            E::Repo(RepoError::Backend(_)) => return Self::internal(e),
+            E::Repo(
+                RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
+            ) => StatusCode::CONFLICT,
+        };
+        let details = match &e {
+            // `invalid_translation`: `{"problems": [{"key", "code", "message"}]}`, every
+            // field that breaks a rule.
+            E::Translation(T::Invalid(problems)) => Some(json!({
+                "problems": problems
+                    .iter()
+                    .map(|p| json!({"key": p.key, "code": p.code, "message": p.message}))
+                    .collect::<Vec<_>>()
+            })),
+            E::ResourceNotFound(resource) => {
+                Some(json!({"kind": resource.kind.as_str(), "id": resource.id_string()}))
+            }
+            _ => None,
+        };
+        Self::domain(status, e).with_details(details)
+    }
+}
+
 impl From<hypha_agents::CommandError> for ApiError {
     fn from(e: hypha_agents::CommandError) -> Self {
         use hypha_agents::{AgentError as A, CommandError as E, ProposalError as P};
@@ -2125,6 +2196,13 @@ fn notification_error_status(e: &hypha_notifications::NotificationError) -> Opti
     }
 }
 
+/// A language tag a request sent that isn't one.
+impl From<hypha_core::LanguageError> for ApiError {
+    fn from(e: hypha_core::LanguageError) -> Self {
+        Self::domain(StatusCode::UNPROCESSABLE_ENTITY, e)
+    }
+}
+
 impl From<hypha_notifications::CommandError> for ApiError {
     fn from(e: hypha_notifications::CommandError) -> Self {
         use hypha_notifications::{CommandError as E, TemplateError as T};
@@ -2138,6 +2216,8 @@ impl From<hypha_notifications::CommandError> for ApiError {
             },
             // Message IDs only ever arrive in URLs.
             E::NotificationNotFound(_) => StatusCode::NOT_FOUND,
+            // A template's `language`, in the query.
+            E::LanguageNotListed(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),
             E::Repo(
                 RepoError::StaleVersion | RepoError::Duplicate(_) | RepoError::Reference(_),
@@ -2175,6 +2255,8 @@ impl From<hypha_mail::CommandError> for ApiError {
             | E::AssetNotReady(_)
             | E::AssetNotPublic(_)
             | E::AssetKindNotAllowed { .. } => StatusCode::UNPROCESSABLE_ENTITY,
+            // A template's `language` the store doesn't have, or `enabled` sent with one.
+            E::LanguageNotListed(_) | E::EnabledNotPerLanguage => StatusCode::UNPROCESSABLE_ENTITY,
             // Message IDs only ever arrive in URLs; a resent message's purchase order is
             // its own (only drafts are deleted, and a sent order isn't one).
             E::NotificationNotFound(_) | E::PurchaseOrderNotFound(_) => StatusCode::NOT_FOUND,
@@ -2262,6 +2344,7 @@ impl From<hypha_users::CommandError> for ApiError {
             E::Role(R::Text(_) | R::NoScopes)
             | E::User(U::Text(_))
             | E::Email(_)
+            | E::Language(_)
             | E::Password(_) => StatusCode::UNPROCESSABLE_ENTITY,
             E::Notify(_) => StatusCode::BAD_GATEWAY,
             E::Repo(RepoError::Backend(_)) => return Self::internal(e),

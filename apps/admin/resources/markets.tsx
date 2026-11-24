@@ -11,40 +11,46 @@ import { GlobeEuropeAfricaIcon } from "@heroicons/react/24/outline";
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 import { ClientResourceTable, byText } from "@/components/resource-table/resource-table";
+import { useT } from "@/lib/use-t";
 
 /** A market with its countries already named ("Croatia, Slovenia"). */
 export type MarketRow = AdminSchemas["MarketResponse"] & { countryNames: string };
 
 export function MarketsTable({ markets }: { markets: MarketRow[] }) {
+  const t = useT<"markets">();
   const columns: TableColumn<MarketRow>[] = [
     {
       key: "name",
-      header: "Market",
+      header: t("common.market"),
       renderCell: (m) => (
         <Link href={`/markets/${m.id}`} weight="semibold" color="primary">
           {m.name}
         </Link>
       ),
     },
-    { key: "countryNames", header: "Countries", width: proportional(3) },
-    { key: "currency", header: "Currency", width: pixel(100) },
+    { key: "countryNames", header: t("common.countries"), width: proportional(3) },
+    { key: "currency", header: t("common.currency"), width: pixel(100) },
     {
       key: "prices",
-      header: "Prices",
+      header: t("markets.list_column_prices"),
       width: pixel(130),
       renderCell: (m) => (
-        <Text color="secondary">{m.prices_include_tax ? "Include tax" : "Exclude tax"}</Text>
+        <Text color="secondary">
+          {m.prices_include_tax
+            ? t("markets.list_prices_include_tax")
+            : t("markets.list_prices_exclude_tax")}
+        </Text>
       ),
     },
     {
       key: "catalog",
-      header: "Catalog",
+      header: t("markets.list_column_catalog"),
       width: pixel(120),
       renderCell: (m) =>
         m.catalog ? (
-          <Badge label="Ready" variant="success" />
+          <Badge label={t("markets.list_catalog_ready")} variant="success" />
         ) : (
-          <Badge label="None yet" variant="warning" />
+          <Badge label={t("markets.list_catalog_none")} variant="warning" />
         ),
     },
   ];
@@ -55,16 +61,16 @@ export function MarketsTable({ markets }: { markets: MarketRow[] }) {
       idKey="id"
       rowHref={(m) => `/markets/${m.id}`}
       searchText={(m) => `${m.name} ${m.countryNames} ${m.currency} ${m.countries.join(" ")}`}
-      searchLabel="Search markets, countries or currencies"
+      searchLabel={t("markets.list_search_label")}
       compare={{
         name: byText((m: MarketRow) => m.name),
         currency: byText((m: MarketRow) => m.currency),
       }}
       empty={{
         icon: <GlobeEuropeAfricaIcon width={32} />,
-        title: "No markets yet",
-        description: "A storefront sells only to countries in a market. Add one to start selling.",
-        action: <Button label="Add market" href="/markets/new" />,
+        title: t("markets.list_empty_title"),
+        description: t("markets.list_empty_description"),
+        action: <Button label={t("markets.add_market")} href="/markets/new" />,
       }}
     />
   );

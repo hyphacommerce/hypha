@@ -21,6 +21,8 @@ import { PageHeader } from "@/components/page-header";
 import { TableSkeleton } from "@/components/skeletons";
 import { appState, isBuiltIn, isPersonalDataScope } from "@/lib/apps";
 import { loaded, publicApiUrl, requireStaff, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
+import type { T } from "@/lib/messages";
 
 import { InstallButtons } from "./install";
 
@@ -30,17 +32,21 @@ import { InstallButtons } from "./install";
  * renders at once; the apps stream in.
  */
 export default async function AppsPage() {
-  const me = await requireStaff();
+  const [t, me] = await Promise.all([getT(), requireStaff()]);
 
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={960}>
         <PageHeader
-          title="Apps"
-          description="Services connected to your store: what each may do, and what it was sent."
+          title={t("common.apps")}
+          description={t("apps.list_description")}
           actions={
             <>
-              <Button label="Webhooks and custom apps" variant="secondary" href="/settings/apps" />
+              <Button
+                label={t("apps.list_custom_apps")}
+                variant="secondary"
+                href="/settings/apps"
+              />
               <InstallButtons api={publicApiUrl()} canWrite={me.scopes.includes("apps:write")} />
             </>
           }
@@ -54,28 +60,30 @@ export default async function AppsPage() {
 }
 
 async function AppRows() {
-  const client = await sessionClient();
+  const [client, t] = await Promise.all([sessionClient(), getT()]);
   const result = await client.GET("/admin/apps");
   if (result.response.status === 403) {
     return (
       <EmptyState
         icon={<LockClosedIcon width={32} />}
-        title="You can't see apps"
-        description="Your role doesn't include apps:read. Ask the store owner for access."
+        title={t("apps.list_no_access_title")}
+        description={t("apps.list_no_access_description", { scope: "apps:read" })}
       />
     );
   }
-  return <AppsTable apps={loaded(result).items} />;
+  return <AppsTable t={t} apps={loaded(result).items} />;
 }
 
-function AppsTable({ apps }: { apps: AdminSchemas["AppResponse"][] }) {
+function AppsTable({ t, apps }: { t: T; apps: AdminSchemas["AppResponse"][] }) {
   if (apps.length === 0) {
     return (
       <EmptyState
         icon={<PuzzlePieceIcon width={32} />}
-        title="No apps yet"
-        description="Install an app from its address, where you approve what it may do. To connect your own code, create a private app."
-        actions={<Button label="Add a custom app" variant="primary" href="/settings/apps" />}
+        title={t("apps.list_empty_title")}
+        description={t("apps.list_empty_description")}
+        actions={
+          <Button label={t("apps.list_add_custom")} variant="primary" href="/settings/apps" />
+        }
       />
     );
   }
@@ -83,14 +91,14 @@ function AppsTable({ apps }: { apps: AdminSchemas["AppResponse"][] }) {
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHeaderCell>App</TableHeaderCell>
-          <TableHeaderCell>Status</TableHeaderCell>
-          <TableHeaderCell>Access</TableHeaderCell>
+          <TableHeaderCell>{t("common.app")}</TableHeaderCell>
+          <TableHeaderCell>{t("common.status")}</TableHeaderCell>
+          <TableHeaderCell>{t("apps.list_access")}</TableHeaderCell>
         </TableRow>
       </TableHeader>
       <TableBody>
         {apps.map((app) => {
-          const state = appState(app);
+          const state = appState(t, app);
           const scopes = app.grant?.scopes ?? [];
           const personal = scopes.filter(isPersonalDataScope).length;
           return (
@@ -101,7 +109,7 @@ function AppsTable({ apps }: { apps: AdminSchemas["AppResponse"][] }) {
                     <Link href={`/apps/${app.key}`} weight="medium">
                       {app.name}
                     </Link>
-                    {isBuiltIn(app) && <Badge label="Built in" />}
+                    {isBuiltIn(app) && <Badge label={t("apps.list_built_in")} />}
                   </HStack>
                   <Text type="supporting" color="secondary">
                     {app.key}
@@ -115,20 +123,18 @@ function AppsTable({ apps }: { apps: AdminSchemas["AppResponse"][] }) {
                 <HStack gap={1} wrap="wrap">
                   {isBuiltIn(app) ? (
                     <Text type="supporting" color="secondary">
-                      {scopes.length === 1
-                        ? "1 scope, built in"
-                        : `${scopes.length} scopes, built in`}
+                      {t("apps.list_scopes_built_in", { count: scopes.length })}
                     </Text>
                   ) : app.grant ? (
                     <Text type="supporting" color="secondary">
-                      {scopes.length === 1 ? "1 scope" : `${scopes.length} scopes`}
+                      {t("apps.list_scopes", { count: scopes.length })}
                     </Text>
                   ) : (
                     <Text type="supporting" color="secondary">
-                      Webhooks only
+                      {t("apps.list_webhooks_only")}
                     </Text>
                   )}
-                  {personal > 0 && <Badge label="Personal data" variant="warning" />}
+                  {personal > 0 && <Badge label={t("apps.list_personal_data")} variant="warning" />}
                 </HStack>
               </TableCell>
             </TableRow>

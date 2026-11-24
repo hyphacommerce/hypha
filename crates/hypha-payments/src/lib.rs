@@ -23,11 +23,13 @@ pub use commands::{
 };
 pub use error::PaymentError;
 pub use events::{
-    PaymentAuthorized, PaymentCreated, PaymentFailed, PaymentPaid, PaymentProcessing,
-    PaymentRefunded, PaymentVoided,
+    PaymentAuthorized, PaymentCreated, PaymentFailed, PaymentMethodCreated, PaymentMethodDeleted,
+    PaymentMethodUpdated, PaymentPaid, PaymentProcessing, PaymentRefunded, PaymentVoided,
 };
 pub use method::{NewPaymentMethod, PaymentMethod, PaymentMethodSnapshot};
-pub use payment::{NewPayment, Payment, PaymentSnapshot, PaymentStatus, financial_status};
+pub use payment::{
+    LocalizedPayment, NewPayment, Payment, PaymentSnapshot, PaymentStatus, financial_status,
+};
 pub use provider::{
     ActionAnswer, ActionRequest, ManualProvider, NextAction, PaymentAction, PaymentProvider,
     PaymentProviders, PaymentRequest, ProviderKey, ProviderState, ProviderStatus, Started,

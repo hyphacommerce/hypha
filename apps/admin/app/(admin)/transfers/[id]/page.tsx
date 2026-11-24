@@ -6,12 +6,11 @@ import { type Crumb, PageHeader } from "@/components/page-header";
 import { DetailSkeleton } from "@/components/skeletons";
 import { TransferStatusBadge } from "@/components/status";
 import { loaded, requireStaff, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import { hasScope } from "@/lib/navigation";
 import { trNumber } from "@/lib/transfers";
 
 import { TransferActions, TransferView } from "./transfer-view";
-
-const BACK: Crumb[] = [{ label: "Transfers", href: "/transfers" }];
 
 /**
  * A transfer: what moves from where to where, and how much of each line left and arrived.
@@ -19,24 +18,26 @@ const BACK: Crumb[] = [{ label: "Transfers", href: "/transfers" }];
  * cancel or delete it.
  */
 export default async function TransferPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+  const [{ id }, t] = await Promise.all([params, getT()]);
+  const back: Crumb[] = [{ label: t("transfers.list_title"), href: "/transfers" }];
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={1280}>
-        <Suspense fallback={<DetailSkeleton back={BACK} />}>
-          <Transfer id={id} />
+        <Suspense fallback={<DetailSkeleton back={back} />}>
+          <Transfer id={id} back={back} />
         </Suspense>
       </VStack>
     </Section>
   );
 }
 
-async function Transfer({ id }: { id: string }) {
+async function Transfer({ id, back }: { id: string; back: Crumb[] }) {
   const client = await sessionClient();
-  const [transfer, me, locations] = await Promise.all([
+  const [transfer, me, locations, t] = await Promise.all([
     client.GET("/admin/transfers/{id}", { params: { path: { id } } }).then(loaded),
     requireStaff(),
     client.GET("/admin/locations"),
+    getT(),
   ]);
   const canWrite = hasScope(me.scopes, "inventory:write");
   const places = (locations.data?.items ?? []).map((l) => ({ id: l.id, name: l.name }));
@@ -59,8 +60,8 @@ async function Transfer({ id }: { id: string }) {
     <VStack gap={5}>
       <PageHeader
         title={trNumber(transfer.number)}
-        back={BACK}
-        badges={<TransferStatusBadge status={transfer.status} />}
+        back={back}
+        badges={<TransferStatusBadge status={transfer.status} t={t} />}
         description={`${nameOf(transfer.origin)} → ${nameOf(transfer.destination)}`}
         actions={
           canWrite && <TransferActions transfer={transfer} atOrigin={atOrigin} places={places} />

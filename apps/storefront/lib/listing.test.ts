@@ -8,6 +8,8 @@ import {
   onSaleOnly,
   previousPage,
   readListing,
+  searchKey,
+  sortFacetValues,
   toMinor,
   withOnSale,
 } from "./listing.ts";
@@ -70,4 +72,68 @@ test("turning the on-sale toggle off drops every on_sale filter", () => {
   const state = readListing({ filter: ["on_sale:true", "on_sale:false", "tag:new"] });
   assert.deepEqual(withOnSale(state, false).filters, ["tag:new"]);
   assert.equal(onSaleOnly(withOnSale(state, false)), false);
+});
+
+test("a search in another language is another cache entry", () => {
+  const query = { country: "DE", sort: "newest", limit: 8 };
+  const de = searchKey({ ...query, language: "de" });
+  assert.notDeepEqual(de, searchKey({ ...query, language: "en" }));
+  assert.deepEqual(de.slice(0, 3), ["search", "DE", "de"]);
+  assert.notDeepEqual(de, searchKey(query));
+});
+
+test("a search in another country is another cache entry", () => {
+  const query = { language: "de", sort: "newest" };
+  assert.notDeepEqual(
+    searchKey({ ...query, country: "DE" }),
+    searchKey({ ...query, country: "AT" }),
+  );
+});
+
+test("one search written in another order is one cache entry", () => {
+  assert.deepEqual(
+    searchKey({ country: "DE", language: "de", filter: ["tag:a", "tag:b"], limit: 4 }),
+    searchKey({ limit: 4, filter: ["tag:a", "tag:b"], language: "de", country: "DE" }),
+  );
+  // An absent parameter is no parameter.
+  assert.deepEqual(
+    searchKey({ country: "DE", language: "de", cursor: undefined }),
+    searchKey({ country: "DE", language: "de" }),
+  );
+});
+
+test("facet values keep the most results first, ties by what they show in the page's language", () => {
+  const values = [
+    { value: "blue", label: "Blau", count: 2 },
+    { value: "green", label: "Grün", count: 5 },
+    { value: "oyster", label: "Austernpilz", count: 2 },
+    { value: "red", label: "Rot", count: 2 },
+  ];
+  assert.deepEqual(
+    sortFacetValues(values, "de-DE").map((v) => v.value),
+    ["green", "oyster", "blue", "red"],
+  );
+  // The API's answer is left as it came.
+  assert.deepEqual(
+    values.map((v) => v.value),
+    ["blue", "green", "oyster", "red"],
+  );
+});
+
+test("facet values without a label sort by their value, numbers by size, letters by language", () => {
+  const values = [
+    { value: "10 ml", count: 1 },
+    { value: "5 ml", count: 1 },
+    { value: "Zebra", label: null, count: 1 },
+    { value: "Äpfel", count: 1 },
+  ];
+  assert.deepEqual(
+    sortFacetValues(values, "de-DE").map((v) => v.value),
+    ["5 ml", "10 ml", "Äpfel", "Zebra"],
+  );
+  // Swedish sorts Ä after Z.
+  assert.deepEqual(
+    sortFacetValues(values, "sv-SE").map((v) => v.value),
+    ["5 ml", "10 ml", "Zebra", "Äpfel"],
+  );
 });

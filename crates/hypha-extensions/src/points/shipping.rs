@@ -3,7 +3,7 @@
 
 use core::time::Duration;
 
-use hypha_core::{Address, CountryCode, Currency, Money, Scope, VariantId};
+use hypha_core::{Address, CountryCode, Currency, Language, Money, Scope, VariantId};
 use serde::{Deserialize, Serialize};
 
 use crate::{ExtensionPoint, OnFailure};
@@ -78,6 +78,12 @@ pub struct RateRequestBody {
     pub items: Vec<RateItemBody>,
     /// The group's lines, as priced.
     pub subtotal: Money,
+    /// The language the cart's shopper reads (a BCP 47 tag): the one they chose, else
+    /// their market's default. Absent where neither names one (the store's default
+    /// language). An added field: still version 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(required = false))]
+    pub language: Option<Language>,
 }
 
 /// One line of the group.
@@ -209,6 +215,7 @@ mod tests {
                     weight_grams: Some(350),
                 }],
                 subtotal: money(2000),
+                language: None,
             },
         }
     }

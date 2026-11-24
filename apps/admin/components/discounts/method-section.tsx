@@ -11,8 +11,12 @@ import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 
 import { generateCode } from "@/lib/discounts/codes";
+import { useT } from "@/lib/use-t";
 
 import { type SectionProps, fieldStatus } from "./fields";
+
+/** What a code looks like: a code, the same in every language. */
+const CODE_EXAMPLE = "WELCOME10";
 
 export function MethodSection({
   draft,
@@ -24,14 +28,15 @@ export function MethodSection({
   /** Only a new discount types its first code here; an existing one has a Codes tab. */
   isNew: boolean;
 }) {
+  const t = useT<"discounts">();
   return (
     <Card>
       <VStack gap={4}>
         <Text type="display-3" as="h2">
-          Method
+          {t("discounts.method_title")}
         </Text>
         <RadioList
-          label="How buyers get it"
+          label={t("discounts.method_label")}
           value={draft.method}
           onChange={(method) =>
             onChange({ ...draft, method: method === "automatic" ? "automatic" : "codes" }, [
@@ -43,19 +48,23 @@ export function MethodSection({
         >
           <RadioListItem
             value="codes"
-            label="Discount code"
-            description="Buyers enter a code in the cart or at checkout. One discount can have many codes."
+            label={t("discounts.method_code")}
+            description={t("discounts.method_code_description")}
           />
           <RadioListItem
             value="automatic"
-            label="Automatic"
-            description="Applies by itself to every cart that qualifies."
+            label={t("discounts.method_automatic")}
+            description={t("discounts.method_automatic_description")}
           />
         </RadioList>
         <TextInput
-          label="Title"
-          description="Buyers see it in the cart, at checkout and in their emails."
-          placeholder={draft.method === "codes" ? "Welcome offer" : "Free shipping over €50"}
+          label={t("common.title")}
+          description={t("discounts.method_title_hint")}
+          placeholder={
+            draft.method === "codes"
+              ? t("discounts.method_title_placeholder_codes")
+              : t("discounts.method_title_placeholder_automatic")
+          }
           value={draft.title}
           onChange={(title) => onChange({ ...draft, title }, ["title"])}
           isDisabled={isReadOnly}
@@ -65,10 +74,10 @@ export function MethodSection({
         {draft.method === "codes" && isNew && (
           <HStack gap={2} vAlign="end" wrap="wrap">
             <TextInput
-              label="Code"
+              label={t("common.code")}
               isOptional
-              description="Leave it blank to add or generate codes once it's created."
-              placeholder="WELCOME10"
+              description={t("discounts.method_code_hint")}
+              placeholder={CODE_EXAMPLE}
               value={draft.code}
               onChange={(code) => onChange({ ...draft, code }, ["code"])}
               isDisabled={isReadOnly}
@@ -77,7 +86,7 @@ export function MethodSection({
             />
             {!isReadOnly && (
               <Button
-                label="Generate"
+                label={t("discounts.method_generate")}
                 variant="secondary"
                 onClick={() => onChange({ ...draft, code: generateCode() }, ["code"])}
               />

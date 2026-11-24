@@ -9,12 +9,13 @@ import { redirect } from "next/navigation";
 
 import type { CreateDiscount, Refusal, UpdateDiscount } from "@/lib/discounts/wire";
 import { describe, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 
 /** The outcome of a write: why it was refused, if it was. */
 export type Result = { refusal?: Refusal };
 
-function refusal(error: ApiError): Refusal {
-  return { code: error.code, message: describe(error), details: error.details };
+async function refusal(error: ApiError): Promise<Refusal> {
+  return { code: error.code, message: await describe(error), details: error.details };
 }
 
 /** The list and the discount's own pages, and orders (which show discounts' titles). */
@@ -26,7 +27,7 @@ function refresh() {
 export async function createDiscount(body: CreateDiscount): Promise<Result> {
   const client = await sessionClient();
   const { data, error } = await client.POST("/admin/discounts", { body });
-  if (error) return { refusal: refusal(error) };
+  if (error) return { refusal: await refusal(error) };
   refresh();
   redirect(`/discounts/${data.id}`);
 }
@@ -39,7 +40,7 @@ export async function updateDiscount(id: string, body: UpdateDiscount): Promise<
     params: { path: { id } },
     body,
   });
-  if (error) return { refusal: refusal(error) };
+  if (error) return { refusal: await refusal(error) };
   refresh();
   return {};
 }
@@ -64,7 +65,7 @@ export async function discountSummary(
 export async function deleteDiscount(id: string): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.DELETE("/admin/discounts/{id}", { params: { path: { id } } });
-  if (error) return { refusal: refusal(error) };
+  if (error) return { refusal: await refusal(error) };
   refresh();
   redirect("/discounts");
 }
@@ -92,7 +93,10 @@ export async function addCodes(
         ? Reflect.get(error.details, "code")
         : undefined;
     return {
-      error: typeof taken === "string" ? `Another discount has ${taken}.` : describe(error),
+      error:
+        typeof taken === "string"
+          ? (await getT())("discounts.codes_taken", { code: taken })
+          : await describe(error),
     };
   }
   refresh();
@@ -114,7 +118,7 @@ export async function generateCodes(
     params: { path: { id } },
     body: input,
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }
@@ -129,7 +133,7 @@ export async function removeCodes(
     params: { path: { id } },
     body: which,
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return { removed: data.removed };
 }
@@ -148,7 +152,7 @@ export async function setCodesActive(
     params: { path: { id } },
     body: { ...which, active },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return { updated: data.updated };
 }

@@ -12,6 +12,7 @@ hypha-categories = { path = "../hypha-categories" }
 hypha-dispatch = { path = "../hypha-dispatch" }
 hypha-media = { path = "../hypha-media" }
 hypha-search = { path = "../hypha-search" }
+hypha-translations = { path = "../hypha-translations" }
 hypha-notifications = { path = "../hypha-notifications" }
 hypha-extensions = { path = "../hypha-extensions" }
 hypha-privacy = { path = "../hypha-privacy" }

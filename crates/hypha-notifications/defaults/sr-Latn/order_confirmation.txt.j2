@@ -1,0 +1,69 @@
+{% if customer and customer.name %}Zdravo, {{ customer.name }},{% else %}Zdravo,{% endif %}
+
+Primili smo vašu porudžbinu {{ order.number }} i pripremamo je. Pisaćemo vam ponovo kada bude poslata.
+{%- if order.payment %}
+
+Plaćanje: {{ order.payment.method }}
+{%- if order.payment.instructions %}
+
+{{ order.payment.instructions }}
+{%- endif %}
+{%- endif %}
+{%- if order.url %}
+
+Pogledaj porudžbinu: {{ order.url }}
+{%- endif %}
+
+Porudžbina {{ order.number }}, datum: {{ order.placed_at.formatted }}
+{%- for line in order.lines %}
+- {{ line.quantity }} × {{ line.title }}{% if line.variant %} ({{ line.variant }}){% endif %}: {{ line.total.formatted }}{% if line.discount %} (pre popusta: {{ line.original_total.formatted }}){% endif %}
+{%- endfor %}
+
+Međuzbir: {{ order.subtotal.formatted }}
+Dostava: {{ order.shipping.formatted }}
+{%- if not order.taxes_included %}
+Porez: {{ order.tax.formatted }}
+{%- endif %}
+Ukupno: {{ order.total.formatted }}
+{%- if order.taxes_included %}
+Od toga porez: {{ order.tax.formatted }}
+{%- endif %}
+{%- if order.discounts %}
+
+Popusti uračunati u iznose iznad:
+{%- for discount in order.discounts %}
+- {{ discount.title }}{% if discount.code %} ({{ discount.code }}){% endif %}: {{ discount.amount.formatted }}
+{%- endfor %}
+{%- endif %}
+{%- if order.shipping_address %}
+
+Adresa za dostavu:
+{%- if order.shipping_address.name %}
+{{ order.shipping_address.name }}
+{%- endif %}
+{%- if order.shipping_address.company %}
+{{ order.shipping_address.company }}
+{%- endif %}
+{{ order.shipping_address.line1 }}
+{%- if order.shipping_address.line2 %}
+{{ order.shipping_address.line2 }}
+{%- endif %}
+{% if order.shipping_address.postal_code %}{{ order.shipping_address.postal_code }} {% endif %}{{ order.shipping_address.city }}
+{%- if order.shipping_address.province %}
+{{ order.shipping_address.province }}
+{%- endif %}
+{{ order.shipping_address.country }}
+{%- if order.shipping_address.phone %}
+{{ order.shipping_address.phone }}
+{%- endif %}
+{%- endif %}
+{%- if order.shipping_method %}
+
+Način dostave: {{ order.shipping_method }}
+{%- endif %}
+
+--
+{{ shop.name }}{% if shop.email %} · {{ shop.email }}{% endif %}
+{%- if brand.footer %}
+{{ brand.footer }}
+{%- endif %}

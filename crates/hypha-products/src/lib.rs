@@ -31,7 +31,7 @@ pub use hypha_core::{Description, Handle, HandleError};
 pub use option::{OptionValue, ProductOption};
 pub use product::{
     OptionDraft, OptionSnapshot, OptionValueDraft, OptionValueSnapshot, Product, ProductSnapshot,
-    ProductStatus, VariantDraft, VariantSnapshot,
+    ProductStatus, VariantDraft, VariantSnapshot, join_variant_title,
 };
 pub use repo::{HasProducts, ProductRepo, StageProducts};
 pub use summary::{PriceRange, ProductSummary, VariantSummary};

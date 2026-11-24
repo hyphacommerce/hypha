@@ -1,12 +1,16 @@
 import type { Metadata } from "next";
 
 import { describe, publicClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 
 import { LinkProblem } from "../login/link-problem";
 import { InviteForm } from "./invite-form";
 
 // The token is in the URL: never pass it on to another site as a referrer.
-export const metadata: Metadata = { title: "Join the team · Hypha admin", referrer: "no-referrer" };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t("auth.invite_page_title"), referrer: "no-referrer" };
+}
 
 /**
  * Where an invite email's link lands (`{admin_url}/invite?token=…`): the invite looked
@@ -18,12 +22,12 @@ export default async function InvitePage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { token } = await searchParams;
+  const [{ token }, t] = await Promise.all([searchParams, getT()]);
   if (typeof token !== "string" || !token) {
     return (
       <LinkProblem
-        title="This invite link is incomplete"
-        subtitle="Open the link from your invite email again, or ask the person who invited you to resend it."
+        title={t("auth.invite_incomplete_title")}
+        subtitle={t("auth.invite_incomplete_subtitle")}
       />
     );
   }
@@ -32,11 +36,11 @@ export default async function InvitePage({
   if (error) {
     return error.code === "invalid_token" ? (
       <LinkProblem
-        title="This invite link no longer works"
-        subtitle="It expired, was withdrawn, or was already used. Ask the person who invited you to send a new one. If you already joined, sign in."
+        title={t("auth.invite_invalid_title")}
+        subtitle={t("auth.invite_invalid_subtitle")}
       />
     ) : (
-      <LinkProblem title="The invite can't be opened right now" subtitle={describe(error)} />
+      <LinkProblem title={t("auth.invite_unavailable_title")} subtitle={await describe(error)} />
     );
   }
   return <InviteForm token={token} invite={data} />;

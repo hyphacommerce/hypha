@@ -13,8 +13,8 @@ use core::time::Duration;
 use hypha_auth::{IdentityRepo, Session, SessionClient, SessionRepo, TokenKind};
 use hypha_cart::{Cart, CartRepo};
 use hypha_core::{
-    Actor, CartId, ChannelId, CountryCode, CustomerId, Email, MarketId, NotifyError, Scope,
-    Versioned,
+    Actor, CartId, ChannelId, CountryCode, CustomerId, Email, Language, MarketId, NotifyError,
+    Scope, Versioned,
 };
 use hypha_customer_accounts::{
     CommandError, CustomerEmail, LoggedIn, authenticate_customer, login_with_code, logout,
@@ -40,7 +40,7 @@ fn world() -> (InMemoryPorts, TestEnv) {
 }
 
 fn request(ports: &InMemoryPorts, env: &TestEnv, email: &str) -> Result<(), CommandError> {
-    block_on(request_login_code(ports, env, email))
+    block_on(request_login_code(ports, env, email, None))
 }
 
 fn login(
@@ -85,6 +85,7 @@ fn asking_for_a_code_creates_the_customer_and_emails_a_six_digit_code() {
         to,
         code,
         expires_at,
+        language,
     } = &sent[0]
     else {
         panic!("not a code: {:?}", sent[0]);
@@ -93,6 +94,55 @@ fn asking_for_a_code_creates_the_customer_and_emails_a_six_digit_code() {
     assert_eq!(code.len(), 6);
     assert!(code.bytes().all(|b| b.is_ascii_digit()), "{code}");
     assert_eq!(*expires_at, env.now().plus(Duration::from_secs(600)));
+    assert_eq!(*language, None, "a new customer has no language yet");
+}
+
+fn code_language(env: &TestEnv) -> Option<Language> {
+    match env.sent_to_customers().last() {
+        Some(CustomerEmail::LoginCode { language, .. }) => language.clone(),
+        other => panic!("not a code: {other:?}"),
+    }
+}
+
+#[test]
+fn a_new_customer_reads_the_language_the_code_was_asked_in() {
+    let (ports, env) = world();
+    let german = Language::new("de").unwrap();
+    block_on(request_login_code(&ports, &env, NINA, Some(&german))).unwrap();
+    assert_eq!(code_language(&env), Some(german.clone()));
+    assert_eq!(
+        customer_with(&ports, NINA).and_then(|c| c.language().cloned()),
+        Some(german)
+    );
+}
+
+#[test]
+fn a_customers_own_language_wins_over_the_one_asked_in() {
+    let (ports, env) = world();
+    request(&ports, &env, NINA).unwrap();
+    let mut nina = customer_with(&ports, NINA).unwrap();
+    nina.set_language(Some(Language::new("hr").unwrap()))
+        .unwrap();
+    block_on(ports.customers.update(&mut nina)).unwrap();
+    env.advance(60);
+    let german = Language::new("de").unwrap();
+    block_on(request_login_code(&ports, &env, NINA, Some(&german))).unwrap();
+    assert_eq!(code_language(&env), Some(Language::new("hr").unwrap()));
+}
+
+#[test]
+fn a_known_customer_without_a_language_gets_the_code_in_the_one_asked_in_and_keeps_none() {
+    let (ports, env) = world();
+    request(&ports, &env, NINA).unwrap();
+    env.advance(60);
+    let german = Language::new("de").unwrap();
+    block_on(request_login_code(&ports, &env, NINA, Some(&german))).unwrap();
+    assert_eq!(code_language(&env), Some(german));
+    assert_eq!(
+        customer_with(&ports, NINA).and_then(|c| c.language().cloned()),
+        None,
+        "only a customer created by the request reads it"
+    );
 }
 
 #[test]

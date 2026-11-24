@@ -6,6 +6,8 @@ import { Button } from "@astryxdesign/core/Button";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { useState, useTransition } from "react";
 
+import { useT } from "@/lib/use-t";
+
 import { removeApp, setAppEnabled } from "../actions";
 
 /** Turning an app off or on, and uninstalling or removing it, each asked first. */
@@ -22,6 +24,7 @@ export function AppActions({
   isInstalled: boolean;
   isUninstalled: boolean;
 }) {
+  const t = useT<"apps">();
   const [isConfirming, setIsConfirming] = useState(false);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -43,14 +46,14 @@ export function AppActions({
       <HStack gap={2}>
         {!isUninstalled && (
           <Button
-            label={isEnabled ? "Turn off" : "Turn on"}
+            label={isEnabled ? t("common.turn_off") : t("common.turn_on")}
             variant="secondary"
             isLoading={isPending && !isConfirming}
             onClick={toggle}
           />
         )}
         <Button
-          label={isUninstall ? "Uninstall" : "Remove"}
+          label={isUninstall ? t("apps.actions_uninstall") : t("common.remove")}
           variant="destructive"
           onClick={() => setIsConfirming(true)}
         />
@@ -59,13 +62,17 @@ export function AppActions({
       <AlertDialog
         isOpen={isConfirming}
         onOpenChange={setIsConfirming}
-        title={isUninstall ? `Uninstall ${name}?` : `Remove ${name}?`}
+        title={
+          isUninstall
+            ? t("apps.actions_uninstall_title", { name })
+            : t("apps.actions_remove_title", { name })
+        }
         description={
           isUninstall
-            ? "Its access ends at once: its tokens stop working and it gets no more events except app.uninstalled. It can be installed again later."
-            : "The app, its signing secret and its delivery history are deleted. This can't be undone."
+            ? t("apps.actions_uninstall_description", { event: "app.uninstalled" })
+            : t("apps.actions_remove_description")
         }
-        actionLabel={isUninstall ? "Uninstall" : "Remove"}
+        actionLabel={isUninstall ? t("apps.actions_uninstall") : t("common.remove")}
         isActionLoading={isPending}
         onAction={remove}
       />

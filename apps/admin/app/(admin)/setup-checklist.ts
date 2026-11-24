@@ -3,6 +3,7 @@
 // renders.
 
 import { sessionClient } from "@/lib/hypha";
+import type { TFor } from "@/lib/messages";
 
 /** Which step: the setup wizard groups them by these. */
 export type SetupKey =
@@ -42,64 +43,26 @@ export async function setupDone(): Promise<Record<SetupKey, boolean>> {
   );
 }
 
-export async function setupSteps(): Promise<SetupStep[]> {
+/** The steps in order, each with the screen it's done on. */
+const STEPS: { key: SetupKey; href: string }[] = [
+  { key: "store", href: "/settings/store" },
+  { key: "market", href: "/markets" },
+  { key: "shipping", href: "/settings/shipping" },
+  { key: "payment", href: "/settings/payments" },
+  { key: "product", href: "/products" },
+  { key: "stock", href: "/products" },
+  { key: "publish", href: "/products" },
+  { key: "key", href: "/settings/channels" },
+];
+
+/** The checklist as `t`'s language words it, each step done or not. */
+export async function setupSteps(t: TFor<"setup">): Promise<SetupStep[]> {
   const done = await setupDone();
-  return [
-    {
-      key: "store",
-      label: "Add your store's details",
-      description: "A contact email shoppers can write to, and your legal details.",
-      href: "/settings/store",
-      isDone: done.store,
-    },
-    {
-      key: "market",
-      label: "Create a market",
-      description: "The countries you sell to and their currency.",
-      href: "/markets",
-      isDone: done.market,
-    },
-    {
-      key: "shipping",
-      label: "Set up shipping",
-      description: "A zone with a rate, so physical products can be delivered.",
-      href: "/settings/shipping",
-      isDone: done.shipping,
-    },
-    {
-      key: "payment",
-      label: "Turn on a payment method",
-      description: "Cash on delivery or a bank transfer: checkout is refused without one.",
-      href: "/settings/payments",
-      isDone: done.payment,
-    },
-    {
-      key: "product",
-      label: "Activate a product",
-      description: "Drafts can't be sold.",
-      href: "/products",
-      isDone: done.product,
-    },
-    {
-      key: "stock",
-      label: "Stock it",
-      description: "Set stock at a location, or leave stock untracked.",
-      href: "/products",
-      isDone: done.stock,
-    },
-    {
-      key: "publish",
-      label: "Publish it to a channel",
-      description: "A storefront sells what's published to its channel.",
-      href: "/products",
-      isDone: done.publish,
-    },
-    {
-      key: "key",
-      label: "Create a storefront key",
-      description: "The publishable key your storefront calls the API with.",
-      href: "/settings/channels",
-      isDone: done.key,
-    },
-  ];
+  return STEPS.map(({ key, href }) => ({
+    key,
+    label: t(`setup.checklist_${key}_label`),
+    description: t(`setup.checklist_${key}_description`),
+    href,
+    isDone: done[key],
+  }));
 }

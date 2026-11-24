@@ -9,7 +9,7 @@ use axum::{
     http::{HeaderValue, header},
     response::{IntoResponse, Response},
 };
-use hypha_addresses::{Form, PostalCode};
+use hypha_addresses::{Form, LabelKey, PostalCode};
 use hypha_checkout_rules::{CheckoutSettingsRepo, HasCheckoutSettings};
 use hypha_core::{AddressField, CountryCode, RepoError};
 use serde::Serialize;
@@ -33,6 +33,92 @@ pub enum PostalCodeUse {
     Optional,
 }
 
+/// What a field's label says, by meaning: a closed set for a client to translate labels
+/// by, the English `labels` being one rendering of it. Values are added, never renamed.
+#[derive(Debug, Clone, Copy, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LabelKeyDto {
+    FirstName,
+    LastName,
+    Company,
+    /// "Address".
+    Address1,
+    /// "Apartment, suite, etc.".
+    Address2,
+    StreetAndHouseNumber,
+    FullAddress,
+    AdditionalAddress,
+    City,
+    /// "City/town".
+    CityTown,
+    /// "City/ward/town/village".
+    CityWardTownVillage,
+    Ward,
+    District,
+    Suburb,
+    Area,
+    /// "Region": a region's label where the country names it nothing else.
+    Region,
+    Province,
+    State,
+    /// "State/territory".
+    StateTerritory,
+    County,
+    Prefecture,
+    Emirate,
+    Governorate,
+    Department,
+    /// "Postal code".
+    PostalCode,
+    Postcode,
+    /// "ZIP code".
+    ZipCode,
+    /// "PIN code".
+    PinCode,
+    Phone,
+}
+
+impl From<LabelKey> for LabelKeyDto {
+    fn from(key: LabelKey) -> Self {
+        match key {
+            LabelKey::FirstName => Self::FirstName,
+            LabelKey::LastName => Self::LastName,
+            LabelKey::Company => Self::Company,
+            LabelKey::Address1 => Self::Address1,
+            LabelKey::Address2 => Self::Address2,
+            LabelKey::StreetAndHouseNumber => Self::StreetAndHouseNumber,
+            LabelKey::FullAddress => Self::FullAddress,
+            LabelKey::AdditionalAddress => Self::AdditionalAddress,
+            LabelKey::City => Self::City,
+            LabelKey::CityTown => Self::CityTown,
+            LabelKey::CityWardTownVillage => Self::CityWardTownVillage,
+            LabelKey::Ward => Self::Ward,
+            LabelKey::District => Self::District,
+            LabelKey::Suburb => Self::Suburb,
+            LabelKey::Area => Self::Area,
+            LabelKey::Region => Self::Region,
+            LabelKey::Province => Self::Province,
+            LabelKey::State => Self::State,
+            LabelKey::StateTerritory => Self::StateTerritory,
+            LabelKey::County => Self::County,
+            LabelKey::Prefecture => Self::Prefecture,
+            LabelKey::Emirate => Self::Emirate,
+            LabelKey::Governorate => Self::Governorate,
+            LabelKey::Department => Self::Department,
+            LabelKey::PostalCode => Self::PostalCode,
+            LabelKey::Postcode => Self::Postcode,
+            LabelKey::ZipCode => Self::ZipCode,
+            LabelKey::PinCode => Self::PinCode,
+            LabelKey::Phone => Self::Phone,
+        }
+    }
+}
+
+/// A label's key, or `null` for a label outside the set.
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(transparent)]
+pub struct LabelKeyOrNull(Option<LabelKeyDto>);
+
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct RegionResponse {
     /// What `province` holds: `CA`, `M`.
@@ -48,9 +134,14 @@ pub struct AddressFormatResponse {
     rows: Vec<Vec<AddressFieldDto>>,
     /// The fields a write refuses empty (`422 invalid_address`, `required`).
     required: Vec<AddressFieldDto>,
-    /// Each field's label, by field ("State", "ZIP code"). English for now.
+    /// Each field's label, by field ("State", "ZIP code"), in English.
     #[schema(value_type = HashMap<String, String>)]
     labels: BTreeMap<&'static str, &'static str>,
+    /// Each label's key, by field, for the same fields as `labels` (`province: "state"`,
+    /// `postal_code: "zip_code"`): what a form in another language translates the label
+    /// by. `null` for a label outside the set, which is then shown as `labels` has it.
+    #[schema(value_type = HashMap<String, LabelKeyOrNull>)]
+    label_keys: BTreeMap<&'static str, LabelKeyOrNull>,
     postal_code: PostalCodeUse,
     /// A postal code in the country's shape, for a placeholder.
     postal_code_example: Option<&'static str>,
@@ -79,6 +170,11 @@ impl From<Form> for AddressFormatResponse {
                 .labels()
                 .into_iter()
                 .map(|(f, label)| (f.as_str(), label))
+                .collect(),
+            label_keys: form
+                .label_keys()
+                .into_iter()
+                .map(|(f, key)| (f.as_str(), LabelKeyOrNull(key.map(LabelKeyDto::from))))
                 .collect(),
             postal_code: match form.postal_code() {
                 PostalCode::None => PostalCodeUse::None,

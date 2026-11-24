@@ -2,9 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use futures_util::future::try_join;
 use hypha_core::{
-    BasisPoints, CatalogId, CategoryId, CountryCode, CustomerGroupId, Direction, Keyset, MarketId,
-    Page, PageRequest, Price, PriceListId, ProductId, Recorded, RepoError, SortKey, Timestamp,
-    VariantId, Version, Versioned, stamp_insert, stamp_update,
+    BasisPoints, CatalogId, CategoryId, CountryCode, CustomerGroupId, Direction, Keyset, Language,
+    MarketId, Page, PageRequest, Price, PriceListId, ProductId, Recorded, RepoError, SortKey,
+    Timestamp, VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_markets::{
     Adjustment, AppliesTo, Catalog, CatalogContext, CatalogRepo, CatalogSnapshot, CompareAtMode,
@@ -85,13 +85,14 @@ impl<C: PgConnection> MarketRepo for PgStore<C> {
 /// `MarketRepo::insert` inside the caller's transaction: the row, then its countries.
 pub(crate) async fn insert_market(tx: &impl Queries, s: &MarketSnapshot) -> Result<(), RepoError> {
     tx.query_typed(
-        "INSERT INTO markets (id, version, name, currency, prices_include_tax)
-         VALUES ($1, 1, $2, $3, $4)",
+        "INSERT INTO markets (id, version, name, currency, prices_include_tax, languages)
+         VALUES ($1, 1, $2, $3, $4, $5)",
         &[
             (&s.id.as_uuid(), Type::UUID),
             (&s.name, Type::TEXT),
             (&s.currency.as_str(), Type::TEXT),
             (&s.prices_include_tax, Type::BOOL),
+            (&languages_to_db(s), Type::TEXT_ARRAY),
         ],
     )
     .await
@@ -110,7 +111,7 @@ pub(crate) async fn update_market(
     let bumped = tx
         .query_typed_opt(
             "UPDATE markets SET version = version + 1, name = $3, currency = $4,
-                 prices_include_tax = $5
+                 prices_include_tax = $5, languages = $6
              WHERE id = $1 AND version = $2 RETURNING version",
             &[
                 (&s.id.as_uuid(), Type::UUID),
@@ -118,6 +119,7 @@ pub(crate) async fn update_market(
                 (&s.name, Type::TEXT),
                 (&s.currency.as_str(), Type::TEXT),
                 (&s.prices_include_tax, Type::BOOL),
+                (&languages_to_db(s), Type::TEXT_ARRAY),
             ],
         )
         .await
@@ -133,6 +135,10 @@ pub(crate) async fn update_market(
     let written = version_from_db(col(&row, "version")?)?;
     write_stamps(tx, "markets", "id", &s.id.as_uuid(), Type::UUID, s.stamps).await?;
     Ok(written)
+}
+
+fn languages_to_db(s: &MarketSnapshot) -> Vec<&str> {
+    s.languages.iter().map(Language::as_str).collect()
 }
 
 async fn write_countries(tx: &impl Queries, s: &MarketSnapshot) -> Result<(), RepoError> {
@@ -167,7 +173,8 @@ async fn load_markets(client: &impl Queries, which: Markets<'_>) -> Result<Vec<M
         ),
     };
     let markets_sql = format!(
-        "SELECT m.id, m.version, m.name, m.currency, m.prices_include_tax, {} FROM markets m
+        "SELECT m.id, m.version, m.name, m.currency, m.prices_include_tax, m.languages, {}
+         FROM markets m
          WHERE {filter} ORDER BY m.id",
         stamp_columns("m."),
     );
@@ -194,6 +201,12 @@ async fn load_markets(client: &impl Queries, which: Markets<'_>) -> Result<Vec<M
     rows.iter()
         .map(|row| {
             let id: Uuid = col(row, "id")?;
+            let languages: Vec<String> = col(row, "languages")?;
+            let languages = languages
+                .iter()
+                .map(|l| Language::new(l))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| corrupt(format!("market {id}: {e}")))?;
             let snapshot = MarketSnapshot {
                 id: MarketId::from_uuid(id),
                 version: version_from_db(col(row, "version")?)?,
@@ -202,6 +215,7 @@ async fn load_markets(client: &impl Queries, which: Markets<'_>) -> Result<Vec<M
                 countries: countries.remove(&id).unwrap_or_default(),
                 currency: currency_from_db(col(row, "currency")?)?,
                 prices_include_tax: col(row, "prices_include_tax")?,
+                languages,
             };
             Market::restore(snapshot).map_err(|e| corrupt(format!("market {id}: {e}")))
         })

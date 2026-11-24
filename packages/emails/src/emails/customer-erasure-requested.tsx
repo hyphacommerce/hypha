@@ -1,36 +1,38 @@
 import { Text } from "react-email";
-import type { Email } from "../email.ts";
+import { j, type Template } from "../email.ts";
 import { v } from "../jinja.tsx";
 import { heading, muted, paragraph } from "../styles.ts";
 import * as text from "../text.ts";
 
-export const customerErasureRequested: Email = {
+export const customerErasureRequested: Template = {
   key: "customer_erasure_requested",
-  subject: "Your request to erase your data at {{ shop.name }}",
-  preheader: "Your personal data will be erased on {{ due_at.formatted }} unless you cancel.",
-  Content: () => (
-    <>
-      <Text style={heading}>We'll erase your data</Text>
-      <Text style={paragraph}>
-        You asked {v("shop.name")} to erase your personal data. We'll do it on{" "}
-        {v("due_at.formatted")}: your name, contact details, addresses and marketing choices will be
-        removed from your account and your orders, and your account will be closed. Your orders
-        themselves stay on record without anything that identifies you.
-      </Text>
-      <Text style={paragraph}>
-        Changed your mind? Sign in to your account before then and cancel the request.
-      </Text>
-      <Text style={{ ...muted, marginTop: "16px" }}>
-        If you didn't ask for this, sign in and cancel the request, or contact us.
-      </Text>
-    </>
-  ),
-  text: `You asked {{ shop.name }} to erase your personal data. We'll do it on {{ due_at.formatted }}: your name, contact details, addresses and marketing choices will be removed from your account and your orders, and your account will be closed. Your orders themselves stay on record without anything that identifies you.
+  translated: true,
+  email: (t) => ({
+    key: "customer_erasure_requested",
+    subject: t("customer_erasure_requested.subject", { shop: j("shop.name") }),
+    preheader: t("customer_erasure_requested.preheader", { date: j("due_at.formatted") }),
+    Content: () => (
+      <>
+        <Text style={heading}>{t("customer_erasure_requested.heading")}</Text>
+        <Text style={paragraph}>
+          {t("customer_erasure_requested.body", {
+            shop: v("shop.name"),
+            date: v("due_at.formatted"),
+          })}
+        </Text>
+        <Text style={paragraph}>{t("customer_erasure_requested.changed_mind")}</Text>
+        <Text style={{ ...muted, marginTop: "16px" }}>
+          {t("customer_erasure_requested.not_you")}
+        </Text>
+      </>
+    ),
+    text: `${t("customer_erasure_requested.body", { shop: j("shop.name"), date: j("due_at.formatted") })}
 
-Changed your mind? Sign in to your account before then and cancel the request.
+${t("customer_erasure_requested.changed_mind")}
 
-If you didn't ask for this, sign in and cancel the request, or contact us.
+${t("customer_erasure_requested.not_you")}
 
 ${text.footer}
 `,
+  }),
 };

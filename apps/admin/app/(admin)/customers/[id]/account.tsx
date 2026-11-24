@@ -15,6 +15,7 @@ import { useState, useTransition } from "react";
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 import { DateTime } from "@/components/date-time";
+import { useT } from "@/lib/use-t";
 
 import { revokeSessions } from "../actions";
 
@@ -31,28 +32,25 @@ export function AccountCard({
   canEdit: boolean;
 }) {
   const router = useRouter();
+  const t = useT<"customers">();
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
   return (
     <Card>
       <VStack gap={3}>
         <Text type="display-3" as="h2">
-          Account
+          {t("customers.account_title")}
         </Text>
         {!account ? (
-          <Text color="secondary">
-            Never signed in to the storefront. Checkouts as a guest still count as this customer.
-          </Text>
+          <Text color="secondary">{t("customers.account_never")}</Text>
         ) : (
           <>
             <MetadataList>
-              <MetadataListItem label="Signed in on">
-                {account.active_sessions === 0
-                  ? "No devices"
-                  : `${account.active_sessions} ${account.active_sessions === 1 ? "device" : "devices"}`}
+              <MetadataListItem label={t("customers.account_signed_in_on")}>
+                {t("customers.account_devices", { count: account.active_sessions })}
               </MetadataListItem>
               {account.last_active_at && (
-                <MetadataListItem label="Last active">
+                <MetadataListItem label={t("customers.account_last_active")}>
                   <DateTime value={account.last_active_at} />
                 </MetadataListItem>
               )}
@@ -61,7 +59,7 @@ export function AccountCard({
             {canEdit && account.active_sessions > 0 && (
               <div>
                 <Button
-                  label="Sign out everywhere"
+                  label={t("customers.account_sign_out_everywhere")}
                   variant="secondary"
                   size="sm"
                   isLoading={isPending}

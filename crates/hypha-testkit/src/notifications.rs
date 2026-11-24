@@ -4,8 +4,8 @@ use std::{
 };
 
 use hypha_core::{
-    Email, EventId, Language, NotificationId, Page, PageRequest, RepoError, Timestamp, Versioned,
-    stamp_insert, stamp_update,
+    Email, EventId, Language, NotificationId, Page, PageRequest, Recorded, RepoError, Timestamp,
+    Versioned, stamp_insert, stamp_update,
 };
 use hypha_notifications::{
     EmailSender, Notification, NotificationFilter, NotificationRepo, NotificationSettings,
@@ -116,13 +116,19 @@ impl NotificationSettingsRepo for InMemoryNotificationSettingsRepo {
 
     async fn insert(&self, settings: &mut NotificationSettings) -> Result<(), RepoError> {
         stamp_insert(settings, self.outbox.now());
+        let events = settings.take_events();
         self.settings
-            .insert((), settings, keys::SETTINGS, &no_unique_keys)
+            .insert((), settings, keys::SETTINGS, &no_unique_keys)?;
+        self.outbox.write(events, Some(settings.version()));
+        Ok(())
     }
 
     async fn update(&self, settings: &mut NotificationSettings) -> Result<(), RepoError> {
         stamp_update(settings, self.outbox.now());
-        self.settings.update((), settings, &no_unique_keys)
+        let events = settings.take_events();
+        self.settings.update((), settings, &no_unique_keys)?;
+        self.outbox.write(events, Some(settings.version()));
+        Ok(())
     }
 }
 

@@ -6,6 +6,9 @@
 import { revalidatePath } from "next/cache";
 
 import { describe, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
+import { offeredLanguages, rememberLanguage } from "@/lib/language";
+import { PSEUDO } from "@/lib/pseudo";
 
 export type Result = { error?: string };
 export type TotpSetup = Result & { secret?: string; uri?: string };
@@ -17,9 +20,38 @@ const PAGE = "/account";
 export async function updateName(name: string): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.PATCH("/admin/me", { body: { name } });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath("/", "layout");
   return {};
+}
+
+/**
+ * Chooses the language the admin speaks to the staff member: saved on their user, so it
+ * follows them to any browser, and on this one (the cookie), so the pages before the
+ * login speak it too. The whole admin renders again in it. An account that can't change
+ * itself (a locked demo login, `account_locked`) keeps the choice on this browser alone,
+ * with a `note` saying so.
+ */
+export async function chooseLanguage(language: string): Promise<Result & { note?: string }> {
+  if (!offeredLanguages().includes(language)) {
+    const t = await getT();
+    return { error: t("account.language_not_offered") };
+  }
+  let note: string | undefined;
+  // The pseudo-language is the admin's own: it lives in the cookie, never in the API.
+  if (language !== PSEUDO) {
+    const client = await sessionClient();
+    const { error } = await client.PATCH("/admin/me", { body: { language } });
+    if (error?.code === "account_locked") {
+      // In the language just chosen: the page renders in it next to the note.
+      note = (await getT(language))("account.language_browser_only");
+    } else if (error) {
+      return { error: await describe(error) };
+    }
+  }
+  await rememberLanguage(language);
+  revalidatePath("/", "layout");
+  return { note };
 }
 
 /** Signs one of the staff member's other sessions out: that device must sign in again. */
@@ -29,7 +61,7 @@ export async function revokeSession(id: string): Promise<Result> {
     params: { path: { id } },
   });
   // Already signed out (it expired, or another tab did it): the list is just stale.
-  if (error && error.code !== "session_not_found") return { error: describe(error) };
+  if (error && error.code !== "session_not_found") return { error: await describe(error) };
   revalidatePath(PAGE);
   return {};
 }
@@ -38,7 +70,7 @@ export async function revokeSession(id: string): Promise<Result> {
 export async function revokeOtherSessions(): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.POST("/admin/me/sessions/revoke-others");
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(PAGE);
   return {};
 }
@@ -50,7 +82,7 @@ export async function changePassword(input: {
 }): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.PUT("/admin/me/password", { body: input });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   return {};
 }
 
@@ -58,7 +90,7 @@ export async function changePassword(input: {
 export async function startTotp(password: string): Promise<TotpSetup> {
   const client = await sessionClient();
   const { data, error } = await client.POST("/admin/me/mfa/totp", { body: { password } });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   return { secret: data.secret, uri: data.uri };
 }
 
@@ -66,7 +98,7 @@ export async function startTotp(password: string): Promise<TotpSetup> {
 export async function confirmTotp(code: string): Promise<RecoveryCodes> {
   const client = await sessionClient();
   const { data, error } = await client.POST("/admin/me/mfa/totp/confirm", { body: { code } });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(PAGE);
   return { codes: data.recovery_codes };
 }
@@ -75,7 +107,7 @@ export async function confirmTotp(code: string): Promise<RecoveryCodes> {
 export async function regenerateRecoveryCodes(code: string): Promise<RecoveryCodes> {
   const client = await sessionClient();
   const { data, error } = await client.POST("/admin/me/mfa/recovery-codes", { body: { code } });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   return { codes: data.recovery_codes };
 }
 
@@ -83,7 +115,7 @@ export async function regenerateRecoveryCodes(code: string): Promise<RecoveryCod
 export async function disableTotp(code: string): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.POST("/admin/me/mfa/totp/disable", { body: { code } });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(PAGE);
   return {};
 }

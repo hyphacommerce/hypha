@@ -9,6 +9,8 @@ import { Button } from "@astryxdesign/core/Button";
 import { HStack } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
 
+import { useT } from "@/lib/use-t";
+
 export function SaveBar({
   isDirty,
   isPending,
@@ -26,15 +28,23 @@ export function SaveBar({
   onSave: () => void;
   onDiscard: () => void;
 }) {
+  const t = useT();
   if (!isDirty && !error) return null;
   return (
     <div className="save-bar">
       <HStack gap={3} hAlign="between" vAlign="center" wrap="wrap">
-        <Text weight="medium">{isDirty ? "Unsaved changes" : "Not saved"}</Text>
+        <Text weight="medium">
+          {isDirty ? t("common.unsaved_changes") : t("components.save_bar_not_saved")}
+        </Text>
         <HStack gap={2}>
-          <Button label="Discard" variant="ghost" isDisabled={isPending} onClick={onDiscard} />
           <Button
-            label="Save"
+            label={t("common.discard")}
+            variant="ghost"
+            isDisabled={isPending}
+            onClick={onDiscard}
+          />
+          <Button
+            label={t("common.save")}
             variant="primary"
             isLoading={isPending}
             isDisabled={!isDirty || !canSave}

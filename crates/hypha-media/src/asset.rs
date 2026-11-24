@@ -1,4 +1,4 @@
-use std::{fmt, str::FromStr};
+use std::{collections::BTreeSet, fmt, str::FromStr};
 
 use hypha_core::{
     AssetId, PendingEvent, Recorded, Recorder, Subject, Timestamp, Version, Versioned,
@@ -7,7 +7,7 @@ use hypha_core::{
 
 use crate::{
     AssetKind, BlobKey, MediaError, MimeType, UploadMismatch,
-    events::{ASSET, AssetDeleted},
+    events::{ASSET, AssetDeleted, AssetUpdated},
 };
 
 /// Where an asset is in its upload.
@@ -174,10 +174,22 @@ pub struct Asset {
     updated_at: Timestamp,
     /// What happened since it was loaded, for its events.
     events: Recorder,
+    /// The fields staff changed since it was loaded: one `asset.updated` names them all
+    /// when its events are taken.
+    changed: BTreeSet<&'static str>,
 }
 
 impl Recorded for Asset {
     fn take_events(&mut self) -> Vec<PendingEvent> {
+        let changed = std::mem::take(&mut self.changed);
+        if !changed.is_empty() && self.version != Version::NEW {
+            let event = AssetUpdated {
+                asset: self.id,
+                fields: changed.into_iter().collect(),
+            };
+            self.events
+                .record(Subject::new(ASSET, self.id.as_uuid()), &event);
+        }
         self.events.take()
     }
 }
@@ -196,6 +208,7 @@ impl Asset {
     /// Records that the asset is being deleted (`asset.deleted`), for `AssetRepo::delete`
     /// to write with the row.
     pub fn delete(&mut self) {
+        self.changed.clear();
         let event = AssetDeleted { asset: self.id };
         self.events
             .record(Subject::new(ASSET, self.id.as_uuid()), &event);
@@ -232,6 +245,7 @@ impl Asset {
             created_at: new.now,
             updated_at: new.now,
             events: Recorder::default(),
+            changed: BTreeSet::new(),
         })
     }
 
@@ -298,6 +312,7 @@ impl Asset {
     pub fn set_alt(&mut self, alt: Option<String>, now: Timestamp) -> Result<(), MediaError> {
         self.alt = optional_text("alt", alt)?;
         self.updated_at = now;
+        self.changed.insert("alt");
         Ok(())
     }
 
@@ -305,6 +320,7 @@ impl Asset {
     pub fn set_title(&mut self, title: Option<String>, now: Timestamp) -> Result<(), MediaError> {
         self.title = optional_text("title", title)?;
         self.updated_at = now;
+        self.changed.insert("title");
         Ok(())
     }
 
@@ -514,6 +530,7 @@ impl Asset {
             created_at: s.created_at,
             updated_at: s.updated_at,
             events: Recorder::default(),
+            changed: BTreeSet::new(),
         })
     }
 }
@@ -702,6 +719,24 @@ mod tests {
         assert_eq!(asset.alt(), Some("A blue shirt"));
         asset.set_alt(Some(" ".to_string()), NOW).unwrap();
         assert_eq!(asset.alt(), None);
+    }
+
+    #[test]
+    fn a_stored_assets_text_changes_are_one_event_naming_the_fields() {
+        let mut asset = upload("a.png", MimeType::Png, 1).unwrap();
+        asset.set_alt(Some("A mug".to_string()), NOW).unwrap();
+        assert!(asset.take_events().is_empty(), "a new upload records none");
+        asset.set_version(Version::new(1));
+        asset.set_title(Some("Mug".to_string()), NOW).unwrap();
+        asset.set_alt(Some("A blue mug".to_string()), NOW).unwrap();
+        let events = asset.take_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "asset.updated");
+        assert_eq!(
+            events[0].data["fields"],
+            serde_json::json!(["alt", "title"])
+        );
+        assert!(asset.take_events().is_empty(), "taken once");
     }
 
     #[test]

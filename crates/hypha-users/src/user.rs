@@ -1,7 +1,7 @@
 //! Staff users: the people who run the store. How they log in lives in their
 //! `hypha_auth::Identity`.
 
-use hypha_core::{Email, RoleId, Timestamp, UserId, Version, Versioned, required_text};
+use hypha_core::{Email, Language, RoleId, Timestamp, UserId, Version, Versioned, required_text};
 
 use crate::error::UserError;
 
@@ -43,6 +43,10 @@ pub struct User {
     name: String,
     role: RoleId,
     status: UserStatus,
+    /// The language the admin speaks to them in. Any tag: it's matched against the
+    /// admin's own catalogs, not the store's content languages. `None` leaves it to the
+    /// browser's languages.
+    language: Option<Language>,
     created_at: Timestamp,
 }
 
@@ -72,6 +76,7 @@ impl User {
             name: required_text("name", name)?,
             role,
             status: UserStatus::Active,
+            language: None,
             created_at,
         })
     }
@@ -100,6 +105,10 @@ impl User {
         self.status == UserStatus::Active
     }
 
+    pub fn language(&self) -> Option<&Language> {
+        self.language.as_ref()
+    }
+
     pub fn created_at(&self) -> Timestamp {
         self.created_at
     }
@@ -117,6 +126,10 @@ impl User {
         self.status = status;
     }
 
+    pub fn set_language(&mut self, language: Option<Language>) {
+        self.language = language;
+    }
+
     pub fn snapshot(&self) -> UserSnapshot {
         UserSnapshot {
             id: self.id,
@@ -125,6 +138,7 @@ impl User {
             name: self.name.clone(),
             role: self.role,
             status: self.status,
+            language: self.language.clone(),
             created_at: self.created_at,
         }
     }
@@ -133,6 +147,7 @@ impl User {
         let mut user = User::new(s.id, s.email, &s.name, s.role, s.created_at)?;
         user.version = s.version;
         user.status = s.status;
+        user.language = s.language;
         Ok(user)
     }
 }
@@ -146,6 +161,7 @@ pub struct UserSnapshot {
     pub name: String,
     pub role: RoleId,
     pub status: UserStatus,
+    pub language: Option<Language>,
     pub created_at: Timestamp,
 }
 
@@ -191,9 +207,25 @@ mod tests {
     }
 
     #[test]
+    fn a_new_user_has_no_language() {
+        assert_eq!(user("Ana").unwrap().language(), None);
+    }
+
+    #[test]
+    fn a_language_is_set_and_cleared() {
+        let mut u = user("Ana").unwrap();
+        let de = Language::new("de-AT").unwrap();
+        u.set_language(Some(de.clone()));
+        assert_eq!(u.language(), Some(&de));
+        u.set_language(None);
+        assert_eq!(u.language(), None);
+    }
+
+    #[test]
     fn snapshot_round_trips() {
         let mut u = user("Ana").unwrap();
         u.set_status(UserStatus::Disabled);
+        u.set_language(Some(Language::new("sr-Latn").unwrap()));
         assert_eq!(User::restore(u.snapshot()), Ok(u));
     }
 }

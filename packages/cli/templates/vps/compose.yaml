@@ -107,6 +107,8 @@ services:
       HYPHA_WEBHOOK_SECRET: ${HYPHA_WEBHOOK_SECRET:-}
       STOREFRONT_ROUTING: ${STOREFRONT_ROUTING:-folders}
       STOREFRONT_URL: ${STOREFRONT_URL:-}
+      # `1` keeps a demo or staging store out of search engines.
+      STOREFRONT_NOINDEX: ${STOREFRONT_NOINDEX:-}
       # As the admin's: the shopper's address from Caddy, for the API's per-address
       # cart limit.
       STOREFRONT_TRUST_X_FORWARDED_FOR: "true"

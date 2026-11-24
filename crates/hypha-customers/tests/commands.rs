@@ -196,6 +196,7 @@ fn find_or_create_creates_a_guest_once() {
         &world.customers,
         &world.ids,
         &ana,
+        None,
     ))
     .unwrap();
     let found = block_on(find_or_create_customer(
@@ -203,10 +204,37 @@ fn find_or_create_creates_a_guest_once() {
         &world.customers,
         &world.ids,
         &ana,
+        None,
     ))
     .unwrap();
     assert_eq!(found, created);
     assert_eq!(created.first_name(), None);
+}
+
+#[test]
+fn find_or_create_gives_a_new_customer_the_language_but_not_an_existing_one() {
+    let world = World::new();
+    let german = hypha_core::Language::new("de").unwrap();
+    let created = block_on(find_or_create_customer(
+        &Ctx::system(),
+        &world.customers,
+        &world.ids,
+        &email("lena@example.de"),
+        Some(&german),
+    ))
+    .unwrap();
+    assert_eq!(created.language(), Some(&german));
+    let existing = world.create("ana@example.hr").unwrap();
+    let found = block_on(find_or_create_customer(
+        &Ctx::system(),
+        &world.customers,
+        &world.ids,
+        &email("ana@example.hr"),
+        Some(&german),
+    ))
+    .unwrap();
+    assert_eq!(found.language(), None);
+    assert_eq!(found, existing);
 }
 
 #[test]
@@ -218,7 +246,8 @@ fn find_or_create_finds_an_existing_customer() {
             &Ctx::system(),
             &world.customers,
             &world.ids,
-            &email("ana@example.hr")
+            &email("ana@example.hr"),
+            None,
         )),
         Ok(existing)
     );
@@ -237,7 +266,8 @@ fn find_or_create_losing_a_race_returns_the_winner() {
             &Ctx::system(),
             &repo,
             &SequentialIds::default(),
-            &email("ana@example.hr")
+            &email("ana@example.hr"),
+            None,
         )),
         Ok(winner)
     );
@@ -294,6 +324,34 @@ fn update_changes_given_fields_and_none_or_blank_clears() {
     assert_eq!(updated.phone(), None);
     assert_eq!(updated.email(), &email("ana@example.hr"));
     assert_eq!(world.stored(c.id()), updated);
+}
+
+#[test]
+fn update_sets_and_clears_the_language() {
+    let world = World::new();
+    let c = world.create("ana@example.hr").unwrap();
+    let german = hypha_core::Language::new("de").unwrap();
+    let updated = world
+        .update(
+            c.id(),
+            UpdateCustomer {
+                language: Some(Some(german.clone())),
+                ..UpdateCustomer::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(updated.language(), Some(&german));
+    assert_eq!(world.stored(c.id()).language(), Some(&german));
+    let cleared = world
+        .update(
+            c.id(),
+            UpdateCustomer {
+                language: Some(None),
+                ..UpdateCustomer::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(cleared.language(), None);
 }
 
 #[test]
@@ -390,6 +448,7 @@ fn add_address_rejects_an_invalid_address() {
                 field: AddressField::City,
                 code: AddressProblemCode::Required,
                 message: "Enter a city".to_string(),
+                params: hypha_core::MessageParams::field(AddressField::City),
             }
         ])))
     );

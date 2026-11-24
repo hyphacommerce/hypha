@@ -2,7 +2,7 @@
 // `https://<storefront>/order/{order}?token={token}` (`hypha deploy` and `pnpm seed`
 // set it so). Pages can't set cookies while rendering, so this handler checks the token
 // against the order, keeps it in the order's httpOnly cookie (as checkout does), and
-// sends the buyer to the confirmation in the order's own country, with no token left in
+// sends the buyer to the confirmation in the order's own country and language, with no token left in
 // the address bar or the history. Country-less, so one pattern serves both routing
 // modes: the proxy lets `/order/<id>` through untouched. A wrong or missing token lands
 // on the confirmation without one, which shows its "can't show this order" state (or
@@ -12,7 +12,7 @@ import { cookies } from "next/headers";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { api, loadCountries } from "@/lib/api";
-import { COUNTRY_COOKIE } from "@/lib/routing";
+import { COUNTRY_COOKIE, localeSegment, offered } from "@/lib/routing";
 import { link, mode, rememberOrder } from "@/lib/site";
 
 /** Per request: it reads the order with the link's token. */
@@ -42,9 +42,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   });
   if (!order) return to(fallback);
   await rememberOrder(order.id, token);
-  const sold = (await loadCountries()).some((c) => c.country === order.country);
+  const offer = (await loadCountries()).find((c) => c.country === order.country);
   // A country no market sells to any more has no folder: the shopper's one, then.
-  if (!sold) return to(fallback);
+  if (!offer) return to(fallback);
   // A single tree takes the country from its cookie: the order's, so its page shows
   // the order's country and money.
   if (mode() === "single") {
@@ -54,5 +54,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       maxAge: 60 * 60 * 24 * 365,
     });
   }
-  return to(link(order.country, `/order/${order.id}/confirmed`));
+  // In the order's language, which its email was written in (the country's default for
+  // an order from before languages, or in one the country no longer offers).
+  const segment = localeSegment(offer, offered(order.language ?? undefined, offer));
+  return to(link(segment, `/order/${order.id}/confirmed`));
 }

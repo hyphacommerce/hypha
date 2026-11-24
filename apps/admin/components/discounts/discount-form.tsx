@@ -14,6 +14,8 @@ import type { DiscountDraft } from "@/lib/discounts/draft";
 import { draftSummary } from "@/lib/discounts/summary";
 import type { FieldErrors } from "@/lib/discounts/validate";
 import { toLocalInput } from "@/lib/price-lists";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { AppliesToSection } from "./applies-to-section";
 import { CombinationsSection, type LiveDiscount } from "./combinations-section";
@@ -61,6 +63,8 @@ export function DiscountForm({
   /** The instant (ms) the summary's phase is judged at. */
   now: number;
 }) {
+  const t = useT<"discounts">();
+  const format = useFormat();
   const currencies = useCurrencies();
   const timeZone = useTimeZone();
   const allNames = {
@@ -78,6 +82,8 @@ export function DiscountForm({
     currencies,
     names: allNames,
     today: toLocalInput(new Date(now).toISOString(), timeZone).slice(0, 10),
+    t,
+    format,
   });
   const section = { draft, errors, onChange, isReadOnly };
 

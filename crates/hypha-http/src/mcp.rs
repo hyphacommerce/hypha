@@ -85,6 +85,10 @@ you retry, so a retry never writes twice. Where your mode for an operation is \"
 apply stores a proposal that a staff member approves in the admin: tell the person its link, \
 and follow it with get_proposal or list_proposals.
 
+To change part of a record, use its PATCH where it has one: a PUT replaces the record whole, \
+so whatever it leaves out is removed (a translation's PUT drops every field of the language \
+not sent; PATCH /admin/translations/{kind}/{id}/{language} changes only those named).
+
 Money is in minor units of the currency named beside it (2490 with EUR is 24.90 EUR), never \
 floats. Times are UTC (RFC 3339); show them in the store's time zone. Lists are paged: pass \
 the answer's next cursor for more.

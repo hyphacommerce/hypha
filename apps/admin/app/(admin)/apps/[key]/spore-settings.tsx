@@ -9,7 +9,12 @@ import { Switch } from "@astryxdesign/core/Switch";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { useState, useTransition } from "react";
 
+import { useT } from "@/lib/use-t";
+
 import { saveSporeSettings } from "../actions";
+
+/** What a secret that is set shows in place of its value. */
+const MASK = "••••••••";
 
 /** One property of a spore's settings schema: the subset the API accepts. */
 type Property = {
@@ -90,6 +95,7 @@ export function SporeSettingsForm({
   settings: Record<string, unknown>;
   canWrite: boolean;
 }) {
+  const t = useT<"apps">();
   const [values, setValues] = useState(() => initial(schema, settings));
   // Secrets the merchant asked to clear: sent as `null` on the next save.
   const [cleared, setCleared] = useState<ReadonlySet<string>>(new Set());
@@ -141,11 +147,11 @@ export function SporeSettingsForm({
         if (property["x-hypha-secret"]) {
           const isClearing = cleared.has(name);
           const wasSet = isSet(settings[name]) && !isClearing;
-          const description = isClearing
-            ? "Cleared when you save."
+          const state = isClearing
+            ? t("apps.spore_secret_clearing")
             : wasSet
-              ? "Set. Type a new value to replace it."
-              : "Not set yet.";
+              ? t("apps.spore_secret_set")
+              : t("apps.spore_secret_unset");
           return (
             <VStack key={name} gap={1}>
               <TextInput
@@ -154,9 +160,14 @@ export function SporeSettingsForm({
                 // Whether it's set comes first: a spore's own description (where to find
                 // the key) mustn't hide it.
                 description={
-                  property.description ? `${description} ${property.description}` : description
+                  property.description
+                    ? t("apps.spore_secret_described", {
+                        state,
+                        description: property.description,
+                      })
+                    : state
                 }
-                placeholder={wasSet ? "••••••••" : undefined}
+                placeholder={wasSet ? MASK : undefined}
                 isRequired={required.has(name) && !wasSet}
                 isDisabled={isDisabled}
                 status={status}
@@ -168,7 +179,11 @@ export function SporeSettingsForm({
               />
               {wasSet && !required.has(name) && canWrite && (
                 <HStack hAlign="end">
-                  <Button label={`Clear ${label}`} size="sm" onClick={() => clear(name)} />
+                  <Button
+                    label={t("apps.spore_clear", { label })}
+                    size="sm"
+                    onClick={() => clear(name)}
+                  />
                 </HStack>
               )}
             </VStack>
@@ -231,11 +246,20 @@ export function SporeSettingsForm({
       })}
       {error && <Banner status="error" title={error} onDismiss={() => setError(undefined)} />}
       {isSaved && (
-        <Banner status="success" title="Settings saved." onDismiss={() => setIsSaved(false)} />
+        <Banner
+          status="success"
+          title={t("apps.spore_saved")}
+          onDismiss={() => setIsSaved(false)}
+        />
       )}
       {canWrite && (
         <HStack hAlign="end">
-          <Button label="Save settings" variant="primary" isLoading={isPending} onClick={save} />
+          <Button
+            label={t("apps.spore_save")}
+            variant="primary"
+            isLoading={isPending}
+            onClick={save}
+          />
         </HStack>
       )}
     </VStack>

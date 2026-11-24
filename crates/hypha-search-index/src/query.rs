@@ -2,7 +2,7 @@
 
 use std::{fmt, str::FromStr};
 
-use hypha_core::{CategoryId, ChannelId, MarketId, Money};
+use hypha_core::{CategoryId, ChannelId, Language, MarketId, Money};
 
 use crate::SearchDocument;
 
@@ -117,6 +117,8 @@ pub struct PriceBounds {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchQuery {
     pub market: MarketId,
+    /// The market's documents in this language: one it offers.
+    pub language: Language,
     /// Only documents published to this channel (a storefront's); `None` searches them
     /// all (staff).
     pub channel: Option<ChannelId>,
@@ -145,7 +147,12 @@ pub struct Hit {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FacetValue {
+    /// As filters take it: as stored, in every language.
     pub value: String,
+    /// What the counted documents show for it in the query's language (an option
+    /// value's translated label; every other facet's value itself). Where they differ,
+    /// the least in byte order, so every engine picks the same.
+    pub label: String,
     /// Groups (what the shopper sees), not documents.
     pub count: u64,
 }

@@ -889,6 +889,20 @@ impl Validations {
         }
     }
 
+    /// In characters.
+    pub fn min_length(&self) -> Option<u32> {
+        self.min_length
+    }
+
+    /// In characters.
+    pub fn max_length(&self) -> Option<u32> {
+        self.max_length
+    }
+
+    pub fn pattern(&self) -> Option<&Pattern> {
+        self.pattern.as_ref()
+    }
+
     pub fn choices(&self) -> &[Choice] {
         &self.choices
     }

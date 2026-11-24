@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { t } from "./testing.ts";
 import type { FixedPriceUpsert } from "./types.ts";
 import { type DiffWriter, writeDiff } from "./write.ts";
 
@@ -14,6 +15,7 @@ const entry = (variant: string): FixedPriceUpsert => ({
 function recording(answers: DiffWriter["put"]) {
   const puts: string[][] = [];
   const writer: DiffWriter = {
+    t,
     put: (entries) => {
       puts.push(entries.map((e) => e.variant));
       return answers(entries);

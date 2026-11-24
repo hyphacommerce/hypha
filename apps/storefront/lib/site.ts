@@ -3,16 +3,26 @@
 import { cookies } from "next/headers";
 
 import { cartFlagCookie } from "./cart-flag";
-import { href, routing } from "./routing";
+import { segmentCountry as countryOfSegment, href, routing } from "./routing";
 
 /** The routing mode this deployment uses (`STOREFRONT_ROUTING`). */
 export function mode() {
   return routing(process.env.STOREFRONT_ROUTING);
 }
 
-/** A link to `path` in `country`, for this deployment's routing. */
-export function link(country: string, path: string): string {
-  return href(mode(), country, path);
+/**
+ * A link to `path` in a place, for this deployment's routing. The place is a page's
+ * locale segment (`params.country`: `de`, `en-de`), so a link keeps the page's
+ * language; a country code alone (`DE`) is that country in its default language.
+ */
+export function link(place: string, path: string): string {
+  return href(mode(), place, path);
+}
+
+/** The country code a URL's locale segment names (`hr` and `en-hr` → `HR`): the one
+ * place that reads it, as `pageLocale` (`lib/api.ts`) is for the language. */
+export function segmentCountry(segment: string): string {
+  return countryOfSegment(segment);
 }
 
 /** The cart's cookie: one cart per country, since a cart's country sets its market. */

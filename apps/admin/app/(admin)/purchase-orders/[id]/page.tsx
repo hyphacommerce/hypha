@@ -7,6 +7,7 @@ import { type Crumb, PageHeader } from "@/components/page-header";
 import { DetailSkeleton } from "@/components/skeletons";
 import { PurchaseOrderStatusBadge, ReceiptStatusBadge } from "@/components/status";
 import { loaded, requireStaff, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import { hasScope } from "@/lib/navigation";
 import { poNumber } from "@/lib/purchasing";
 
@@ -15,8 +16,6 @@ import { PurchaseOrderEditor } from "./purchase-order-editor";
 import { ReceiptsCard, ReceiveButton } from "./receiving";
 import { type Recipient, SendButton } from "./send-purchase-order";
 
-const BACK: Crumb[] = [{ label: "Purchase orders", href: "/purchase-orders" }];
-
 /**
  * A purchase order: its lines (outstanding per line, landed cost), extra costs, totals in
  * its currency and the store's, and its details; changed in place while it's a draft or
@@ -24,25 +23,27 @@ const BACK: Crumb[] = [{ label: "Purchase orders", href: "/purchase-orders" }];
  * delete) and print it; its receipts are listed under it, each to take back.
  */
 export default async function PurchaseOrderPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+  const [{ id }, t] = await Promise.all([params, getT()]);
+  const back: Crumb[] = [{ label: t("purchasing.list_title"), href: "/purchase-orders" }];
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={1280}>
-        <Suspense fallback={<DetailSkeleton back={BACK} />}>
-          <PurchaseOrderView id={id} />
+        <Suspense fallback={<DetailSkeleton back={back} />}>
+          <PurchaseOrderView id={id} back={back} />
         </Suspense>
       </VStack>
     </Section>
   );
 }
 
-async function PurchaseOrderView({ id }: { id: string }) {
+async function PurchaseOrderView({ id, back }: { id: string; back: Crumb[] }) {
   const client = await sessionClient();
-  const [po, me, locations, receipts] = await Promise.all([
+  const [po, me, locations, receipts, t] = await Promise.all([
     client.GET("/admin/purchase-orders/{id}", { params: { path: { id } } }).then(loaded),
     requireStaff(),
     client.GET("/admin/locations"),
     client.GET("/admin/purchase-orders/{id}/receipts", { params: { path: { id } } }),
+    getT(),
   ]);
   const canWrite = hasScope(me.scopes, "purchasing:write");
   const canSend = canWrite && hasScope(me.scopes, "purchasing:send");
@@ -57,19 +58,30 @@ async function PurchaseOrderView({ id }: { id: string }) {
     <VStack gap={5}>
       <PageHeader
         title={poNumber(po.number)}
-        back={BACK}
+        back={back}
         badges={
           <HStack gap={2}>
-            <PurchaseOrderStatusBadge status={po.status} />
+            <PurchaseOrderStatusBadge status={po.status} t={t} />
             {po.status !== "draft" && po.status !== "cancelled" && (
-              <ReceiptStatusBadge status={po.receipt_status} />
+              <ReceiptStatusBadge status={po.receipt_status} t={t} />
             )}
           </HStack>
         }
-        description={`${po.supplier_name} · ${po.currency}${po.revision > 0 ? ` · revision ${po.revision}` : ""}${po.sent_at ? " · sent" : ""}`}
+        description={[
+          po.supplier_name,
+          po.currency,
+          po.revision > 0 && t("purchasing.detail_revision", { revision: po.revision }),
+          po.sent_at && t("purchasing.detail_sent"),
+        ]
+          .filter(Boolean)
+          .join(" · ")}
         actions={
           <HStack gap={2} wrap="wrap" vAlign="start">
-            <Button label="Print" variant="ghost" href={`/purchase-orders/${po.id}/print`} />
+            <Button
+              label={t("common.print")}
+              variant="ghost"
+              href={`/purchase-orders/${po.id}/print`}
+            />
             {canWrite && <PurchaseOrderActions po={po} />}
             {canSend && <SendButton po={po} contacts={contacts} />}
             {canWrite && <ReceiveButton po={po} places={places} />}

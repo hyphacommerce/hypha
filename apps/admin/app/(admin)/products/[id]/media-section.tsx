@@ -26,6 +26,7 @@ import { type DragEvent, useEffect, useEffectEvent, useRef, useState, useTransit
 
 import { ACCEPT_PRODUCT_MEDIA, MAX_BYTES, uploadFile } from "../../media/upload";
 import { LibrarySearch } from "@/components/library-search";
+import { useT } from "@/lib/use-t";
 import { libraryPage, setProductMedia } from "../actions";
 
 type Item = AdminSchemas["ProductMediaResponse"];
@@ -65,6 +66,7 @@ function moved<T>(list: T[], from: number, to: number): T[] {
  * the file stays in the library.
  */
 export function MediaSection({ id, media }: { id: string; media: Item[] }) {
+  const t = useT<"products" | "media">();
   const [items, setItems] = useState(media);
   // The server's list after each save, taken in while staying mounted: a remount would
   // drop the errors and running uploads of this section.
@@ -117,9 +119,10 @@ export function MediaSection({ id, media }: { id: string; media: Item[] }) {
     try {
       // One at a time, like the Media page.
       for (const file of files) {
-        const result = await uploadFile(file);
-        if ("error" in result) failed.push(`${file.name}: ${result.error}`);
-        else uploaded.push(result.id);
+        const result = await uploadFile(file, t);
+        if ("error" in result) {
+          failed.push(t("media.upload_file_error", { file: file.name, error: result.error }));
+        } else uploaded.push(result.id);
       }
       if (uploaded.length > 0) {
         const attachError = await attach(uploaded);
@@ -144,16 +147,16 @@ export function MediaSection({ id, media }: { id: string; media: Item[] }) {
         <HStack gap={2} vAlign="center" hAlign="between" wrap="wrap">
           <VStack gap={1}>
             <Text type="display-3" as="h2">
-              Media
+              {t("products.media")}
             </Text>
             <Text type="supporting" color="secondary">
-              Drag to reorder. The first is the featured image.
+              {t("products.media_hint")}
             </Text>
           </VStack>
           <HStack gap={2} vAlign="center">
-            {isSaving && <Spinner size="sm" aria-label="Saving" />}
+            {isSaving && <Spinner size="sm" aria-label={t("products.media_saving")} />}
             <Button
-              label="Pick from library"
+              label={t("common.pick_from_library")}
               variant="secondary"
               isDisabled={items.length >= MAX_ITEMS}
               onClick={() => setIsPicking(true)}
@@ -166,8 +169,8 @@ export function MediaSection({ id, media }: { id: string; media: Item[] }) {
         {items.length === 0 ? (
           <EmptyState
             icon={<PhotoIcon width={32} />}
-            title="No media yet"
-            description="Upload images or videos, or pick them from the library."
+            title={t("products.media_empty_title")}
+            description={t("products.media_empty_description")}
           />
         ) : (
           <Grid columns={{ minWidth: 150 }} gap={3}>
@@ -193,20 +196,20 @@ export function MediaSection({ id, media }: { id: string; media: Item[] }) {
                     <Preview item={item} />
                     <HStack gap={1} padding={2} vAlign="center" hAlign="between">
                       {index === 0 ? (
-                        <Badge label="Featured" variant="info" />
+                        <Badge label={t("products.media_featured")} variant="info" />
                       ) : (
                         <Text color="secondary">
                           {item.kind === "video" ? (
-                            <FilmIcon width={16} aria-label="Video" />
+                            <FilmIcon width={16} aria-label={t("products.media_kind_video")} />
                           ) : (
-                            <PhotoIcon width={16} aria-label="Image" />
+                            <PhotoIcon width={16} aria-label={t("products.media_kind_image")} />
                           )}
                         </Text>
                       )}
                       <HStack gap={0.5}>
                         <IconButton
-                          label="Move earlier"
-                          tooltip="Move earlier"
+                          label={t("products.media_move_earlier")}
+                          tooltip={t("products.media_move_earlier")}
                           size="sm"
                           variant="ghost"
                           icon={<ArrowLeftIcon width={16} />}
@@ -214,8 +217,8 @@ export function MediaSection({ id, media }: { id: string; media: Item[] }) {
                           onClick={() => save(moved(items, index, index - 1))}
                         />
                         <IconButton
-                          label="Move later"
-                          tooltip="Move later"
+                          label={t("products.media_move_later")}
+                          tooltip={t("products.media_move_later")}
                           size="sm"
                           variant="ghost"
                           icon={<ArrowRightIcon width={16} />}
@@ -223,8 +226,8 @@ export function MediaSection({ id, media }: { id: string; media: Item[] }) {
                           onClick={() => save(moved(items, index, index + 1))}
                         />
                         <IconButton
-                          label="Remove from product"
-                          tooltip="Remove from product (the file stays in the library)"
+                          label={t("products.media_remove")}
+                          tooltip={t("products.media_remove_tooltip")}
                           size="sm"
                           variant="ghost"
                           icon={<XMarkIcon width={16} />}
@@ -240,7 +243,7 @@ export function MediaSection({ id, media }: { id: string; media: Item[] }) {
         )}
 
         <FileInput
-          label="Upload media"
+          label={t("products.media_upload_label")}
           isLabelHidden
           mode="dropzone"
           isMultiple
@@ -251,7 +254,7 @@ export function MediaSection({ id, media }: { id: string; media: Item[] }) {
           changeAction={uploadAll}
           isLoading={isUploading}
           isDisabled={items.length >= MAX_ITEMS}
-          placeholder="Drop images or videos here, or choose files"
+          placeholder={t("products.media_upload_placeholder")}
         />
       </VStack>
 
@@ -282,6 +285,7 @@ function LibraryPicker({
   onClose: () => void;
   onPick: (assets: string[]) => Promise<void>;
 }) {
+  const t = useT<"products">();
   const [assets, setAssets] = useState<Asset[]>();
   const [next, setNext] = useState<string>();
   const [error, setError] = useState<string>();
@@ -310,8 +314,8 @@ function LibraryPicker({
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={760} purpose="form">
       <DialogHeader
-        title="Pick from library"
-        subtitle="Images and videos, newest first."
+        title={t("products.media_pick")}
+        subtitle={t("products.media_picker_subtitle")}
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       {/* The library scrolls; the buttons stay in view (see the shipping option dialog). */}
@@ -327,16 +331,20 @@ function LibraryPicker({
         <VStack gap={4} padding={4}>
           {assets === undefined ? (
             <HStack hAlign="center" padding={6}>
-              <Spinner aria-label="Loading the library" />
+              <Spinner aria-label={t("products.media_picker_loading")} />
             </HStack>
           ) : assets.length === 0 ? (
             <EmptyState
               icon={<PhotoIcon width={32} />}
-              title={query ? `Nothing matches “${query}”` : "The library is empty"}
+              title={
+                query
+                  ? t("products.media_picker_no_match", { query })
+                  : t("products.media_picker_empty")
+              }
               description={
                 query
-                  ? "Search looks at file names, alt text and titles."
-                  : "Upload files on the Media page, or drop them on this product."
+                  ? t("products.media_picker_no_match_description")
+                  : t("products.media_picker_empty_description")
               }
             />
           ) : (
@@ -368,7 +376,7 @@ function LibraryPicker({
                         </Text>
                         {isAttached && (
                           <Text type="supporting" color="secondary">
-                            On this product
+                            {t("products.media_picker_attached")}
                           </Text>
                         )}
                       </VStack>
@@ -381,7 +389,7 @@ function LibraryPicker({
           {next && (
             <HStack hAlign="center">
               <Button
-                label="Load more"
+                label={t("common.load_more")}
                 variant="ghost"
                 isLoading={isLoading}
                 onClick={() => load(next)}
@@ -393,9 +401,13 @@ function LibraryPicker({
       <VStack gap={3} padding={4}>
         {error && <Banner status="error" title={error} />}
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label={picked.length > 0 ? `Add ${picked.length}` : "Add"}
+            label={
+              picked.length > 0
+                ? t("products.media_picker_add_count", { count: picked.length })
+                : t("common.add")
+            }
             variant="primary"
             isDisabled={picked.length === 0}
             isLoading={isAdding}

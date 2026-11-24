@@ -1,0 +1,25 @@
+{% if customer and customer.name %}Zdravo, {{ customer.name }},{% else %}Zdravo,{% endif %}
+
+Podaci za praćenje pošiljke iz vaše porudžbine {{ order.number }} su izmenjeni. Ovo su najnoviji podaci.
+{%- if fulfillment.tracking %}
+
+Praćenje pošiljke:
+{%- for tracking in fulfillment.tracking %}
+- {% if tracking.carrier %}{{ tracking.carrier }}: {% endif %}{{ tracking.number }}{% if tracking.url %} ({{ tracking.url }}){% endif %}
+{%- endfor %}
+{%- endif %}
+
+U ovoj pošiljci:
+{%- for line in fulfillment.lines %}
+- {{ line.quantity }} × {{ line.title }}{% if line.variant %} ({{ line.variant }}){% endif %}
+{%- endfor %}
+{%- if order.url %}
+
+Pogledaj porudžbinu: {{ order.url }}
+{%- endif %}
+
+--
+{{ shop.name }}{% if shop.email %} · {{ shop.email }}{% endif %}
+{%- if brand.footer %}
+{{ brand.footer }}
+{%- endif %}

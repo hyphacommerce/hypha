@@ -9,20 +9,39 @@
 )]
 
 use hypha_core::{
-    Actor, AuthError, Ctx, Email, EventId, NotificationId, OrderId, PageLimit, PageRequest, Scope,
-    UserId,
+    Actor, AuthError, Ctx, Email, EventId, Language, NotificationId, OrderId, PageLimit,
+    PageRequest, Scope, UserId,
 };
 use hypha_notifications::{
     CommandError, NewNotification, NewTemplate, Notification, NotificationFilter, NotificationRepo,
     NotificationSettings, NotificationSettingsRepo, NotificationStatus, NotificationTemplateRepo,
-    Template, TemplateError, TemplateKey, TemplatePart, TemplateSources, default_template,
-    get_notification, get_notification_settings, get_notification_template,
-    list_notification_templates, list_notifications, revert_notification_template,
-    set_notification_template_enabled,
+    Template, TemplateError, TemplateKey, TemplateLanguages, TemplatePart, TemplateSources,
+    default_template, default_template_in, get_notification, get_notification_settings,
+    get_notification_template, list_notification_templates, list_notifications,
+    revert_notification_template, set_notification_template_enabled,
 };
 use hypha_testkit::InMemoryPorts;
 use pollster::block_on;
 use uuid::Uuid;
+
+fn en() -> Language {
+    Language::new("en").unwrap()
+}
+
+/// An English store that also has Serbian and German.
+fn langs() -> TemplateLanguages<'static> {
+    static OTHERS: std::sync::LazyLock<Vec<Language>> = std::sync::LazyLock::new(|| {
+        ["sr-Latn", "de"]
+            .into_iter()
+            .map(|t| Language::new(t).unwrap())
+            .collect()
+    });
+    static DEFAULT: std::sync::LazyLock<Language> = std::sync::LazyLock::new(en);
+    TemplateLanguages {
+        default: &DEFAULT,
+        others: &OTHERS,
+    }
+}
 
 fn ctx() -> Ctx {
     Ctx::system()
@@ -80,10 +99,10 @@ fn settings_are_the_defaults_until_saved() {
 fn every_template_is_listed_default_or_edited() {
     let ports = InMemoryPorts::default();
     store_edit(&ports, TemplateKey::OrderShipped, false);
-    let listed = block_on(list_notification_templates(&ctx(), &ports)).unwrap();
-    let keys: Vec<TemplateKey> = listed.iter().map(|t| t.key).collect();
+    let listed = block_on(list_notification_templates(&ctx(), &ports, &en())).unwrap();
+    let keys: Vec<TemplateKey> = listed.iter().map(|t| t.template.key).collect();
     assert_eq!(keys, TemplateKey::ALL);
-    for t in &listed {
+    for t in listed.iter().map(|l| &l.template) {
         if t.key == TemplateKey::OrderShipped {
             assert!(t.customized && !t.enabled);
             assert_eq!(t.sources, edited(TemplateKey::OrderShipped));
@@ -98,11 +117,25 @@ fn every_template_is_listed_default_or_edited() {
 fn one_template_is_its_sources_in_effect() {
     let ports = InMemoryPorts::default();
     let key = TemplateKey::OrderConfirmation;
-    let default = block_on(get_notification_template(&ctx(), &ports, key)).unwrap();
+    let default = block_on(get_notification_template(
+        &ctx(),
+        &ports,
+        key,
+        None,
+        langs(),
+    ))
+    .unwrap();
     assert_eq!(default.sources, default_template(key).sources());
     assert!(!default.customized);
     store_edit(&ports, key, true);
-    let mine = block_on(get_notification_template(&ctx(), &ports, key)).unwrap();
+    let mine = block_on(get_notification_template(
+        &ctx(),
+        &ports,
+        key,
+        None,
+        langs(),
+    ))
+    .unwrap();
     assert_eq!(mine.sources, edited(key));
     assert!(mine.customized);
     assert_eq!(mine.sending_sources(), edited(key));
@@ -118,7 +151,14 @@ fn a_stored_template_that_no_longer_parses_sends_the_default() {
     broken.html = Some("{% extends \"layout\" %}{% block content %}{% for %}".to_string());
     let mut broken = Template::restore(broken).unwrap();
     block_on(ports.notification_templates.update(&mut broken)).unwrap();
-    let t = block_on(get_notification_template(&ctx(), &ports, key)).unwrap();
+    let t = block_on(get_notification_template(
+        &ctx(),
+        &ports,
+        key,
+        None,
+        langs(),
+    ))
+    .unwrap();
     assert_eq!(t.problem.as_ref().map(|p| p.part), Some(TemplatePart::Html));
     assert_eq!(t.sending_sources(), default_template(key).sources());
 }
@@ -132,6 +172,7 @@ fn turning_a_default_off_stores_no_sources_and_on_again_stores_nothing() {
         &ports,
         key,
         false,
+        &en(),
     ))
     .unwrap();
     assert!(!off.enabled && !off.customized);
@@ -140,7 +181,14 @@ fn turning_a_default_off_stores_no_sources_and_on_again_stores_nothing() {
         stored(&ports, key).map(|t| t.sources().is_none()),
         Some(true)
     );
-    let on = block_on(set_notification_template_enabled(&ctx(), &ports, key, true)).unwrap();
+    let on = block_on(set_notification_template_enabled(
+        &ctx(),
+        &ports,
+        key,
+        true,
+        &en(),
+    ))
+    .unwrap();
     assert!(on.enabled);
     assert_eq!(stored(&ports, key), None);
 }
@@ -155,6 +203,7 @@ fn turning_an_edited_template_off_keeps_its_sources() {
         &ports,
         key,
         false,
+        &en(),
     ))
     .unwrap();
     assert!(!off.enabled && off.customized);
@@ -174,7 +223,8 @@ fn invites_resets_and_the_layout_stay_on() {
                 &ctx(),
                 &ports,
                 key,
-                false
+                false,
+                &en()
             )),
             Err(CommandError::Template(TemplateError::Required(key)))
         );
@@ -187,7 +237,14 @@ fn reverting_drops_the_edit_but_keeps_off_off() {
     let ports = InMemoryPorts::default();
     let key = TemplateKey::OrderCancelled;
     store_edit(&ports, key, false);
-    let reverted = block_on(revert_notification_template(&ctx(), &ports, key)).unwrap();
+    let reverted = block_on(revert_notification_template(
+        &ctx(),
+        &ports,
+        key,
+        None,
+        langs(),
+    ))
+    .unwrap();
     assert!(!reverted.customized && !reverted.enabled);
     assert_eq!(reverted.sources, default_template(key).sources());
     assert_eq!(
@@ -197,7 +254,14 @@ fn reverting_drops_the_edit_but_keeps_off_off() {
 
     let on = TemplateKey::OrderConfirmation;
     store_edit(&ports, on, true);
-    block_on(revert_notification_template(&ctx(), &ports, on)).unwrap();
+    block_on(revert_notification_template(
+        &ctx(),
+        &ports,
+        on,
+        None,
+        langs(),
+    ))
+    .unwrap();
     assert_eq!(stored(&ports, on), None);
 }
 
@@ -205,7 +269,14 @@ fn reverting_drops_the_edit_but_keeps_off_off() {
 fn reverting_a_default_changes_nothing() {
     let ports = InMemoryPorts::default();
     let key = TemplateKey::Layout;
-    let reverted = block_on(revert_notification_template(&ctx(), &ports, key)).unwrap();
+    let reverted = block_on(revert_notification_template(
+        &ctx(),
+        &ports,
+        key,
+        None,
+        langs(),
+    ))
+    .unwrap();
     assert!(!reverted.customized && reverted.enabled);
     assert_eq!(stored(&ports, key), None);
 }
@@ -314,7 +385,7 @@ fn reading_needs_notifications_read_and_changing_needs_write() {
         missing(Scope::NotificationsRead)
     );
     assert_eq!(
-        block_on(list_notification_templates(&nobody, &ports)).map(|_| ()),
+        block_on(list_notification_templates(&nobody, &ports, &en())).map(|_| ()),
         missing(Scope::NotificationsRead)
     );
     assert_eq!(
@@ -326,7 +397,9 @@ fn reading_needs_notifications_read_and_changing_needs_write() {
         block_on(revert_notification_template(
             &reader,
             &ports,
-            TemplateKey::OrderShipped
+            TemplateKey::OrderShipped,
+            None,
+            langs()
         ))
         .map(|_| ()),
         missing(Scope::NotificationsWrite)
@@ -336,7 +409,8 @@ fn reading_needs_notifications_read_and_changing_needs_write() {
             &reader,
             &ports,
             TemplateKey::OrderShipped,
-            false
+            false,
+            &en()
         ))
         .map(|_| ()),
         missing(Scope::NotificationsWrite)
@@ -344,4 +418,226 @@ fn reading_needs_notifications_read_and_changing_needs_write() {
     // Write implies read.
     let writer = staff(vec![Scope::NotificationsWrite]);
     assert!(block_on(get_notification_settings(&writer, &ports)).is_ok());
+}
+
+fn lang(tag: &str) -> Language {
+    Language::new(tag).unwrap()
+}
+
+/// Stores `key` for `locale` with sources whose subject names it.
+fn store_in(ports: &InMemoryPorts, key: TemplateKey, locale: Option<&str>) -> TemplateSources {
+    let sources = TemplateSources::new(
+        key,
+        format!("{}: {{{{ order.number }}}}", locale.unwrap_or("default")),
+        r#"{% extends "layout" %}{% block content %}<p>Mine</p>{% endblock %}"#.to_string(),
+        None,
+    )
+    .unwrap();
+    let mut template = Template::new(NewTemplate {
+        key,
+        locale: locale.map(lang),
+        sources: Some(sources.clone()),
+        enabled: true,
+    })
+    .unwrap();
+    block_on(ports.notification_templates.insert(&mut template)).unwrap();
+    sources
+}
+
+#[test]
+fn the_chain_tries_the_merchants_then_the_builds_by_region_then_the_default_language() {
+    use hypha_notifications::{Step, lookup_chain};
+    let m = |tag: Option<&str>| Step::Merchant(tag.map(lang));
+    let d = |tag: &str| Step::Default(lang(tag));
+    assert_eq!(
+        lookup_chain(&lang("de-AT"), &en()),
+        vec![
+            m(Some("de-AT")),
+            m(Some("de")),
+            d("de-AT"),
+            d("de"),
+            m(None),
+            d("en")
+        ]
+    );
+    // The default language is the `''` row, never one keyed by it.
+    assert_eq!(
+        lookup_chain(&lang("de-AT"), &lang("de")),
+        vec![m(Some("de-AT")), m(None), d("de-AT"), d("de"), d("en")]
+    );
+    assert_eq!(lookup_chain(&en(), &en()), vec![m(None), d("en")]);
+    // A script isn't a region: Serbian in Latin script never falls back to Cyrillic.
+    assert_eq!(
+        lookup_chain(&lang("sr-Latn"), &en()),
+        vec![m(Some("sr-Latn")), d("sr-Latn"), m(None), d("en")]
+    );
+}
+
+#[test]
+fn an_email_in_a_regional_language_takes_the_merchants_language_before_the_builds() {
+    let ports = InMemoryPorts::default();
+    let key = TemplateKey::OrderConfirmation;
+    let de = store_in(&ports, key, Some("de"));
+    store_in(&ports, key, None);
+    let at = block_on(hypha_notifications::template_in_effect(
+        &ports,
+        key,
+        Some(&lang("de-AT")),
+        &en(),
+    ))
+    .unwrap();
+    assert_eq!(at.sending_sources(), de);
+    assert_eq!(at.language(), &lang("de"));
+    assert!(!at.customized, "nothing saved for de-AT itself");
+    let mine = store_in(&ports, key, Some("de-AT"));
+    let at = block_on(hypha_notifications::template_in_effect(
+        &ports,
+        key,
+        Some(&lang("de-AT")),
+        &en(),
+    ))
+    .unwrap();
+    assert_eq!((at.sending_sources(), at.customized), (mine, true));
+}
+
+#[test]
+fn the_builds_language_comes_before_the_merchants_default_language() {
+    let ports = InMemoryPorts::default();
+    let key = TemplateKey::OrderConfirmation;
+    store_in(&ports, key, None);
+    let serbian = block_on(hypha_notifications::template_in_effect(
+        &ports,
+        key,
+        Some(&lang("sr-Latn")),
+        &en(),
+    ))
+    .unwrap();
+    let built = default_template_in(key, &lang("sr-Latn")).unwrap();
+    assert_eq!(serbian.sending_sources(), built.sources());
+    assert_eq!(serbian.language(), &lang("sr-Latn"));
+    // A language the build has nothing in reads the merchant's default language.
+    let german = block_on(hypha_notifications::template_in_effect(
+        &ports,
+        key,
+        Some(&lang("de")),
+        &en(),
+    ))
+    .unwrap();
+    assert_eq!(german.language(), &en());
+    assert!(german.sends_merchants());
+}
+
+#[test]
+fn a_store_in_another_language_sends_the_builds_defaults_in_it() {
+    let ports = InMemoryPorts::default();
+    let key = TemplateKey::OrderShipped;
+    let serbian = lang("sr-Latn");
+    let t = block_on(hypha_notifications::template_in_effect(
+        &ports, key, None, &serbian,
+    ))
+    .unwrap();
+    assert_eq!(
+        t.sending_sources(),
+        default_template_in(key, &serbian).unwrap().sources()
+    );
+    // Staff emails have English defaults only.
+    let staff = block_on(hypha_notifications::template_in_effect(
+        &ports,
+        TemplateKey::StaffNewOrder,
+        None,
+        &serbian,
+    ))
+    .unwrap();
+    assert_eq!(staff.language(), &en());
+}
+
+#[test]
+fn a_languages_template_is_read_reverted_and_listed_apart_from_the_default() {
+    let ports = InMemoryPorts::default();
+    let key = TemplateKey::OrderShipped;
+    let mine = store_in(&ports, key, Some("sr-Latn"));
+    let sr = lang("sr-Latn");
+    let got = block_on(get_notification_template(
+        &ctx(),
+        &ports,
+        key,
+        Some(&sr),
+        langs(),
+    ))
+    .unwrap();
+    assert_eq!(
+        (got.sources, got.customized, got.locale),
+        (mine, true, Some(sr.clone()))
+    );
+    let listed = block_on(list_notification_templates(&ctx(), &ports, &en())).unwrap();
+    let shipped = listed.iter().find(|l| l.template.key == key).unwrap();
+    assert_eq!(shipped.languages, vec![sr.clone()]);
+    assert!(!shipped.template.customized);
+    let reverted = block_on(revert_notification_template(
+        &ctx(),
+        &ports,
+        key,
+        Some(&sr),
+        langs(),
+    ))
+    .unwrap();
+    assert!(!reverted.customized);
+    assert_eq!(
+        reverted.sources,
+        default_template_in(key, &sr).unwrap().sources()
+    );
+    assert_eq!(
+        block_on(ports.notification_templates.list()).unwrap(),
+        vec![]
+    );
+}
+
+#[test]
+fn the_default_language_named_is_the_default_row_and_others_must_be_the_stores() {
+    let ports = InMemoryPorts::default();
+    let key = TemplateKey::OrderShipped;
+    let got = block_on(get_notification_template(
+        &ctx(),
+        &ports,
+        key,
+        Some(&en()),
+        langs(),
+    ))
+    .unwrap();
+    assert_eq!(got.locale, None);
+    assert_eq!(
+        block_on(get_notification_template(
+            &ctx(),
+            &ports,
+            key,
+            Some(&lang("fr")),
+            langs()
+        ))
+        .map(|_| ()),
+        Err(CommandError::LanguageNotListed(lang("fr")))
+    );
+}
+
+#[test]
+fn whether_a_template_is_sent_is_the_default_rows_for_every_language() {
+    let ports = InMemoryPorts::default();
+    let key = TemplateKey::OrderShipped;
+    store_in(&ports, key, Some("sr-Latn"));
+    block_on(set_notification_template_enabled(
+        &ctx(),
+        &ports,
+        key,
+        false,
+        &en(),
+    ))
+    .unwrap();
+    let sr = block_on(get_notification_template(
+        &ctx(),
+        &ports,
+        key,
+        Some(&lang("sr-Latn")),
+        langs(),
+    ))
+    .unwrap();
+    assert!(!sr.enabled);
 }

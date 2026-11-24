@@ -1,31 +1,61 @@
 // Server-only: a page's metadata for search engines and link previews.
 
+import { localeOf } from "@hyphacommerce/i18n";
 import type { Metadata } from "next";
 
-import { loadCountries, loadStore } from "./api";
-import { countryAlternates } from "./seo";
+import { loadCountries, loadStore, pageLocale } from "./api";
+import { duplicateOf, hreflangPlaces } from "./routing";
+import { localeAlternates } from "./seo";
 import { link, mode, siteUrl } from "./site";
 
 type Image = { url: string; width?: number | null; height?: number | null; alt?: string | null };
 
 /**
+ * A page's canonical URL and its alternates by `hreflang`, `path` being its path inside
+ * a place (`/p/mug`): its own URL and its copy in every country and language
+ * (`hreflangPlaces`), or, for a page (`segment`) whose tag another won
+ * (`duplicateOf`), that page's URL and none, since a page in a set names itself in it.
+ */
+export async function linksOf(
+  segment: string,
+  path: string,
+): Promise<{ canonical: string; languages?: Record<string, string> }> {
+  const countries = await loadCountries();
+  const duplicate = duplicateOf(mode(), countries, segment);
+  if (duplicate !== undefined) return { canonical: link(duplicate, path) };
+  const canonical = link(segment, path);
+  const places = hreflangPlaces(mode(), countries);
+  if (!places.some((p) => p.segment === segment.toLowerCase())) return { canonical };
+  const languages = localeAlternates(
+    places.map((p) => ({ tag: p.tag, href: link(p.segment, path) })),
+  );
+  return { canonical, languages };
+}
+
+/**
  * A shop page's metadata: its title (the layout's template adds the store's name),
- * description, canonical URL with every country's copy as alternates, and the Open
- * Graph and Twitter previews with `image`. `path` is the page's path inside a country
- * (`/p/mug`).
+ * description, its canonical URL (its own, or the page it duplicates) with its copy in
+ * every country and language as alternates (`linksOf`), and the Open Graph and Twitter
+ * previews with `image`. `segment` is the page's locale segment (`params.country`),
+ * `path` its path inside it (`/p/mug`).
  */
 export async function pageMetadata(input: {
-  country: string;
+  segment: string;
   path: string;
   title?: string;
   description?: string;
   image?: Image | null;
   type?: "website" | "article";
 }): Promise<Metadata> {
-  const [store, countries] = await Promise.all([loadStore(), loadCountries()]);
+  const place = await pageLocale(input.segment);
+  const [store, links] = await Promise.all([
+    loadStore(place.country, place.language),
+    siteUrl() ? linksOf(place.segment, input.path) : undefined,
+  ]);
   const description = input.description ?? store.description ?? undefined;
   const title = input.title ? `${input.title} · ${store.name}` : store.name;
-  const url = link(input.country, input.path);
+  const url = links?.canonical ?? link(place.segment, input.path);
+  const languages = links?.languages;
   const images = input.image
     ? [
         {
@@ -40,28 +70,15 @@ export async function pageMetadata(input: {
     ...(input.title ? { title: input.title } : {}),
     description,
     // Relative links need the origin to resolve against; without it, none.
-    ...(siteUrl()
-      ? {
-          alternates: {
-            canonical: url,
-            languages:
-              mode() === "folders"
-                ? countryAlternates(
-                    store.default_language,
-                    countries.map((c) => c.country),
-                    (c) => link(c, input.path),
-                  )
-                : undefined,
-          },
-        }
-      : {}),
+    ...(siteUrl() ? { alternates: { canonical: url, languages } } : {}),
     openGraph: {
       type: input.type ?? "website",
       siteName: store.name,
       title,
       description,
       ...(siteUrl() ? { url } : {}),
-      locale: `${store.default_language}_${input.country}`,
+      // Open Graph spells a locale `de_CH`.
+      locale: localeOf(place.language, place.country).replace(/-/g, "_"),
       images,
     },
     twitter: {

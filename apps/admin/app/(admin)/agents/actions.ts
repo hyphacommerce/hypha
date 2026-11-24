@@ -4,6 +4,7 @@ import type { AdminSchemas, ApiError } from "@hyphacommerce/sdk/admin";
 import { revalidatePath } from "next/cache";
 
 import { describe, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 
 export type Result = { error?: string };
 
@@ -32,8 +33,8 @@ function detail(error: ApiError, key: string): string | undefined {
  * Where a save's error belongs: grant errors name their list (`details.field`) and the
  * scope they're about; a missing or long name is the name's.
  */
-function placed(error: ApiError): SaveResult {
-  const message = describe(error);
+async function placed(error: ApiError): Promise<SaveResult> {
+  const message = await describe(error);
   const field = GRANT_FIELDS.find((f) => f === detail(error, "field"));
   if (field) return { error: message, field, scope: detail(error, "scope") };
   if (
@@ -80,7 +81,7 @@ export async function setAgentEnabled(id: string, enabled: boolean): Promise<Res
     params: { path: { id } },
     body: { enabled },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/agents/${id}`);
   revalidatePath("/agents");
   return {};
@@ -90,7 +91,7 @@ export async function setAgentEnabled(id: string, enabled: boolean): Promise<Res
 export async function revokeAgent(id: string): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.POST("/admin/agents/{id}/revoke", { params: { path: { id } } });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/agents/${id}`);
   revalidatePath("/agents");
   return {};
@@ -114,12 +115,10 @@ export async function approveProposal(id: string, refreshes: number): Promise<Re
   revalidatePath(`/agents/proposals/${id}`);
   revalidatePath("/agents/proposals");
   if (error?.code === "proposal_changed") {
-    return {
-      error:
-        "This proposal changed since you opened it. Below is what it would do now: review it and approve again.",
-    };
+    const t = await getT();
+    return { error: t("agents.proposal_changed") };
   }
-  if (error && error.code !== "preview_stale") return { error: describe(error) };
+  if (error && error.code !== "preview_stale") return { error: await describe(error) };
   return {};
 }
 
@@ -130,7 +129,7 @@ export async function rejectProposal(id: string, note: string): Promise<Result> 
     params: { path: { id } },
     body: { note: note.trim() || null },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/agents/proposals/${id}`);
   revalidatePath("/agents/proposals");
   return {};
@@ -154,9 +153,8 @@ export async function approveConnection(
     body: { name, grant },
   });
   if (error?.code === "oauth_request_expired") {
-    return {
-      error: "This request expired: requests wait ten minutes. Connect again from the client.",
-    };
+    const t = await getT();
+    return { error: t("agents.connect_expired") };
   }
   if (error) return placed(error);
   revalidatePath("/agents");
@@ -169,6 +167,6 @@ export async function denyConnection(id: string): Promise<ConnectResult> {
   const { data, error } = await client.POST("/admin/agent-connections/{id}/deny", {
     params: { path: { id } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   return { redirectTo: data.redirect_to };
 }

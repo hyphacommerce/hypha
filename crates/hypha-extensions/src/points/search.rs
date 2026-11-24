@@ -6,7 +6,9 @@
 
 use core::time::Duration;
 
-use hypha_core::{CategoryId, ChannelId, Currency, MarketId, ProductId, Scope, VariantId};
+use hypha_core::{
+    CategoryId, ChannelId, Currency, Language, MarketId, ProductId, Scope, VariantId,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{ExtensionPoint, OnFailure};
@@ -87,6 +89,12 @@ pub struct SearchQueryRequest {
     /// Hits to skip, then at most `limit` (1 to 100) to answer.
     pub offset: u32,
     pub limit: u32,
+    /// The language the shopper searches in (a BCP 47 tag), one the market offers:
+    /// `query` is in its words, and hits are shown in it. Filter values stay as stored,
+    /// whatever the language. An added field: still version 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(required = false))]
+    pub language: Option<Language>,
 }
 
 /// A facet's accepted values.
@@ -196,11 +204,21 @@ mod tests {
             facets: vec!["vendor".to_string()],
             offset: 0,
             limit: 2,
+            language: Some(Language::new("de").unwrap()),
         }
     }
 
     fn answer(value: serde_json::Value) -> SearchQueryResponse {
         serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn a_request_without_a_language_reads_as_one() {
+        let mut json = serde_json::to_value(request()).unwrap();
+        assert_eq!(json["language"], "de");
+        json.as_object_mut().unwrap().remove("language");
+        let read: SearchQueryRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(read.language, None);
     }
 
     #[test]

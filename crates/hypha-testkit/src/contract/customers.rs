@@ -259,6 +259,8 @@ async fn round_trips<R: CustomerRepo>(repo: &R) {
     c.set_first_name(Some("Ana".to_string())).unwrap();
     c.set_last_name(Some("Horvat".to_string())).unwrap();
     c.set_phone(Some("+385 91 000 0000".to_string())).unwrap();
+    c.set_language(Some(hypha_core::Language::new("sr-Latn").unwrap()))
+        .unwrap();
     c.add_address(addr_id(2), bare_address("Split"), false, true)
         .unwrap();
     c.add_address(addr_id(1), full_address("Zagreb"), true, false)
@@ -331,6 +333,8 @@ async fn update<R: CustomerRepo>(repo: &R) {
     c.set_last_name(Some("Horvat".to_string())).unwrap();
     c.remove_address(addr_id(1)).unwrap();
     c.add_address(addr_id(2), bare_address("Split"), false, true)
+        .unwrap();
+    c.set_language(Some(hypha_core::Language::new("de").unwrap()))
         .unwrap();
     repo.update(&mut c).await.unwrap();
 

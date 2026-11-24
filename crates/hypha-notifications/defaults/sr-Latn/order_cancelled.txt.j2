@@ -1,0 +1,37 @@
+{% if customer and customer.name %}Zdravo, {{ customer.name }},{% else %}Zdravo,{% endif %}
+
+Vaša porudžbina {{ order.number }} je otkazana.{% if cancellation.reason %} Razlog: {{ cancellation.reason }}.{% endif %}
+
+Ako imate pitanja o tome, samo odgovorite na ovaj imejl.
+{%- if order.url %}
+
+Pogledaj porudžbinu: {{ order.url }}
+{%- endif %}
+
+Porudžbina {{ order.number }}
+{%- for line in order.lines %}
+- {{ line.quantity }} × {{ line.title }}{% if line.variant %} ({{ line.variant }}){% endif %}: {{ line.total.formatted }}{% if line.discount %} (pre popusta: {{ line.original_total.formatted }}){% endif %}
+{%- endfor %}
+
+Međuzbir: {{ order.subtotal.formatted }}
+Dostava: {{ order.shipping.formatted }}
+{%- if not order.taxes_included %}
+Porez: {{ order.tax.formatted }}
+{%- endif %}
+Ukupno: {{ order.total.formatted }}
+{%- if order.taxes_included %}
+Od toga porez: {{ order.tax.formatted }}
+{%- endif %}
+{%- if order.discounts %}
+
+Popusti uračunati u iznose iznad:
+{%- for discount in order.discounts %}
+- {{ discount.title }}{% if discount.code %} ({{ discount.code }}){% endif %}: {{ discount.amount.formatted }}
+{%- endfor %}
+{%- endif %}
+
+--
+{{ shop.name }}{% if shop.email %} · {{ shop.email }}{% endif %}
+{%- if brand.footer %}
+{{ brand.footer }}
+{%- endif %}

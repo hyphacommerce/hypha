@@ -1,15 +1,11 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { type ReactNode, useMemo } from "react";
 
 import { UrlTabs } from "@/components/url-tabs";
+import { useT } from "@/lib/use-t";
 
 export type AgentTab = "access" | "activity";
-
-const TABS = [
-  { value: "access", label: "Access" },
-  { value: "activity", label: "Activity" },
-] as const;
 
 /** An agent's access and its activity as tabs, the tab in the URL (`?tab=activity`). */
 export function AgentTabs({
@@ -21,11 +17,20 @@ export function AgentTabs({
   tab: AgentTab;
   children: ReactNode;
 }) {
+  const t = useT<"agents">();
+  const tabs = useMemo(
+    () =>
+      [
+        { value: "access", label: t("agents.tab_access") },
+        { value: "activity", label: t("agents.tab_activity") },
+      ] as const,
+    [t],
+  );
   return (
     <UrlTabs
-      tabs={TABS}
+      tabs={tabs}
       value={tab}
-      href={(t) => (t === "activity" ? `/agents/${id}?tab=activity` : `/agents/${id}`)}
+      href={(next) => (next === "activity" ? `/agents/${id}?tab=activity` : `/agents/${id}`)}
     >
       {children}
     </UrlTabs>

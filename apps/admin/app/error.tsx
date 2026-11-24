@@ -11,8 +11,10 @@ import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { useEffect } from "react";
 
 import { isStaleBuild, reloadForNewBuild } from "@/lib/stale-build";
+import { useT } from "@/lib/use-t";
 
 export default function PageError({ error, reset }: { error: Error; reset: () => void }) {
+  const t = useT();
   const stale = isStaleBuild(error);
   useEffect(() => {
     if (stale) reloadForNewBuild();
@@ -23,17 +25,21 @@ export default function PageError({ error, reset }: { error: Error; reset: () =>
     <Center axis="both" padding={6} style={{ minHeight: "100%" }}>
       {stale ? (
         <EmptyState
-          title="A new version of the admin is out"
-          description="Loading it… If this page stays, reload it."
+          title={t("shell.error_stale_title")}
+          description={t("shell.error_stale_description")}
           actions={
-            <Button label="Reload" variant="primary" clickAction={() => window.location.reload()} />
+            <Button
+              label={t("common.reload")}
+              variant="primary"
+              clickAction={() => window.location.reload()}
+            />
           }
         />
       ) : (
         <EmptyState
-          title="Something went wrong"
-          description="This page ran into a problem."
-          actions={<Button label="Try again" variant="primary" clickAction={reset} />}
+          title={t("common.something_went_wrong")}
+          description={t("shell.error_description")}
+          actions={<Button label={t("common.retry")} variant="primary" clickAction={reset} />}
         />
       )}
     </Center>

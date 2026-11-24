@@ -12,11 +12,12 @@ import { Text } from "@astryxdesign/core/Text";
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 import { ShoppingBagIcon } from "@heroicons/react/24/outline";
 
-import { useCurrencies } from "@/components/currencies";
 import { DateTime } from "@/components/date-time";
 import { ResourceTable } from "@/components/resource-table/resource-table";
 import { customerLabel, orderLabel } from "@/lib/discounts/usage";
-import { customerName, formatMoney } from "@/lib/format";
+import { customerName } from "@/lib/format";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 type Usage = AdminSchemas["DiscountUsageResponse"];
 type Money = AdminSchemas["Money"];
@@ -33,11 +34,12 @@ export function UsageTable({
   /** What it took off in all, one sum per currency (the discount's `discounted_total`). */
   totals?: Money[];
 }) {
-  const currencies = useCurrencies();
+  const t = useT<"discounts">();
+  const format = useFormat();
   const columns: TableColumn<Usage>[] = [
     {
       key: "order",
-      header: "Order",
+      header: t("common.order"),
       width: proportional(2, { minWidth: 200 }),
       renderCell: (u) => (
         <Link href={`/orders/${u.order}`} weight="semibold" color="primary">
@@ -47,7 +49,7 @@ export function UsageTable({
     },
     {
       key: "customer",
-      header: "Customer",
+      header: t("common.customer"),
       width: proportional(2, { minWidth: 200 }),
       renderCell: (u) => {
         const name = customerName(u);
@@ -61,22 +63,24 @@ export function UsageTable({
     },
     {
       key: "code",
-      header: "Code",
+      header: t("common.code"),
       width: pixel(160),
       renderCell: (u) => (
-        <Text color={u.code ? undefined : "secondary"}>{u.code ?? "Automatic"}</Text>
+        <Text color={u.code ? undefined : "secondary"}>
+          {u.code ?? t("discounts.method_automatic")}
+        </Text>
       ),
     },
     {
       key: "amount",
-      header: "Took off",
+      header: t("discounts.usage_column_took_off"),
       width: pixel(130),
       align: "end",
-      renderCell: (u) => <Text>{formatMoney(u.amount, currencies)}</Text>,
+      renderCell: (u) => <Text>{format.money(u.amount)}</Text>,
     },
     {
       key: "used_at",
-      header: "Used",
+      header: t("discounts.usage_column_used"),
       width: pixel(170),
       renderCell: (u) => (
         <Text type="supporting">
@@ -90,14 +94,14 @@ export function UsageTable({
       {used !== undefined && totals && (
         <Card>
           <MetadataList>
-            <MetadataListItem label="Orders">
-              <Text>{used.toLocaleString("en")}</Text>
+            <MetadataListItem label={t("common.orders")}>
+              <Text>{format.number(used)}</Text>
             </MetadataListItem>
-            <MetadataListItem label="Total discounted">
+            <MetadataListItem label={t("discounts.usage_total")}>
               <Text>
                 {totals.length === 0
-                  ? "Nothing yet"
-                  : totals.map((m) => formatMoney(m, currencies)).join(" + ")}
+                  ? t("discounts.usage_total_none")
+                  : totals.map((m) => format.money(m)).join(" + ")}
               </Text>
             </MetadataListItem>
           </MetadataList>
@@ -114,8 +118,8 @@ export function UsageTable({
         error={page?.error}
         empty={{
           icon: <ShoppingBagIcon width={32} />,
-          title: "Not used yet",
-          description: "Orders placed with this discount show here.",
+          title: t("discounts.usage_empty_title"),
+          description: t("discounts.usage_empty_description"),
         }}
       />
     </VStack>

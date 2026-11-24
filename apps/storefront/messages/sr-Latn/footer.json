@@ -1,0 +1,10 @@
+{
+  "shop": "Prodavnica",
+  "all_products": "Svi proizvodi",
+  "sale": "Sniženje",
+  "help": "Pomoć",
+  "cart": "Korpa",
+  "account": "Nalog",
+  "credit": "© {store} · Napravljeno uz <link>Hypha</link>",
+  "shipping_to": "Zemlja dostave: {country} · Cene u valuti {currency}"
+}

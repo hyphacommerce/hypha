@@ -1,11 +1,12 @@
 // Shipping option rates as the admin edits them, and the API's tagged `rate` both
 // ways. One built-in rate in the API (a basis and tiers per currency) is shown as the
 // preset it matches: flat, free from an amount, tiers by subtotal or by weight. Shared
-// by server and client components.
+// by server and client components: what builds text takes the caller's translator.
 
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
-import { type Currencies, formatMoney, moneyInput, parseMoney } from "./format";
+import { type Currencies, type Format, moneyInput, parseMoney } from "./format";
+import type { TFor } from "./messages";
 
 type Currency = AdminSchemas["Currency"];
 export type RateDto = AdminSchemas["RateDto"];
@@ -22,17 +23,9 @@ export type RateDraft =
 
 export type RateKind = RateDraft["kind"];
 
-export const RATE_KINDS: { value: RateKind; label: string; description: string }[] = [
-  { value: "flat", label: "Flat", description: "One price per order." },
-  {
-    value: "free_over",
-    label: "Free from an amount",
-    description: "A price, free from a subtotal.",
-  },
-  { value: "subtotal", label: "By subtotal", description: "Tiers by the order's subtotal." },
-  { value: "weight", label: "By weight", description: "Tiers by the order's weight." },
-  { value: "provider", label: "Rate app", description: "Quoted live by a rate app." },
-];
+/** Every kind, as the picker lists them: `shipping.rate_kind_<kind>` names each, and
+ * `…_description` says what it is. */
+export const RATE_KINDS: RateKind[] = ["flat", "free_over", "subtotal", "weight", "provider"];
 
 /** A new draft of `kind`, in `currency`. */
 export function emptyDraft(kind: RateKind, currency: Currency): RateDraft {
@@ -114,15 +107,16 @@ export function toDraft(rate: RateDto, currencies: Currencies): RateDraft {
 /** The API's rate from a draft, or a message saying what to fix. The API checks the
  * rest (rising tiers, one table per currency) and answers `invalid_shipping_rate`. */
 export function fromDraft(
+  t: TFor<"shipping">,
   draft: RateDraft,
   currencies: Currencies,
 ): { rate: RateDto } | { error: string } {
   const money = (input: string, currency: Currency) => parseMoney(input, currency, currencies);
-  const priceError = "Enter prices as numbers, like 4.90 or 0.";
+  const priceError = t("shipping.rate_error_price");
   switch (draft.kind) {
     case "provider":
       if (!draft.provider || !draft.service.trim()) {
-        return { error: "Choose a rate app and the service it quotes." };
+        return { error: t("shipping.rate_error_provider") };
       }
       return {
         rate: { type: "provider", provider: draft.provider, service: draft.service.trim() },
@@ -142,7 +136,7 @@ export function fromDraft(
         const amount = money(price, currency);
         const from = money(freeFrom, currency);
         if (amount === null || from === null || from === 0) {
-          return { error: "Enter the price and the amount it's free from, like 4.90 and 50." };
+          return { error: t("shipping.rate_error_free_over") };
         }
         tables.push({ currency, tiers: [{ up_to: from, amount }, { amount: 0 }] });
       }
@@ -171,8 +165,8 @@ export function fromDraft(
             return {
               error:
                 draft.kind === "weight"
-                  ? "Enter each tier's limit in whole grams, like 1000."
-                  : "Enter each tier's limit as an amount, like 50.",
+                  ? t("shipping.rate_error_weight_limit")
+                  : t("shipping.rate_error_subtotal_limit"),
             };
           }
           parsed.push({ up_to: upTo, amount });
@@ -185,32 +179,37 @@ export function fromDraft(
 }
 
 /** "€4.90", "€4.90, free from €50.00", "3 weight tiers (EUR)", "app_courier · express". */
-export function describeRate(rate: RateDto, currencies: Currencies): string {
+export function describeRate(
+  t: TFor<"shipping">,
+  format: Format,
+  rate: RateDto,
+  currencies: Currencies,
+): string {
   if (rate.type === "provider") return `${rate.provider} · ${rate.service}`;
   const draft = toDraft(rate, currencies);
-  const codes = rate.tables.map((t) => t.currency).join(", ");
   switch (draft.kind) {
     case "flat":
       return rate.tables
-        .map((t) => formatMoney({ amount: t.tiers[0].amount, currency: t.currency }, currencies))
+        .map((table) => format.money({ amount: table.tiers[0].amount, currency: table.currency }))
         .join(" · ");
     case "free_over":
       return rate.tables
-        .map((t) => {
-          const price = formatMoney(
-            { amount: t.tiers[0].amount, currency: t.currency },
-            currencies,
-          );
-          const from = formatMoney(
-            { amount: t.tiers[0].up_to ?? 0, currency: t.currency },
-            currencies,
-          );
-          return `${price}, free from ${from}`;
-        })
+        .map((table) =>
+          t("shipping.rate_summary_free_over", {
+            price: format.money({ amount: table.tiers[0].amount, currency: table.currency }),
+            from: format.money({ amount: table.tiers[0].up_to ?? 0, currency: table.currency }),
+          }),
+        )
         .join(" · ");
     default: {
       const count = rate.tables[0]?.tiers.length ?? 0;
-      return `${count} ${draft.kind === "weight" ? "weight" : "subtotal"} tiers (${codes})`;
+      const codes = format.list(
+        rate.tables.map((table) => table.currency),
+        "unit",
+      );
+      return draft.kind === "weight"
+        ? t("shipping.rate_summary_weight_tiers", { count, currencies: codes })
+        : t("shipping.rate_summary_subtotal_tiers", { count, currencies: codes });
     }
   }
 }

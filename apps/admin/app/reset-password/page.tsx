@@ -1,13 +1,15 @@
 import type { Metadata } from "next";
 
+import { getT } from "@/lib/i18n";
+
 import { LinkProblem } from "../login/link-problem";
 import { ResetForm } from "./reset-form";
 
 // The token is in the URL: never pass it on to another site as a referrer.
-export const metadata: Metadata = {
-  title: "Choose a new password · Hypha admin",
-  referrer: "no-referrer",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t("auth.reset_page_title"), referrer: "no-referrer" };
+}
 
 /** Where a reset email's link lands (`{admin_url}/reset-password?token=…`). */
 export default async function ResetPasswordPage({
@@ -17,11 +19,12 @@ export default async function ResetPasswordPage({
 }) {
   const { token } = await searchParams;
   if (typeof token !== "string" || !token) {
+    const t = await getT();
     return (
       <LinkProblem
-        title="This reset link is incomplete"
-        subtitle="Open the link from the email again, or ask for a new one."
-        action={{ label: "Ask for a new link", href: "/forgot-password" }}
+        title={t("auth.reset_incomplete_title")}
+        subtitle={t("auth.reset_incomplete_subtitle")}
+        action={{ label: t("auth.reset_incomplete_action"), href: "/forgot-password" }}
       />
     );
   }

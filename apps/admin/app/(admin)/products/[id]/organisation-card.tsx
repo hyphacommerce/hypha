@@ -7,12 +7,14 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { Tokenizer } from "@astryxdesign/core/Tokenizer";
 import type { SearchableItem, SearchSource } from "@astryxdesign/core/Typeahead";
 
+import { useT } from "@/lib/use-t";
+
 import type { Draft } from "./draft";
 
 /** Tags are typed in, not picked from a list: the source offers nothing, `hasCreate` adds. */
 const noSuggestions: SearchSource = { search: () => [], bootstrap: () => [] };
 
-const asItems = (tags: string[]): SearchableItem[] => tags.map((t) => ({ id: t, label: t }));
+const asItems = (tags: string[]): SearchableItem[] => tags.map((tag) => ({ id: tag, label: tag }));
 
 const firstWithLabel = (items: SearchableItem[], label: string) =>
   items.findIndex((item) => item.label.toLowerCase() === label.toLowerCase());
@@ -28,30 +30,31 @@ export function OrganisationCard({
   draft: Draft;
   onChange: (change: Partial<Draft>) => void;
 }) {
+  const t = useT<"products">();
   return (
     <Card>
       <VStack gap={4}>
         <Text type="display-3" as="h2">
-          Organisation
+          {t("products.organisation_title")}
         </Text>
         <TextInput
-          label="Vendor"
+          label={t("products.vendor")}
           isOptional
           value={draft.vendor}
           onChange={(vendor) => onChange({ vendor })}
         />
         <TextInput
-          label="Product type"
+          label={t("products.organisation_product_type")}
           isOptional
-          placeholder="Mug, T-shirt…"
+          placeholder={t("products.organisation_product_type_placeholder")}
           value={draft.productType}
           onChange={(productType) => onChange({ productType })}
         />
         <Tokenizer
-          label="Tags"
-          description="Shoppers can filter by them. Up to 250."
+          label={t("products.organisation_tags")}
+          description={t("products.organisation_tags_description")}
           isOptional
-          placeholder="Add a tag…"
+          placeholder={t("products.organisation_tags_placeholder")}
           searchSource={noSuggestions}
           hasCreate
           debounceMs={0}

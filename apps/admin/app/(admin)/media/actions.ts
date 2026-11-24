@@ -25,7 +25,7 @@ export async function startUpload(file: {
   const { data, error } = await client.POST("/admin/assets", {
     body: { filename: file.name, mime_type: file.type, byte_size: file.size },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   return { id: data.asset.id, upload: data.upload };
 }
 
@@ -36,7 +36,7 @@ export async function completeUpload(id: string): Promise<FormState> {
     params: { path: { id } },
   });
   revalidatePath("/media");
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   return {};
 }
 
@@ -53,7 +53,7 @@ export async function updateAsset(
     params: { path: { id: input.id } },
     body,
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/media/${input.id}`);
   revalidatePath("/media");
   return { saved: true };
@@ -62,7 +62,7 @@ export async function updateAsset(
 export async function deleteAsset(id: string): Promise<FormState> {
   const client = await sessionClient();
   const { error } = await client.DELETE("/admin/assets/{id}", { params: { path: { id } } });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath("/media");
   redirect("/media");
 }

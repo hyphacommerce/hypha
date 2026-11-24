@@ -1,43 +1,48 @@
 import { Text } from "react-email";
-import type { Email } from "../email.ts";
+import { j, type Template } from "../email.ts";
 import { v } from "../jinja.tsx";
 import { Delivery, Greeting, OrderButton, OrderLines, Payment, Totals } from "../parts.tsx";
 import { heading, muted, paragraph, subheading } from "../styles.ts";
 import * as text from "../text.ts";
 
-export const orderConfirmation: Email = {
+export const orderConfirmation: Template = {
   key: "order_confirmation",
-  subject: "Order {{ order.number }} confirmed",
-  preheader: "Thanks for your order. Here's what you ordered and what happens next.",
-  Content: () => (
-    <>
-      <Text style={heading}>Thanks for your order</Text>
-      <Greeting />
-      <Text style={paragraph}>
-        We've received your order {v("order.number")} and we're getting it ready. We'll email you
-        again when it ships.
-      </Text>
-      <Payment />
-      <OrderButton />
-      <Text style={subheading}>Order {v("order.number")}</Text>
-      <Text style={muted}>Placed {v("order.placed_at.formatted")}</Text>
-      <OrderLines />
-      <Totals />
-      <Delivery />
-    </>
-  ),
-  text: `${text.greeting}
+  translated: true,
+  email: (t) => ({
+    key: "order_confirmation",
+    subject: t("order_confirmation.subject", { number: j("order.number") }),
+    preheader: t("order_confirmation.preheader"),
+    Content: () => (
+      <>
+        <Text style={heading}>{t("order_confirmation.heading")}</Text>
+        <Greeting t={t} />
+        <Text style={paragraph}>
+          {t("order_confirmation.received", { number: v("order.number") })}
+        </Text>
+        <Payment t={t} />
+        <OrderButton t={t} />
+        <Text style={subheading}>{t("common.order_number", { number: v("order.number") })}</Text>
+        <Text style={muted}>
+          {t("order_confirmation.placed", { date: v("order.placed_at.formatted") })}
+        </Text>
+        <OrderLines />
+        <Totals t={t} />
+        <Delivery t={t} />
+      </>
+    ),
+    text: `${text.greeting(t)}
 
-We've received your order {{ order.number }} and we're getting it ready. We'll email you again when it ships.
-${text.payment}
-${text.orderLink}
+${t("order_confirmation.received", { number: j("order.number") })}
+${text.payment(t)}
+${text.orderLink(t)}
 
-Order {{ order.number }}, placed {{ order.placed_at.formatted }}
-${text.orderLines}
+${t("order_confirmation.text_placed", { number: j("order.number"), date: j("order.placed_at.formatted") })}
+${text.orderLines(t)}
 
-${text.totals}
-${text.delivery}
+${text.totals(t)}
+${text.delivery(t)}
 
 ${text.footer}
 `,
+  }),
 };

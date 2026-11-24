@@ -4,7 +4,7 @@
 //! Here rather than in `hypha-cart` because it reads payment methods, which the cart
 //! crate doesn't depend on: the cart stores only the method's ID.
 
-use hypha_cart::{CartPorts, CartRepo, HasCarts, PricedCart, price_for_checkout};
+use hypha_cart::{Cart, CartPorts, CartRepo, HasCarts, PricedCart, price_for_checkout};
 use hypha_core::{CartId, Ctx, PaymentMethodId, Scope};
 use hypha_payments::{
     HasPaymentMethods, PaymentMethod, PaymentMethodRepo, PaymentProviders, ProviderKey,
@@ -24,13 +24,23 @@ pub(crate) async fn offered<P: PaymentProviders>(
     Ok(method.offered_in(market, channel) && providers.available(method.provider()).await?)
 }
 
+/// What `cart_payment_methods` answers: the methods, and the cart they're offered to, so
+/// a caller needn't read it again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CartPaymentMethods {
+    /// The cart as stored.
+    pub cart: Cart,
+    /// In position order.
+    pub methods: Vec<PaymentMethod>,
+}
+
 /// The methods a buyer can choose for the cart, in position order (`carts:read`).
 pub async fn cart_payment_methods<S: HasCarts + HasPaymentMethods, P: PaymentProviders>(
     ctx: &Ctx,
     ports: &S,
     providers: &P,
     id: CartId,
-) -> Result<Vec<PaymentMethod>, CommandError> {
+) -> Result<CartPaymentMethods, CommandError> {
     ctx.require(Scope::CartsRead)?;
     let cart = ports
         .carts()
@@ -61,12 +71,13 @@ pub async fn cart_payment_methods<S: HasCarts + HasPaymentMethods, P: PaymentPro
             offered_here.push(i);
         }
     }
-    Ok(methods
+    let methods = methods
         .into_iter()
         .enumerate()
         .filter(|(i, _)| offered_here.contains(i))
         .map(|(_, m)| m)
-        .collect())
+        .collect();
+    Ok(CartPaymentMethods { cart, methods })
 }
 
 /// Sets how the buyer will pay (`carts:write`), or clears it with `None`: a method that

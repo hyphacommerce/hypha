@@ -22,7 +22,7 @@ export async function adjustStock(
       },
     },
   );
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/inventory/${item}`);
   return {};
 }
@@ -40,7 +40,7 @@ export async function setUnitCost(
     params: { path: { id: item } },
     body: { unit_cost: input.cost, note: input.note.trim() === "" ? null : input.note },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/inventory/${item}`);
   return {};
 }

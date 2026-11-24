@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import { type SearchParams, one } from "@/components/resource-table/params";
 import { listPage, pageQuery } from "@/components/resource-table/server";
 import { loadStore, requireStaff, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import { hasScope } from "@/lib/navigation";
 
 import { NewSupplier } from "./new-supplier";
@@ -20,14 +21,19 @@ export default async function SuppliersPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const [params, me, store] = await Promise.all([searchParams, requireStaff(), loadStore()]);
+  const [params, me, store, t] = await Promise.all([
+    searchParams,
+    requireStaff(),
+    loadStore(),
+    getT(),
+  ]);
   const canWrite = hasScope(me.scopes, "purchasing:write");
   return (
     <Section padding={6}>
       <VStack gap={5}>
         <PageHeader
-          title="Suppliers"
-          description="Who you buy stock from, on what terms, and what each sells you at what price."
+          title={t("suppliers.list_title")}
+          description={t("suppliers.list_description")}
           actions={canWrite && <NewSupplier currency={store?.currency ?? null} />}
         />
         <Suspense fallback={<SuppliersTable canWrite={canWrite} />}>
@@ -50,5 +56,5 @@ async function SupplierRows({ params, canWrite }: { params: SearchParams; canWri
       },
     },
   });
-  return <SuppliersTable page={listPage(result, "/suppliers", params)} canWrite={canWrite} />;
+  return <SuppliersTable page={await listPage(result, "/suppliers", params)} canWrite={canWrite} />;
 }

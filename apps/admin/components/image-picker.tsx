@@ -18,6 +18,7 @@ import { useEffect, useEffectEvent, useState, useTransition } from "react";
 
 import { libraryPage } from "@/app/(admin)/products/actions";
 import { LibrarySearch } from "@/components/library-search";
+import { useT } from "@/lib/use-t";
 
 type Asset = AdminSchemas["AssetResponse"];
 
@@ -31,6 +32,7 @@ export function ImagePicker({
   onPick: (asset: string) => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const [assets, setAssets] = useState<Asset[]>();
   const [next, setNext] = useState<string>();
   const [error, setError] = useState<string>();
@@ -57,8 +59,8 @@ export function ImagePicker({
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={760} purpose="form">
       <DialogHeader
-        title="Pick an image"
-        subtitle="Images from the library, newest first."
+        title={t("components.image_picker_title")}
+        subtitle={t("components.image_picker_subtitle")}
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack padding={4} gap={0}>
@@ -73,16 +75,20 @@ export function ImagePicker({
         <VStack gap={4} padding={4}>
           {assets === undefined ? (
             <HStack hAlign="center" padding={6}>
-              <Spinner aria-label="Loading the library" />
+              <Spinner aria-label={t("components.image_picker_loading")} />
             </HStack>
           ) : assets.length === 0 ? (
             <EmptyState
               icon={<PhotoIcon width={32} />}
-              title={query ? `No images match “${query}”` : "No images yet"}
+              title={
+                query
+                  ? t("components.image_picker_no_match_title", { query })
+                  : t("components.image_picker_empty_title")
+              }
               description={
                 query
-                  ? "Search looks at file names, alt text and titles."
-                  : "Upload images on the Media page."
+                  ? t("components.image_picker_no_match_description")
+                  : t("components.image_picker_empty_description")
               }
             />
           ) : (
@@ -115,7 +121,7 @@ export function ImagePicker({
           {next && (
             <HStack hAlign="center">
               <Button
-                label="Load more"
+                label={t("common.load_more")}
                 variant="ghost"
                 isLoading={isLoading}
                 onClick={() => load(next)}
@@ -127,9 +133,9 @@ export function ImagePicker({
       <VStack gap={3} padding={4}>
         {error && <Banner status="error" title={error} />}
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label="Use image"
+            label={t("components.image_picker_confirm")}
             variant="primary"
             isDisabled={!picked}
             isLoading={isSaving}

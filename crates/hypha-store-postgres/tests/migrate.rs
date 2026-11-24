@@ -994,3 +994,72 @@ async fn every_counted_level_opens_the_ledger() {
         "an empty level opens nothing"
     );
 }
+
+/// Core before search documents had a language: migrations 0001 to 0104.
+const BEFORE_SEARCH_LANGUAGES: MigrationSet = MigrationSet {
+    module: "core",
+    migrations: CORE.migrations.split_at(104).0,
+};
+
+#[tokio::test]
+async fn search_documents_become_their_markets_default_languages() {
+    let Some(mut client) = fresh_schema("migrate_0105_search_languages").await else {
+        return;
+    };
+    migrate(&mut client, &[BEFORE_SEARCH_LANGUAGES])
+        .await
+        .unwrap();
+    // English, with German published and French not: a market listing nothing reads in
+    // English, one listing French first reads in German (French isn't offered), one
+    // listing German in German.
+    client
+        .batch_execute(
+            "INSERT INTO stores (id, version, name, languages) VALUES (gen_random_uuid(), 1,
+                 'Shop', '[{\"language\": \"de\", \"published\": true},
+                           {\"language\": \"fr\", \"published\": false}]');
+             INSERT INTO markets (id, version, name, currency, languages) VALUES
+                 ('00000000-0000-0000-0000-000000000001', 1, 'Plain', 'EUR', '{}'),
+                 ('00000000-0000-0000-0000-000000000002', 1, 'French', 'EUR', '{fr,de,en}'),
+                 ('00000000-0000-0000-0000-000000000003', 1, 'German', 'EUR', '{de,en}');
+             INSERT INTO search_documents (market_id, product_id, variant_id, listing, handle,
+                 title, title_sort, description, tags, option_names, option_values, currency,
+                 price, product_min, product_max, listing_min, listing_max, available,
+                 created_us, position, terms_a, terms_b, terms_d, tsv, facets, channels,
+                 categories)
+             SELECT m, gen_random_uuid(), gen_random_uuid(), 'l', 'h', 'T', 't', '', '{}',
+                 '{Color}', '{Red}', 'EUR', 1, 1, 1, 1, 1, true, 0, 0, '{t}', '{red}', '{}',
+                 array_to_tsvector('{t,red}'::text[]),
+                 ARRAY['option.color' || chr(31) || 'Red', 'on_sale' || chr(31) || 'false'],
+                 '{}', '{}'
+             FROM unnest(ARRAY['00000000-0000-0000-0000-000000000001',
+                               '00000000-0000-0000-0000-000000000002',
+                               '00000000-0000-0000-0000-000000000003']::uuid[]) m",
+        )
+        .await
+        .unwrap();
+    migrate(&mut client, &[CORE]).await.unwrap();
+
+    let rows = client
+        .query(
+            "SELECT language, option_name_labels, option_value_labels, facet_labels
+             FROM search_documents ORDER BY market_id",
+            &[],
+        )
+        .await
+        .unwrap();
+    let languages: Vec<String> = rows.iter().map(|r| r.get(0)).collect();
+    assert_eq!(languages, ["en", "de", "de"]);
+    // Labelled as stored, until the rebuild writes them in their language.
+    let row = &rows[0];
+    assert_eq!(row.get::<_, Vec<String>>(1), ["Color"]);
+    assert_eq!(row.get::<_, Vec<String>>(2), ["Red"]);
+    assert_eq!(row.get::<_, Vec<String>>(3), ["Red", "false"]);
+    let queued: Vec<String> = client
+        .query("SELECT target FROM search_queue", &[])
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.get(0))
+        .collect();
+    assert_eq!(queued, ["all"]);
+}

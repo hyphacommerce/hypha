@@ -14,7 +14,7 @@ export type ChannelKind = "online_store" | "agentic" | "custom";
 export async function createChannel(name: string, kind: ChannelKind): Promise<Result> {
   const client = await sessionClient();
   const { error } = await client.POST("/admin/channels", { body: { name, kind } });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   // Product pages offer every channel: refresh them too.
   revalidatePath("/", "layout");
   return {};
@@ -26,7 +26,7 @@ export async function renameChannel(id: string, name: string): Promise<Result> {
     params: { path: { id } },
     body: { name },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath("/", "layout");
   return {};
 }
@@ -37,6 +37,6 @@ export async function createStorefrontKey(channel: string, name: string): Promis
   const { data, error } = await client.POST("/admin/api-keys", {
     body: { kind: "publishable", name, channel },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   return { token: data.token };
 }

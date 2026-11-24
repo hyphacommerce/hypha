@@ -4,9 +4,10 @@
 //! nobody: the answers go stale, and checkout asks again.
 
 use futures_util::future::join_all;
-use hypha_cart::{CartRepo, HasCarts, PricedCart};
+use hypha_cart::{CartRepo, ContentLanguages, HasCarts, PricedCart};
 use hypha_core::{
-    AppCheck, AppKey, CartId, Clock, Ctx, Message, MessagePath, RepoError, Scope, ValidationStep,
+    AppCheck, AppKey, CartId, Clock, Ctx, Language, Message, MessagePath, RepoError, Scope,
+    ValidationStep,
 };
 
 use crate::{CartChecks, CommandError};
@@ -32,8 +33,13 @@ pub trait CheckoutValidators {
     type Body;
 
     /// The apps asked about `cart` now (answering `checkout.validate` and enabled in the
-    /// store's settings), in a stable order, each with what it would be sent.
-    async fn validators(&self, cart: &PricedCart) -> Result<Vec<Validator<Self::Body>>, RepoError>;
+    /// store's settings), in a stable order, each with what it would be sent: `language`
+    /// is what they're told the shopper reads (`ContentLanguages::told`).
+    async fn validators(
+        &self,
+        cart: &PricedCart,
+        language: Option<&Language>,
+    ) -> Result<Vec<Validator<Self::Body>>, RepoError>;
 
     /// Asks one app at `step`: its messages, each with the app as its source, or why it
     /// couldn't answer (no answer, an error, an answer the point refuses).
@@ -47,8 +53,12 @@ pub trait CheckoutValidators {
 impl<T: CheckoutValidators + ?Sized> CheckoutValidators for &T {
     type Body = T::Body;
 
-    async fn validators(&self, cart: &PricedCart) -> Result<Vec<Validator<T::Body>>, RepoError> {
-        (**self).validators(cart).await
+    async fn validators(
+        &self,
+        cart: &PricedCart,
+        language: Option<&Language>,
+    ) -> Result<Vec<Validator<T::Body>>, RepoError> {
+        (**self).validators(cart, language).await
     }
 
     async fn ask(
@@ -67,7 +77,11 @@ pub struct NoValidators;
 impl CheckoutValidators for NoValidators {
     type Body = ();
 
-    async fn validators(&self, _cart: &PricedCart) -> Result<Vec<Validator<()>>, RepoError> {
+    async fn validators(
+        &self,
+        _cart: &PricedCart,
+        _language: Option<&Language>,
+    ) -> Result<Vec<Validator<()>>, RepoError> {
         Ok(Vec::new())
     }
 
@@ -85,12 +99,15 @@ impl CheckoutValidators for NoValidators {
 /// loses its answer. `None` when that changes nothing.
 pub(crate) async fn refreshed_checks<V: CheckoutValidators>(
     validators: &V,
+    languages: &ContentLanguages,
     clock: &impl Clock,
     cart: &PricedCart,
     step: ValidationStep,
 ) -> Result<Option<Vec<AppCheck>>, RepoError> {
     let kept = &cart.app_checks;
-    let current = validators.validators(cart).await?;
+    let current = validators
+        .validators(cart, languages.told(cart).as_ref())
+        .await?;
     let holds =
         |v: &Validator<V::Body>| kept.iter().any(|k| k.app == v.app && k.answers(&v.digest));
     let stale: Vec<&Validator<V::Body>> = current.iter().filter(|v| !holds(v)).collect();
@@ -153,10 +170,12 @@ pub(crate) fn app_messages<B>(current: &[Validator<B>], cart: &PricedCart) -> Ve
 /// set, an option chosen) and keeps their answers with it; `cart` is the cart as just
 /// priced, and gains them. An app that fails is kept as failed, to be asked again. A write
 /// that loses a race keeps nothing: the answers are asked for again at checkout.
+/// `languages` (the store's) decide what the apps are told the shopper reads.
 pub async fn validate_cart<S: HasCarts, K: CartChecks>(
     ctx: &Ctx,
     ports: &S,
     checks: &K,
+    languages: &ContentLanguages,
     clock: &impl Clock,
     cart: &mut PricedCart,
     step: ValidationStep,
@@ -165,7 +184,8 @@ pub async fn validate_cart<S: HasCarts, K: CartChecks>(
     if cart.order.is_some() {
         return Ok(());
     }
-    let Some(fresh) = refreshed_checks(checks.validators(), clock, cart, step).await? else {
+    let Some(fresh) = refreshed_checks(checks.validators(), languages, clock, cart, step).await?
+    else {
         return Ok(());
     };
     keep(ports, cart.id, fresh.clone()).await?;
@@ -251,6 +271,8 @@ mod tests {
             total: eur,
             payment_method: None,
             marketing_opt_in: false,
+            language: None,
+            market_languages: Vec::new(),
         }
     }
 
@@ -283,7 +305,11 @@ mod tests {
     impl CheckoutValidators for Apps {
         type Body = ();
 
-        async fn validators(&self, _cart: &PricedCart) -> Result<Vec<Validator<()>>, RepoError> {
+        async fn validators(
+            &self,
+            _cart: &PricedCart,
+            _language: Option<&Language>,
+        ) -> Result<Vec<Validator<()>>, RepoError> {
             Ok(self.current.clone())
         }
 
@@ -302,8 +328,10 @@ mod tests {
     }
 
     fn refresh(apps: &Apps, cart: &PricedCart) -> Option<Vec<AppCheck>> {
+        let languages = ContentLanguages::only(Language::new("en").unwrap());
         pollster::block_on(refreshed_checks(
             apps,
+            &languages,
             &Fixed,
             cart,
             ValidationStep::Address,

@@ -15,6 +15,7 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { useState, useTransition } from "react";
 
 import { QrCode } from "@/components/qr-code";
+import { useT } from "@/lib/use-t";
 
 import { AccountCard } from "./account-cards";
 import {
@@ -37,40 +38,45 @@ function grouped(secret: string): string {
   return secret.replace(/(.{4})(?=.)/g, "$1 ");
 }
 
+/** What a code from an authenticator looks like: the same in every language. */
+const CODE_EXAMPLE = "123456";
+
 export function TwoFactorCard({ isEnabled }: { isEnabled: boolean }) {
+  const t = useT<"account">();
   const [step, setStep] = useState<Step>();
   const close = () => setStep(undefined);
 
   return (
     <AccountCard
       id="two-factor"
-      title="Two-factor authentication"
+      title={t("account.two_factor_title")}
       description={
-        isEnabled
-          ? "Signing in asks for a code from your authenticator app, or one of your recovery codes."
-          : "Protect your account with a code from an authenticator app (1Password, Google Authenticator, Authy, …) as well as your password."
+        isEnabled ? t("account.two_factor_description_on") : t("account.two_factor_description_off")
       }
       action={
-        <Badge label={isEnabled ? "On" : "Off"} variant={isEnabled ? "success" : "warning"} />
+        <Badge
+          label={isEnabled ? t("common.on") : t("common.off")}
+          variant={isEnabled ? "success" : "warning"}
+        />
       }
     >
       <HStack gap={2} wrap="wrap">
         {isEnabled ? (
           <>
             <Button
-              label="New recovery codes"
+              label={t("account.two_factor_new_codes")}
               variant="secondary"
               onClick={() => setStep({ kind: "regenerate" })}
             />
             <Button
-              label="Turn off"
+              label={t("common.turn_off")}
               variant="destructive"
               onClick={() => setStep({ kind: "disable" })}
             />
           </>
         ) : (
           <Button
-            label="Set up two-factor"
+            label={t("account.two_factor_set_up")}
             variant="primary"
             onClick={() => setStep({ kind: "password" })}
           />
@@ -92,13 +98,18 @@ function TwoFactorDialog({
   onStep: (step: Step) => void;
   onClose: () => void;
 }) {
-  const title = {
-    password: "Set up two-factor authentication",
-    scan: "Scan the code",
-    codes: "Save your recovery codes",
-    regenerate: "New recovery codes",
-    disable: "Turn off two-factor authentication",
-  }[step.kind];
+  const t = useT<"account">();
+  const title = t(
+    (
+      {
+        password: "account.two_factor_setup_title",
+        scan: "account.two_factor_scan_title",
+        codes: "account.two_factor_codes_title",
+        regenerate: "account.two_factor_new_codes",
+        disable: "account.two_factor_disable_title",
+      } as const
+    )[step.kind],
+  );
   const onOpenChange = (isOpen: boolean) => !isOpen && onClose();
 
   return (
@@ -108,11 +119,11 @@ function TwoFactorDialog({
         {step.kind === "password" && (
           <AskOnce
             key="password"
-            label="Your password"
-            description="To check it's you before an authenticator is added."
+            label={t("account.two_factor_password")}
+            description={t("account.two_factor_password_description")}
             type="password"
             autoComplete="current-password"
-            submitLabel="Continue"
+            submitLabel={t("common.continue")}
             onSubmit={async (password) => {
               const result = await startTotp(password);
               if (result.secret && result.uri) {
@@ -125,24 +136,22 @@ function TwoFactorDialog({
         )}
         {step.kind === "scan" && (
           <VStack gap={4}>
-            <Text>
-              Scan this with your authenticator app, then enter the 6-digit code it shows.
-            </Text>
+            <Text>{t("account.two_factor_scan_instructions")}</Text>
             <HStack hAlign="center">
-              <QrCode value={step.uri} label="QR code for your authenticator app" />
+              <QrCode value={step.uri} label={t("account.two_factor_qr_label")} />
             </HStack>
             <VStack gap={1}>
               <Text type="supporting" color="secondary">
-                Can't scan it? Enter this key in the app instead (time-based, 6 digits):
+                {t("account.two_factor_scan_manual")}
               </Text>
               <Text type="code">{grouped(step.secret)}</Text>
             </VStack>
             <AskOnce
               key="scan"
-              label="Code from the app"
+              label={t("account.two_factor_app_code")}
               autoComplete="one-time-code"
-              placeholder="123456"
-              submitLabel="Turn on"
+              placeholder={CODE_EXAMPLE}
+              submitLabel={t("common.turn_on")}
               onSubmit={async (code) => {
                 const result = await confirmTotp(code);
                 if (result.codes) onStep({ kind: "codes", codes: result.codes, isNew: true });
@@ -155,10 +164,10 @@ function TwoFactorDialog({
         {step.kind === "regenerate" && (
           <AskOnce
             key="regenerate"
-            label="Code from your authenticator, or a recovery code"
-            description="Your current recovery codes stop working once the new ones are made."
+            label={t("account.two_factor_code_or_recovery")}
+            description={t("account.two_factor_regenerate_description")}
             autoComplete="one-time-code"
-            submitLabel="Make new codes"
+            submitLabel={t("account.two_factor_regenerate_submit")}
             onSubmit={async (code) => {
               const result = await regenerateRecoveryCodes(code);
               if (result.codes) onStep({ kind: "codes", codes: result.codes, isNew: false });
@@ -170,10 +179,10 @@ function TwoFactorDialog({
         {step.kind === "disable" && (
           <AskOnce
             key="disable"
-            label="Code from your authenticator, or a recovery code"
-            description="Signing in will then ask only for your password, and your recovery codes stop working."
+            label={t("account.two_factor_code_or_recovery")}
+            description={t("account.two_factor_disable_description")}
             autoComplete="one-time-code"
-            submitLabel="Turn off"
+            submitLabel={t("common.turn_off")}
             isDestructive
             onSubmit={async (code) => {
               const result = await disableTotp(code);
@@ -213,6 +222,7 @@ function AskOnce({
   onSubmit: (value: string) => Promise<Result>;
   onCancel: () => void;
 }) {
+  const t = useT<"account">();
   const [value, setValue] = useState("");
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -239,7 +249,7 @@ function AskOnce({
         hasAutoFocus
       />
       <HStack gap={2} hAlign="end">
-        <Button label="Cancel" variant="ghost" onClick={onCancel} />
+        <Button label={t("common.cancel")} variant="ghost" onClick={onCancel} />
         <Button
           label={submitLabel}
           variant={isDestructive ? "destructive" : "primary"}
@@ -262,8 +272,9 @@ function RecoveryCodesView({
   isNew: boolean;
   onDone: () => void;
 }) {
+  const t = useT<"account">();
   const [isCopied, setIsCopied] = useState(false);
-  const text = `Hypha admin recovery codes\nEach works once, if you lose your authenticator.\n\n${codes.join("\n")}\n`;
+  const text = `${t("account.two_factor_codes_file_title")}\n${t("account.two_factor_codes_file_note")}\n\n${codes.join("\n")}\n`;
 
   const copy = async () => {
     try {
@@ -286,10 +297,8 @@ function RecoveryCodesView({
     <VStack gap={4}>
       <Banner
         status={isNew ? "success" : "info"}
-        title={
-          isNew ? "Two-factor authentication is on." : "Your old recovery codes no longer work."
-        }
-        description="Keep these somewhere safe, like a password manager. Each works once to sign in without your authenticator. They won't be shown again."
+        title={isNew ? t("account.two_factor_is_on") : t("account.two_factor_codes_replaced")}
+        description={t("account.two_factor_codes_keep")}
       />
       <Grid columns={{ minWidth: 180, repeat: "fill" }} gap={2}>
         {codes.map((code) => (
@@ -300,10 +309,14 @@ function RecoveryCodesView({
       </Grid>
       <HStack gap={2} hAlign="between" wrap="wrap">
         <HStack gap={2}>
-          <Button label={isCopied ? "Copied" : "Copy"} variant="secondary" onClick={copy} />
-          <Button label="Download" variant="secondary" onClick={download} />
+          <Button
+            label={isCopied ? t("common.copied") : t("common.copy")}
+            variant="secondary"
+            onClick={copy}
+          />
+          <Button label={t("common.download")} variant="secondary" onClick={download} />
         </HStack>
-        <Button label="I've saved them" variant="primary" onClick={onDone} />
+        <Button label={t("account.two_factor_codes_saved")} variant="primary" onClick={onDone} />
       </HStack>
     </VStack>
   );

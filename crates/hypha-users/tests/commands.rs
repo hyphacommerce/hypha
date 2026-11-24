@@ -11,15 +11,16 @@
 use hypha_auth::SessionRepo;
 use hypha_auth::{LoginStep, PasswordError, SessionClient};
 use hypha_core::{
-    Actor, AuthError, Ctx, Email, InviteId, NotifyError, RoleId, Scope, UserId, Versioned,
+    Actor, AuthError, Ctx, Email, InviteId, Language, LanguageError, NotifyError, RoleId, Scope,
+    UserId, Versioned,
 };
 use hypha_testkit::{InMemoryPorts, TestEnv};
 use hypha_users::{
     AcceptInvite, CommandError, Invite, InviteUser, NewOwner, Role, RoleRepo, StaffEmail,
-    StaffSettings, UpdateRole, UpdateUser, User, UserRepo, UserStatus, accept_invite,
+    StaffSettings, UpdateMe, UpdateRole, UpdateUser, User, UserRepo, UserStatus, accept_invite,
     authenticate_staff, bootstrap_owner, create_role, get_user, invite_user, list_invites,
-    list_roles, list_users, login, lookup_invite, rename_me, request_password_reset,
-    require_unlocked, revoke_invite, update_role, update_user,
+    list_roles, list_users, login, lookup_invite, request_password_reset, require_unlocked,
+    revoke_invite, update_me, update_role, update_user,
 };
 use pollster::block_on;
 use uuid::Uuid;
@@ -1248,21 +1249,92 @@ fn an_accepted_or_unknown_invite_is_not_found() {
 
 // ---------- my profile and sessions ----------
 
+fn rename(name: &str) -> UpdateMe {
+    UpdateMe {
+        name: Some(name.to_string()),
+        ..UpdateMe::default()
+    }
+}
+
+fn speak(language: Option<&str>) -> UpdateMe {
+    UpdateMe {
+        language: Some(language.map(str::to_string)),
+        ..UpdateMe::default()
+    }
+}
+
 #[test]
 fn anyone_may_rename_themselves() {
     let (ports, env, owner) = world();
     let role = support_role(&ports, &env, &owner);
     let (bob, _) = join(&ports, &env, &owner, role.id());
-    let renamed = block_on(rename_me(&ports.users, bob.id(), "  Robert ")).unwrap();
+    let renamed = block_on(update_me(&ports.users, bob.id(), rename("  Robert "))).unwrap();
     assert_eq!(renamed.name(), "Robert");
     assert_eq!(
         block_on(ports.users.get(bob.id())).map(|u| u.map(|u| u.name().to_string())),
         Ok(Some("Robert".to_string()))
     );
     assert!(matches!(
-        block_on(rename_me(&ports.users, bob.id(), " ")),
+        block_on(update_me(&ports.users, bob.id(), rename(" "))),
         Err(CommandError::User(_))
     ));
+}
+
+#[test]
+fn anyone_may_pick_their_language_in_canonical_case() {
+    let (ports, env, owner) = world();
+    let role = support_role(&ports, &env, &owner);
+    let (bob, _) = join(&ports, &env, &owner, role.id());
+    let me = block_on(update_me(&ports.users, bob.id(), speak(Some("SR-latn-rs")))).unwrap();
+    let tag = me.language().map(Language::as_str);
+    assert_eq!(tag, Some("sr-Latn-RS"));
+    let stored = block_on(ports.users.get(bob.id())).unwrap().unwrap();
+    assert_eq!(stored.language(), me.language());
+    assert_eq!(stored.name(), bob.name());
+}
+
+#[test]
+fn a_language_is_any_tag_not_only_the_stores() {
+    let (ports, _env, owner) = world();
+    // The store publishes no languages; the admin's UI language isn't held to them.
+    let me = block_on(update_me(&ports.users, owner.id(), speak(Some("ja")))).unwrap();
+    assert_eq!(me.language().map(Language::as_str), Some("ja"));
+}
+
+#[test]
+fn null_clears_the_language_and_absent_keeps_it() {
+    let (ports, _env, owner) = world();
+    block_on(update_me(&ports.users, owner.id(), speak(Some("de")))).unwrap();
+    let renamed = block_on(update_me(&ports.users, owner.id(), rename("Ana"))).unwrap();
+    assert_eq!(renamed.language().map(Language::as_str), Some("de"));
+    let cleared = block_on(update_me(&ports.users, owner.id(), speak(None))).unwrap();
+    assert_eq!(cleared.language(), None);
+    let stored = block_on(ports.users.get(owner.id())).unwrap().unwrap();
+    assert_eq!(stored.language(), None);
+}
+
+#[test]
+fn a_malformed_language_is_refused_and_nothing_changes() {
+    let (ports, _env, owner) = world();
+    let before = block_on(ports.users.get(owner.id())).unwrap().unwrap();
+    let mut input = speak(Some("english"));
+    input.name = Some("Someone else".to_string());
+    assert_eq!(
+        block_on(update_me(&ports.users, owner.id(), input)),
+        Err(CommandError::Language(LanguageError::Invalid(
+            "english".to_string()
+        )))
+    );
+    assert_eq!(block_on(ports.users.get(owner.id())), Ok(Some(before)));
+}
+
+#[test]
+fn an_empty_update_writes_nothing() {
+    let (ports, _env, owner) = world();
+    let before = block_on(ports.users.get(owner.id())).unwrap().unwrap();
+    let after = block_on(update_me(&ports.users, owner.id(), UpdateMe::default())).unwrap();
+    assert_eq!(after, before);
+    assert_eq!(block_on(ports.users.get(owner.id())), Ok(Some(before)));
 }
 
 #[test]

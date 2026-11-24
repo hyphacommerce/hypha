@@ -6,9 +6,12 @@ import { VStack } from "@astryxdesign/core/Layout";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { useT } from "@/lib/use-t";
+
 import { ACCEPT_ANY, MAX_BYTES, uploadFile } from "./upload";
 
 export function Uploader() {
+  const t = useT<"media">();
   const router = useRouter();
   const [files, setFiles] = useState<File[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
@@ -23,8 +26,10 @@ export function Uploader() {
     try {
       // One at a time: a merchant dropping fifty photos shouldn't open fifty connections.
       for (const file of list) {
-        const uploaded = await uploadFile(file);
-        if ("error" in uploaded) failed.push(`${file.name}: ${uploaded.error}`);
+        const uploaded = await uploadFile(file, t);
+        if ("error" in uploaded) {
+          failed.push(t("media.upload_file_error", { file: file.name, error: uploaded.error }));
+        }
       }
     } finally {
       setErrors(failed);
@@ -40,7 +45,7 @@ export function Uploader() {
         <Banner key={error} status="error" title={error} />
       ))}
       <FileInput
-        label="Upload files"
+        label={t("media.upload_label")}
         isLabelHidden
         mode="dropzone"
         isMultiple
@@ -50,7 +55,7 @@ export function Uploader() {
         onChange={(selected) => setFiles(Array.isArray(selected) ? selected : [])}
         changeAction={uploadAll}
         isLoading={isUploading}
-        placeholder="Drop images, videos or PDFs here, or choose files"
+        placeholder={t("media.upload_placeholder")}
       />
     </VStack>
   );

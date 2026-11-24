@@ -26,3 +26,10 @@ export function useCurrencies(): Currencies {
   if (!currencies) throw new Error("useCurrencies outside the admin layout's CurrenciesProvider");
   return currencies;
 }
+
+const NO_CURRENCIES: Currencies = {};
+
+/** The currency table, or an empty one outside the admin layout (`useFormat` reads it). */
+export function useCurrenciesIfAny(): Currencies {
+  return useContext(CurrenciesContext) ?? NO_CURRENCIES;
+}

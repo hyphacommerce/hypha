@@ -3,6 +3,8 @@
 
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
+import type { TFor } from "./messages";
+
 export type Supplier = AdminSchemas["SupplierResponse"];
 export type PaymentTerms = AdminSchemas["PaymentTermsDto"];
 export type CatalogueRow = AdminSchemas["SupplierVariantResponse"];
@@ -26,22 +28,32 @@ export function isOpen(po: PurchaseOrder): boolean {
   return po.status === "draft" || po.status === "ordered";
 }
 
-export const COST_KINDS: { value: AdminSchemas["CostKindDto"]; label: string }[] = [
-  { value: "shipping", label: "Shipping" },
-  { value: "duties", label: "Duties" },
-  { value: "fees", label: "Fees" },
-  { value: "other", label: "Other" },
-];
+/** The kinds of extra cost, in the order offered. */
+export const COST_KINDS = [
+  "shipping",
+  "duties",
+  "fees",
+  "other",
+] as const satisfies readonly AdminSchemas["CostKindDto"][];
 
-export const ALLOCATIONS: {
-  value: AdminSchemas["CostAllocationDto"];
-  label: string;
-  description: string;
-}[] = [
-  { value: "by_value", label: "By value", description: "Each line's share of the order's value." },
-  { value: "by_quantity", label: "By quantity", description: "Each line's share of the units." },
-  { value: "none", label: "Not in unit costs", description: "An expense on the total only." },
-];
+/** "Shipping", "Duties"…: an extra cost's kind (an unknown one as it is). */
+export function costKindLabel(t: TFor<"purchasing">, kind: string): string {
+  const known = COST_KINDS.find((k) => k === kind);
+  return known ? t(`purchasing.cost_kind_${known}`) : kind;
+}
+
+/** How an extra cost is spread over the lines, in the order offered. */
+export const ALLOCATIONS = [
+  "by_value",
+  "by_quantity",
+  "none",
+] as const satisfies readonly AdminSchemas["CostAllocationDto"][];
+
+/** "By value", "By quantity"…: how an extra cost is spread (an unknown way as it is). */
+export function allocationLabel(t: TFor<"purchasing">, allocation: string): string {
+  const known = ALLOCATIONS.find((a) => a === allocation);
+  return known ? t(`purchasing.allocation_${known}`) : allocation;
+}
 
 /**
  * `amount` minor units of one currency in another at `rate` (one unit of the first in the
@@ -64,22 +76,22 @@ export function convertMinor(
 }
 
 /** "Net 30", "In advance", "On receipt"; "—" for none. */
-export function termsLabel(terms: PaymentTerms | null | undefined): string {
+export function termsLabel(t: TFor<"purchasing">, terms: PaymentTerms | null | undefined): string {
   if (!terms) return "—";
   switch (terms.type) {
     case "net":
-      return `Net ${terms.days}`;
+      return t("purchasing.terms_net", { days: terms.days });
     case "in_advance":
-      return "In advance";
+      return t("purchasing.terms_in_advance");
     case "on_receipt":
-      return "On receipt";
+      return t("purchasing.terms_on_receipt");
   }
 }
 
 /** "14 days", "1 day"; "—" for none. */
-export function daysLabel(days: number | null | undefined): string {
+export function daysLabel(t: TFor<"purchasing">, days: number | null | undefined): string {
   if (days === null || days === undefined) return "—";
-  return days === 1 ? "1 day" : `${days} days`;
+  return t("purchasing.days_count", { count: days });
 }
 
 /** The contact purchase orders go to. */

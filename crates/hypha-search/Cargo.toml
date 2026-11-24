@@ -14,6 +14,7 @@ hypha-markets = { path = "../hypha-markets" }
 hypha-pricing = { path = "../hypha-pricing" }
 hypha-products = { path = "../hypha-products" }
 hypha-search-index = { path = "../hypha-search-index" }
+hypha-translations = { path = "../hypha-translations" }
 serde_json.workspace = true
 thiserror.workspace = true
 uuid.workspace = true

@@ -13,7 +13,7 @@ const filler = "‌ ​".repeat(60);
 
 export function Layout() {
   return (
-    <Html lang="en">
+    <Html lang={v("language")} dir={v("dir")}>
       <Head>
         <meta name="color-scheme" content="light" />
         <meta name="supported-color-schemes" content="light" />

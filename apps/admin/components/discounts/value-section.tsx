@@ -12,6 +12,7 @@ import { Text } from "@astryxdesign/core/Text";
 
 import { type StandardDraft, amountMarkets, emptyItems, emptyValue } from "@/lib/discounts/draft";
 import type { MarketOption } from "@/lib/discounts/validate";
+import { useT } from "@/lib/use-t";
 
 import { AmountsByMarket, type SectionProps, ValueFields } from "./fields";
 import { BuyXGetYValue, TieredValue } from "./kind-value";
@@ -23,6 +24,7 @@ export function ValueSection({
   isReadOnly,
   markets,
 }: SectionProps & { markets: readonly MarketOption[] }) {
+  const t = useT<"discounts">();
   const kind = draft.kind;
   const priced = amountMarkets(draft.conditions, markets);
 
@@ -59,19 +61,17 @@ export function ValueSection({
       <VStack gap={4}>
         <VStack gap={1}>
           <Text type="display-3" as="h2">
-            Value
+            {t("discounts.value_title")}
           </Text>
           <Text type="supporting" color="secondary">
-            What it takes off. Product discounts come off lines first, order discounts off the
-            subtotal after them, then shipping. Discounts of one kind that combine add up: 10% and
-            20% take 30% off.
+            {t("discounts.value_hint")}
           </Text>
         </VStack>
         {errors.kind && <Banner status="error" title={errors.kind} />}
 
         <Switch
-          label="Off products"
-          description="A percentage or an amount off the items it applies to, or a fixed price for them."
+          label={t("discounts.value_off_products")}
+          description={t("discounts.value_off_products_hint")}
           value={kind.product !== null}
           onChange={(on) =>
             set(
@@ -103,8 +103,8 @@ export function ValueSection({
 
         <Divider />
         <Switch
-          label="Off the order"
-          description="Off the subtotal of the items, after product discounts."
+          label={t("discounts.value_off_order")}
+          description={t("discounts.value_off_order_hint")}
           value={kind.order !== null}
           onChange={(on) =>
             set({ order: on ? { value: { ...emptyValue(), percent: "10" } } : null }, ["kind"])
@@ -125,8 +125,8 @@ export function ValueSection({
 
         <Divider />
         <Switch
-          label="Off shipping"
-          description="Off the chosen shipping options. An order gets one shipping discount at most."
+          label={t("discounts.value_off_shipping")}
+          description={t("discounts.value_off_shipping_hint")}
           value={kind.shipping !== null}
           onChange={(on) =>
             set(
@@ -154,9 +154,9 @@ export function ValueSection({
               hasFree
             />
             <AmountsByMarket
-              label="Up to"
-              placeholder="No cap"
-              description="The most it takes off shipping in each market; blank for no cap."
+              label={t("discounts.value_cap")}
+              placeholder={t("discounts.value_cap_placeholder")}
+              description={t("discounts.value_cap_hint")}
               amounts={kind.shipping.maxAmount}
               markets={priced}
               path="kind.shipping.maxAmount"

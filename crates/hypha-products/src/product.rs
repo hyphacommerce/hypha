@@ -322,25 +322,45 @@ impl Product {
     /// product's variant, which has no options, and for a variant this product doesn't
     /// have.
     pub fn variant_title(&self, variant: VariantId) -> Option<String> {
-        let variant = self.variants.iter().find(|v| v.id() == variant)?;
-        if variant.selections().is_empty() {
-            return None;
-        }
+        self.variant_title_with(variant, OptionValue::label)
+    }
+
+    /// `variant_title` with each value's label as `label` gives it: for whoever shows
+    /// the labels in another language than they're stored in.
+    pub fn variant_title_with<'a>(
+        &'a self,
+        variant: VariantId,
+        label: impl Fn(&'a OptionValue) -> &'a str,
+    ) -> Option<String> {
+        join_variant_title(self.variant_values(variant).into_iter().map(label))
+    }
+
+    /// The option values `variant` selects, in option order: what its title joins.
+    /// Empty for a simple product's variant and for one this product doesn't have.
+    pub fn variant_values(&self, variant: VariantId) -> Vec<&OptionValue> {
+        let Some(variant) = self.variants.iter().find(|v| v.id() == variant) else {
+            return Vec::new();
+        };
         // Selections are in option order (`add_variant` checks it), so they pair up.
-        let labels: Vec<&str> = self
-            .options
+        self.options
             .iter()
             .zip(variant.selections())
             .filter_map(|(option, selected)| {
-                option
-                    .values()
-                    .iter()
-                    .find(|value| value.id() == *selected)
-                    .map(|value| value.label())
+                option.values().iter().find(|value| value.id() == *selected)
             })
-            .collect();
-        Some(labels.join(" / "))
+            .collect()
     }
+}
+
+/// A variant's title from its option values' labels, in option order: joined with
+/// " / ", `None` without any. The one place that says how a title reads, for whoever
+/// keeps the labels apart from the product.
+pub fn join_variant_title<'a>(labels: impl IntoIterator<Item = &'a str>) -> Option<String> {
+    let labels: Vec<&str> = labels.into_iter().collect();
+    if labels.is_empty() {
+        return None;
+    }
+    Some(labels.join(" / "))
 }
 
 /// Option rules shared by `new_configurable`, `set_options` and `restore`: names and
@@ -834,6 +854,34 @@ mod tests {
         p.add_variant(new_var(2, vec![val(12), val(22)])).unwrap();
         assert_eq!(p.variant_title(var(1)), Some("S / Red".to_string()));
         assert_eq!(p.variant_title(var(2)), Some("M / Blue".to_string()));
+    }
+
+    #[test]
+    fn variant_title_with_joins_the_labels_it_is_given() {
+        let p = shirt();
+        let title = p.variant_title_with(var(1), |value| match value.label() {
+            "S" => "Klein",
+            label => label,
+        });
+        assert_eq!(title, Some("Klein / Red".to_string()));
+    }
+
+    #[test]
+    fn variant_values_are_the_selected_ones_in_option_order() {
+        let p = shirt();
+        let labels: Vec<&str> = p.variant_values(var(1)).iter().map(|v| v.label()).collect();
+        assert_eq!(labels, vec!["S", "Red"]);
+        assert!(simple().variant_values(var(1)).is_empty());
+        assert!(p.variant_values(var(99)).is_empty());
+    }
+
+    #[test]
+    fn a_title_joins_labels_and_is_none_without_any() {
+        assert_eq!(
+            join_variant_title(["M", "Blue"]),
+            Some("M / Blue".to_string())
+        );
+        assert_eq!(join_variant_title([]), None);
     }
 
     #[test]

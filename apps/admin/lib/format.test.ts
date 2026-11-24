@@ -1,9 +1,116 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { formatUnitCost, parseUnitCost, unitCostInput, unitCostTotal } from "./format.ts";
+import {
+  capitalized,
+  createFormat,
+  parseUnitCost,
+  unitCostInput,
+  unitCostTotal,
+} from "./format.ts";
+import { formatLocale } from "./pick-language.ts";
 
-const currencies = { EUR: 2, JPY: 0, KWD: 3 };
+const currencies = { EUR: 2, JPY: 0, KWD: 3, USD: 2 };
+
+test("English keeps the formats the admin always had", () => {
+  const format = createFormat(formatLocale("en"), { currencies, timeZone: "Europe/Zagreb" });
+  assert.equal(format.money({ amount: 1800, currency: "EUR" }), "€18.00");
+  assert.equal(format.money({ amount: 1800, currency: "USD" }), "US$18.00");
+  assert.equal(format.money({ amount: 1800, currency: "JPY" }), "JP¥1,800");
+  assert.equal(format.unitCost({ amount: "412.5", currency: "EUR" }), "€4.125");
+  assert.equal(format.number(1234.5), "1,234.5");
+  assert.equal(format.dateTime("2026-10-15T07:30:00Z"), "15 Oct 2026, 09:30 CEST");
+  assert.equal(format.dateTime("2020-10-15T07:30:00Z", "short"), "15 Oct 2020");
+  assert.equal(format.date("2026-11-11T12:00:00Z"), "11 Nov 2026");
+  assert.equal(format.date("2026-11-11T12:00:00Z", "short"), "11 Nov");
+  assert.equal(format.weekday(new Date("2026-10-22T22:30:00Z")), "Friday 23 October");
+  assert.equal(format.bytes(980), "980 B");
+  assert.equal(format.bytes(1024 * 1024 * 1.4), "1.4 MB");
+});
+
+test("without a store there's no zone: times are UTC", () => {
+  const format = createFormat(formatLocale("en"));
+  assert.equal(format.dateTime("2026-10-15T07:30:00Z"), "15 Oct 2026, 07:30 UTC");
+  assert.equal(format.bytes(1536), "1.5 KB");
+});
+
+test("the pseudo-language formats as English", () => {
+  const format = createFormat(formatLocale("en-XA"), { currencies });
+  assert.equal(format.money({ amount: 1800, currency: "EUR" }), "€18.00");
+  assert.equal(format.date("2026-11-11T12:00:00Z"), "11 Nov 2026");
+});
+
+test("another language formats its own way", () => {
+  const format = createFormat("de", { currencies, timeZone: "Europe/Berlin" });
+  assert.equal(format.number(1234.5), "1.234,5");
+  assert.equal(format.money({ amount: 123450, currency: "EUR" }), "1.234,50 €");
+  assert.equal(format.percent(0.125), "12,5 %");
+  assert.equal(format.bytes(1536), "1,5 KB");
+  assert.equal(format.date("2026-03-11T12:00:00Z"), "11. März 2026");
+  assert.equal(format.list(["A", "B", "C"]), "A, B und C");
+  assert.equal(format.list(["A", "B", "C"], "disjunction"), "A, B oder C");
+  assert.equal(format.countryName("HR"), "Kroatien");
+  assert.equal(format.currencyName("EUR"), "Euro");
+  assert.equal(format.languageName("sr-Latn"), "Serbisch (Lateinisch)");
+  assert.deepEqual(
+    ["z", "ä", "a"].toSorted((a, b) => format.compare(a, b)),
+    ["a", "ä", "z"],
+  );
+});
+
+test("a language name shown alone starts with a capital, as the storefront writes it", () => {
+  const format = createFormat("sr-Latn");
+  assert.equal(format.languageName("sr-Latn"), "Srpski (latinica)");
+  assert.equal(format.languageName("de"), "Nemački");
+  assert.equal(createFormat("fr").languageName("de"), "Allemand");
+});
+
+test("a language name in a sentence stays as Intl writes it there", () => {
+  assert.equal(createFormat("sr-Latn").languageNameInSentence("sr-Latn"), "srpski (latinica)");
+  assert.equal(createFormat("fr").languageNameInSentence("de"), "allemand");
+  assert.equal(createFormat(formatLocale("en")).languageNameInSentence("de"), "German");
+});
+
+test("a language without a name is its tag, uncapitalised", () => {
+  const format = createFormat("sr-Latn");
+  assert.equal(format.languageName("x-unknown"), "x-unknown");
+  assert.equal(format.languageNameInSentence("x-unknown"), "x-unknown");
+});
+
+test("capitals follow the locale's rules", () => {
+  assert.equal(capitalized("istanbul", "tr"), "İstanbul");
+  assert.equal(capitalized("istanbul", "en"), "Istanbul");
+});
+
+test("only the first character is capitalised", () => {
+  assert.equal(capitalized("éire", "fr"), "Éire");
+  assert.equal(capitalized("éire", "fr"), "Éire");
+  assert.equal(capitalized("𝓍y", "en"), "𝓍y");
+  assert.equal(capitalized("", "en"), "");
+});
+
+test("names Intl doesn't have fall back to the code", () => {
+  const format = createFormat(formatLocale("en"));
+  assert.equal(format.countryName("not a code"), "not a code");
+  assert.equal(format.currencyName("not a code"), undefined);
+});
+
+test("plural categories follow the language", () => {
+  assert.equal(createFormat(formatLocale("en")).plural(1), "one");
+  assert.equal(createFormat("sr-Latn").plural(3), "few");
+});
+
+test("money in a currency the store's table lacks throws rather than guess", () => {
+  assert.throws(
+    () => createFormat(formatLocale("en")).money({ amount: 1, currency: "EUR" }),
+    /unknown currency/,
+  );
+});
+
+test("a time that isn't one is a dash", () => {
+  assert.equal(createFormat(formatLocale("en")).dateTime("nonsense"), "—");
+  assert.equal(createFormat(formatLocale("en")).date("nonsense"), "—");
+});
 
 test("a unit cost reads in the major unit with its extra decimals", () => {
   assert.equal(unitCostInput({ amount: "412.5", currency: "EUR" }, currencies), "4.125");
@@ -11,8 +118,9 @@ test("a unit cost reads in the major unit with its extra decimals", () => {
   assert.equal(unitCostInput({ amount: "1000", currency: "EUR" }, currencies), "10");
   assert.equal(unitCostInput({ amount: "1000", currency: "JPY" }, currencies), "1000");
   assert.equal(unitCostInput({ amount: "1.5", currency: "KWD" }, currencies), "0.0015");
-  assert.equal(formatUnitCost({ amount: "412.5", currency: "EUR" }, currencies), "€4.125");
-  assert.equal(formatUnitCost({ amount: "400", currency: "EUR" }, currencies), "€4.00");
+  const format = createFormat(formatLocale("en"), { currencies });
+  assert.equal(format.unitCost({ amount: "412.5", currency: "EUR" }), "€4.125");
+  assert.equal(format.unitCost({ amount: "400", currency: "EUR" }), "€4.00");
 });
 
 test("typed costs become minor units as text", () => {

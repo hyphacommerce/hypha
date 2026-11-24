@@ -8,6 +8,7 @@ import {
   generationProblem,
   normaliseCode,
 } from "./codes.ts";
+import { t } from "./testing.ts";
 
 test("typed codes are split on lines, commas and spaces, each kept once as compared", () => {
   assert.deepEqual(codesFrom("WELCOME10\nspring, Welcome10;\n\n  AUTUMN  "), [
@@ -38,14 +39,14 @@ test("generated codes use only the alphabet, the prefix counted in the length", 
 });
 
 test("a generated code keeps at least 8 random characters after its prefix", () => {
-  assert.equal(generationProblem(8, ""), null);
-  assert.equal(generationProblem(12, "VIP-"), null);
+  assert.equal(generationProblem(8, "", t), null);
+  assert.equal(generationProblem(12, "VIP-", t), null);
   assert.equal(
-    generationProblem(11, "VIP-"),
+    generationProblem(11, "VIP-", t),
     "Codes need 8 random characters after the 4-character prefix: a length of 12 or more.",
   );
   assert.equal(
-    generationProblem(24, "ABCDEFGHIJKLMNOPQ"),
+    generationProblem(24, "ABCDEFGHIJKLMNOPQ", t),
     "The prefix is 17 characters: at most 16, so codes keep 8 random characters.",
   );
   assert.throws(() => generateCode(11, "VIP-"), RangeError);
@@ -53,9 +54,9 @@ test("a generated code keeps at least 8 random characters after its prefix", () 
 
 test("generated lengths are 8 to 24", () => {
   const message = "Length: 8 to 24 characters, the prefix included.";
-  assert.equal(generationProblem(7, ""), message);
-  assert.equal(generationProblem(25, ""), message);
-  assert.equal(generationProblem(24, ""), null);
+  assert.equal(generationProblem(7, "", t), message);
+  assert.equal(generationProblem(25, "", t), message);
+  assert.equal(generationProblem(24, "", t), null);
 });
 
 test("the alphabet has no look-alikes", () => {

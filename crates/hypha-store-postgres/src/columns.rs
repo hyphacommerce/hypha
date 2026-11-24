@@ -2,8 +2,8 @@
 
 use hypha_auth::TokenHash;
 use hypha_core::{
-    Actor, AddressParts, AgentId, ApiKeyId, Currency, RepoError, Scope, Stamps, TaxRate, Timestamp,
-    UnitCost, UserId, Version,
+    Actor, AddressParts, AgentId, ApiKeyId, Currency, Language, RepoError, Scope, Stamps, TaxRate,
+    Timestamp, UnitCost, UserId, Version,
 };
 use tokio_postgres::{
     Row,
@@ -35,6 +35,35 @@ pub(crate) fn version_from_db(version: i64) -> Result<Version, RepoError> {
 
 pub(crate) fn currency_from_db(code: &str) -> Result<Currency, RepoError> {
     code.parse().map_err(corrupt)
+}
+
+/// A nullable language column (a BCP 47 tag) as read.
+pub(crate) fn language_from_db(tag: Option<String>) -> Result<Option<Language>, RepoError> {
+    tag.as_deref()
+        .map(Language::new)
+        .transpose()
+        .map_err(corrupt)
+}
+
+/// A JSON column's value written as text (`$n::text::jsonb`); `None` for SQL NULL.
+pub(crate) fn json_to_db<T: serde::Serialize>(
+    value: Option<&T>,
+    what: &str,
+) -> Result<Option<String>, RepoError> {
+    value
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|e| corrupt(format!("{what}: {e}")))
+}
+
+/// A nullable JSON column read as text (`col::text AS col`).
+pub(crate) fn json_from_db<T: serde::de::DeserializeOwned>(
+    text: Option<String>,
+    what: &str,
+) -> Result<Option<T>, RepoError> {
+    text.map(|t| serde_json::from_str(&t))
+        .transpose()
+        .map_err(|e| corrupt(format!("{what}: {e}")))
 }
 
 /// A unit cost as its columns: the amount in 1/10,000 of a minor unit, and the currency.

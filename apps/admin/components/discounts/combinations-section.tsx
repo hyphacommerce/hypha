@@ -18,24 +18,15 @@ import {
   compatible,
 } from "@/lib/discounts/draft";
 
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
+
 import type { SectionProps } from "./fields";
 
 /** A live discount, as the form weighs combining with it. */
 export type LiveDiscount = ClassSettings & { id: string; title: string };
 
 const NONE: readonly LiveDiscount[] = [];
-
-const LABELS: Record<DiscountClass, string> = {
-  product: "Product discounts",
-  order: "Order discounts",
-  shipping: "Shipping discounts",
-};
-
-function titles(discounts: readonly LiveDiscount[]): string {
-  const shown = discounts.slice(0, 3).map((d) => d.title);
-  const more = discounts.length - shown.length;
-  return more > 0 ? `${shown.join(", ")} and ${more} more` : shown.join(", ");
-}
 
 export function CombinationsSection({
   draft,
@@ -49,6 +40,16 @@ export function CombinationsSection({
   /** This discount's ID, to leave it out of `live`. */
   selfId?: string;
 }) {
+  const t = useT<"discounts">();
+  const format = useFormat();
+  /** "Lets it combine with A, B, C and 2 more.": the first three by title. */
+  const letsCombine = (discounts: readonly LiveDiscount[]) => {
+    const shown = discounts.slice(0, 3).map((d) => d.title);
+    return t("discounts.combinations_lets_combine", {
+      titles: format.list(shown, "unit"),
+      more: discounts.length - shown.length,
+    });
+  };
   const own: ClassSettings = {
     classes: classesOf(draft.kind),
     combinesWith: combinedClasses(draft),
@@ -66,11 +67,10 @@ export function CombinationsSection({
       <VStack gap={4}>
         <VStack gap={1}>
           <Text type="display-3" as="h2">
-            Combinations
+            {t("discounts.combinations_title")}
           </Text>
           <Text type="supporting" color="secondary">
-            Two discounts apply together only if each allows the other&apos;s kind. When they
-            can&apos;t, buyers get whichever saves them more.
+            {t("discounts.combinations_hint")}
           </Text>
         </VStack>
         {CLASSES.map((c) => {
@@ -78,14 +78,14 @@ export function CombinationsSection({
           const ofClass = others.filter((d) => d.classes.includes(c));
           const note =
             combined.length > 0
-              ? `Lets it combine with ${titles(combined)}.`
+              ? letsCombine(combined)
               : ofClass.length > 0
-                ? "No live discount of this kind allows this one's kind, so this changes nothing yet."
+                ? t("discounts.combinations_changes_nothing")
                 : undefined;
           return (
             <CheckboxInput
               key={c}
-              label={LABELS[c]}
+              label={t(`discounts.combinations_${c}`)}
               description={note}
               value={draft.combinesWith[c]}
               onChange={(on) =>

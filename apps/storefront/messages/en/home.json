@@ -1,0 +1,13 @@
+{
+  "welcome_title": "Welcome to {store}",
+  "welcome_description": "Products sold in {country} will show up here.",
+  "shop_everything": "Shop everything",
+  "browse_category": "Browse {category}",
+  "shop_by_category": "Shop by category",
+  "shop_now": "Shop now",
+  "new_arrivals": "New arrivals",
+  "new_arrivals_description": "The latest additions to the store.",
+  "best_prices": "Best prices",
+  "best_prices_description": "Our most affordable picks in {currency}.",
+  "view_all": "View all"
+}

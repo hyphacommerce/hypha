@@ -15,10 +15,12 @@ import { Token } from "@astryxdesign/core/Token";
 import { useState, useTransition } from "react";
 
 import { type Discounts, codeMessage, typedCode } from "@/lib/discounts";
+import { useT } from "@/lib/use-t";
 
 import { useCart } from "./cart-provider";
 
 export function DiscountCodeField({ discounts }: { discounts: Discounts }) {
+  const t = useT();
   const { digits, applyCode, removeCode, isPending } = useCart();
   const [value, setValue] = useState("");
   const [error, setError] = useState<string>();
@@ -44,14 +46,14 @@ export function DiscountCodeField({ discounts }: { discounts: Discounts }) {
         }}
       >
         <InputGroup
-          label="Discount code"
+          label={t("discounts.code_label")}
           isLabelHidden
           size="sm"
           status={error ? { type: "error", message: error } : undefined}
         >
           <TextInput
-            label="Discount code"
-            placeholder="Discount code"
+            label={t("discounts.code_label")}
+            placeholder={t("discounts.code_label")}
             autoComplete="off"
             value={value}
             onChange={(next) => {
@@ -60,7 +62,7 @@ export function DiscountCodeField({ discounts }: { discounts: Discounts }) {
             }}
           />
           <Button
-            label="Apply"
+            label={t("discounts.apply")}
             type="submit"
             isLoading={applying}
             isDisabled={isPending || typedCode(value) === null}
@@ -68,9 +70,9 @@ export function DiscountCodeField({ discounts }: { discounts: Discounts }) {
         </InputGroup>
       </form>
       {discounts.codes.length > 0 && (
-        <VStack as="ul" gap={2} aria-label="Discount codes" className="shop-plain-list">
+        <VStack as="ul" gap={2} aria-label={t("discounts.codes_label")} className="shop-plain-list">
           {discounts.codes.map((code) => {
-            const { text, tone } = codeMessage(code, discounts.applications, digits);
+            const { text, tone } = codeMessage(t, code, discounts.applications, digits);
             return (
               <li key={code.code}>
                 <VStack gap={1}>

@@ -8,6 +8,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { Grid } from "@astryxdesign/core/Grid";
+import { Selector } from "@astryxdesign/core/Selector";
 import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
@@ -20,6 +21,7 @@ import {
   type FieldProblems,
   missingIn,
 } from "@/lib/address";
+import { useT } from "@/lib/use-t";
 
 import {
   type AddressInput,
@@ -31,15 +33,26 @@ import {
   signOut,
   signOutEverywhere,
   updateProfile,
-} from "@/app/[country]/account/actions";
+} from "@/app/[country]/(shop)/account/actions";
+import { useLocale } from "@/components/locale";
+
+/** The account's messages and the address form's, beside the shared ones: the account's
+ * layout sends them. */
+const useAccountT = () => useT<"account" | "address">();
 
 export function ProfileForm({
-  country,
   initial,
+  languages,
 }: {
-  country: string;
-  initial: { first_name: string; last_name: string; phone: string };
+  /** `language`: one of `languages`, or empty when theirs isn't one of them (none, or
+   * another country's). */
+  initial: { first_name: string; last_name: string; phone: string; language: string };
+  /** The languages the country is offered in, each named in itself; the select is
+   * left out with fewer than two. */
+  languages: { value: string; label: string }[];
 }) {
+  const locale = useLocale();
+  const t = useAccountT();
   const [values, setValues] = useState(initial);
   const [error, setError] = useState<string>();
   const [saved, setSaved] = useState(false);
@@ -53,31 +66,50 @@ export function ProfileForm({
       <Grid columns={{ minWidth: 220 }} gap={3}>
         <TextInput
           size="lg"
-          label="First name"
+          label={t("account.first_name")}
           isOptional
           value={values.first_name}
           onChange={set("first_name")}
         />
         <TextInput
           size="lg"
-          label="Last name"
+          label={t("account.last_name")}
           isOptional
           value={values.last_name}
           onChange={set("last_name")}
         />
       </Grid>
-      <TextInput size="lg" label="Phone" isOptional value={values.phone} onChange={set("phone")} />
+      <TextInput
+        size="lg"
+        label={t("account.phone")}
+        isOptional
+        value={values.phone}
+        onChange={set("phone")}
+      />
+      {languages.length > 1 && (
+        <Selector
+          size="lg"
+          label={t("account.language")}
+          description={t("account.language_note")}
+          placeholder={t("account.choose_language")}
+          options={languages}
+          value={values.language || undefined}
+          onChange={set("language")}
+        />
+      )}
       {error && <Banner status="error" title={error} />}
-      {saved && <Banner status="success" title="Saved" />}
+      {saved && <Banner status="success" title={t("account.saved")} />}
       <div>
         <Button
-          label="Save"
+          label={t("account.save")}
           variant="primary"
           size="lg"
           isLoading={pending}
           clickAction={() =>
             start(async () => {
-              const result = await updateProfile(country, values);
+              // The language only when changed: an untouched select keeps theirs.
+              const language = values.language === initial.language ? undefined : values.language;
+              const result = await updateProfile(locale, { ...values, language });
               setError(result?.error);
               setSaved(!result);
             })
@@ -131,6 +163,8 @@ function AddressForm({
   initial?: AddressFields;
   onDone: () => void;
 }) {
+  const locale = useLocale();
+  const t = useAccountT();
   const [values, setValues] = useState(initial);
   const [error, setError] = useState<string>();
   const [problems, setProblems] = useState<FieldProblems>();
@@ -159,7 +193,7 @@ function AddressForm({
       default_billing: values.default_billing,
     };
     start(async () => {
-      const result = await saveAddress(country, address, body);
+      const result = await saveAddress(locale, address, body);
       setError(result?.error);
       setProblems(result?.problems);
       if (!result) onDone();
@@ -169,11 +203,9 @@ function AddressForm({
     <Card padding={5}>
       <VStack gap={4}>
         <Text type="large" weight="bold">
-          {address ? "Edit address" : "New address"}
+          {address ? t("account.edit_address") : t("account.new_address")}
         </Text>
-        <Text type="supporting">
-          In {countryName}. To ship elsewhere, switch the currency at the top.
-        </Text>
+        <Text type="supporting">{t("account.address_country", { country: countryName })}</Text>
         <AddressFields
           format={format}
           values={values}
@@ -186,19 +218,24 @@ function AddressForm({
           }}
         />
         <CheckboxInput
-          label="Use as my shipping address"
+          label={t("account.default_shipping")}
           value={values.default_shipping}
           onChange={(v) => setValues((s) => ({ ...s, default_shipping: v }))}
         />
         <CheckboxInput
-          label="Use as my billing address"
+          label={t("account.default_billing")}
           value={values.default_billing}
           onChange={(v) => setValues((s) => ({ ...s, default_billing: v }))}
         />
         {error && <Banner status="error" title={error} />}
         <HStack gap={2}>
-          <Button label="Save address" variant="primary" isLoading={pending} clickAction={submit} />
-          <Button label="Cancel" variant="ghost" clickAction={onDone} />
+          <Button
+            label={t("account.save_address")}
+            variant="primary"
+            isLoading={pending}
+            clickAction={submit}
+          />
+          <Button label={t("common.cancel")} variant="ghost" clickAction={onDone} />
         </HStack>
       </VStack>
     </Card>
@@ -229,6 +266,8 @@ export function AddressBook({
   format: AddressFormat;
   addresses: SavedAddress[];
 }) {
+  const locale = useLocale();
+  const t = useAccountT();
   // An address's ID being edited, `NEW` for a new one, or nothing.
   const [editing, setEditing] = useState<string | null>(null);
   const [error, setError] = useState<string>();
@@ -236,7 +275,7 @@ export function AddressBook({
   return (
     <VStack gap={4} maxWidth={760}>
       {addresses.length === 0 && editing !== NEW && (
-        <Text color="secondary">No saved addresses yet. Add one to check out faster.</Text>
+        <Text color="secondary">{t("account.no_addresses")}</Text>
       )}
       <Grid columns={{ minWidth: 260, max: 2 }} gap={4}>
         {addresses.map((a) =>
@@ -260,26 +299,29 @@ export function AddressBook({
                 </VStack>
                 {(a.isShipping || a.isBilling) && (
                   <Text type="supporting" color="secondary">
-                    {[a.isShipping && "Shipping address", a.isBilling && "Billing address"]
+                    {[
+                      a.isShipping && t("account.shipping_address"),
+                      a.isBilling && t("account.billing_address"),
+                    ]
                       .filter(Boolean)
                       .join(" · ")}
                   </Text>
                 )}
                 <HStack gap={2}>
                   <Button
-                    label="Edit"
+                    label={t("account.edit")}
                     variant="secondary"
                     size="sm"
                     clickAction={() => setEditing(a.id)}
                   />
                   <Button
-                    label="Remove"
+                    label={t("common.remove")}
                     variant="ghost"
                     size="sm"
                     isLoading={pending}
                     clickAction={() =>
                       start(async () => {
-                        const result = await removeAddress(country, a.id);
+                        const result = await removeAddress(locale, a.id);
                         setError(result?.error);
                       })
                     }
@@ -302,7 +344,11 @@ export function AddressBook({
       {error && <Banner status="error" title={error} />}
       {editing !== NEW && (
         <div>
-          <Button label="Add an address" variant="primary" clickAction={() => setEditing(NEW)} />
+          <Button
+            label={t("account.add_address")}
+            variant="primary"
+            clickAction={() => setEditing(NEW)}
+          />
         </div>
       )}
     </VStack>
@@ -311,66 +357,68 @@ export function AddressBook({
 
 /** "Email me with news and offers" and the SMS one, saved as they're ticked. */
 export function MarketingChoices({
-  country,
   email,
   sms,
   hasPhone,
 }: {
-  country: string;
   email: boolean;
   sms: boolean;
   hasPhone: boolean;
 }) {
+  const locale = useLocale();
+  const t = useAccountT();
   const [error, setError] = useState<string>();
   const [pending, start] = useTransition();
   const change = (channel: "email" | "sms") => (value: boolean) =>
     start(async () => {
-      const result = await setMarketing(country, channel, value);
+      const result = await setMarketing(locale, channel, value);
       setError(result?.error);
     });
   return (
     <VStack gap={3} maxWidth={560}>
       <CheckboxInput
-        label="Email me with news and offers"
+        label={t("account.email_opt_in")}
         value={email}
         onChange={change("email")}
         isDisabled={pending}
       />
       <CheckboxInput
-        label="Text me with news and offers"
+        label={t("account.sms_opt_in")}
         value={sms}
         onChange={change("sms")}
         isDisabled={pending || !hasPhone}
       />
       {!hasPhone && (
         <Text type="supporting" color="secondary">
-          Add a phone number to your profile to get texts.
+          {t("account.sms_needs_phone")}
         </Text>
       )}
       {error && <Banner status="error" title={error} />}
       <Text type="supporting" color="secondary">
-        You can change your mind any time; we only send what you asked for.
+        {t("account.change_mind")}
       </Text>
     </VStack>
   );
 }
 
 /** Signing out, here or everywhere. */
-export function SignOutButtons({ country }: { country: string }) {
+export function SignOutButtons() {
+  const locale = useLocale();
+  const t = useAccountT();
   const [pending, start] = useTransition();
   return (
     <HStack gap={2} wrap="wrap">
       <Button
-        label="Sign out"
+        label={t("account.sign_out")}
         variant="secondary"
         isLoading={pending}
-        clickAction={() => start(() => signOut(country))}
+        clickAction={() => start(() => signOut(locale))}
       />
       <Button
-        label="Sign out everywhere"
+        label={t("account.sign_out_everywhere")}
         variant="ghost"
         isLoading={pending}
-        clickAction={() => start(() => signOutEverywhere(country))}
+        clickAction={() => start(() => signOutEverywhere(locale))}
       />
     </HStack>
   );
@@ -378,13 +426,13 @@ export function SignOutButtons({ country }: { country: string }) {
 
 /** Asking for the account's data to be erased, and taking it back while it's pending. */
 export function ErasureControls({
-  country,
   dueAt,
 }: {
-  country: string;
   /** When a requested erasure runs, formatted; `null` without a request. */
   dueAt: string | null;
 }) {
+  const locale = useLocale();
+  const t = useAccountT();
   const [error, setError] = useState<string>();
   const [confirming, setConfirming] = useState(false);
   const [pending, start] = useTransition();
@@ -393,18 +441,18 @@ export function ErasureControls({
       <VStack gap={3}>
         <Banner
           status="warning"
-          title={`Your data will be erased on ${dueAt}.`}
-          description="Until then you can cancel. Afterwards your account is closed and nothing that identifies you stays with your orders."
+          title={t("account.erasure_due_title", { date: dueAt })}
+          description={t("account.erasure_due_description")}
         />
         {error && <Banner status="error" title={error} />}
         <div>
           <Button
-            label="Keep my account"
+            label={t("account.keep_account")}
             variant="primary"
             isLoading={pending}
             clickAction={() =>
               start(async () => {
-                const result = await cancelErasure(country);
+                const result = await cancelErasure(locale);
                 setError(result?.error);
               })
             }
@@ -415,32 +463,32 @@ export function ErasureControls({
   }
   return (
     <VStack gap={3}>
-      <Text color="secondary">
-        We&apos;ll remove your name, contact details, addresses and marketing choices from your
-        account and your orders after a short cancel window, and close your account. Your orders
-        stay on record without anything that identifies you.
-      </Text>
+      <Text color="secondary">{t("account.erasure_description")}</Text>
       {error && <Banner status="error" title={error} />}
       {confirming ? (
         <HStack gap={2}>
           <Button
-            label="Yes, erase my data"
+            label={t("account.confirm_erase")}
             variant="primary"
             isLoading={pending}
             clickAction={() =>
               start(async () => {
-                const result = await requestErasure(country);
+                const result = await requestErasure(locale);
                 setError(result?.error);
                 setConfirming(false);
               })
             }
           />
-          <Button label="Cancel" variant="ghost" clickAction={() => setConfirming(false)} />
+          <Button
+            label={t("common.cancel")}
+            variant="ghost"
+            clickAction={() => setConfirming(false)}
+          />
         </HStack>
       ) : (
         <div>
           <Button
-            label="Erase my data"
+            label={t("account.erase")}
             variant="secondary"
             clickAction={() => setConfirming(true)}
           />

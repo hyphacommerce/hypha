@@ -1,0 +1,8 @@
+{
+  "subject": "Your request to erase your data at {shop}",
+  "preheader": "Your personal data will be erased on {date} unless you cancel.",
+  "heading": "We'll erase your data",
+  "body": "You asked {shop} to erase your personal data. We'll do it on {date}: your name, contact details, addresses and marketing choices will be removed from your account and your orders, and your account will be closed. Your orders themselves stay on record without anything that identifies you.",
+  "changed_mind": "Changed your mind? Sign in to your account before then and cancel the request.",
+  "not_you": "If you didn't ask for this, sign in and cancel the request, or contact us."
+}

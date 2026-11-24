@@ -5,6 +5,7 @@
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
 import { type Currencies, moneyInput, parseMoney } from "@/lib/format";
+import type { TFor } from "@/lib/messages";
 
 type Product = AdminSchemas["ProductResponse"];
 
@@ -120,6 +121,9 @@ export function kept(draft: Draft): VariantDraft[] {
   return draft.variants.filter((v) => !resolvedSelections(draft, v).includes(null));
 }
 
+/** A translator of the editor's messages: the client components' own. */
+type Translate = TFor<"products">;
+
 /** "M / Blue", from the draft's labels; `null` without options. */
 export function variantTitle(draft: Draft, variant: VariantDraft): string | null {
   if (draft.options.length === 0) return null;
@@ -230,6 +234,7 @@ export function plan(
   saved: Draft,
   currency: string,
   currencies: Currencies,
+  t: Translate,
 ): { plan: SavePlan } | { error: string } {
   const changed = changes(draft, saved, currency, currencies);
   const result: SavePlan = {};
@@ -245,10 +250,10 @@ export function plan(
     }
     result.product = body;
   }
-  const problem = optionsProblem(draft);
+  const problem = optionsProblem(draft, t);
   if (problem) return { error: problem };
   const variants = kept(draft);
-  if (variants.length === 0) return { error: "A product keeps at least one variant." };
+  if (variants.length === 0) return { error: t("products.keeps_one_variant") };
   if (changed.options) {
     const keptIds = new Set(variants.flatMap((v) => (v.id ? [v.id] : [])));
     result.options = {
@@ -262,28 +267,26 @@ export function plan(
     const seen = new Set<string>();
     const planned: VariantPlan[] = [];
     for (const v of variants) {
-      const title = variantTitle(draft, v) ?? "the variant";
+      // A product without options has one variant, with no title to name it by.
+      const title = variantTitle(draft, v);
+      const named = { named: title === null ? "no" : "yes", variant: title ?? "" };
       const amount = parseMoney(v.price, currency, currencies);
-      if (amount === null)
-        return { error: `Enter the price of ${title} as a number, like 18 or 18.50.` };
+      if (amount === null) return { error: t("products.error_variant_price", named) };
       let compareAt: number | null = null;
       if (v.compareAt.trim() !== "") {
         compareAt = parseMoney(v.compareAt, currency, currencies);
         if (compareAt === null) {
-          return {
-            error: `Enter the compare-at price of ${title} as a number, or leave it empty.`,
-          };
+          return { error: t("products.error_variant_compare_at", named) };
         }
         if (compareAt <= amount) {
-          return { error: `The compare-at price of ${title} must be above its price.` };
+          return { error: t("products.error_variant_compare_at_low", named) };
         }
       }
       const grams = parseGrams(v.weight);
-      if (grams === undefined)
-        return { error: `Enter the weight of ${title} in whole grams, like 350.` };
+      if (grams === undefined) return { error: t("products.error_variant_weight", named) };
       const keys = resolvedSelections(draft, v);
       const combination = keys.join("\n");
-      if (seen.has(combination)) return { error: `Two variants are ${title}. Remove one of them.` };
+      if (seen.has(combination)) return { error: t("products.error_variant_duplicate", named) };
       seen.add(combination);
       planned.push({
         id: v.id ?? null,
@@ -309,17 +312,19 @@ export function plan(
 }
 
 /** What's wrong with the draft's options before the API sees them, or `null`. */
-export function optionsProblem(draft: Draft): string | null {
+export function optionsProblem(draft: Draft, t: Translate): string | null {
   const names = new Set<string>();
   for (const option of draft.options) {
     const name = option.name.trim();
-    if (name === "") return "Name every option, or remove the ones you don't need.";
-    if (names.has(name.toLowerCase())) return `Two options are called ${name}.`;
+    if (name === "") return t("products.error_option_unnamed");
+    if (names.has(name.toLowerCase())) return t("products.error_option_duplicate", { name });
     names.add(name.toLowerCase());
     const labels = valuesOf(option).map((v) => v.label.trim().toLowerCase());
-    if (labels.length === 0) return `Give ${name} at least one value.`;
-    if (labels.includes("")) return `A value of ${name} is blank: enter it or remove it.`;
-    if (new Set(labels).size !== labels.length) return `${name} has the same value twice.`;
+    if (labels.length === 0) return t("products.error_option_no_values", { name });
+    if (labels.includes("")) return t("products.error_option_blank_value", { name });
+    if (new Set(labels).size !== labels.length) {
+      return t("products.error_option_repeated_value", { name });
+    }
   }
   return null;
 }
@@ -357,17 +362,20 @@ export function withTypedValues(draft: Draft): Draft {
  * The draft with every combination of its options' values that no kept variant has
  * yet, each priced like the first variant, or a message when there are too many.
  */
-export function withAllCombinations(current: Draft): { draft: Draft } | { error: string } {
+export function withAllCombinations(
+  current: Draft,
+  t: Translate,
+): { draft: Draft } | { error: string } {
   const draft = withTypedValues(current);
-  if (draft.options.length === 0) return { error: "Add an option with values first." };
+  if (draft.options.length === 0) return { error: t("products.error_no_options") };
   const lists = draft.options.map((o) => valuesOf(o).filter((v) => v.label.trim() !== ""));
   if (lists.some((values) => values.length === 0)) {
-    return { error: "Every option needs at least one value." };
+    return { error: t("products.error_option_needs_value") };
   }
   const total = lists.reduce((n, values) => n * values.length, 1);
   if (total > MAX_VARIANTS) {
     return {
-      error: `Those options make ${total.toLocaleString("en")} combinations; a product has at most 2,048 variants.`,
+      error: t("products.error_too_many_combinations", { total, max: MAX_VARIANTS }),
     };
   }
   const existing = new Set(kept(draft).map((v) => resolvedSelections(draft, v).join("\n")));
@@ -388,7 +396,7 @@ export function withAllCombinations(current: Draft): { draft: Draft } | { error:
       selections: Object.fromEntries(draft.options.map((o, i) => [o.key, keys[i]] as const)),
     }));
   if (kept(draft).length + added.length > MAX_VARIANTS) {
-    return { error: "That would make more than 2,048 variants." };
+    return { error: t("products.error_too_many_variants", { max: MAX_VARIANTS }) };
   }
   return { draft: { ...draft, variants: [...draft.variants, ...added] } };
 }

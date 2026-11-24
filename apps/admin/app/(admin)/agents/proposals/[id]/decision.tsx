@@ -9,6 +9,9 @@ import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { useState, useTransition } from "react";
 
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
+
 import { approveProposal, rejectProposal } from "../../actions";
 
 /** The longest note the API keeps. */
@@ -30,6 +33,8 @@ export function Decision({
   /** The proposal's scopes the signed-in staff member lacks: then they can't approve it. */
   missing: string[];
 }) {
+  const t = useT<"agents">();
+  const format = useFormat();
   const [isRejecting, setIsRejecting] = useState(false);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -43,31 +48,32 @@ export function Decision({
       <VStack gap={3}>
         <VStack gap={1}>
           <Text type="display-3" as="h2">
-            Decide
+            {t("agents.decide_title")}
           </Text>
           <Text type="supporting" color="secondary">
-            Approving applies exactly what's previewed below, or nothing if the store changed since.
-            Rejecting tells the agent why, if you add a note.
+            {t("agents.decide_description")}
           </Text>
         </VStack>
         {!canDecide && (
           <Banner
             status="info"
-            title="You can't decide this one"
-            description={`It needs ${missing.join(", ")}, which your role doesn't have.`}
+            title={t("agents.decide_cannot_title")}
+            description={t("agents.decide_cannot_description", {
+              scopes: format.list(missing, "unit"),
+            })}
           />
         )}
         {error && <Banner status="error" title={error} onDismiss={() => setError(undefined)} />}
         <HStack gap={2}>
           <Button
-            label="Approve"
+            label={t("common.approve")}
             variant="primary"
             isLoading={isPending && !isRejecting}
             isDisabled={!canDecide}
             onClick={approve}
           />
           <Button
-            label="Reject"
+            label={t("agents.decide_reject")}
             variant="secondary"
             isDisabled={!canDecide || isPending}
             onClick={() => setIsRejecting(true)}
@@ -80,6 +86,7 @@ export function Decision({
 }
 
 function RejectDialog({ id, onClose }: { id: string; onClose: () => void }) {
+  const t = useT<"agents">();
   const [note, setNote] = useState("");
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -95,25 +102,25 @@ function RejectDialog({ id, onClose }: { id: string; onClose: () => void }) {
   return (
     <Dialog isOpen onOpenChange={(isOpen) => !isOpen && onClose()} width={520} purpose="form">
       <DialogHeader
-        title="Reject this proposal?"
-        subtitle="Nothing is applied. The agent can read your note when it checks the proposal."
+        title={t("agents.reject_dialog_title")}
+        subtitle={t("agents.reject_dialog_subtitle")}
         onOpenChange={(isOpen) => !isOpen && onClose()}
       />
       <VStack gap={4} padding={4}>
         {error && <Banner status="error" title={error} />}
         <TextArea
-          label="Note for the agent"
+          label={t("agents.reject_note_label")}
           isOptional
-          placeholder="Prices end in .99 in this store; propose again with that."
+          placeholder={t("agents.reject_note_placeholder")}
           rows={4}
           maxLength={NOTE_MAX}
           value={note}
           onChange={setNote}
         />
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label="Reject"
+            label={t("agents.decide_reject")}
             variant="destructive"
             isLoading={isPending}
             isDisabled={isTooLong}

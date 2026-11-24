@@ -5,6 +5,7 @@ import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import type { StorefrontSchemas } from "@hyphacommerce/sdk/storefront";
 import { readPromotions } from "@/lib/discounts";
+import type { TFor } from "@/lib/messages";
 import { formatRange } from "@/lib/money";
 
 import { PromotionBadges } from "./discounts";
@@ -31,6 +32,7 @@ export function productImageName(handle: string): string {
  * their place, new ones fade in and gone ones out (`.shop-card-*`, globals.css).
  */
 export function ProductGrid({
+  t,
   hits,
   digits,
   productBase,
@@ -38,6 +40,8 @@ export function ProductGrid({
   eager = 0,
   shared = false,
 }: {
+  /** The page's translator, or the client component's (`useT`). */
+  t: TFor<"common" | "product">;
   hits: Hit[];
   digits: number;
   /** Product pages' URL prefix (`/hr/p`): a string, so client components can pass it. */
@@ -71,7 +75,7 @@ export function ProductGrid({
             <Link
               href={`${productBase}/${hit.handle}`}
               className="shop-product-card"
-              aria-label={hit.on_sale ? `${hit.title}, on sale` : hit.title}
+              aria-label={hit.on_sale ? t("product.card_on_sale", { title: hit.title }) : hit.title}
             >
               <VStack gap={3}>
                 <ViewTransition
@@ -107,17 +111,23 @@ export function ProductGrid({
                     {hit.title}
                   </Text>
                   <Price
+                    t={t}
                     price={hit.price}
                     compareAt={hit.on_sale ? hit.compare_at : null}
-                    text={formatRange(hit.listing_price.min, hit.listing_price.max, digits)}
+                    text={formatRange(
+                      hit.listing_price.min,
+                      hit.listing_price.max,
+                      digits,
+                      t.locale,
+                    )}
                     digits={digits}
                     color="secondary"
                   />
                   {(!hit.available || hit.on_sale || promotions.length > 0) && (
                     <HStack gap={1} wrap="wrap">
-                      {hit.on_sale && <SaleBadge />}
+                      {hit.on_sale && <SaleBadge t={t} />}
                       <PromotionBadges promotions={promotions} />
-                      {!hit.available && <Badge label="Sold out" variant="neutral" />}
+                      {!hit.available && <Badge label={t("common.sold_out")} variant="neutral" />}
                     </HStack>
                   )}
                 </VStack>

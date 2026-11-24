@@ -6,11 +6,13 @@ import { hyphaTheme } from "@/theme/hypha";
 import Link from "next/link";
 import { useEffect } from "react";
 
+import { I18n } from "@/components/i18n-provider";
 import { reloadForNewBuild } from "@/lib/stale-build";
 
-/** The Hypha theme (`theme/hyphaTheme.ts`), Next.js links for every Astryx link and nav
- * item, and a reload onto the new build when an earlier deploy's code can't load. */
-export function Providers({ children }: { children: React.ReactNode }) {
+/** The Hypha theme (`theme/hyphaTheme.ts`), the admin's and Astryx's strings in the staff
+ * member's `language`, Next.js links for every Astryx link and nav item, and a reload
+ * onto the new build when an earlier deploy's code can't load. */
+export function Providers({ language, children }: { language: string; children: React.ReactNode }) {
   // Vite's loader says when code split out of the build couldn't be loaded (an earlier
   // deploy's): load the page again, onto the new build (`lib/stale-build.ts`).
   useEffect(() => {
@@ -22,7 +24,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
   }, []);
   return (
     <Theme theme={hyphaTheme}>
-      <LinkProvider component={Link}>{children}</LinkProvider>
+      <I18n language={language}>
+        <LinkProvider component={Link}>{children}</LinkProvider>
+      </I18n>
     </Theme>
   );
 }

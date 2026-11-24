@@ -239,6 +239,7 @@ impl World {
             country: country.to_string(),
             idempotency: None,
             customer: None,
+            language: None,
         };
         block_on(create_cart(
             &self.ports.storefront(),
@@ -316,6 +317,59 @@ fn create_cart_picks_the_market_of_its_country() {
     assert_eq!(world.get(cart.id), Ok(cart));
 }
 
+#[test]
+fn a_cart_keeps_the_language_it_was_made_in_and_changes_it() {
+    let world = World::new();
+    let de = hypha_core::Language::new("de").unwrap();
+    let ctx = world.storefront();
+    let input = CreateCart {
+        country: "HR".to_string(),
+        idempotency: None,
+        customer: None,
+        language: Some(de.clone()),
+    };
+    let cart = block_on(create_cart(
+        &ctx,
+        &world.ports,
+        &world.ids,
+        &world.clock,
+        input,
+    ))
+    .unwrap()
+    .value;
+    assert_eq!(cart.language, Some(de.clone()));
+    assert_eq!(world.get(cart.id).unwrap().language, Some(de));
+
+    let changed = block_on(hypha_cart::set_cart_language(
+        &ctx,
+        &world.ports,
+        cart.id,
+        None,
+    ))
+    .unwrap();
+    assert_eq!(changed.language, None);
+    let stored = block_on(world.carts.get(cart.id)).unwrap().unwrap();
+    assert_eq!(stored.language(), None);
+}
+
+#[test]
+fn changing_the_language_needs_carts_write() {
+    let world = World::new();
+    let cart = world.create_cart();
+    let reader = Ctx::new(Actor::System, vec![Scope::CartsRead]);
+    assert_eq!(
+        block_on(hypha_cart::set_cart_language(
+            &reader,
+            &world.ports,
+            cart,
+            None
+        )),
+        Err(CommandError::Auth(AuthError::MissingScope(
+            Scope::CartsWrite
+        )))
+    );
+}
+
 /// What an empty cart in the Croatian market prices to, whatever else is set up.
 fn empty_in_croatia(
     id: CartId,
@@ -346,6 +400,8 @@ fn empty_in_croatia(
         total: eur(0),
         payment_method: None,
         marketing_opt_in: false,
+        language: None,
+        market_languages: Vec::new(),
     }
 }
 
@@ -662,6 +718,7 @@ fn a_cart_needs_a_channel() {
         country: "HR".to_string(),
         idempotency: None,
         customer: None,
+        language: None,
     };
     let result = block_on(create_cart(
         &Ctx::system(),
@@ -1257,6 +1314,7 @@ impl World {
             country: "HR".to_string(),
             idempotency,
             customer: None,
+            language: None,
         };
         block_on(create_cart(ctx, &self.ports, &self.ids, &self.clock, input))
     }

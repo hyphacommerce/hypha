@@ -12,6 +12,7 @@ import {
   parseOff,
   problemsFromDetails,
 } from "./validate.ts";
+import { t } from "./testing.ts";
 
 const ctx: CheckContext = {
   markets: [
@@ -20,6 +21,7 @@ const ctx: CheckContext = {
   ],
   currencies: { EUR: 2, JPY: 0 },
   timeZone: "Europe/Dublin",
+  t,
 };
 
 function valid(change: Partial<DiscountDraft> = {}): DiscountDraft {
@@ -53,6 +55,12 @@ function mapRewardPath(path: string): string | null {
   return path === "kind.rewards[0].value.percent_bps" ? "kind.product.value.percent" : null;
 }
 
+/** What's wrong with a percentage off, in words; null when nothing is. */
+function problem(text: string): string | null {
+  const off = parseOff(text);
+  return off.ok ? null : t(off.error);
+}
+
 test("the blank draft with a title is valid", () => {
   assert.deepEqual(checkDraft(valid(), ctx), []);
 });
@@ -77,9 +85,9 @@ test("an automatic discount's code isn't checked", () => {
 test("a percentage off is above 0 and at most 100", () => {
   assert.deepEqual(parseOff("0.01"), { ok: true, value: 1 });
   assert.deepEqual(parseOff("100"), { ok: true, value: 10_000 });
-  assert.deepEqual(parseOff("0"), { ok: false, error: "More than 0%." });
-  assert.deepEqual(parseOff("100.01"), { ok: false, error: "At most 100%." });
-  assert.deepEqual(parseOff("-10"), { ok: false, error: "Without a sign: 20 is 20% off." });
+  assert.equal(problem("0"), "More than 0%.");
+  assert.equal(problem("100.01"), "At most 100%.");
+  assert.equal(problem("-10"), "Without a sign: 20 is 20% off.");
 });
 
 test("a standard discount needs a reward", () => {

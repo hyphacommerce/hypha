@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/page-header";
 import { type SearchParams, one, oneOf } from "@/components/resource-table/params";
 import { listPage, pageQuery } from "@/components/resource-table/server";
 import { requireStaff, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import { hasScope } from "@/lib/navigation";
 
 import { DiscountsTable } from "./discounts-table";
@@ -24,16 +25,18 @@ export default async function DiscountsPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const [params, me] = await Promise.all([searchParams, requireStaff()]);
+  const [params, me, t] = await Promise.all([searchParams, requireStaff(), getT()]);
   const canWrite = hasScope(me.scopes, "discounts:write");
   return (
     <Section padding={6}>
       <VStack gap={5}>
         <PageHeader
-          title="Discounts"
-          description="Codes buyers enter and discounts that apply by themselves: off products, the order or shipping, buy X get Y and volume tiers."
+          title={t("discounts.title")}
+          description={t("discounts.list_description")}
           actions={
-            canWrite && <Button label="Create discount" variant="primary" href="/discounts/new" />
+            canWrite && (
+              <Button label={t("discounts.create")} variant="primary" href="/discounts/new" />
+            )
           }
         />
         <Suspense fallback={<DiscountsTable canWrite={canWrite} />}>
@@ -57,5 +60,5 @@ async function DiscountRows({ params, canWrite }: { params: SearchParams; canWri
       },
     },
   });
-  return <DiscountsTable page={listPage(result, "/discounts", params)} canWrite={canWrite} />;
+  return <DiscountsTable page={await listPage(result, "/discounts", params)} canWrite={canWrite} />;
 }

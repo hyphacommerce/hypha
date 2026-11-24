@@ -5,7 +5,8 @@
 
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
-import { sessionClient } from "@/lib/hypha";
+import { describe, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 
 type Status = AdminSchemas["ProductStatus"];
 
@@ -41,7 +42,12 @@ export async function pickerProducts(input: {
     },
   });
   if (!data) {
-    return { items: [], nextCursor: null, error: error?.error ?? "Couldn't load products." };
+    const t = await getT();
+    return {
+      items: [],
+      nextCursor: null,
+      error: error ? await describe(error) : t("components.product_picker_load_failed"),
+    };
   }
   return {
     items: data.items.map((p) => ({

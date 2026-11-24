@@ -2,6 +2,7 @@ import { Section } from "@astryxdesign/core/Section";
 import { Suspense } from "react";
 
 import { FormSkeleton } from "@/components/skeletons";
+import { getStoreDefaults } from "@/lib/get-store-t";
 import {
   loadCountries,
   loadPaymentMethods,
@@ -9,6 +10,7 @@ import {
   requireStore,
   sessionClient,
 } from "@/lib/hypha";
+import { WIZARD_DEFAULTS } from "@/lib/store-defaults";
 
 import { setupDone } from "../setup-checklist";
 import { type WizardData, SetupWizard } from "./setup-wizard";
@@ -65,5 +67,12 @@ async function Wizard({ initialStep }: { initialStep: number | undefined }) {
     countries,
   };
 
-  return <SetupWizard data={data} initialStep={initialStep} savedStep={store.setup.step} />;
+  return (
+    <SetupWizard
+      data={data}
+      defaults={await getStoreDefaults(WIZARD_DEFAULTS)}
+      initialStep={initialStep}
+      savedStep={store.setup.step}
+    />
+  );
 }

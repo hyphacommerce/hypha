@@ -1,38 +1,40 @@
 import { Text } from "react-email";
-import type { Email } from "../email.ts";
+import { j, type Template } from "../email.ts";
 import { v } from "../jinja.tsx";
 import { Delivery, Greeting, OrderButton, ShippedLines, Tracking } from "../parts.tsx";
 import { heading, paragraph, subheading } from "../styles.ts";
 import * as text from "../text.ts";
 
-export const orderShipped: Email = {
+export const orderShipped: Template = {
   key: "order_shipped",
-  subject: "Your order {{ order.number }} is on its way",
-  preheader: "Items from your order {{ order.number }} have shipped.",
-  Content: () => (
-    <>
-      <Text style={heading}>Your order is on its way</Text>
-      <Greeting />
-      <Text style={paragraph}>
-        Good news: items from your order {v("order.number")} have shipped.
-      </Text>
-      <Tracking />
-      <OrderButton />
-      <Text style={subheading}>In this shipment</Text>
-      <ShippedLines />
-      <Delivery />
-    </>
-  ),
-  text: `${text.greeting}
+  translated: true,
+  email: (t) => ({
+    key: "order_shipped",
+    subject: t("order_shipped.subject", { number: j("order.number") }),
+    preheader: t("order_shipped.preheader", { number: j("order.number") }),
+    Content: () => (
+      <>
+        <Text style={heading}>{t("order_shipped.heading")}</Text>
+        <Greeting t={t} />
+        <Text style={paragraph}>{t("order_shipped.shipped", { number: v("order.number") })}</Text>
+        <Tracking t={t} />
+        <OrderButton t={t} />
+        <Text style={subheading}>{t("common.in_shipment")}</Text>
+        <ShippedLines />
+        <Delivery t={t} />
+      </>
+    ),
+    text: `${text.greeting(t)}
 
-Good news: items from your order {{ order.number }} have shipped.
-${text.tracking}
+${t("order_shipped.shipped", { number: j("order.number") })}
+${text.tracking(t)}
 
-In this shipment:
+${t("common.in_shipment")}:
 ${text.shippedLines}
-${text.orderLink}
-${text.delivery}
+${text.orderLink(t)}
+${text.delivery(t)}
 
 ${text.footer}
 `,
+  }),
 };

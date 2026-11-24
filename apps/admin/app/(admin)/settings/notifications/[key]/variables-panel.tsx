@@ -12,6 +12,7 @@ import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { useState } from "react";
 
 import { type Variable, printable } from "@/lib/notifications";
+import { useT } from "@/lib/use-t";
 
 /** The snippet a click copies: a loop for a list, else the value. */
 function snippet(variable: Variable): string {
@@ -21,6 +22,7 @@ function snippet(variable: Variable): string {
 }
 
 export function VariablesPanel({ variables }: { variables: Variable[] }) {
+  const t = useT<"notifications">();
   const [filter, setFilter] = useState("");
   const toast = useToast();
   const shown = variables.filter((v) => v.path.toLowerCase().includes(filter.trim().toLowerCase()));
@@ -29,9 +31,12 @@ export function VariablesPanel({ variables }: { variables: Variable[] }) {
     const text = snippet(variable);
     try {
       await navigator.clipboard.writeText(text);
-      toast({ body: `Copied ${text}`, uniqueID: "variable-copied" });
+      toast({
+        body: t("notifications.variables_copied", { snippet: text }),
+        uniqueID: "variable-copied",
+      });
     } catch {
-      toast({ body: "Couldn't copy: select the path and copy it yourself.", type: "error" });
+      toast({ body: t("notifications.variables_copy_failed"), type: "error" });
     }
   };
 
@@ -40,17 +45,16 @@ export function VariablesPanel({ variables }: { variables: Variable[] }) {
       <VStack gap={3}>
         <VStack gap={1}>
           <Text type="display-3" as="h2">
-            Variables
+            {t("notifications.variables_title")}
           </Text>
           <Text type="supporting" color="secondary">
-            Click one to copy it. Values are from a made-up order. A list&apos;s items are shown
-            under [0]: loop over the list to print each.
+            {t("notifications.variables_description")}
           </Text>
         </VStack>
         <TextInput
-          label="Filter variables"
+          label={t("notifications.variables_filter_label")}
           isLabelHidden
-          placeholder="Filter, like order.total"
+          placeholder={t("notifications.variables_filter_placeholder")}
           startIcon={MagnifyingGlassIcon}
           hasClear
           width="100%"
@@ -58,13 +62,13 @@ export function VariablesPanel({ variables }: { variables: Variable[] }) {
           onChange={setFilter}
         />
         <div className="variables-list">
-          {shown.length === 0 && <Text color="secondary">No variable matches.</Text>}
+          {shown.length === 0 && <Text color="secondary">{t("notifications.variables_none")}</Text>}
           {shown.map((variable) => (
             <button
               key={variable.path}
               type="button"
               className="variable"
-              title={`Copy ${snippet(variable)}`}
+              title={t("notifications.variables_copy", { snippet: snippet(variable) })}
               onClick={() => copy(variable)}
             >
               <code>{variable.path}</code>

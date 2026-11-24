@@ -4,6 +4,7 @@ import { Text } from "@astryxdesign/core/Text";
 import type { ReactNode } from "react";
 
 import { type Discounts, NO_DISCOUNTS, discountedTotals, minus } from "@/lib/discounts";
+import type { TFor } from "@/lib/messages";
 import { type Money, formatMoney } from "@/lib/money";
 
 import { DiscountNotes } from "./discounts";
@@ -34,6 +35,7 @@ function Row({ label, value, strong }: { label: string; value: string; strong?: 
  * subtotal is before what came off the goods, a "Discounts" row takes it off, and
  * shipping a discount took all of is "Free". */
 export function Totals({
+  t,
   subtotal,
   shipping,
   tax,
@@ -42,6 +44,7 @@ export function Totals({
   digits,
   discounts = NO_DISCOUNTS,
 }: {
+  t: TFor<"cart">;
   subtotal: Money;
   shipping: Money;
   tax: Money;
@@ -52,20 +55,27 @@ export function Totals({
 }) {
   const shown = discountedTotals(subtotal, discounts);
   const freeShipping = (discounts.shipping?.amount ?? 0) > 0 && shipping.amount <= 0;
+  const money = (amount: Money) => formatMoney(amount, digits, t.locale);
   return (
     <VStack gap={2}>
-      <Row label="Subtotal" value={formatMoney(shown.subtotal, digits)} />
-      {shown.goods && <Row label="Discounts" value={minus(shown.goods, digits)} />}
-      <Row label="Shipping" value={freeShipping ? "Free" : formatMoney(shipping, digits)} />
-      <Row label={taxesIncluded ? "Including tax" : "Tax"} value={formatMoney(tax, digits)} />
+      <Row label={t("cart.subtotal")} value={money(shown.subtotal)} />
+      {shown.goods && (
+        <Row label={t("cart.discounts")} value={minus(shown.goods, digits, t.locale)} />
+      )}
+      <Row
+        label={t("cart.shipping")}
+        value={freeShipping ? t("cart.shipping_free") : money(shipping)}
+      />
+      <Row label={taxesIncluded ? t("cart.including_tax") : t("cart.tax")} value={money(tax)} />
       <Divider />
-      <Row label="Total" value={formatMoney(total, digits)} strong />
+      <Row label={t("cart.total")} value={money(total)} strong />
     </VStack>
   );
 }
 
 /** One line of a summary: "2 × Mug (M / Blue)" and its total. */
 export function SummaryLine({
+  t,
   quantity,
   title,
   variant,
@@ -73,6 +83,7 @@ export function SummaryLine({
   image,
   notes,
 }: {
+  t: TFor<"cart">;
   quantity: number;
   title: string;
   variant?: string | null;
@@ -89,7 +100,7 @@ export function SummaryLine({
       <StackItem size="fill">
         <VStack gap={0.5}>
           <Text type="body" weight="medium">
-            {quantity} × {title}
+            {t("cart.line", { quantity, title })}
           </Text>
           {variant && <Text type="supporting">{variant}</Text>}
           <DiscountNotes notes={notes} />

@@ -25,15 +25,18 @@ import {
   type SortOption,
   type View,
 } from "@/components/resource-table/resource-table";
-import { formatBytes } from "@/lib/format";
+import { labelOr } from "@/lib/keys";
+import type { KeyIn } from "@/lib/messages";
+import { type Format, useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 type Asset = AdminSchemas["AssetResponse"];
 
-const SORT_OPTIONS: SortOption[] = [
-  { value: "newest", label: "Newest" },
-  { value: "oldest", label: "Oldest" },
-  { value: "name_asc", label: "Name A–Z" },
-  { value: "name_desc", label: "Name Z–A" },
+const SORT_OPTIONS: { value: string; label: KeyIn<"common"> }[] = [
+  { value: "newest", label: "common.sort_newest" },
+  { value: "oldest", label: "common.sort_oldest" },
+  { value: "name_asc", label: "common.sort_name_asc" },
+  { value: "name_desc", label: "common.sort_name_desc" },
 ];
 
 const SORTS: Record<string, SortDef> = {
@@ -41,17 +44,11 @@ const SORTS: Record<string, SortDef> = {
   uploaded: { asc: "oldest", desc: "newest" },
 };
 
-// Kinds are views (below), so the only filter is the search; `kind=` in a URL still
-// picks its view.
-const FILTERS: FilterDef[] = [
-  { kind: "search", param: "q", label: "Search", placeholder: "Search names, alt text, titles" },
-];
-
-const VIEWS: View[] = [
-  { label: "All", params: {} },
-  { label: "Images", params: { kind: ["image"] } },
-  { label: "Videos", params: { kind: ["video"] } },
-  { label: "Files", params: { kind: ["file"] } },
+const VIEWS: { label: KeyIn<"media" | "common">; params: View["params"] }[] = [
+  { label: "common.all", params: {} },
+  { label: "media.view_images", params: { kind: ["image"] } },
+  { label: "media.view_videos", params: { kind: ["video"] } },
+  { label: "media.view_files", params: { kind: ["file"] } },
 ];
 
 // Keyed by string: the API may add kinds; those show as files.
@@ -88,13 +85,14 @@ function Preview({ asset, size }: { asset: Asset; size?: number }) {
   );
 }
 
-function facts(asset: Asset): string {
+function facts(asset: Asset, format: Format): string {
   return asset.width && asset.height
-    ? `${asset.width} × ${asset.height} · ${formatBytes(asset.byte_size)}`
-    : formatBytes(asset.byte_size);
+    ? `${asset.width} × ${asset.height} · ${format.bytes(asset.byte_size)}`
+    : format.bytes(asset.byte_size);
 }
 
 function MediaGrid({ assets }: { assets: Asset[] }) {
+  const format = useFormat();
   return (
     <Grid columns={{ minWidth: 180 }} gap={3}>
       {assets.map((asset) => (
@@ -110,7 +108,7 @@ function MediaGrid({ assets }: { assets: Asset[] }) {
               <Text weight="medium" maxLines={1}>
                 {asset.title ?? asset.filename}
               </Text>
-              <Text type="supporting">{facts(asset)}</Text>
+              <Text type="supporting">{facts(asset, format)}</Text>
             </VStack>
           </VStack>
         </ClickableCard>
@@ -125,9 +123,10 @@ function ViewToggle({ view }: { view: "grid" | "table" }) {
   const pathname = usePathname();
   const params = useSearchParams();
   const [, startTransition] = useTransition();
+  const t = useT<"media">();
   return (
     <SegmentedControl
-      label="View"
+      label={t("media.layout_label")}
       size="sm"
       value={view}
       onChange={(next) =>
@@ -141,8 +140,8 @@ function ViewToggle({ view }: { view: "grid" | "table" }) {
         )
       }
     >
-      <SegmentedControlItem value="grid" label="Grid" />
-      <SegmentedControlItem value="table" label="Table" />
+      <SegmentedControlItem value="grid" label={t("media.layout_grid")} />
+      <SegmentedControlItem value="table" label={t("media.layout_table")} />
     </SegmentedControl>
   );
 }
@@ -155,10 +154,27 @@ export function MediaLibrary({
   page?: { items: Asset[]; next_cursor: string | null; error?: string };
   view: "grid" | "table";
 }) {
+  const t = useT<"media">();
+  const format = useFormat();
+  // Kinds are views, so the only filter is the search; `kind=` in a URL still picks its
+  // view.
+  const filters: FilterDef[] = [
+    {
+      kind: "search",
+      param: "q",
+      label: t("common.search"),
+      placeholder: t("media.search_placeholder"),
+    },
+  ];
+  const views: View[] = VIEWS.map(({ label, params }) => ({ label: t(label), params }));
+  const sortOptions: SortOption[] = SORT_OPTIONS.map(({ value, label }) => ({
+    value,
+    label: t(label),
+  }));
   const columns: TableColumn<Asset>[] = [
     {
       key: "filename",
-      header: "File",
+      header: t("media.file"),
       width: proportional(3, { minWidth: 240 }),
       renderCell: (asset) => (
         <HStack gap={3} vAlign="center">
@@ -176,16 +192,25 @@ export function MediaLibrary({
         </HStack>
       ),
     },
-    { key: "kind", header: "Kind", width: pixel(90) },
-    { key: "facts", header: "Size", renderCell: facts },
+    {
+      key: "kind",
+      header: t("common.kind"),
+      width: pixel(90),
+      renderCell: (asset) => {
+        // The API may add kinds: one without a name shows as it is.
+        const key = `media.kind_${asset.kind}`;
+        return labelOr(t, key, asset.kind);
+      },
+    },
+    { key: "facts", header: t("media.size"), renderCell: (asset) => facts(asset, format) },
     {
       key: "alt",
-      header: "Alt text",
-      renderCell: (asset) => asset.alt ?? <Text color="secondary">None</Text>,
+      header: t("media.alt_text"),
+      renderCell: (asset) => asset.alt ?? <Text color="secondary">{t("common.none")}</Text>,
     },
     {
       key: "uploaded",
-      header: "Uploaded",
+      header: t("media.uploaded"),
       width: pixel(190),
       renderCell: (asset) => <DateTime value={asset.created_at} short />,
     },
@@ -198,18 +223,18 @@ export function MediaLibrary({
       columns={columns}
       idKey="id"
       rowHref={(a) => `/media/${a.id}`}
-      filters={FILTERS}
-      views={VIEWS}
+      filters={filters}
+      views={views}
       sorts={SORTS}
-      sortOptions={SORT_OPTIONS}
+      sortOptions={sortOptions}
       defaultSort="newest"
       error={page?.error}
       empty={{
         icon: <PhotoIcon width={32} />,
-        title: "No media yet",
-        description: "Files you upload show up here, newest first, ready to use on products.",
+        title: t("media.empty_title"),
+        description: t("media.empty_description"),
       }}
-      noResults={{ title: "No files match these filters" }}
+      noResults={{ title: t("media.no_results_title") }}
       toolbarEnd={<ViewToggle view={view} />}
       renderRows={view === "grid" ? (assets) => <MediaGrid assets={assets} /> : undefined}
     />

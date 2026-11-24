@@ -3,8 +3,8 @@
 //! the staff flows' direct emails.
 
 use hypha_core::{
-    Actor, AssetId, Clock, Ctx, Email, HasBatch, HasOutbox, IdGenerator, NotificationId, Notifier,
-    NotifyError, OrderId, OutboxRepo, RepoError, Scope, retry_on_conflict,
+    Actor, AssetId, Clock, Ctx, Email, HasBatch, HasOutbox, IdGenerator, Language, NotificationId,
+    Notifier, NotifyError, OrderId, OutboxRepo, RepoError, Scope, retry_on_conflict,
 };
 use hypha_customer_accounts::CustomerEmail;
 use hypha_media::{
@@ -14,9 +14,9 @@ use hypha_media::{
 use hypha_notifications::{
     Colour, EffectiveTemplate, EmailSender, HasNotificationSettings, HasNotificationTemplates,
     HasNotifications, Mailbox, NewTemplate, Notification, NotificationRepo, NotificationSettings,
-    NotificationSettingsRepo, NotificationStatus, NotificationTemplateRepo, OrderUrl,
-    OutgoingEmail, Rendered, StageNotificationSettings, Template, TemplateKey, TemplateSources,
-    keys, render, template_in_effect,
+    NotificationSettingsRepo, NotificationStatus, NotificationTemplateRepo, OrderUrl, Origin,
+    OutgoingEmail, Rendered, StageNotificationSettings, Template, TemplateKey, TemplateLanguages,
+    TemplateSources, keys, render, template_in_effect,
 };
 use hypha_payments::newest_payment;
 use hypha_purchasing::PurchaseOrderSent;
@@ -25,10 +25,11 @@ use hypha_users::{HasUsers, StaffEmail, UserRepo};
 
 use crate::{
     CommandError, MailEnv, MailPorts,
-    context::{CodeMail, ErasureMail, MailContext, StaffMail, login_link, user_context},
+    context::{CodeMail, ErasureMail, Locale, MailContext, StaffMail, login_link, user_context},
     format::TimeValue,
     handler::{
-        load_fulfillment, load_order, load_purchase_order, order_context, supplier_order_context,
+        load_fulfillment, load_order, load_purchase_order, order_context, reading_language,
+        supplier_order_context,
     },
     send::{
         Branding, Message, Sources, branding, lost_a_race, queue, render_for_sending, send_now,
@@ -203,43 +204,58 @@ impl TemplateInput {
     }
 }
 
-/// Saves a template's sources and whether it's on. The sources must parse, and render in
-/// the layout in effect against the template's sample, and against it with every value that
-/// may be absent absent (`MailContext::checks`): `template_invalid` with the part and line
-/// otherwise, so a template that only works when an order has a payment or a shipping
-/// address is refused here rather than failing on a real order. Saving the layout renders
-/// every message template in it, so a layout that breaks one is refused. Turning off one
-/// that can't be is `template_required`.
+/// Saves a template's sources for `language` (none: the store's default, as is the default
+/// language named), and whether it's on (`None` keeps it). The sources must parse, and render
+/// in the layout in effect for the language against the template's sample, and against it
+/// with every value that may be absent absent (`MailContext::checks_in`): `template_invalid`
+/// with the part and line otherwise, so a template that only works when an order has a
+/// payment or a shipping address is refused here rather than failing on a real order.
+/// Saving the layout renders every message template in effect for the language in it, so a
+/// layout that breaks one is refused. Turning off one that can't be is `template_required`;
+/// whether a template is sent is set for every language at once, so `enabled` with another
+/// language is `enabled_not_per_language`, and a language the store doesn't have
+/// `language_not_listed`.
 pub async fn save_template<S: HasNotificationTemplates>(
     ctx: &Ctx,
     ports: &S,
     key: TemplateKey,
+    language: Option<&Language>,
+    languages: TemplateLanguages<'_>,
     input: TemplateInput,
-    enabled: bool,
+    enabled: Option<bool>,
 ) -> Result<EffectiveTemplate, CommandError> {
     ctx.require(Scope::NotificationsWrite)?;
+    let locale = languages
+        .locale(language)
+        .map_err(CommandError::LanguageNotListed)?;
+    if locale.is_some() && enabled.is_some() {
+        return Err(CommandError::EnabledNotPerLanguage);
+    }
     let sources = input.sources(key)?;
-    if !enabled && !key.can_disable() {
+    if enabled == Some(false) && !key.can_disable() {
         return Err(hypha_notifications::TemplateError::Required(key).into());
     }
-    check_against_samples(ports, key, &sources).await?;
+    let written = locale.clone().unwrap_or_else(|| languages.default.clone());
+    check_against_samples(ports, key, &sources, locale.as_ref(), languages, &written).await?;
     let sources = &sources;
+    let locale = locale.as_ref();
     retry_on_conflict(
         move || async move {
             let repo = ports.notification_templates();
-            let template = match repo.get(key, None).await? {
+            match repo.get(key, locale).await? {
                 Some(mut template) => {
                     template.set_sources(Some(sources.clone()));
-                    template.set_enabled(enabled)?;
+                    if let Some(enabled) = enabled {
+                        template.set_enabled(enabled)?;
+                    }
                     repo.update(&mut template).await?;
-                    template
                 }
                 None => {
                     let mut template = Template::new(NewTemplate {
                         key,
-                        locale: None,
+                        locale: locale.cloned(),
                         sources: Some(sources.clone()),
-                        enabled,
+                        enabled: enabled.unwrap_or(true),
                     })?;
                     match repo.insert(&mut template).await {
                         Err(RepoError::Duplicate(keys::TEMPLATE_KEY)) => {
@@ -247,33 +263,54 @@ pub async fn save_template<S: HasNotificationTemplates>(
                         }
                         done => done?,
                     }
-                    template
                 }
-            };
-            Ok(EffectiveTemplate::of(key, Some(&template)))
+            }
+            Ok(template_in_effect(ports, key, locale, languages.default).await?)
         },
         lost_a_race,
     )
     .await
 }
 
-/// Renders `sources` (of `key`) against the samples (`MailContext::checks`): a message
-/// in the layout in effect, or the layout around every message template in effect.
+/// Renders `sources` (of `key`, for `locale`, written in `written`) against the samples in
+/// that language (`MailContext::checks_in`): a message in the layout in effect for it, or
+/// the layout around every message template in effect for it, and around those of the
+/// store's other languages that would send in this layout (having none of their own).
 async fn check_against_samples<S: HasNotificationTemplates>(
     ports: &S,
     key: TemplateKey,
     sources: &TemplateSources,
+    locale: Option<&Language>,
+    languages: TemplateLanguages<'_>,
+    written: &Language,
 ) -> Result<(), CommandError> {
+    let default = languages.default;
+    let reading = Locale::of(written.clone());
+    let stored = ports.notification_templates().list().await?;
     if key.is_layout() {
-        for message in TemplateKey::ALL.into_iter().filter(|k| !k.is_layout()) {
-            let template = template_in_effect(ports, message).await?;
-            for context in MailContext::checks(message) {
-                render(sources.html(), &template.sending_sources(), &context)?;
+        let mut readers = vec![(locale.cloned(), reading)];
+        for other in languages.others.iter().filter(|l| Some(*l) != locale) {
+            let layout = EffectiveTemplate::resolve(key, &stored, Some(other), default);
+            let falls_back_here = match layout.origin() {
+                Origin::Merchant { locale: from } => from.as_ref() == locale,
+                Origin::Default { .. } => locale.is_none(),
+            };
+            if falls_back_here {
+                readers.push((Some(other.clone()), Locale::of(other.clone())));
+            }
+        }
+        for (reader, reading) in &readers {
+            for message in TemplateKey::ALL.into_iter().filter(|k| !k.is_layout()) {
+                let template =
+                    EffectiveTemplate::resolve(message, &stored, reader.as_ref(), default);
+                for context in MailContext::checks_in(message, reading) {
+                    render(sources.html(), &template.sending_sources(), &context)?;
+                }
             }
         }
     } else {
-        let layout = template_in_effect(ports, TemplateKey::Layout).await?;
-        for context in MailContext::checks(key) {
+        let layout = EffectiveTemplate::resolve(TemplateKey::Layout, &stored, locale, default);
+        for context in MailContext::checks_in(key, &reading) {
             render(layout.sending_sources().html(), sources, &context)?;
         }
     }
@@ -289,6 +326,7 @@ async fn preview_context<E: MailEnv, P: MailPorts>(
     branding: &Branding,
     key: TemplateKey,
     order: Option<OrderId>,
+    locale: &Locale,
 ) -> Result<MailContext, CommandError> {
     let as_order = match key {
         TemplateKey::Layout => Some(TemplateKey::OrderConfirmation),
@@ -311,42 +349,63 @@ async fn preview_context<E: MailEnv, P: MailPorts>(
                 &order,
                 payment.as_ref(),
                 None,
+                locale,
             )
             .await
         }
-        _ => {
-            Ok(MailContext::sample(key)
-                .with_branding(branding.shop.clone(), branding.brand.clone()))
-        }
+        _ => Ok(MailContext::sample_in(key, locale)
+            .with_branding(branding.shop.clone(), branding.brand.clone())),
     }
 }
 
+/// The store's languages, for checking a language a request names.
+fn store_languages(branding: &Branding) -> (Language, Vec<Language>) {
+    let store = &branding.store;
+    (
+        store.default_language().clone(),
+        store
+            .languages()
+            .iter()
+            .map(|l| l.language.clone())
+            .collect(),
+    )
+}
+
 /// Renders unsaved sources the way they'd send, with what `preview` renders them
-/// against, and the branding (for a test send's sender).
+/// against, and the branding (for a test send's sender). The sources and formats are
+/// `Sources::previewing`'s, the rule real sends load theirs by, so what the merchant sees
+/// is what that language's emails send.
 async fn render_preview<E: MailEnv, P: MailPorts>(
     env: &E,
     ports: &P,
     key: TemplateKey,
     input: TemplateInput,
     order: Option<OrderId>,
+    language: Option<&Language>,
 ) -> Result<(Rendered, Branding), CommandError> {
-    let sources = input.sources(key)?;
+    let edited = input.sources(key)?;
     let branding = branding(env, ports).await?;
-    let context = preview_context(env, ports, &branding, key, order).await?;
-    let rendered = if key.is_layout() {
-        let confirmation = template_in_effect(ports, TemplateKey::OrderConfirmation).await?;
-        render(sources.html(), &confirmation.sending_sources(), &context)?
-    } else {
-        let layout = template_in_effect(ports, TemplateKey::Layout).await?;
-        render(layout.sending_sources().html(), &sources, &context)?
+    let (default, others) = store_languages(&branding);
+    let languages = TemplateLanguages {
+        default: &default,
+        others: &others,
     };
-    Ok((rendered, branding))
+    let locale = languages
+        .locale(language)
+        .map_err(CommandError::LanguageNotListed)?;
+    let language = locale.unwrap_or_else(|| default.clone());
+    let sources = Sources::previewing(ports, key, edited, &language, &default).await?;
+    let context = preview_context(env, ports, &branding, key, order, &sources.locale).await?;
+    Ok((sources.render(&context)?, branding))
 }
 
-/// Renders unsaved sources of `key`: against the sample with the store's branding, or
-/// against a real `order` (which needs `orders:read` too; the shipping templates use its
-/// newest fulfilment). The layout previews as an order confirmation in it.
-/// `template_invalid` with the part and line when they don't render.
+/// Renders unsaved sources of `key` written for `language` (none: the store's default):
+/// against the sample in that language with the store's branding, or against a real
+/// `order` (which needs `orders:read` too; the shipping templates use its newest
+/// fulfilment; a buyer's email shows its names in the order's language), in the layout in
+/// effect for the language. The layout previews as an order confirmation in it.
+/// `template_invalid` with the part and line when they don't render; `language_not_listed`
+/// for a language the store doesn't have.
 pub async fn preview<E: MailEnv, P: MailPorts>(
     ctx: &Ctx,
     env: &E,
@@ -354,12 +413,15 @@ pub async fn preview<E: MailEnv, P: MailPorts>(
     key: TemplateKey,
     input: TemplateInput,
     order: Option<OrderId>,
+    language: Option<&Language>,
 ) -> Result<Rendered, CommandError> {
     ctx.require(Scope::NotificationsRead)?;
     if order.is_some() {
         ctx.require(Scope::OrdersRead)?;
     }
-    Ok(render_preview(env, ports, key, input, order).await?.0)
+    Ok(render_preview(env, ports, key, input, order, language)
+        .await?
+        .0)
 }
 
 /// The sender every email goes out under: the operator's address with the merchant's
@@ -385,6 +447,7 @@ pub async fn send_test<E, P>(
     key: TemplateKey,
     input: TemplateInput,
     order: Option<OrderId>,
+    language: Option<&Language>,
 ) -> Result<Email, CommandError>
 where
     E: MailEnv,
@@ -405,7 +468,7 @@ where
         .get(user)
         .await?
         .ok_or(CommandError::StaffOnly)?;
-    let (rendered, branding) = render_preview(env, ports, key, input, order).await?;
+    let (rendered, branding) = render_preview(env, ports, key, input, order, language).await?;
     let to = user.email().clone();
     let email = OutgoingEmail {
         id: NotificationId::from_uuid(env.ids().new_uuid()),
@@ -483,6 +546,9 @@ where
         _ => None,
     };
     let payment = newest_payment(ports, order.id()).await?;
+    let language = reading_language(template, &order, &branding);
+    let default = branding.store.default_language();
+    let sources = Sources::load(ports, template, &language, default).await?;
     let context = order_context(
         env,
         ports,
@@ -491,9 +557,9 @@ where
         &order,
         payment.as_ref(),
         fulfillment.as_ref(),
+        &sources.locale,
     )
     .await?;
-    let sources = Sources::load(ports, template).await?;
     let rendering = render_for_sending(&sources, &context)?;
     let message = Message {
         template,
@@ -539,8 +605,8 @@ where
             ship_to: None,
         });
     let branding = branding(env, ports).await?;
-    let context = supplier_order_context(ports, &branding, &po, &sent).await?;
-    let sources = Sources::load(ports, template).await?;
+    let sources = Sources::load_default(ports, template, branding.store.default_language()).await?;
+    let context = supplier_order_context(ports, &branding, &po, &sent, &sources.locale).await?;
     let rendering = render_for_sending(&sources, &context)?;
     let message = Message {
         template,
@@ -596,12 +662,18 @@ where
         Some(base) => format!("{base}{path}?token={token}"),
         None => format!("token {token} (set HYPHA_ADMIN_URL for a link)"),
     };
+    let sources = Sources::load_default(ports, template, branding.store.default_language())
+        .await
+        .map_err(|e| failed(e.into()))?;
+    let locale = &sources.locale;
     let context = MailContext::Staff(StaffMail {
+        language: locale.tag(),
+        dir: locale.dir(),
         shop: branding.shop.clone(),
         brand: branding.brand.clone(),
         user: user_context(&to),
         link,
-        expires_at: TimeValue::of(expires_at, branding.store.timezone()),
+        expires_at: TimeValue::of(expires_at, branding.store.timezone(), locale.formats),
     });
     let message = Message {
         template,
@@ -610,9 +682,6 @@ where
         order: None,
         purchase_order: None,
     };
-    let sources = Sources::load(ports, template)
-        .await
-        .map_err(|e| failed(e.into()))?;
     let record = send_now(env, ports, &branding, &sources, message, &context)
         .await
         .map_err(failed)?;
@@ -645,11 +714,29 @@ where
 {
     let failed = |e: CommandError| NotifyError(e.to_string());
     let branding = branding(env, ports).await.map_err(failed)?;
-    let (template, to, context) = match message {
+    let default = branding.store.default_language();
+    let (template, language) = match &message {
+        CustomerEmail::LoginCode { language, .. } => (TemplateKey::CustomerLoginCode, language),
+        CustomerEmail::ErasureRequested { language, .. } => {
+            (TemplateKey::CustomerErasureRequested, language)
+        }
+    };
+    // The customer's language while the store still offers it, else the default.
+    let offered = branding.store.offered_languages();
+    let language = language
+        .as_ref()
+        .filter(|l| offered.contains(l))
+        .unwrap_or(default);
+    let sources = Sources::load(ports, template, language, default)
+        .await
+        .map_err(|e| failed(e.into()))?;
+    let locale = &sources.locale;
+    let (to, context) = match message {
         CustomerEmail::LoginCode {
             to,
             code,
             expires_at,
+            language: _,
         } => {
             let left = expires_at
                 .unix_secs()
@@ -657,23 +744,31 @@ where
                 .max(0);
             let link = login_link(branding.shop.url.as_deref(), to.as_str(), &code);
             let context = MailContext::Code(CodeMail {
+                language: locale.tag(),
+                dir: locale.dir(),
                 shop: branding.shop.clone(),
                 brand: branding.brand.clone(),
                 email: to.as_str().to_string(),
                 link,
                 code,
-                expires_at: TimeValue::of(expires_at, branding.store.timezone()),
+                expires_at: TimeValue::of(expires_at, branding.store.timezone(), locale.formats),
                 expires_in_minutes: u64::try_from(left / 60).unwrap_or(0).max(1),
             });
-            (TemplateKey::CustomerLoginCode, to, context)
+            (to, context)
         }
-        CustomerEmail::ErasureRequested { to, due_at } => {
+        CustomerEmail::ErasureRequested {
+            to,
+            due_at,
+            language: _,
+        } => {
             let context = MailContext::Erasure(ErasureMail {
+                language: locale.tag(),
+                dir: locale.dir(),
                 shop: branding.shop.clone(),
                 brand: branding.brand.clone(),
-                due_at: TimeValue::of(due_at, branding.store.timezone()),
+                due_at: TimeValue::of(due_at, branding.store.timezone(), locale.formats),
             });
-            (TemplateKey::CustomerErasureRequested, to, context)
+            (to, context)
         }
     };
     let message = Message {
@@ -683,9 +778,6 @@ where
         order: None,
         purchase_order: None,
     };
-    let sources = Sources::load(ports, template)
-        .await
-        .map_err(|e| failed(e.into()))?;
     let record = send_now(env, ports, &branding, &sources, message, &context)
         .await
         .map_err(failed)?;

@@ -38,7 +38,10 @@ pub async fn order_repo<R: OrderRepo>(make: impl AsyncFn() -> R) {
     fulfilment_round_trips(&make().await).await;
     scenario("order: sales add up a period's orders per bucket and currency, with top products");
     sales(&make().await).await;
-    scenario("order: discounts, their shares on lines and shipping, round trip");
+    scenario(
+        "order: discounts, their shares on lines and shipping, the language and the names \
+         in it round trip",
+    );
     discount_round_trips(&make().await).await;
 }
 
@@ -52,6 +55,11 @@ async fn discount_round_trips<R: OrderRepo>(repo: &R) {
     let mut line = plain_line(10);
     line.discounts = vec![share(0, 50, Some(1)), share(1, 45, None)];
     line.total = eur(405);
+    // The names as the buyer read them, in the order's language.
+    line.localized = Some(hypha_orders::LocalizedLine {
+        product_title: format!("{} (de)", line.product_title),
+        variant_title: line.variant_title.as_ref().map(|v| format!("{v} (de)")),
+    });
     let shipping = OrderShippingLine {
         group: hypha_core::ShippingGroupId::from_uuid(Uuid::from_u128(40)),
         lines: vec![line.id],
@@ -66,6 +74,9 @@ async fn discount_round_trips<R: OrderRepo>(repo: &R) {
         total: eur(0),
         estimate_days: None,
         tax: None,
+        localized: Some(hypha_orders::LocalizedShipping {
+            name: "Standardversand".to_string(),
+        }),
     };
     let discount = |n: u128, class, amount: i64, code: Option<&str>| OrderDiscount {
         discount: hypha_core::DiscountId::from_uuid(Uuid::from_u128(n)),
@@ -76,6 +87,9 @@ async fn discount_round_trips<R: OrderRepo>(repo: &R) {
         value: serde_json::json!({"type": "percent", "basis_points": 1000}),
         target: serde_json::json!({"type": "subtotal"}),
         amount: eur(amount),
+        localized: Some(hypha_orders::LocalizedDiscount {
+            title: format!("Angebot {n}"),
+        }),
     };
     let mut order = Order::place(NewOrder {
         id: oid(1),
@@ -130,9 +144,11 @@ async fn discount_round_trips<R: OrderRepo>(repo: &R) {
         shipping_total: eur(0),
         tax_total: eur(0),
         total: eur(405),
+        language: Some(hypha_core::Language::new("de").unwrap()),
     })
     .unwrap();
     repo.insert(&mut order).await.unwrap();
+    assert!(order.lines()[0].localized.is_some());
     assert_eq!(repo.get(oid(1)).await.unwrap(), Some(order));
 }
 
@@ -171,6 +187,7 @@ fn plain_line(id: u128) -> OrderLine {
         compare_at_price: None,
         price_list: None,
         unit_cost: None,
+        localized: None,
     }
 }
 
@@ -202,6 +219,7 @@ fn full_line(id: u128) -> OrderLine {
         price_list: Some(hypha_core::PriceListId::from_uuid(Uuid::from_u128(id + 5))),
         // In another currency than the order's: costs are in the store's.
         unit_cost: Some(hypha_core::UnitCost::parse("0.0035", Currency::USD).unwrap()),
+        localized: None,
     }
 }
 
@@ -243,6 +261,7 @@ fn order_with(n: u128, lines: Vec<OrderLine>, taxes_included: bool) -> Order {
         shipping_total: Money::zero(Currency::EUR),
         tax_total,
         total,
+        language: None,
     })
     .unwrap()
 }
@@ -455,6 +474,7 @@ fn varied(n: u128, amount: i64, currency: Currency, email: &str, country: &str, 
         shipping_total: Money::zero(currency),
         tax_total: Money::zero(currency),
         total: money,
+        language: None,
     })
     .unwrap()
 }
@@ -828,6 +848,7 @@ async fn shipping_round_trips<R: OrderRepo>(repo: &R) {
                 region: TaxRegionId::from_uuid(Uuid::from_u128(53)),
             },
         }),
+        localized: None,
     };
     let plain = OrderShippingLine {
         group: ShippingGroupId::from_uuid(Uuid::from_u128(60)),
@@ -843,6 +864,7 @@ async fn shipping_round_trips<R: OrderRepo>(repo: &R) {
         amount: Price::new(eur(0)).unwrap(),
         estimate_days: None,
         tax: None,
+        localized: None,
     };
     let address = Address::new(AddressParts {
         first_name: Some("Ana".to_string()),
@@ -961,6 +983,7 @@ fn sale(s: Sale) -> Order {
             compare_at_price: None,
             price_list: None,
             unit_cost: None,
+            localized: None,
         })
         .collect();
     let subtotal: i64 = lines.iter().map(|l| l.total.amount()).sum();
@@ -1002,6 +1025,7 @@ fn sale(s: Sale) -> Order {
             amount: Price::new(money(s.shipping)).unwrap(),
             estimate_days: None,
             tax: None,
+            localized: None,
         }];
     }
     snapshot.subtotal = money(subtotal);

@@ -5,15 +5,15 @@ import { Suspense } from "react";
 
 import { type Crumb, PageHeader } from "@/components/page-header";
 import { DetailSkeleton } from "@/components/skeletons";
-import { loadCountries, loaded, requireStaff, sessionClient } from "@/lib/hypha";
+import { loadCountries, loadStore, loaded, requireStaff, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
+import { offeredLanguages } from "@/lib/languages";
 import { hasScope } from "@/lib/navigation";
 import { takenCountries } from "@/lib/regions";
 
 import { CatalogCard } from "./catalog-card";
 import { MarketEditor } from "./market-editor";
 import { PriceListsCard } from "./price-lists-card";
-
-const BACK: Crumb = { label: "Markets", href: "/markets" };
 
 /**
  * A market: its details and countries, the catalog of what it sells (paged by the
@@ -27,32 +27,43 @@ export default async function MarketPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { id } = await params;
-  const query = await searchParams;
+  const [{ id }, query, t] = await Promise.all([params, searchParams, getT()]);
+  const back: Crumb = { label: t("common.markets"), href: "/markets" };
   const productsCursor = typeof query.products === "string" ? query.products : undefined;
 
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={1280}>
-        <Suspense fallback={<DetailSkeleton back={BACK} />}>
-          <Market id={id} productsCursor={productsCursor} />
+        <Suspense fallback={<DetailSkeleton back={back} />}>
+          <Market id={id} productsCursor={productsCursor} back={back} />
         </Suspense>
       </VStack>
     </Section>
   );
 }
 
-async function Market({ id, productsCursor }: { id: string; productsCursor: string | undefined }) {
+async function Market({
+  id,
+  productsCursor,
+  back,
+}: {
+  id: string;
+  productsCursor: string | undefined;
+  back: Crumb;
+}) {
   const client = await sessionClient();
   // Price lists need `pricing:read`; without it the card says so instead. The catalog's
   // own (at most 50) come in one page; the first 100 of the rest are offered to add.
-  const [market, countries, markets, own, all, me] = await Promise.all([
+  const [market, countries, markets, own, all, me, store] = await Promise.all([
     client.GET("/admin/markets/{id}", { params: { path: { id } } }).then(loaded),
     loadCountries(),
     client.GET("/admin/markets").then(loaded),
     client.GET("/admin/price-lists", { params: { query: { market: id, limit: 100 } } }),
     client.GET("/admin/price-lists", { params: { query: { sort: "name_asc", limit: 100 } } }),
     requireStaff(),
+    // What the market can offer comes from the store's languages; without
+    // `stores:read` the page shows no Languages card.
+    loadStore(),
   ]);
 
   const catalogId = market.catalog;
@@ -69,12 +80,25 @@ async function Market({ id, productsCursor }: { id: string; productsCursor: stri
 
   return (
     <>
-      <PageHeader title={market.name} back={BACK} />
+      <PageHeader title={market.name} back={back} />
       <MarketEditor
-        key={[market.name, market.prices_include_tax, ...market.countries].join("|")}
+        key={JSON.stringify([
+          market.name,
+          market.prices_include_tax,
+          market.countries,
+          market.languages,
+        ])}
         market={market}
         countries={countries}
         taken={takenCountries(markets.items, market.id)}
+        languages={
+          store
+            ? {
+                storeDefault: store.default_language,
+                offered: offeredLanguages(store.default_language, store.languages),
+              }
+            : undefined
+        }
         main={
           <>
             <CatalogCard

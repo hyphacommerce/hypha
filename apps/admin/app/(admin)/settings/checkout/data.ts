@@ -4,6 +4,7 @@
 import { flatten } from "@/lib/categories";
 import type { AddressFormat } from "@/lib/address";
 import type { RuleForm, RuleOptions } from "@/lib/checkout-rules";
+import { getFormat } from "@/lib/get-format";
 import { loadCountries, type sessionClient } from "@/lib/hypha";
 import { countryOptions } from "@/lib/regions";
 
@@ -14,7 +15,8 @@ type Client = Awaited<ReturnType<typeof sessionClient>>;
  * nothing it doesn't know, and the rule shows IDs for those.
  */
 export async function loadRuleOptions(client: Client): Promise<RuleOptions> {
-  const [countries, markets, channels, zones, categories] = await Promise.all([
+  const [format, countries, markets, channels, zones, categories] = await Promise.all([
+    getFormat(),
     loadCountries().catch(() => []),
     client.GET("/admin/markets"),
     client.GET("/admin/channels"),
@@ -22,7 +24,7 @@ export async function loadRuleOptions(client: Client): Promise<RuleOptions> {
     client.GET("/admin/categories"),
   ]);
   return {
-    countries: countryOptions(countries),
+    countries: countryOptions(countries, format.locale),
     defaultCountry: markets.data?.items?.[0]?.countries?.[0],
     markets: (markets.data?.items ?? []).map((m) => ({
       value: m.id,

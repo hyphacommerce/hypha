@@ -24,6 +24,7 @@ import {
   covers,
   visibleSections,
 } from "@/lib/navigation";
+import { useT } from "@/lib/use-t";
 
 import { logout } from "../login/actions";
 
@@ -42,9 +43,10 @@ function currentHref(pathname: string): string | undefined {
 /** The setup guide's nav item, while the guide isn't finished. */
 export function SetupNavItem() {
   const pathname = usePathname();
+  const t = useT();
   return (
     <SideNavItem
-      label="Setup guide"
+      label={t("nav.setup_guide")}
       href="/setup"
       icon={RocketLaunchIcon}
       isSelected={pathname === "/setup"}
@@ -54,16 +56,17 @@ export function SetupNavItem() {
 
 /** The signed-in staff member's menu. */
 export function UserMenu({ name, email }: { name: string; email: string }) {
+  const t = useT();
   return (
     <DropdownMenu button={{ label: name, variant: "ghost", size: "sm" }} menuWidth={240}>
       <DropdownMenuItem
-        label={ACCOUNT_NAV.label}
+        label={t(ACCOUNT_NAV.label)}
         description={email}
         icon={ACCOUNT_NAV.icon}
         href={ACCOUNT_NAV.href}
       />
       <DropdownMenuItem
-        label="Sign out"
+        label={t("common.sign_out")}
         icon={ArrowRightStartOnRectangleIcon}
         onClick={() => startTransition(() => logout())}
       />
@@ -72,6 +75,7 @@ export function UserMenu({ name, email }: { name: string; email: string }) {
 }
 
 function NavEntry({ item, current }: { item: NavItem; current: string | undefined }) {
+  const t = useT();
   const inSection = [item, ...(item.children ?? [])].some((i) => i.href === current);
   // The pages under a section show while you're in it; the toggle overrides that until
   // you enter or leave a section, which opens or closes it again.
@@ -80,7 +84,7 @@ function NavEntry({ item, current }: { item: NavItem; current: string | undefine
   if (!item.children?.length) {
     return (
       <SideNavItem
-        label={item.label}
+        label={t(item.label)}
         href={item.href}
         icon={item.icon}
         isSelected={current === item.href}
@@ -89,7 +93,7 @@ function NavEntry({ item, current }: { item: NavItem; current: string | undefine
   }
   return (
     <SideNavItem
-      label={item.label}
+      label={t(item.label)}
       href={item.href}
       icon={item.icon}
       isSelected={current === item.href}
@@ -101,7 +105,7 @@ function NavEntry({ item, current }: { item: NavItem; current: string | undefine
       {item.children.map((child) => (
         <SideNavItem
           key={child.href}
-          label={child.label}
+          label={t(child.label)}
           href={child.href}
           isSelected={current === child.href}
         />
@@ -122,8 +126,9 @@ export function MainNav({
   setupItem?: ReactNode;
 }) {
   const current = currentHref(usePathname());
+  const t = useT();
   return visibleSections(scopes).map((section) => (
-    <SideNavSection key={section.title} title={section.title}>
+    <SideNavSection key={section.title} title={t(section.title)}>
       {section.items.map((item) => (
         <Fragment key={item.href}>
           {item.href === SETTINGS_NAV.href && setupItem}
@@ -147,12 +152,13 @@ export function AdminShell({
   userMenu: ReactNode;
   children: ReactNode;
 }) {
+  const t = useT();
   return (
     <AppShell
       contentPadding={0}
       topNav={
         <TopNav
-          label="Hypha admin"
+          label={t("nav.app_name")}
           heading={<Wordmark />}
           endContent={
             <HStack gap={1} vAlign="center">

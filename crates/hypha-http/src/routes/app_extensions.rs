@@ -330,7 +330,7 @@ pub async fn list_admin<S: Storage>(
         }
         if let Some(settings) = c.settings {
             response.settings.push(SettingsExtension {
-                app: key.clone(),
+                app: key,
                 schema: settings.schema,
                 secret_fields: settings.secret_fields,
                 proxy: c.proxy,

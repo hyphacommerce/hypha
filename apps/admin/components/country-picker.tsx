@@ -11,15 +11,18 @@ import { MultiSelector } from "@astryxdesign/core/MultiSelector";
 import { Text } from "@astryxdesign/core/Text";
 import { useState } from "react";
 
+import type { KeyIn } from "@/lib/messages";
 import { type Country, REGIONS, countryName, countryOptions } from "@/lib/regions";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 export function CountryPicker({
   countries,
   taken,
   value,
   onChange,
-  label = "Countries",
-  description = "A country belongs to one market at most.",
+  label,
+  description,
   status,
 }: {
   countries: Country[];
@@ -31,32 +34,43 @@ export function CountryPicker({
   description?: string;
   status?: { type: "error" | "warning" | "success"; message?: string };
 }) {
+  const t = useT();
+  const format = useFormat();
   const [note, setNote] = useState<string>();
   const known = new Set(countries.map((c) => c.code));
   const free = (codes: string[]) => codes.filter((c) => known.has(c) && !taken[c]);
 
-  const add = (codes: string[], what: string) => {
+  /** Adds the free ones of `codes`: a region's (its label's key), or every country's. */
+  const add = (codes: string[], region?: KeyIn<"components">) => {
     const available = free(codes);
     const left = codes.filter((c) => known.has(c)).length - available.length;
     onChange([...new Set([...value, ...available])]);
     setNote(
-      left > 0
-        ? `Added ${what}; ${left} ${left === 1 ? "country is" : "countries are"} in other markets.`
-        : undefined,
+      left === 0
+        ? undefined
+        : region
+          ? t("components.country_picker_added_region", { region: t(region), left })
+          : t("components.country_picker_added_all", { left }),
     );
   };
 
-  const options = countryOptions(countries).map((option) => {
+  const options = countryOptions(countries, format.locale).map((option) => {
     const market = taken[option.value];
-    return market ? { ...option, label: `${option.label} · in ${market}`, disabled: true } : option;
+    return market
+      ? {
+          ...option,
+          label: t("components.country_picker_taken", { country: option.label, market }),
+          disabled: true,
+        }
+      : option;
   });
-  const names = value.map((code) => countryName(code, countries));
+  const names = value.map((code) => countryName(code, countries, format.locale));
 
   return (
     <VStack gap={2}>
       <MultiSelector
-        label={label}
-        description={description}
+        label={label ?? t("common.countries")}
+        description={description ?? t("components.country_picker_description")}
         options={options}
         value={value}
         onChange={(codes) => {
@@ -66,27 +80,25 @@ export function CountryPicker({
         hasSearch
         triggerDisplay="count"
         formatValue={(items) =>
-          items.length === 1 ? (items[0]?.label ?? "1 country") : `${items.length} countries`
+          (items.length === 1 ? items[0]?.label : undefined) ??
+          t("common.countries_count", { count: items.length })
         }
-        placeholder="Choose countries"
+        placeholder={t("components.country_picker_placeholder")}
         status={status}
       />
       <HStack gap={1} wrap="wrap">
         <Button
-          label={`All available (${free(countries.map((c) => c.code)).length})`}
+          label={t("components.country_picker_all_available", {
+            count: free(countries.map((c) => c.code)).length,
+          })}
           size="sm"
           variant="secondary"
-          onClick={() =>
-            add(
-              countries.map((c) => c.code),
-              "every free country",
-            )
-          }
+          onClick={() => add(countries.map((c) => c.code))}
         />
         {REGIONS.map((region) => (
           <Button
             key={region.key}
-            label={region.label}
+            label={t(region.label)}
             size="sm"
             variant="ghost"
             onClick={() => add(region.codes, region.label)}
@@ -94,7 +106,7 @@ export function CountryPicker({
         ))}
         {value.length > 0 && (
           <Button
-            label="Clear"
+            label={t("common.clear")}
             size="sm"
             variant="ghost"
             onClick={() => {
@@ -107,8 +119,11 @@ export function CountryPicker({
       {value.length > 0 && (
         <Text type="supporting" color="secondary">
           {names.length <= 6
-            ? names.join(", ")
-            : `${names.slice(0, 6).join(", ")} and ${names.length - 6} more`}
+            ? format.list(names, "unit")
+            : t("components.country_picker_names_more", {
+                names: format.list(names.slice(0, 6), "unit"),
+                count: names.length - 6,
+              })}
         </Text>
       )}
       {note && (

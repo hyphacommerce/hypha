@@ -28,11 +28,9 @@ function problemsOf(error: { code: string; details?: unknown }): RuleProblems | 
   return problems;
 }
 
-function failed(error: { code: string; error: string; details?: unknown }): Result {
+async function failed(error: { code: string; error: string; details?: unknown }): Promise<Result> {
   const problems = problemsOf(error);
-  return problems
-    ? { error: "Check the highlighted parts of the rule.", problems }
-    : { error: describe(error) };
+  return { error: await describe(error), problems };
 }
 
 function refresh() {
@@ -64,7 +62,7 @@ export async function setRuleEnabled(id: string, enabled: boolean): Promise<Resu
     params: { path: { id } },
     body: { enabled },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }
@@ -76,7 +74,7 @@ export async function moveRule(id: string, position: number): Promise<Result> {
     params: { path: { id } },
     body: { position },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }
@@ -86,7 +84,7 @@ export async function deleteRule(id: string): Promise<Result> {
   const { error } = await client.DELETE("/admin/checkout-rules/{id}", {
     params: { path: { id } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }
@@ -111,7 +109,7 @@ export async function setCheckoutApp(setting: AppSetting, app: string | null): P
   const { error } = await client.PATCH("/admin/checkout-settings", {
     body: { [setting]: app },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }
@@ -125,7 +123,7 @@ export async function setValidationApps(apps: ValidationApp[]): Promise<Result> 
   const { error } = await client.PATCH("/admin/checkout-settings", {
     body: { validation_apps: apps },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh();
   return {};
 }

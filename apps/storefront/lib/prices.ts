@@ -1,6 +1,7 @@
 // What a price is shown as: struck-through compare-at prices ("was"), quantity breaks
 // and the words a screen reader gets for them. Pure, so servers and browsers share it.
 
+import type { TFor } from "./messages.ts";
 import { type Money, formatMoney } from "./money.ts";
 
 export type PriceBreak = { min_quantity: number; price: Money };
@@ -28,13 +29,16 @@ export function sortedBreaks(breaks: readonly PriceBreak[]): PriceBreak[] {
 }
 
 /** "Buy 10+: €8.00 each". */
-export function breakLabel(b: PriceBreak, digits: number): string {
-  return `Buy ${b.min_quantity}+: ${formatMoney(b.price, digits)} each`;
+export function breakLabel(t: TFor<"product">, b: PriceBreak, digits: number): string {
+  return t("product.price_break", {
+    quantity: b.min_quantity,
+    price: formatMoney(b.price, digits, t.locale),
+  });
 }
 
 /** What a screen reader hears for a struck-through price: "Was €40.00, now €30.00". */
-export function saleLabel(was: string, now: string): string {
-  return `Was ${was}, now ${now}`;
+export function saleLabel(t: TFor<"common">, was: string, now: string): string {
+  return t("common.was_now", { was, now });
 }
 
 /** A cart or order line's compare-at total: the unit compare-at times the quantity, shown only

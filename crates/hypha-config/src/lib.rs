@@ -23,6 +23,7 @@ use hypha_extensions::ExtensionSettings;
 use hypha_media::MediaSettings;
 use hypha_notifications::{LONGEST_SEND, SendSettings};
 use hypha_search::SyncSettings;
+use hypha_translations::SourceSyncSettings;
 use ipnet::IpNet;
 use thiserror::Error;
 
@@ -52,6 +53,8 @@ pub struct Config {
     pub dispatch: DispatchSettings,
     /// The search sync job's batch and lease.
     pub search_sync: SyncSettings,
+    /// The translation sources job's batch.
+    pub translation_sources: SourceSyncSettings,
     /// The send job's batch, lease and retries.
     pub send_notifications: SendSettings,
     /// How long the extension call log is kept.
@@ -184,6 +187,7 @@ pub struct JobsConfig {
     pub prune: JobConfig,
     pub media_sweep: JobConfig,
     pub search_sync: JobConfig,
+    pub translation_sources: JobConfig,
     pub send_notifications: JobConfig,
     pub price_list_schedule: JobConfig,
     pub discount_schedule: JobConfig,
@@ -792,6 +796,10 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
         ),
         ("jobs.search_sync.interval", jobs.search_sync.interval),
         (
+            "jobs.translation_sources.interval",
+            jobs.translation_sources.interval,
+        ),
+        (
             "jobs.send_notifications.interval",
             jobs.send_notifications.interval,
         ),
@@ -808,6 +816,10 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
     for (key, batch) in [
         ("jobs.dispatch.batch", jobs.dispatch.batch),
         ("jobs.search_sync.batch", jobs.search_sync.batch),
+        (
+            "jobs.translation_sources.batch",
+            jobs.translation_sources.batch,
+        ),
         (
             "jobs.send_notifications.batch",
             jobs.send_notifications.batch,
@@ -1003,6 +1015,9 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
             batch: jobs.search_sync.batch,
             lease: jobs.search_sync.lease.0,
         },
+        translation_sources: SourceSyncSettings {
+            batch: jobs.translation_sources.batch,
+        },
         send_notifications: SendSettings {
             batch: jobs.send_notifications.batch,
             lease: jobs.send_notifications.lease.0,
@@ -1017,6 +1032,10 @@ fn check(file: &File, problems: &mut Vec<Problem>) -> Config {
             prune: job(jobs.prune.enabled, jobs.prune.interval),
             media_sweep: job(jobs.media_sweep.enabled, jobs.media_sweep.interval),
             search_sync: job(jobs.search_sync.enabled, jobs.search_sync.interval),
+            translation_sources: job(
+                jobs.translation_sources.enabled,
+                jobs.translation_sources.interval,
+            ),
             send_notifications: job(
                 jobs.send_notifications.enabled,
                 jobs.send_notifications.interval,
@@ -1321,6 +1340,23 @@ mod tests {
                 "jobs.search_sync.batch: is 0, 1 to 1000",
                 "jobs.search_sync.lease: is 5s, at least 10s is needed",
             ]
+        );
+    }
+
+    #[test]
+    fn translation_sources_have_a_batch() {
+        let config = load("").unwrap();
+        assert_eq!(config.translation_sources, SourceSyncSettings::default());
+        assert!(config.jobs.translation_sources.enabled);
+        let set = load("[jobs.translation_sources]\nbatch = 7\ninterval = \"5m\"").unwrap();
+        assert_eq!(set.translation_sources.batch, 7);
+        assert_eq!(
+            set.jobs.translation_sources.interval,
+            Duration::from_secs(300)
+        );
+        assert_eq!(
+            problems(load("[jobs.translation_sources]\nbatch = 1001")),
+            ["jobs.translation_sources.batch: is 1001, 1 to 1000"]
         );
     }
 

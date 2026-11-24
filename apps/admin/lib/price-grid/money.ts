@@ -1,6 +1,14 @@
 // Money as the grid and the CSV files type it: decimal text in and out, integer minor
 // units in between. Nothing here goes through a float, so "0.29" is 29 cents, never
 // 28.999….
+//
+// None of it follows the reader's language: what's typed, pasted from a spreadsheet or
+// read from a file means the same amount for everyone ("." and "," are both accepted,
+// and what's written back is always plain decimals with a "."). Only the messages are
+// translated.
+
+import type { KeyIn } from "../messages";
+import type { AmountT, PriceT } from "./types.ts";
 
 /** The largest amount the API takes either way (2⁵³ − 1), so JSON keeps it exact. */
 export const MAX_AMOUNT = 2 ** 53 - 1;
@@ -12,8 +20,38 @@ export const MAX_BASIS_POINTS = 1_000_000;
 
 export type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
 
-const ok = <T>(value: T): Parsed<T> => ({ ok: true, value });
-const fail = <T>(error: string): Parsed<T> => ({ ok: false, error });
+/** What's wrong with typed text, to be said by a translator `Tr`. */
+export type Problem<Tr = PriceT> = (t: Tr) => string;
+
+/**
+ * Typed text read without a translator: the value, or the problem still to be said. What
+ * the parsers work in, so a caller that only asks whether text parses needs no language.
+ */
+export type Read<T, Tr = PriceT> = { ok: true; value: T } | { ok: false; problem: Problem<Tr> };
+
+type Values = Readonly<Record<string, string | number>>;
+type AmountKey = Extract<KeyIn<"components">, `components.amount_${string}`>;
+type PercentKey = Extract<KeyIn<"price_lists">, `price_lists.percent_${string}`>;
+
+const amountProblem =
+  (key: AmountKey, values: Values = {}): Problem<AmountT> =>
+  (t) =>
+    t(key, values);
+const percentProblem =
+  (key: PercentKey): Problem =>
+  (t) =>
+    t(key);
+
+const ok = <T>(value: T): { ok: true; value: T } => ({ ok: true, value });
+const fail = <Tr>(problem: Problem<Tr>): { ok: false; problem: Problem<Tr> } => ({
+  ok: false,
+  problem,
+});
+
+/** A read as its caller shows it: the problem in `t`'s language. */
+export function said<T, Tr>(read: Read<T, Tr>, t: Tr): Parsed<T> {
+  return read.ok ? read : { ok: false, error: read.problem(t) };
+}
 
 // Spaces (incl. no-break and narrow no-break ones) and apostrophes ("1'234.50", Swiss)
 // only ever group thousands.
@@ -36,7 +74,11 @@ function isCurrencyCode(code: string): boolean {
   return knownCodes.has(code);
 }
 
-/** How `currency` is written in English ("€", "$", "CA$"), longest first. */
+/**
+ * How `currency` is written in English ("€", "$", "CA$"), longest first. English whatever
+ * the reader's language: these are the signs stripped from typed and pasted amounts, and
+ * the same text must parse alike for everyone.
+ */
 function symbolsOf(currency: string): string[] {
   const symbols = new Set<string>();
   for (const currencyDisplay of ["symbol", "narrowSymbol"] as const) {
@@ -56,10 +98,10 @@ function symbolsOf(currency: string): string[] {
  * `text` without `currency`'s code or symbol at its ends. Another currency's code or any
  * other currency sign is an error: "$12" in a EUR list is a mistake, not 12 euros.
  */
-function stripCurrency(text: string, currency: string): Parsed<string> {
+function stripCurrency(text: string, currency: string): Read<string, AmountT> {
   const symbols = symbolsOf(currency);
   const foreign = (written: string) =>
-    fail<string>(`That's in ${written}; this list is in ${currency}.`);
+    fail(amountProblem("components.amount_foreign_currency", { written, currency }));
   let rest = text;
   for (const end of ["start", "end"] as const) {
     const own = symbols.find((s) => (end === "start" ? rest.startsWith(s) : rest.endsWith(s)));
@@ -88,15 +130,35 @@ function stripCurrency(text: string, currency: string): Parsed<string> {
  * decimal point, except that "1,234" (three digits the currency doesn't have) is refused
  * as ambiguous; in KWD, with three digits, it's 1.234. Negative amounts and more decimals
  * than the currency has are refused, never rounded. `currency`'s code or symbol may stand
- * at either end; another currency's is refused.
+ * at either end; another currency's is refused. The error is in `t`'s language.
  */
-export function parseAmount(input: string, digits: number, currency: string): Parsed<number> {
+export function parseAmount(
+  input: string,
+  digits: number,
+  currency: string,
+  t: AmountT,
+): Parsed<number> {
+  return said(readAmount(input, digits, currency), t);
+}
+
+/** The amount `parseAmount` reads, or null when the text isn't one: for a caller that doesn't say why. */
+export function amountOf(input: string, digits: number, currency: string): number | null {
+  const read = readAmount(input, digits, currency);
+  return read.ok ? read.value : null;
+}
+
+/** `parseAmount` before its problem is said. */
+export function readAmount(input: string, digits: number, currency: string): Read<number, AmountT> {
+  const garbage = () =>
+    fail(amountProblem("components.amount_invalid", { input: JSON.stringify(input.trim()) }));
   const stripped = stripCurrency(input.trim(), currency);
   if (!stripped.ok) return stripped;
   const text = stripped.value.replaceAll(GROUPING, "");
-  if (text === "") return input.trim() === "" ? fail("Enter an amount.") : garbage(input);
-  if (/^[-−]/.test(text)) return fail("Can't be negative.");
-  if (!/^\+?[\d.,]+$/.test(text) || !/\d/.test(text)) return garbage(input);
+  if (text === "") {
+    return input.trim() === "" ? fail(amountProblem("components.amount_required")) : garbage();
+  }
+  if (/^[-−]/.test(text)) return fail(amountProblem("components.amount_negative"));
+  if (!/^\+?[\d.,]+$/.test(text) || !/\d/.test(text)) return garbage();
   const body = text.replace(/^\+/, "");
 
   const lastDot = body.lastIndexOf(".");
@@ -109,7 +171,7 @@ export function parseAmount(input: string, digits: number, currency: string): Pa
     const group = point === lastDot ? "," : ".";
     const head = body.slice(0, point);
     fraction = body.slice(point + 1);
-    if (head.includes(body.charAt(point)) || !isGrouped(head, group)) return garbage(input);
+    if (head.includes(body.charAt(point)) || !isGrouped(head, group)) return garbage();
     whole = head.replaceAll(group, "");
   } else if (lastDot >= 0 || lastComma >= 0) {
     const separator = lastDot >= 0 ? "." : ",";
@@ -123,11 +185,14 @@ export function parseAmount(input: string, digits: number, currency: string): Pa
     ) {
       // "1,234" is a thousand to some and one and a bit to others: a price can't guess.
       return fail(
-        `${JSON.stringify(input.trim())} is ambiguous: write it without the separator, or with ${digits} decimals.`,
+        amountProblem("components.amount_ambiguous", {
+          input: JSON.stringify(input.trim()),
+          digits,
+        }),
       );
     }
     if (parts.length > 2) {
-      if (!isGrouped(body, separator)) return garbage(input);
+      if (!isGrouped(body, separator)) return garbage();
       whole = parts.join("");
       fraction = "";
     } else {
@@ -140,15 +205,17 @@ export function parseAmount(input: string, digits: number, currency: string): Pa
   }
 
   if (!/^\d*$/.test(whole) || !/^\d*$/.test(fraction) || whole + fraction === "") {
-    return garbage(input);
+    return garbage();
   }
   if (fraction.length > digits) {
     return fail(
-      digits === 0 ? "This currency has no decimals." : `At most ${digits} decimal places.`,
+      digits === 0
+        ? amountProblem("components.amount_no_decimals")
+        : amountProblem("components.amount_too_many_decimals", { digits }),
     );
   }
   const amount = BigInt((whole || "0") + fraction.padEnd(digits, "0"));
-  if (amount > BigInt(MAX_AMOUNT)) return fail("Too large.");
+  if (amount > BigInt(MAX_AMOUNT)) return fail(amountProblem("components.amount_too_large"));
   return ok(Number(amount));
 }
 
@@ -158,10 +225,6 @@ function isGrouped(text: string, separator: string): boolean {
   return (
     first !== undefined && /^\d{1,3}$/.test(first) && rest.every((group) => /^\d{3}$/.test(group))
   );
-}
-
-function garbage<T>(input: string): Parsed<T> {
-  return fail(`${JSON.stringify(input.trim())} isn't an amount.`);
 }
 
 /**
@@ -212,18 +275,29 @@ export function adjustAmount(amount: number, bps: number): number | null {
 /**
  * Basis points from a typed percentage, negative for a discount: "-10", "+5.5", "10%",
  * "−12,25" (a typographic minus and a decimal comma too). At most two decimals, from
- * −100% to +10,000%.
+ * −100% to +10,000%. The error is in `t`'s language.
  */
-export function parsePercent(input: string): Parsed<number> {
+export function parsePercent(input: string, t: PriceT): Parsed<number> {
+  return said(readPercent(input), t);
+}
+
+/** The basis points `parsePercent` reads, or null when the text isn't a percentage. */
+export function percentOf(input: string): number | null {
+  const read = readPercent(input);
+  return read.ok ? read.value : null;
+}
+
+function readPercent(input: string): Read<number> {
   const match = /^([-+−])?\s*(\d+)(?:[.,](\d+))?\s*%?$/.exec(input.trim());
-  if (!match) return fail("A percentage, like -10 or 5.5.");
+  if (!match) return fail(percentProblem("price_lists.percent_invalid"));
   const [, sign, whole = "", fraction = ""] = match;
-  if (fraction.length > 2) return fail("At most two decimal places.");
+  if (fraction.length > 2) return fail(percentProblem("price_lists.percent_too_many_decimals"));
   const magnitude = Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
-  if (!Number.isSafeInteger(magnitude)) return fail("Too large.");
+  if (!Number.isSafeInteger(magnitude))
+    return fail(percentProblem("price_lists.percent_too_large"));
   // `-0` would read back as "-0".
   const bps = (sign === "-" || sign === "−") && magnitude > 0 ? -magnitude : magnitude;
-  if (bps < MIN_BASIS_POINTS) return fail("Can't take off more than 100%.");
-  if (bps > MAX_BASIS_POINTS) return fail("At most +10,000%.");
+  if (bps < MIN_BASIS_POINTS) return fail(percentProblem("price_lists.percent_below_minimum"));
+  if (bps > MAX_BASIS_POINTS) return fail(percentProblem("price_lists.percent_above_maximum"));
   return ok(bps);
 }

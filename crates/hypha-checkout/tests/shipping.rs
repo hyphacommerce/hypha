@@ -35,6 +35,11 @@ use hypha_testkit::{FixedClock, InMemoryPorts, SequentialIds};
 use pollster::block_on;
 use uuid::Uuid;
 
+/// A store in English alone.
+fn languages() -> hypha_cart::ContentLanguages {
+    hypha_cart::ContentLanguages::only(hypha_core::Language::new("en").unwrap())
+}
+
 fn hr() -> CountryCode {
     CountryCode::new("HR").unwrap()
 }
@@ -182,6 +187,7 @@ impl World {
             country: "HR".to_string(),
             idempotency: None,
             customer: None,
+            language: None,
         };
         let cart = block_on(create_cart(
             &self.ports.storefront(),
@@ -241,6 +247,7 @@ impl World {
             &Ctx::system(),
             &self.ports,
             &self.dhl,
+            &languages(),
             &self.clock,
             cart,
             group,
@@ -259,6 +266,9 @@ impl World {
             expected_total: expected,
             idempotency: None,
             return_url: None,
+            languages: hypha_checkout::ContentLanguages::only(
+                hypha_core::Language::new("en").unwrap(),
+            ),
         };
         block_on(checkout(
             &Ctx::system(),
@@ -523,6 +533,9 @@ impl World {
             expected_total: None,
             idempotency: None,
             return_url: None,
+            languages: hypha_checkout::ContentLanguages::only(
+                hypha_core::Language::new("en").unwrap(),
+            ),
         };
         let placed = block_on(checkout(
             &Ctx::system(),

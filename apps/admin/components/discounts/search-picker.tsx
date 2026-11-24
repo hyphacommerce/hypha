@@ -15,25 +15,16 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { useEffect, useRef, useState } from "react";
 
+import { useT } from "@/lib/use-t";
+
 import { type PickerRow, type PickerRows, searchCustomers, searchVariants } from "./picker-actions";
 
 export type { PickerRow };
 
 const SOURCES = {
-  variants: {
-    load: searchVariants,
-    placeholder: "Search by product title, handle or SKU",
-    noun: "variants",
-  },
-  customers: {
-    load: searchCustomers,
-    placeholder: "Search by name or email",
-    noun: "customers",
-  },
-} satisfies Record<
-  string,
-  { load: (q: string, cursor?: string) => Promise<PickerRows>; placeholder: string; noun: string }
->;
+  variants: searchVariants,
+  customers: searchCustomers,
+} satisfies Record<string, (q: string, cursor?: string) => Promise<PickerRows>>;
 
 export function SearchPicker({
   source,
@@ -49,7 +40,8 @@ export function SearchPicker({
   onConfirm: (rows: PickerRow[]) => void;
   onClose: () => void;
 }) {
-  const { load, placeholder, noun } = SOURCES[source];
+  const t = useT<"discounts">();
+  const load = SOURCES[source];
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<PickerRow[]>();
   const [next, setNext] = useState<string | null>(null);
@@ -115,9 +107,9 @@ export function SearchPicker({
       </div>
       <VStack gap={3} padding={4}>
         <TextInput
-          label={`Search ${noun}`}
+          label={t("discounts.picker_search", { source })}
           isLabelHidden
-          placeholder={placeholder}
+          placeholder={t("discounts.picker_placeholder", { source })}
           startIcon={MagnifyingGlassIcon}
           value={q}
           onChange={setQ}
@@ -136,7 +128,11 @@ export function SearchPicker({
           </VStack>
         ) : rows && rows.length === 0 ? (
           <VStack gap={1} padding={6} hAlign="center">
-            <Text weight="medium">{q ? `No ${noun} match` : `No ${noun} yet`}</Text>
+            <Text weight="medium">
+              {q
+                ? t("discounts.picker_no_match", { source })
+                : t("discounts.picker_none_yet", { source })}
+            </Text>
           </VStack>
         ) : (
           <div style={{ opacity: isLoading ? 0.6 : 1 }}>
@@ -156,11 +152,11 @@ export function SearchPicker({
                 >
                   <div role="presentation" onClick={(e) => e.stopPropagation()}>
                     <CheckboxInput
-                      label={`Pick ${row.label}`}
+                      label={t("discounts.picker_pick", { name: row.label })}
                       isLabelHidden
                       value={already || isPicked}
                       isDisabled={already}
-                      disabledMessage={already ? "Already chosen" : undefined}
+                      disabledMessage={already ? t("discounts.picker_already_chosen") : undefined}
                       onChange={() => toggle(row)}
                     />
                   </div>
@@ -180,7 +176,7 @@ export function SearchPicker({
             {next && (
               <HStack hAlign="center" padding={3}>
                 <Button
-                  label="Load more"
+                  label={t("common.load_more")}
                   variant="ghost"
                   size="sm"
                   isLoading={isLoadingMore}
@@ -194,12 +190,18 @@ export function SearchPicker({
 
       <HStack gap={2} hAlign="between" vAlign="center" padding={4}>
         <Text type="supporting" color="secondary">
-          {picked.size === 0 ? `Pick one or more ${noun}` : `${picked.size} selected`}
+          {picked.size === 0
+            ? t("discounts.picker_pick_some", { source })
+            : t("common.selected_count", { count: picked.size })}
         </Text>
         <HStack gap={2}>
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
+          <Button label={t("common.cancel")} variant="ghost" onClick={onClose} />
           <Button
-            label={picked.size > 1 ? `Add ${picked.size}` : "Add"}
+            label={
+              picked.size > 1
+                ? t("discounts.picker_add_count", { count: picked.size })
+                : t("common.add")
+            }
             variant="primary"
             isDisabled={picked.size === 0}
             onClick={() => onConfirm([...picked.values()])}

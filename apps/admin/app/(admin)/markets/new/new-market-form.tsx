@@ -13,6 +13,8 @@ import { CountryPicker } from "@/components/country-picker";
 import { useCurrencies } from "@/components/currencies";
 import { currencyCodes } from "@/lib/format";
 import { type Country, currencyOptions } from "@/lib/regions";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { createMarket } from "../actions";
 
@@ -24,6 +26,8 @@ export function NewMarketForm({
   /** Countries other markets have (`takenCountries`). */
   taken: Record<string, string>;
 }) {
+  const t = useT<"markets">();
+  const format = useFormat();
   const currencies = useCurrencies();
   const [name, setName] = useState("");
   const [chosen, setChosen] = useState<string[]>([]);
@@ -46,9 +50,9 @@ export function NewMarketForm({
       <VStack gap={4}>
         {error && <Banner status="error" title={error} />}
         <TextInput
-          label="Name"
-          placeholder="Eurozone"
-          description="For staff only; shoppers see their country."
+          label={t("common.name")}
+          placeholder={t("markets.new_name_placeholder")}
+          description={t("markets.new_name_description")}
           value={name}
           onChange={setName}
           onEnter={submit}
@@ -56,24 +60,24 @@ export function NewMarketForm({
         />
         <CountryPicker countries={countries} taken={taken} value={chosen} onChange={setChosen} />
         <Selector
-          label="Currency"
-          description="What the market's prices are in. It can't change later: price lists depend on it."
-          options={currencyOptions(currencyCodes(currencies))}
+          label={t("common.currency")}
+          description={t("markets.new_currency_description")}
+          options={currencyOptions(currencyCodes(currencies), format.locale)}
           value={currency}
           onChange={setCurrency}
           hasSearch
-          placeholder="Choose a currency"
+          placeholder={t("common.choose_currency")}
         />
         <Switch
-          label="Prices include tax"
-          description="On for most of Europe; off where tax is added at checkout, as in the US."
+          label={t("markets.prices_include_tax")}
+          description={t("markets.new_prices_include_tax_description")}
           value={pricesIncludeTax}
           onChange={setPricesIncludeTax}
         />
         <HStack gap={2} hAlign="end">
-          <Button label="Cancel" variant="ghost" href="/markets" />
+          <Button label={t("common.cancel")} variant="ghost" href="/markets" />
           <Button
-            label="Add market"
+            label={t("markets.new_submit")}
             variant="primary"
             isLoading={isPending}
             isDisabled={!name.trim() || chosen.length === 0 || !currency}

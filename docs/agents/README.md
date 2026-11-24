@@ -95,7 +95,10 @@ sees only what its grant allows.
 Operations are the admin API's own (`admin.products.update` is `PATCH
 /admin/products/{id}`), so everything in the [OpenAPI document](../../openapi/admin.json)
 is what an agent can do, with the same validation, errors and redaction. Errors come
-back as tool results carrying Hypha's `{code, error, details}`.
+back as tool results carrying Hypha's `{code, error, details}`. To change part of a
+record, an agent should use its `PATCH` where there is one: a `PUT` replaces the record
+whole, so a translation's `PUT` removes every field of the language it leaves out, while
+`admin.translations.patch` changes only the fields it names.
 
 Money is always in minor units of the currency named beside it (`2490` with `EUR` is
 24.90 €), and times are UTC.

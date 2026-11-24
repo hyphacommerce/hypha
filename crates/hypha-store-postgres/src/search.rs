@@ -5,9 +5,12 @@
 //! `search_index` contract checks it). Everything that defines a match or an order is
 //! computed in Rust when a document is written: its terms (`SearchDocument::terms`;
 //! `tsv` is `array_to_tsvector` of them, so Postgres's parser plays no part and the GIN
-//! index alone decides a text match), its facet values, a lowercased title. SQL only
-//! compares them, byte by byte (`COLLATE "C"`), so the database's locale changes
-//! nothing.
+//! index alone decides a text match), its facet values with their labels, a lowercased
+//! title. SQL only compares them, byte by byte (`COLLATE "C"`), so the database's locale
+//! changes nothing.
+//!
+//! A row is a variant in a market and a language. `replace` takes a product's rows in
+//! every language; a search reads one language's.
 //!
 //! A search is one statement in one snapshot: the matching rows, narrow (no display
 //! columns), materialised once; each group's representative (`DISTINCT ON`, skipped
@@ -20,8 +23,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use hypha_core::{
-    AssetId, CategoryId, ChannelId, MarketId, Money, ProductId, RepoError, Timestamp, VariantId,
-    Version, Versioned, stamp_insert, stamp_update,
+    AssetId, CategoryId, ChannelId, Language, MarketId, Money, ProductId, RepoError, Timestamp,
+    VariantId, Version, Versioned, stamp_insert, stamp_update,
 };
 use hypha_search_index::{
     FacetCounts, FacetKey, FacetValue, Group, Hit, IndexError, MAX_FACET_VALUES, Mark, PriceRange,
@@ -57,11 +60,12 @@ const INSERT_ROWS: usize = 1000;
 
 /// The columns a document is written with, in order (one placeholder each, but `tsv`).
 const COLUMNS: &str =
-    "market_id, product_id, variant_id, listing, channels, categories, handle, title, title_sort,
-    variant_title, description, vendor, product_type, tags, sku, option_names, option_values,
-    currency, price, compare_at, product_min, product_max, listing_min, listing_max, available,
-    image_id, created_us, position, terms_a, terms_b, terms_d, tsv, facets";
-const PER_ROW: usize = 33;
+    "market_id, language, product_id, variant_id, listing, channels, categories, handle, title,
+    title_sort, variant_title, description, vendor, product_type, tags, sku, option_names,
+    option_values, option_name_labels, option_value_labels, currency, price, compare_at,
+    product_min, product_max, listing_min, listing_max, available, image_id, created_us,
+    position, terms_a, terms_b, terms_d, tsv, facets, facet_labels";
+const PER_ROW: usize = 37;
 
 // ---------- the engine ----------
 
@@ -264,6 +268,28 @@ impl<C: PgConnection> SearchIndex for PgStore<C> {
         let n: i64 = col(&row, "n")?;
         Ok(u64::try_from(n).map_err(corrupt)?)
     }
+
+    async fn has_documents(
+        &self,
+        market: MarketId,
+        language: &Language,
+    ) -> Result<bool, IndexError> {
+        let mut conn = self.conn().await;
+        // The key's prefix: one index probe.
+        let row = conn
+            .db()
+            .query_typed_one(
+                "SELECT EXISTS (SELECT 1 FROM search_documents
+                                WHERE market_id = $1 AND language = $2) AS found",
+                &[
+                    (&market.as_uuid(), Type::UUID),
+                    (&language.as_str(), Type::TEXT),
+                ],
+            )
+            .await
+            .map_err(repo_error)?;
+        Ok(col::<bool>(&row, "found")?)
+    }
 }
 
 /// One `INSERT` for `documents` (at most `INSERT_ROWS`).
@@ -280,14 +306,17 @@ async fn insert_documents(
         let terms = d.terms();
         let all_terms = terms.all();
         let (names, values): (Vec<String>, Vec<String>) = d.options.iter().cloned().unzip();
-        let facets: Vec<String> = d
-            .facet_values()
+        let (name_labels, value_labels): (Vec<String>, Vec<String>) =
+            d.option_labels.iter().cloned().unzip();
+        let (facets, facet_labels): (Vec<String>, Vec<String>) = d
+            .labelled_facet_values()
             .into_iter()
-            .map(|(key, value)| format!("{key}{SEPARATOR}{value}"))
-            .collect();
+            .map(|(key, value, label)| (format!("{key}{SEPARATOR}{value}"), label))
+            .unzip();
         let position = i32::try_from(d.position).map_err(corrupt)?;
         let placeholders = [
             params.add(d.market.as_uuid(), Type::UUID),
+            params.add(d.language.as_str().to_string(), Type::TEXT),
             params.add(d.product.as_uuid(), Type::UUID),
             params.add(d.variant.as_uuid(), Type::UUID),
             params.add(d.listing.clone(), Type::TEXT),
@@ -316,6 +345,8 @@ async fn insert_documents(
             params.add(d.sku.clone(), Type::TEXT),
             params.add(names, Type::TEXT_ARRAY),
             params.add(values, Type::TEXT_ARRAY),
+            params.add(name_labels, Type::TEXT_ARRAY),
+            params.add(value_labels, Type::TEXT_ARRAY),
             params.add(d.price.currency().as_str().to_string(), Type::TEXT),
             params.add(d.price.amount(), Type::INT8),
             params.add(d.compare_at.map(|c| c.amount()), Type::INT8),
@@ -335,6 +366,7 @@ async fn insert_documents(
                 params.add(all_terms, Type::TEXT_ARRAY)
             ),
             params.add(facets, Type::TEXT_ARRAY),
+            params.add(facet_labels, Type::TEXT_ARRAY),
         ];
         debug_assert_eq!(placeholders.len(), PER_ROW);
         rows.push(format!("({})", placeholders.join(", ")));
@@ -382,10 +414,16 @@ enum Except<'a> {
 
 /// The query's conditions on `d`, as `reference::search` applies them.
 fn conditions(q: &SearchQuery, params: &mut Params, except: Except<'_>) -> String {
-    let mut sql = vec![format!(
-        "d.market_id = {}",
-        params.add(q.market.as_uuid(), Type::UUID)
-    )];
+    let mut sql = vec![
+        format!(
+            "d.market_id = {}",
+            params.add(q.market.as_uuid(), Type::UUID)
+        ),
+        format!(
+            "d.language = {}",
+            params.add(q.language.as_str().to_string(), Type::TEXT)
+        ),
+    ];
     if !q.terms.is_empty() {
         // Every term a prefix of one of the document's terms: exactly `tsv @@` with
         // prefix lexemes, since `tsv` holds the same terms. Terms are letters and digits
@@ -468,23 +506,26 @@ fn score_expr(q: &SearchQuery, sort: Sort, params: &mut Params) -> String {
     )
 }
 
-/// `keys`' facet values with how many groups have them, as `(fv, n)` rows, from
-/// `source`'s rows (each with its `facets` and its group `g`). `distinct`: a group can
-/// have several of the rows (else each row is its own group, and counting is enough).
+/// `keys`' facet values with how many groups have them and their least label, as
+/// `(fv, n, fl)` rows, from `source`'s rows (each with its `facets`, their
+/// `facet_labels` and its group `g`). `distinct`: a group can have several of the rows
+/// (else each row is its own group, and counting is enough).
 fn facet_branch(source: &str, keys: &[&FacetKey], distinct: bool, params: &mut Params) -> String {
     let prefixes: Vec<String> = keys.iter().map(|k| format!("{k}{SEPARATOR}")).collect();
     let prefixes = params.add(prefixes, Type::TEXT_ARRAY);
     let of_keys = format!("split_part(fv, chr(31), 1) || chr(31) = ANY({prefixes}::text[])");
+    let values = format!("{source}, unnest(facets, facet_labels) AS u (fv, fl)");
     if distinct {
         format!(
-            "SELECT fv, count(*) AS n FROM (
-                 SELECT DISTINCT fv, g FROM {source}, unnest(facets) fv WHERE {of_keys}
+            "SELECT fv, count(*) AS n, min(fl COLLATE \"C\") AS fl FROM (
+                 SELECT fv, g, min(fl COLLATE \"C\") AS fl FROM {values} WHERE {of_keys}
+                 GROUP BY fv, g
              ) x GROUP BY fv"
         )
     } else {
         format!(
-            "SELECT fv, count(*) AS n FROM {source}, unnest(facets) fv WHERE {of_keys}
-             GROUP BY fv"
+            "SELECT fv, count(*) AS n, min(fl COLLATE \"C\") AS fl FROM {values}
+             WHERE {of_keys} GROUP BY fv"
         )
     }
 }
@@ -507,6 +548,7 @@ async fn run_search(tx: &impl Queries, q: &SearchQuery) -> Result<SearchResults,
     let matched = conditions(q, &mut params, Except::Nothing);
     let score = score_expr(q, sort, &mut params);
     let market = params.add(q.market.as_uuid(), Type::UUID);
+    let language = params.add(q.language.as_str().to_string(), Type::TEXT);
 
     // Each group's representative, then the page: the reference's orders.
     let within = match sort {
@@ -562,8 +604,9 @@ async fn run_search(tx: &impl Queries, q: &SearchQuery) -> Result<SearchResults,
     let mut branches = Vec::new();
     if !per_product.is_empty() {
         let representatives = format!(
-            "(SELECT b.g, d.facets FROM best b JOIN search_documents d
-              ON d.market_id = {market} AND d.variant_id = b.variant_id) r"
+            "(SELECT b.g, d.facets, d.facet_labels FROM best b JOIN search_documents d
+              ON d.market_id = {market} AND d.language = {language}
+                 AND d.variant_id = b.variant_id) r"
         );
         branches.push(facet_branch(
             &representatives,
@@ -577,15 +620,20 @@ async fn run_search(tx: &impl Queries, q: &SearchQuery) -> Result<SearchResults,
     }
     for key in q.facets.iter().filter(|k| filtered.contains(k)) {
         let conds = conditions(q, &mut params, Except::Facet(key));
-        let source =
-            format!("(SELECT {group} AS g, d.facets FROM search_documents d WHERE {conds}) own");
+        let source = format!(
+            "(SELECT {group} AS g, d.facets, d.facet_labels FROM search_documents d
+              WHERE {conds}) own"
+        );
         branches.push(facet_branch(&source, &[key], grouped, &mut params));
     }
     let facets = if branches.is_empty() {
-        "NULL::text[] AS facet_values, NULL::bigint[] AS facet_counts".to_string()
+        "NULL::text[] AS facet_values, NULL::bigint[] AS facet_counts,
+         NULL::text[] AS facet_value_labels"
+            .to_string()
     } else {
         "(SELECT array_agg(fv) FROM f) AS facet_values,
-         (SELECT array_agg(n) FROM f) AS facet_counts"
+         (SELECT array_agg(n) FROM f) AS facet_counts,
+         (SELECT array_agg(fl) FROM f) AS facet_value_labels"
             .to_string()
     };
     let facet_cte = if branches.is_empty() {
@@ -597,7 +645,7 @@ async fn run_search(tx: &impl Queries, q: &SearchQuery) -> Result<SearchResults,
     let sql = format!(
         "WITH m AS MATERIALIZED (
              SELECT d.variant_id, d.product_id, {group} AS g, {score} AS score, d.price,
-                    d.created_us, d.title_sort, d.listing, d.position, d.facets
+                    d.created_us, d.title_sort, d.listing, d.position, d.facets, d.facet_labels
              FROM search_documents d WHERE {matched}
          ),
          best AS MATERIALIZED ({best}),
@@ -611,12 +659,14 @@ async fn run_search(tx: &impl Queries, q: &SearchQuery) -> Result<SearchResults,
                     (SELECT currency FROM search_documents WHERE market_id = {market} LIMIT 1)
                         AS market_currency
          )
-         SELECT s.total, s.low, s.high, s.facet_values, s.facet_counts, s.market_currency,
-                p.variant_id AS hit, c.matched, d.*
+         SELECT s.total, s.low, s.high, s.facet_values, s.facet_counts, s.facet_value_labels,
+                s.market_currency, p.variant_id AS hit, c.matched, d.*
          FROM summary s
          LEFT JOIN page p ON true
          LEFT JOIN counts c ON c.g = p.g
-         LEFT JOIN search_documents d ON d.market_id = {market} AND d.variant_id = p.variant_id
+         LEFT JOIN search_documents d
+             ON d.market_id = {market} AND d.language = {language}
+                AND d.variant_id = p.variant_id
          ORDER BY {}",
         between
             .split(", ")
@@ -659,13 +709,16 @@ async fn run_search(tx: &impl Queries, q: &SearchQuery) -> Result<SearchResults,
     let values: Vec<String> =
         col::<Option<Vec<String>>>(first, "facet_values")?.unwrap_or_default();
     let counts: Vec<i64> = col::<Option<Vec<i64>>>(first, "facet_counts")?.unwrap_or_default();
+    let labels: Vec<String> =
+        col::<Option<Vec<String>>>(first, "facet_value_labels")?.unwrap_or_default();
     let mut by_key: BTreeMap<String, Vec<FacetValue>> = BTreeMap::new();
-    for (entry, n) in values.into_iter().zip(counts) {
+    for ((entry, n), label) in values.into_iter().zip(counts).zip(labels) {
         let (key, value) = entry
             .split_once(SEPARATOR)
             .ok_or_else(|| corrupt(format!("search facet {entry:?}")))?;
         by_key.entry(key.to_string()).or_default().push(FacetValue {
             value: value.to_string(),
+            label,
             count: u64::try_from(n).map_err(corrupt)?,
         });
     }
@@ -698,6 +751,9 @@ fn document_from_row(row: &Row) -> Result<SearchDocument, RepoError> {
     };
     let names: Vec<String> = col(row, "option_names")?;
     let values: Vec<String> = col(row, "option_values")?;
+    let name_labels: Vec<String> = col(row, "option_name_labels")?;
+    let value_labels: Vec<String> = col(row, "option_value_labels")?;
+    let language: String = col(row, "language")?;
     let compare_at = col::<Option<i64>>(row, "compare_at")?
         .map(|n| Money::new(n, currency).map_err(corrupt))
         .transpose()?;
@@ -714,6 +770,7 @@ fn document_from_row(row: &Row) -> Result<SearchDocument, RepoError> {
         .collect();
     Ok(SearchDocument {
         market: MarketId::from_uuid(col(row, "market_id")?),
+        language: Language::new(&language).map_err(corrupt)?,
         product: ProductId::from_uuid(col(row, "product_id")?),
         variant: VariantId::from_uuid(col(row, "variant_id")?),
         listing: col(row, "listing")?,
@@ -734,6 +791,7 @@ fn document_from_row(row: &Row) -> Result<SearchDocument, RepoError> {
         tags: col(row, "tags")?,
         sku: col(row, "sku")?,
         options: names.into_iter().zip(values).collect(),
+        option_labels: name_labels.into_iter().zip(value_labels).collect(),
         fields,
         price: money("price")?,
         compare_at,
@@ -760,6 +818,7 @@ fn target_to_db(target: Target) -> String {
         Target::Product(id) => format!("product:{}", id.as_uuid()),
         Target::Variant(id) => format!("variant:{}", id.as_uuid()),
         Target::Category(id) => format!("category:{}", id.as_uuid()),
+        Target::Market(id) => format!("market:{}", id.as_uuid()),
         Target::All => "all".to_string(),
     }
 }
@@ -775,6 +834,9 @@ fn target_from_db(text: &str) -> Result<Target, RepoError> {
             id.parse().map_err(|_| bad())?,
         ))),
         Some(("category", id)) => Ok(Target::Category(CategoryId::from_uuid(
+            id.parse().map_err(|_| bad())?,
+        ))),
+        Some(("market", id)) => Ok(Target::Market(MarketId::from_uuid(
             id.parse().map_err(|_| bad())?,
         ))),
         _ => Err(bad()),

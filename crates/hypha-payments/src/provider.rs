@@ -9,8 +9,8 @@
 use std::fmt;
 
 use hypha_core::{
-    AppKey, AppKind, CartId, ChannelId, CountryCode, Email, MarketId, Money, OrderId, PaymentId,
-    PaymentMethodId, RepoError, Union,
+    AppKey, AppKind, CartId, ChannelId, CountryCode, Email, Language, MarketId, Money, OrderId,
+    PaymentId, PaymentMethodId, RepoError, Union,
 };
 
 use crate::PaymentError;
@@ -116,8 +116,11 @@ pub struct PaymentRequest {
     /// (a shopper back on the order page): a provider resumes what it made then rather
     /// than making another, since its own idempotency may not outlive the gap.
     pub reference: Option<String>,
-    /// The method's instructions as the payment copied them.
+    /// The method's instructions as the payment copied them, in the buyer's language
+    /// where the payment has them in it: a manual method shows them to the buyer.
     pub instructions: Option<String>,
+    /// The language the buyer reads (a BCP 47 tag), as the cart or order resolved it.
+    pub language: Option<Language>,
     /// The method's provider settings.
     pub settings: serde_json::Value,
     /// The provider's store-wide settings, filled by the host for a spore's provider (what
@@ -729,6 +732,7 @@ mod tests {
             instructions: instructions.map(str::to_string),
             settings: serde_json::json!({}),
             store_settings: serde_json::Map::new(),
+            language: None,
         }
     }
 

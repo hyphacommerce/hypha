@@ -7,8 +7,8 @@
 use core::time::Duration;
 
 use hypha_core::{
-    CartId, ChannelId, CountryCode, Email, MarketId, Money, OrderId, PaymentId, PaymentMethodId,
-    Scope,
+    CartId, ChannelId, CountryCode, Email, Language, MarketId, Money, OrderId, PaymentId,
+    PaymentMethodId, Scope,
 };
 use serde::{Deserialize, Serialize};
 
@@ -99,6 +99,12 @@ pub struct PaymentStartRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "openapi", schema(required = false))]
     pub customer_email: Option<Email>,
+    /// The language the buyer reads (a BCP 47 tag), as their cart (or order) is in:
+    /// for a page or form shown to them. Absent where neither names one (the store's default
+    /// language). An added field: still version 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(required = false))]
+    pub language: Option<Language>,
 }
 
 /// The app's answer to a start: what the buyer does next.
@@ -297,6 +303,7 @@ mod tests {
             country: CountryCode::new("HR").unwrap(),
             return_url: None,
             customer_email: None,
+            language: None,
         }
     }
 

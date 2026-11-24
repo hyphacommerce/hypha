@@ -9,7 +9,8 @@ use hypha_auth::{
 };
 use hypha_core::{
     Actor, AuthError, Clock, Ctx, Email, EmailError, ErrorCode, HasBatch, IdGenerator, IdentityId,
-    InviteId, Notifier, NotifyError, RepoError, RoleId, Scope, Timestamp, UserId, report_duplicate,
+    InviteId, Language, LanguageError, Notifier, NotifyError, RepoError, RoleId, Scope, Timestamp,
+    UserId, report_duplicate,
 };
 use thiserror::Error;
 
@@ -90,6 +91,8 @@ pub enum CommandError {
     #[error(transparent)]
     Email(#[from] EmailError),
     #[error(transparent)]
+    Language(#[from] LanguageError),
+    #[error(transparent)]
     Password(#[from] hypha_auth::PasswordError),
     /// The write succeeded but the email didn't go out; doing it again resends.
     #[error(transparent)]
@@ -123,6 +126,7 @@ impl ErrorCode for CommandError {
             CommandError::Role(e) => e.code(),
             CommandError::User(e) => e.code(),
             CommandError::Email(e) => e.code(),
+            CommandError::Language(e) => e.code(),
             CommandError::Password(e) => e.code(),
             CommandError::Notify(e) => e.code(),
             CommandError::RoleNotFound(_) => "role_not_found",
@@ -382,18 +386,41 @@ pub async fn update_user<S: StaffPorts>(
     Ok(user)
 }
 
-/// Renames the staff member `me` (the caller's own user, from their session): no scope
-/// needed, since everyone may name themselves. Retried when the user moved meanwhile (a
-/// login writes the user too).
-pub async fn rename_me<R: UserRepo>(
+/// What the staff member `me` changes about themselves. JSON Merge Patch: `None` keeps
+/// a field as it is.
+#[derive(Debug, Default)]
+pub struct UpdateMe {
+    pub name: Option<String>,
+    /// A BCP 47 tag, or `Some(None)` to clear it (the admin then goes by the browser's
+    /// languages). Any well-formed tag: it's the admin's UI language, matched against
+    /// the admin's own catalogs, not one of the store's content languages.
+    pub language: Option<Option<String>>,
+}
+
+/// Changes the staff member `me` (the caller's own user, from their session): no scope
+/// needed, since everyone may name themselves and pick their language. Retried when the
+/// user moved meanwhile (a login writes the user too).
+pub async fn update_me<R: UserRepo>(
     users: &R,
     me: UserId,
-    name: &str,
+    input: UpdateMe,
 ) -> Result<User, CommandError> {
     const ROUNDS: usize = 3;
+    let language = input
+        .language
+        .map(|tag| tag.as_deref().map(Language::new).transpose())
+        .transpose()?;
     for _ in 0..ROUNDS {
         let mut user = load_user(users, me).await?;
-        user.rename(name)?;
+        if input.name.is_none() && language.is_none() {
+            return Ok(user);
+        }
+        if let Some(name) = &input.name {
+            user.rename(name)?;
+        }
+        if let Some(language) = &language {
+            user.set_language(language.clone());
+        }
         match users.update(&mut user).await {
             Ok(()) => return Ok(user),
             Err(RepoError::StaleVersion) => continue,

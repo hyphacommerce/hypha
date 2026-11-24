@@ -89,6 +89,35 @@ impl Language {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// The tag without its region and what follows it (`de-AT` → `de`, `sr-Latn-RS` →
+    /// `sr-Latn`): the language a regional wording falls back to. `None` for a tag
+    /// that names no region.
+    pub fn without_region(&self) -> Option<Language> {
+        // In canonical case only a region is two capitals or three digits.
+        let region = |subtag: &str| {
+            (subtag.len() == 2 && subtag.bytes().all(|b| b.is_ascii_uppercase()))
+                || (subtag.len() == 3 && subtag.bytes().all(|b| b.is_ascii_digit()))
+        };
+        let subtags: Vec<&str> = self.0.split('-').collect();
+        let at = subtags.iter().skip(1).position(|s| region(s))? + 1;
+        Some(Self(subtags[..at].join("-")))
+    }
+
+    /// The language a reader asking for `asked` gets out of `offered` (the default
+    /// first): `asked` when it's offered, else `asked` without its region when that is
+    /// (`de` for `de-AT`), else the default. `None` only when nothing is offered. Never
+    /// refuses: a stale choice still reads.
+    pub fn pick(asked: Option<&Language>, offered: &[Language]) -> Option<Language> {
+        asked
+            .and_then(|asked| {
+                if offered.contains(asked) {
+                    return Some(asked.clone());
+                }
+                asked.without_region().filter(|l| offered.contains(l))
+            })
+            .or_else(|| offered.first().cloned())
+    }
 }
 
 /// `latn` → `Latn`. Only called on ASCII letters.
@@ -131,6 +160,57 @@ mod tests {
 
     fn invalid(tag: &str) -> Result<Language, LanguageError> {
         Err(LanguageError::Invalid(tag.to_string()))
+    }
+
+    #[test]
+    fn without_region_drops_the_region_and_what_follows() {
+        let parent = |tag: &str| {
+            Language::new(tag)
+                .unwrap()
+                .without_region()
+                .map(|l| l.as_str().to_string())
+        };
+        assert_eq!(parent("de-AT"), Some("de".to_string()));
+        assert_eq!(parent("sr-Latn-RS"), Some("sr-Latn".to_string()));
+        assert_eq!(parent("es-419"), Some("es".to_string()));
+        assert_eq!(parent("de-CH-1996"), Some("de".to_string()));
+        assert_eq!(parent("de"), None);
+        assert_eq!(parent("sr-Latn"), None);
+        assert_eq!(parent("de-1996"), None);
+    }
+
+    fn tags(tags: &[&str]) -> Vec<Language> {
+        tags.iter().map(|t| Language::new(t).unwrap()).collect()
+    }
+
+    fn picked(asked: Option<&str>, offered: &[&str]) -> Option<String> {
+        let asked = asked.map(|t| Language::new(t).unwrap());
+        Language::pick(asked.as_ref(), &tags(offered)).map(|l| l.as_str().to_string())
+    }
+
+    #[test]
+    fn pick_takes_an_offered_tag() {
+        assert_eq!(
+            picked(Some("de-AT"), &["en", "de", "de-AT"]),
+            Some("de-AT".into())
+        );
+    }
+
+    #[test]
+    fn pick_falls_back_to_the_tag_without_its_region() {
+        assert_eq!(picked(Some("de-AT"), &["en", "de"]), Some("de".into()));
+        assert_eq!(
+            picked(Some("sr-Latn-RS"), &["en", "sr-Latn"]),
+            Some("sr-Latn".into())
+        );
+    }
+
+    #[test]
+    fn pick_falls_back_to_the_default() {
+        assert_eq!(picked(Some("fr"), &["en", "de"]), Some("en".into()));
+        assert_eq!(picked(None, &["de", "en"]), Some("de".into()));
+        assert_eq!(picked(Some("de"), &["en", "de-AT"]), Some("en".into()));
+        assert_eq!(picked(Some("de"), &[]), None);
     }
 
     #[test]

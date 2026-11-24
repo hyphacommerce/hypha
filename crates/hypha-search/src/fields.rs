@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use hypha_core::{Ctx, ProductId, RepoError, Scope, VariantId};
+use hypha_core::{Ctx, CustomFieldDefinitionId, ProductId, RepoError, Scope, VariantId};
 use hypha_custom_fields::{
     BaseType, CallerKind, CustomFieldDefinition, DefinitionRepo, FieldCaller, FieldValue,
     HasCustomFieldDefinitions, HasCustomFieldValues, OwnerType, ReadAccess, ValueRepo, read_access,
@@ -142,22 +142,31 @@ pub async fn load_facet_fields<S: HasCustomFieldDefinitions + HasCustomFieldValu
     Ok(fields)
 }
 
+/// The value labels of a search's field facets, by facet and stored value, and the
+/// definition of each `choice` field among them (whose labels a reader may translate).
+pub type ChoiceLabels = (
+    BTreeMap<FacetKey, BTreeMap<String, String>>,
+    BTreeMap<FacetKey, CustomFieldDefinitionId>,
+);
+
 /// The value labels of the `choice` and `boolean` field facets among `facets`: a choice's
 /// label by its key, from its definition, and "Yes"/"No" for `true`/`false` (filters and
-/// documents use the stored values; labels are for display).
+/// documents use the stored values; labels are for display); and each choice facet's
+/// definition.
 pub async fn choice_labels<S: HasCustomFieldDefinitions>(
     ports: &S,
     facets: &[FacetKey],
-) -> Result<BTreeMap<FacetKey, BTreeMap<String, String>>, RepoError> {
+) -> Result<ChoiceLabels, RepoError> {
     let wanted: Vec<&FacetKey> = facets
         .iter()
         .filter(|k| matches!(k, FacetKey::Field(_)))
         .collect();
     if wanted.is_empty() {
-        return Ok(BTreeMap::new());
+        return Ok((BTreeMap::new(), BTreeMap::new()));
     }
     let definitions = ports.custom_field_definitions().list(None).await?;
     let mut labels: BTreeMap<FacetKey, BTreeMap<String, String>> = BTreeMap::new();
+    let mut choices: BTreeMap<FacetKey, CustomFieldDefinitionId> = BTreeMap::new();
     for key in wanted {
         let FacetKey::Field(field) = key else {
             continue;
@@ -168,6 +177,7 @@ pub async fn choice_labels<S: HasCustomFieldDefinitions>(
         {
             match definition.field_type().base() {
                 BaseType::Choice => {
+                    choices.insert(key.clone(), definition.id());
                     let entry = labels.entry(key.clone()).or_default();
                     for choice in definition.validations().choices() {
                         entry.insert(choice.key.clone(), choice.label.clone());
@@ -183,5 +193,5 @@ pub async fn choice_labels<S: HasCustomFieldDefinitions>(
             }
         }
     }
-    Ok(labels)
+    Ok((labels, choices))
 }

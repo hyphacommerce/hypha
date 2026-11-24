@@ -1,4 +1,4 @@
-use hypha_core::{RepoError, StoreId, stamp_insert, stamp_update};
+use hypha_core::{Recorded, RepoError, StoreId, Versioned, stamp_insert, stamp_update};
 use hypha_stores::{Store, StoreRepo, repo::keys};
 
 use crate::{
@@ -9,7 +9,8 @@ use crate::{
 #[derive(Default)]
 pub struct InMemoryStoreRepo {
     stores: Table<StoreId, Store>,
-    /// Shared with `InMemoryPorts`' other repos: the clock writes are stamped with.
+    /// Shared with `InMemoryPorts`' other repos: where its events go, and the clock
+    /// writes are stamped with.
     pub(crate) outbox: InMemoryOutbox,
 }
 
@@ -34,12 +35,18 @@ impl StoreRepo for InMemoryStoreRepo {
 
     async fn insert(&self, store: &mut Store) -> Result<(), RepoError> {
         stamp_insert(store, self.outbox.now());
+        let events = store.take_events();
         self.stores
-            .insert(store.id(), store, keys::STORE_ID, &no_unique_keys)
+            .insert(store.id(), store, keys::STORE_ID, &no_unique_keys)?;
+        self.outbox.write(events, Some(store.version()));
+        Ok(())
     }
 
     async fn update(&self, store: &mut Store) -> Result<(), RepoError> {
         stamp_update(store, self.outbox.now());
-        self.stores.update(store.id(), store, &no_unique_keys)
+        let events = store.take_events();
+        self.stores.update(store.id(), store, &no_unique_keys)?;
+        self.outbox.write(events, Some(store.version()));
+        Ok(())
     }
 }

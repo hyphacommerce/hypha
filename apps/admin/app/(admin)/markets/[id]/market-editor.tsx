@@ -12,8 +12,10 @@ import { type ReactNode, useState, useTransition } from "react";
 import { CountryPicker } from "@/components/country-picker";
 import { SaveBar } from "@/components/save-bar";
 import type { Country } from "@/lib/regions";
+import { useT } from "@/lib/use-t";
 
 import { setMarketCountries, updateMarket } from "../actions";
+import { LanguagesCard } from "./languages-card";
 
 type Market = AdminSchemas["MarketResponse"];
 
@@ -27,17 +29,25 @@ export function MarketEditor({
   market,
   countries,
   taken,
+  languages,
   main,
 }: {
   market: Market;
   countries: Country[];
   /** Countries other markets have (`takenCountries`). */
   taken: Record<string, string>;
+  /**
+   * The store's default language and what a market can offer (it and the published
+   * ones); absent for a role that can't read the store, which then sees no card.
+   */
+  languages?: { storeDefault: string; offered: string[] };
   main: ReactNode;
 }) {
+  const t = useT<"markets">();
   const [name, setName] = useState(market.name);
   const [includeTax, setIncludeTax] = useState(market.prices_include_tax);
   const [chosen, setChosen] = useState<string[]>(market.countries);
+  const [offers, setOffers] = useState<string[]>(market.languages);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
 
@@ -45,23 +55,28 @@ export function MarketEditor({
   const taxChanged = includeTax !== market.prices_include_tax;
   const countriesChanged =
     chosen.length !== market.countries.length || chosen.some((c) => !market.countries.includes(c));
-  const isDirty = nameChanged || taxChanged || countriesChanged;
+  // The order counts: the first language is the market's default.
+  const languagesChanged =
+    offers.length !== market.languages.length || offers.some((l, i) => l !== market.languages[i]);
+  const isDirty = nameChanged || taxChanged || countriesChanged || languagesChanged;
   const canSave = name.trim() !== "" && chosen.length > 0;
 
   const discard = () => {
     setName(market.name);
     setIncludeTax(market.prices_include_tax);
     setChosen(market.countries);
+    setOffers(market.languages);
     setError(undefined);
   };
 
   const save = () => {
     if (!isDirty || !canSave) return;
     startTransition(async () => {
-      if (nameChanged || taxChanged) {
+      if (nameChanged || taxChanged || languagesChanged) {
         const result = await updateMarket(market.id, {
           name: nameChanged ? name : undefined,
           pricesIncludeTax: taxChanged ? includeTax : undefined,
+          languages: languagesChanged ? offers : undefined,
         });
         if (result.error) return setError(result.error);
       }
@@ -89,29 +104,31 @@ export function MarketEditor({
           <Card>
             <VStack gap={4}>
               <Text type="display-3" as="h2">
-                Details
+                {t("common.details")}
               </Text>
               <TextInput
-                label="Name"
+                label={t("common.name")}
                 value={name}
                 onChange={setName}
                 onEnter={save}
                 status={
-                  name.trim() ? undefined : { type: "error", message: "A market needs a name." }
+                  name.trim()
+                    ? undefined
+                    : { type: "error", message: t("markets.detail_name_required") }
                 }
               />
               <Switch
-                label="Prices include tax"
-                description="Whether the prices shoppers in this market see already contain tax."
+                label={t("markets.prices_include_tax")}
+                description={t("markets.detail_prices_include_tax_description")}
                 value={includeTax}
                 onChange={setIncludeTax}
               />
               <MetadataList>
-                <MetadataListItem label="Currency">
+                <MetadataListItem label={t("common.currency")}>
                   <VStack gap={0}>
                     <Text>{market.currency}</Text>
                     <Text type="supporting" color="secondary">
-                      Fixed once the market is created: its price lists are in it.
+                      {t("markets.detail_currency_fixed")}
                     </Text>
                   </VStack>
                 </MetadataListItem>
@@ -122,10 +139,10 @@ export function MarketEditor({
             <VStack gap={4}>
               <VStack gap={1}>
                 <Text type="display-3" as="h2">
-                  Countries
+                  {t("common.countries")}
                 </Text>
                 <Text type="supporting" color="secondary">
-                  Shoppers in these countries buy from this market. A country belongs to one market.
+                  {t("markets.detail_countries_description")}
                 </Text>
               </VStack>
               <CountryPicker
@@ -133,15 +150,23 @@ export function MarketEditor({
                 taken={taken}
                 value={chosen}
                 onChange={setChosen}
-                description="Pick or search; the quick picks add only countries no other market has."
+                description={t("markets.detail_countries_picker_description")}
                 status={
                   chosen.length === 0
-                    ? { type: "error", message: "A market needs at least one country." }
+                    ? { type: "error", message: t("markets.detail_countries_required") }
                     : undefined
                 }
               />
             </VStack>
           </Card>
+          {languages && (
+            <LanguagesCard
+              storeDefault={languages.storeDefault}
+              offered={languages.offered}
+              value={offers}
+              onChange={setOffers}
+            />
+          )}
         </div>
       </div>
     </>

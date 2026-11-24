@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/page-header";
 import { type SearchParams, one, oneOf } from "@/components/resource-table/params";
 import { listPage, pageQuery } from "@/components/resource-table/server";
 import { requireStaff, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import { hasScope } from "@/lib/navigation";
 
 import { PriceListsTable } from "./price-lists-table";
@@ -25,17 +26,21 @@ export default async function PriceListsPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const [params, me] = await Promise.all([searchParams, requireStaff()]);
+  const [params, me, t] = await Promise.all([searchParams, requireStaff(), getT()]);
   return (
     <Section padding={6}>
       <VStack gap={5}>
         <PageHeader
-          title="Price lists"
-          description="Prices that differ from the base prices: a market's own, a sale, wholesale. A market can use several; shoppers get the lowest live price among them."
-          back={{ label: "Markets", href: "/markets" }}
+          title={t("price_lists.title")}
+          description={t("price_lists.list_description")}
+          back={{ label: t("common.markets"), href: "/markets" }}
           actions={
             hasScope(me.scopes, "pricing:write") && (
-              <Button label="New price list" variant="primary" href="/markets/price-lists/new" />
+              <Button
+                label={t("price_lists.new")}
+                variant="primary"
+                href="/markets/price-lists/new"
+              />
             )
           }
         />
@@ -69,7 +74,7 @@ async function PriceListRows({ params }: { params: SearchParams }) {
   ]);
   return (
     <PriceListsTable
-      page={listPage(result, "/markets/price-lists", params)}
+      page={await listPage(result, "/markets/price-lists", params)}
       markets={Object.fromEntries((markets.data?.items ?? []).map((m) => [m.id, m.name]))}
       groups={Object.fromEntries((groups.data?.items ?? []).map((g) => [g.id, g.name]))}
     />

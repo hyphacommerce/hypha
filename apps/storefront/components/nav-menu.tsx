@@ -12,6 +12,8 @@ import { ChevronDownIcon } from "@heroicons/react/16/solid";
 import { usePathname } from "next/navigation";
 import { useEffect, useEffectEvent, useId, useRef } from "react";
 
+import { useT } from "@/lib/use-t";
+
 import { SiteLink } from "./site-link";
 
 export type NavCategory = {
@@ -40,6 +42,7 @@ export function NavMenu({
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const t = useT();
   const pathname = usePathname();
   const panelId = useId();
   const group = useRef<HTMLDivElement>(null);
@@ -100,7 +103,7 @@ export function NavMenu({
           <button
             type="button"
             className="shop-nav-chevron"
-            aria-label={`${category.name} subcategories`}
+            aria-label={t("header.subcategories", { category: category.name })}
             aria-expanded={isOpen}
             aria-controls={panelId}
             onClick={() => {

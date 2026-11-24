@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 
 use hypha_categories::{CategoryRepo, CategoryTree, HasCategories};
 use hypha_core::{
-    AppPoints, AuthError, CategoryId, CountryCode, CountryError, Ctx, ErrorCode, RepoError, Scope,
-    optional_text,
+    AppPoints, AuthError, CategoryId, CountryCode, CountryError, Ctx, CustomFieldDefinitionId,
+    ErrorCode, Language, RepoError, Scope, optional_text,
 };
 use hypha_custom_fields::{DefinitionRepo, HasCustomFieldDefinitions};
 use hypha_markets::{HasMarkets, Market, MarketRepo};
@@ -75,22 +75,34 @@ pub struct SearchInput {
     pub limit: u32,
 }
 
-/// What a search found, in the market it searched.
+/// What a search found, in the market and language it searched.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Found {
     pub market: Market,
+    /// The language whose documents were searched: hits' text and option value labels
+    /// are in it. The one asked for, unless the market has no documents in it yet.
+    pub language: Language,
     pub results: SearchResults,
     /// The labels of the facets in `results`, where the merchant set one.
     pub labels: BTreeMap<FacetKey, String>,
     /// The value labels of `choice` and `boolean` field facets in `results`, by stored
-    /// value: a choice's label, "Yes"/"No" (filters use values).
+    /// value: a choice's label as stored, "Yes"/"No" (filters use values).
     pub value_labels: BTreeMap<FacetKey, BTreeMap<String, String>>,
+    /// The definition of each `choice` field facet in `value_labels`, for a reader that
+    /// shows its labels in another language.
+    pub choice_fields: BTreeMap<FacetKey, CustomFieldDefinitionId>,
 }
 
 /// How many default option facets a search counts (the most used options).
 pub const DEFAULT_OPTION_FACETS: usize = 5;
 
-/// Searches the market serving `input.country`. The facets counted are the merchant's
+/// Searches the market serving `input.country`, in the language `languages` chooses for
+/// it: the host's rule for which of the market's languages a read gets (so a search
+/// answers in the same one as the product it lists), then the market's other languages
+/// in order. The first is searched; when that finds nothing and the market has no
+/// documents in it (it began to offer it, and the sync job hasn't built them yet), the
+/// first of the others that has any, so a listing doesn't go empty meanwhile. No others
+/// (a cursor's language, a market with one) searches the first alone. The facets counted are the merchant's
 /// (`SearchSettings::facets`), else product type, vendor, the market's most used options
 /// and tags.
 pub async fn search<
@@ -101,6 +113,7 @@ pub async fn search<
     ports: &S,
     index: &I,
     input: SearchInput,
+    languages: impl FnOnce(&Market) -> (Language, Vec<Language>),
 ) -> Result<Found, CommandError> {
     ctx.require(Scope::ProductsRead)?;
     let country = CountryCode::new(&input.country)?;
@@ -109,6 +122,7 @@ pub async fn search<
         .get_by_country(country)
         .await?
         .ok_or(CommandError::NoMarketForCountry(country))?;
+    let (asked, others) = languages(&market);
 
     let terms = optional_text("q", input.q)
         .map_err(SearchError::Text)?
@@ -166,8 +180,9 @@ pub async fn search<
         }
     }
 
-    let query = SearchQuery {
+    let mut query = SearchQuery {
         market: market.id(),
+        language: asked,
         channel: ctx.channel(),
         category: input.category,
         terms,
@@ -183,13 +198,30 @@ pub async fn search<
         offset: input.offset,
         limit,
     };
-    let results = index.search(&query).await?;
-    let value_labels = choice_labels(ports, &query.facets).await?;
+    let mut results = index.search(&query).await?;
+    // Found nothing: the market may have no documents in the language yet. Asked only
+    // then, so a search that finds something is one round trip; an engine searching an
+    // index of its own (a search app) says it has them.
+    if results.total == 0
+        && !others.is_empty()
+        && !index.has_documents(market.id(), &query.language).await?
+    {
+        for other in others {
+            if index.has_documents(market.id(), &other).await? {
+                query.language = other;
+                results = index.search(&query).await?;
+                break;
+            }
+        }
+    }
+    let (value_labels, choice_fields) = choice_labels(ports, &query.facets).await?;
     Ok(Found {
         market,
+        language: query.language,
         results,
         labels,
         value_labels,
+        choice_fields,
     })
 }
 

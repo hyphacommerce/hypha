@@ -1,4 +1,4 @@
-Hi{% if customer and customer.name %} {{ customer.name }}{% endif %},
+{% if customer and customer.name %}Hi {{ customer.name }},{% else %}Hi,{% endif %}
 
 We've received your order {{ order.number }} and we're getting it ready. We'll email you again when it ships.
 {%- if order.payment %}

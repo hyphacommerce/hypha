@@ -2,18 +2,21 @@ import { VStack } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
 import { Suspense } from "react";
 
-import { PageHeader } from "@/components/page-header";
+import { type Crumb, PageHeader } from "@/components/page-header";
 import { type SearchParams, one } from "@/components/resource-table/params";
 import { FormSkeleton } from "@/components/skeletons";
 import { blankRule, presetOf } from "@/lib/checkout-rules";
+import { getStoreT } from "@/lib/get-store-t";
 import { requireStaff, sessionClient } from "@/lib/hypha";
+import { type T, getT } from "@/lib/i18n";
+import { settingsCrumb } from "@/lib/navigation";
 
 import { loadRuleOptions, loadTryFormat } from "../../data";
 import { RuleEditor } from "../../rule-editor";
 
-const BACK = [
-  { label: "Settings", href: "/settings" },
-  { label: "Checkout", href: "/settings/checkout" },
+const back = (t: T): Crumb[] => [
+  settingsCrumb(t),
+  { label: t("checkout.page_title"), href: "/settings/checkout" },
 ];
 
 /** A new checkout rule, from a preset (`?preset=`) or blank. */
@@ -22,14 +25,23 @@ export default async function NewRulePage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const preset = presetOf(one(await searchParams, "preset"));
+  const [query, t] = await Promise.all([searchParams, getT()]);
+  const preset = presetOf(one(query, "preset"));
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={1320}>
         <PageHeader
-          title={preset ? `Add rule: ${preset.title}` : "Add checkout rule"}
-          description={preset?.description ?? "Pick what must hold, and what the shopper is told."}
-          back={BACK}
+          title={
+            preset
+              ? t("checkout.new_title_preset", {
+                  preset: t(`checkout.preset_${preset.key}_title`),
+                })
+              : t("checkout.new_title")
+          }
+          description={
+            preset ? t(`checkout.preset_${preset.key}_description`) : t("checkout.new_description")
+          }
+          back={back(t)}
         />
         <Suspense fallback={<FormSkeleton cards={4} />}>
           <Form presetKey={preset?.key} />
@@ -42,7 +54,8 @@ export default async function NewRulePage({
 async function Form({ presetKey }: { presetKey: string | undefined }) {
   const client = await sessionClient();
   const [me, options] = await Promise.all([requireStaff(), loadRuleOptions(client)]);
-  const initial = presetOf(presetKey)?.rule() ?? blankRule();
+  // What the preset fills in is saved as the store's content: in the store's language.
+  const initial = presetOf(presetKey)?.rule(await getStoreT()) ?? blankRule();
   const tryFormat = await loadTryFormat(client, initial, options);
   return (
     <RuleEditor

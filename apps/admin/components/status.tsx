@@ -1,125 +1,232 @@
-// Badges for the API's statuses, one place so every page colours them alike.
+// Badges for the API's statuses, one place so every page colours them alike. Each takes
+// the caller's translator (`getT()` on the server, `useT()` in a client component), so
+// server and client pages render the same badge, its text from the staff member's catalog.
 
 import { Badge } from "@astryxdesign/core/Badge";
 import type { AdminSchemas } from "@hyphacommerce/sdk/admin";
 
-const PRODUCT: Record<
-  AdminSchemas["ProductStatus"],
-  { label: string; variant: "success" | "neutral" | "warning" }
-> = {
-  active: { label: "Active", variant: "success" },
-  draft: { label: "Draft", variant: "neutral" },
-  archived: { label: "Archived", variant: "warning" },
-};
+import type { KeyIn, TFor } from "@/lib/messages";
 
-export function ProductStatusBadge({ status }: { status: AdminSchemas["ProductStatus"] }) {
-  const { label, variant } = PRODUCT[status];
-  return <Badge label={label} variant={variant} />;
-}
-
-// The SDK types open enums as strings (a new status mustn't break old admins), so an
-// unknown one shows as it is.
 type Variant = "success" | "neutral" | "warning" | "info" | "error";
 
-/** An order's payment status. */
-const PAYMENT: Record<string, { label: string; variant: Variant }> = {
-  pending: { label: "Payment pending", variant: "warning" },
-  authorized: { label: "Authorized", variant: "info" },
-  partially_paid: { label: "Partly paid", variant: "warning" },
-  paid: { label: "Paid", variant: "success" },
-  partially_refunded: { label: "Partly refunded", variant: "neutral" },
-  refunded: { label: "Refunded", variant: "neutral" },
-  voided: { label: "Voided", variant: "neutral" },
+/** A status as the admin shows it: its label's message key and its colour. */
+type Look = { label: KeyIn<"components">; variant: Variant };
+
+/** The caller's translator: a server page's or a client component's. */
+type Translate = TFor<"components">;
+
+const PRODUCT: Record<AdminSchemas["ProductStatus"], Look> = {
+  active: { label: "components.status_product_active", variant: "success" },
+  draft: { label: "components.status_product_draft", variant: "neutral" },
+  archived: { label: "components.status_product_archived", variant: "warning" },
 };
 
-export function PaymentBadge({ status }: { status: AdminSchemas["FinancialStatusDto"] }) {
-  const { label, variant } = PAYMENT[status] ?? { label: status, variant: "neutral" };
-  return <Badge label={label} variant={variant} />;
+export function ProductStatusBadge({
+  status,
+  t,
+}: {
+  status: AdminSchemas["ProductStatus"];
+  t: Translate;
+}) {
+  const { label, variant } = PRODUCT[status];
+  return <Badge label={t(label)} variant={variant} />;
+}
+
+/** The look of `status` among `looks`, or none for one this build doesn't know. */
+function lookOf(looks: Record<string, Look>, status: string): Look | undefined {
+  return Object.hasOwn(looks, status) ? looks[status] : undefined;
+}
+
+/**
+ * The badge of a status in `looks`. The SDK types open enums as strings (a new status
+ * mustn't break old admins), so an unknown one shows as it is.
+ */
+function StatusBadge({
+  looks,
+  status,
+  t,
+}: {
+  looks: Record<string, Look>;
+  status: string;
+  t: Translate;
+}) {
+  const look = lookOf(looks, status);
+  return look ? (
+    <Badge label={t(look.label)} variant={look.variant} />
+  ) : (
+    <Badge label={status} variant="neutral" />
+  );
+}
+
+/** An order's payment status. */
+const PAYMENT: Record<string, Look> = {
+  pending: { label: "components.status_financial_pending", variant: "warning" },
+  authorized: { label: "components.status_financial_authorized", variant: "info" },
+  partially_paid: { label: "components.status_financial_partially_paid", variant: "warning" },
+  paid: { label: "components.status_financial_paid", variant: "success" },
+  partially_refunded: {
+    label: "components.status_financial_partially_refunded",
+    variant: "neutral",
+  },
+  refunded: { label: "components.status_financial_refunded", variant: "neutral" },
+  voided: { label: "components.status_financial_voided", variant: "neutral" },
+};
+
+export function PaymentBadge({
+  status,
+  t,
+}: {
+  status: AdminSchemas["FinancialStatusDto"];
+  t: Translate;
+}) {
+  return <StatusBadge looks={PAYMENT} status={status} t={t} />;
 }
 
 /** One payment's status, on an order's payment card. */
-const ONE_PAYMENT: Record<string, { label: string; variant: Variant }> = {
-  pending: { label: "Pending", variant: "warning" },
-  authorized: { label: "Authorized", variant: "info" },
-  paid: { label: "Paid", variant: "success" },
-  failed: { label: "Failed", variant: "error" },
-  voided: { label: "Voided", variant: "neutral" },
-  partially_refunded: { label: "Partly refunded", variant: "neutral" },
-  refunded: { label: "Refunded", variant: "neutral" },
+const ONE_PAYMENT: Record<string, Look> = {
+  pending: { label: "components.status_payment_pending", variant: "warning" },
+  authorized: { label: "components.status_payment_authorized", variant: "info" },
+  paid: { label: "components.status_payment_paid", variant: "success" },
+  failed: { label: "components.status_payment_failed", variant: "error" },
+  voided: { label: "components.status_payment_voided", variant: "neutral" },
+  partially_refunded: {
+    label: "components.status_payment_partially_refunded",
+    variant: "neutral",
+  },
+  refunded: { label: "components.status_payment_refunded", variant: "neutral" },
 };
 
-export function PaymentStatusBadge({ status }: { status: AdminSchemas["PaymentStatusDto"] }) {
-  const { label, variant } = ONE_PAYMENT[status] ?? { label: status, variant: "neutral" };
-  return <Badge label={label} variant={variant} />;
+export function PaymentStatusBadge({
+  status,
+  t,
+}: {
+  status: AdminSchemas["PaymentStatusDto"];
+  t: Translate;
+}) {
+  return <StatusBadge looks={ONE_PAYMENT} status={status} t={t} />;
 }
 
-const FULFILLMENT: Record<string, { label: string; variant: "success" | "neutral" | "info" }> = {
-  unfulfilled: { label: "Unfulfilled", variant: "neutral" },
-  partially_fulfilled: { label: "Partly fulfilled", variant: "info" },
-  fulfilled: { label: "Fulfilled", variant: "success" },
+const FULFILLMENT: Record<string, Look> = {
+  unfulfilled: { label: "components.status_fulfillment_unfulfilled", variant: "neutral" },
+  partially_fulfilled: {
+    label: "components.status_fulfillment_partially_fulfilled",
+    variant: "info",
+  },
+  fulfilled: { label: "components.status_fulfillment_fulfilled", variant: "success" },
 };
 
-export function FulfillmentBadge({ status }: { status: AdminSchemas["FulfillmentStatusDto"] }) {
-  const { label, variant } = FULFILLMENT[status] ?? { label: status, variant: "neutral" };
-  return <Badge label={label} variant={variant} />;
+export function FulfillmentBadge({
+  status,
+  t,
+}: {
+  status: AdminSchemas["FulfillmentStatusDto"];
+  t: Translate;
+}) {
+  return <StatusBadge looks={FULFILLMENT} status={status} t={t} />;
 }
 
-export function CancelledBadge() {
-  return <Badge label="Cancelled" variant="error" />;
+export function CancelledBadge({ t }: { t: Translate }) {
+  return <Badge label={t("components.status_order_cancelled")} variant="error" />;
 }
 
 /** An order whose shipping address staff should look at before shipping it. */
-export function NeedsReviewBadge() {
-  return <Badge label="Needs review" variant="warning" />;
+export function NeedsReviewBadge({ t }: { t: Translate }) {
+  return <Badge label={t("components.status_order_needs_review")} variant="warning" />;
 }
 
 /** A shipment: shipped, or taken back. */
-export function ShipmentBadge({ status }: { status: AdminSchemas["FulfillmentStateDto"] }) {
+export function ShipmentBadge({
+  status,
+  t,
+}: {
+  status: AdminSchemas["FulfillmentStateDto"];
+  t: Translate;
+}) {
   return status === "cancelled" ? (
-    <Badge label="Taken back" variant="warning" />
+    <Badge label={t("components.status_shipment_cancelled")} variant="warning" />
   ) : (
-    <Badge label="Shipped" variant="success" />
+    <Badge label={t("components.status_shipment_shipped")} variant="success" />
   );
 }
 
 /** A purchase order's status. */
-const PURCHASE_ORDER: Record<string, { label: string; variant: Variant }> = {
-  draft: { label: "Draft", variant: "neutral" },
-  ordered: { label: "Ordered", variant: "info" },
-  closed: { label: "Closed", variant: "success" },
-  cancelled: { label: "Cancelled", variant: "warning" },
+const PURCHASE_ORDER: Record<string, Look> = {
+  draft: { label: "components.status_purchase_order_draft", variant: "neutral" },
+  ordered: { label: "components.status_purchase_order_ordered", variant: "info" },
+  closed: { label: "components.status_purchase_order_closed", variant: "success" },
+  cancelled: { label: "components.status_purchase_order_cancelled", variant: "warning" },
 };
 
 export function PurchaseOrderStatusBadge({
   status,
+  t,
 }: {
   status: AdminSchemas["PurchaseOrderStatusDto"];
+  t: Translate;
 }) {
-  const { label, variant } = PURCHASE_ORDER[status] ?? { label: status, variant: "neutral" };
-  return <Badge label={label} variant={variant} />;
+  return <StatusBadge looks={PURCHASE_ORDER} status={status} t={t} />;
 }
 
 /** How much of a purchase order has arrived. */
-const RECEIPT: Record<string, { label: string; variant: Variant }> = {
-  none: { label: "Not received", variant: "neutral" },
-  partial: { label: "Partly received", variant: "warning" },
-  received: { label: "Received", variant: "success" },
+const RECEIPT: Record<string, Look> = {
+  none: { label: "components.status_receipt_none", variant: "neutral" },
+  partial: { label: "components.status_receipt_partial", variant: "warning" },
+  received: { label: "components.status_receipt_received", variant: "success" },
 };
 
-export function ReceiptStatusBadge({ status }: { status: AdminSchemas["ReceiptStatusDto"] }) {
-  const { label, variant } = RECEIPT[status] ?? { label: status, variant: "neutral" };
-  return <Badge label={label} variant={variant} />;
+export function ReceiptStatusBadge({
+  status,
+  t,
+}: {
+  status: AdminSchemas["ReceiptStatusDto"];
+  t: Translate;
+}) {
+  return <StatusBadge looks={RECEIPT} status={status} t={t} />;
 }
 
 /** A transfer's status. */
-const TRANSFER: Record<string, { label: string; variant: Variant }> = {
-  draft: { label: "Draft", variant: "neutral" },
-  in_transit: { label: "In transit", variant: "info" },
-  received: { label: "Received", variant: "success" },
-  cancelled: { label: "Cancelled", variant: "warning" },
+const TRANSFER: Record<string, Look> = {
+  draft: { label: "components.status_transfer_draft", variant: "neutral" },
+  in_transit: { label: "components.status_transfer_in_transit", variant: "info" },
+  received: { label: "components.status_transfer_received", variant: "success" },
+  cancelled: { label: "components.status_transfer_cancelled", variant: "warning" },
 };
 
-export function TransferStatusBadge({ status }: { status: AdminSchemas["TransferStatusDto"] }) {
-  const { label, variant } = TRANSFER[status] ?? { label: status, variant: "neutral" };
-  return <Badge label={label} variant={variant} />;
+export function TransferStatusBadge({
+  status,
+  t,
+}: {
+  status: AdminSchemas["TransferStatusDto"];
+  t: Translate;
+}) {
+  return <StatusBadge looks={TRANSFER} status={status} t={t} />;
+}
+
+/** The statuses that have a badge, by family. */
+const FAMILIES = {
+  product: PRODUCT,
+  financial: PAYMENT,
+  fulfillment: FULFILLMENT,
+  purchase_order: PURCHASE_ORDER,
+  receipt: RECEIPT,
+  transfer: TRANSFER,
+} satisfies Record<string, Record<string, Look>>;
+
+/**
+ * A status as its badge says it, for text beside one: a filter's option, a view's tab.
+ * One source for both, so a filter and the badges it filters can't disagree. An unknown
+ * status as it is.
+ */
+export function statusLabel(family: keyof typeof FAMILIES, status: string, t: Translate): string {
+  const look = lookOf(FAMILIES[family], status);
+  return look ? t(look.label) : status;
+}
+
+/** A filter's options for `statuses`, in the order given, each named as its badge is. */
+export function statusOptions<S extends string>(
+  family: keyof typeof FAMILIES,
+  statuses: readonly S[],
+  t: Translate,
+): { value: S; label: string }[] {
+  return statuses.map((value) => ({ value, label: statusLabel(family, value, t) }));
 }

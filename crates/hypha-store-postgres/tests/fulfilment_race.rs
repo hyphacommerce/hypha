@@ -111,6 +111,7 @@ async fn shop(url: &str, schema: &str) -> PgStore<Client> {
             compare_at_price: None,
             price_list: None,
             unit_cost: None,
+            localized: None,
         }],
         shipping_address: None,
         address_check: None,
@@ -119,6 +120,7 @@ async fn shop(url: &str, schema: &str) -> PgStore<Client> {
         shipping_total: eur(0),
         tax_total: eur(0),
         total: eur(3000),
+        language: None,
     })
     .unwrap();
     OrderRepo::insert(&store, &mut order).await.unwrap();

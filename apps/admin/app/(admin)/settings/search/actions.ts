@@ -11,7 +11,7 @@ export type SearchStatus = AdminSchemas["SearchStatusResponse"];
 export async function saveSearchSettings(settings: SearchSettings): Promise<{ error?: string }> {
   const client = await sessionClient();
   const { error } = await client.PATCH("/admin/search/settings", { body: settings });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath("/settings/search");
   return {};
 }
@@ -20,13 +20,13 @@ export async function saveSearchSettings(settings: SearchSettings): Promise<{ er
 export async function rebuildIndex(): Promise<{ error?: string; status?: SearchStatus }> {
   const client = await sessionClient();
   const { data, error } = await client.POST("/admin/search/reindex");
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   return { status: data };
 }
 
 export async function indexStatus(): Promise<{ error?: string; status?: SearchStatus }> {
   const client = await sessionClient();
   const { data, error } = await client.GET("/admin/search/status");
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   return { status: data };
 }

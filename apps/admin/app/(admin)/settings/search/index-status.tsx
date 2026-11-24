@@ -9,6 +9,9 @@ import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList"
 import { Text } from "@astryxdesign/core/Text";
 import { useEffect, useState, useTransition } from "react";
 
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
+
 import { type SearchStatus, indexStatus, rebuildIndex } from "./actions";
 
 /**
@@ -17,6 +20,8 @@ import { type SearchStatus, indexStatus, rebuildIndex } from "./actions";
  * rebuild shows its progress.
  */
 export function IndexStatus({ status: initial }: { status: SearchStatus }) {
+  const t = useT<"settings">();
+  const format = useFormat();
   const [status, setStatus] = useState(initial);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -54,34 +59,37 @@ export function IndexStatus({ status: initial }: { status: SearchStatus }) {
       <VStack gap={4}>
         <HStack gap={2} hAlign="between" vAlign="center">
           <Text type="display-3" as="h2">
-            Search index
+            {t("settings.search_index_title")}
           </Text>
           {isBusy ? (
-            <Badge label="Updating" variant="warning" />
+            <Badge label={t("settings.search_index_updating")} variant="warning" />
           ) : (
-            <Badge label="Up to date" variant="success" />
+            <Badge label={t("settings.search_index_up_to_date")} variant="success" />
           )}
         </HStack>
         {error && <Banner status="error" title={error} />}
         <Text color="secondary">
           {isBusy
-            ? `${status.queued.toLocaleString()} ${status.queued === 1 ? "product is" : "products are"} waiting to be rebuilt. Search keeps answering meanwhile, with the old data for those.`
-            : "Every product change has reached search. Edits to products, prices and stock show within a few seconds."}
+            ? t("settings.search_index_waiting", { count: status.queued })
+            : t("settings.search_index_current")}
         </Text>
         <MetadataList>
-          <MetadataListItem label="Searchable results">
-            <Text>{status.documents.toLocaleString()}</Text>
+          <MetadataListItem label={t("settings.search_index_documents")}>
+            <Text>{format.number(status.documents)}</Text>
           </MetadataListItem>
-          <MetadataListItem label="Waiting">
-            <Text>{status.queued.toLocaleString()}</Text>
+          <MetadataListItem label={t("settings.search_index_queued")}>
+            <Text>{format.number(status.queued)}</Text>
           </MetadataListItem>
         </MetadataList>
         <Text type="supporting" color="secondary">
-          The index holds one entry per variant in each market that sells it. Rebuild it only after
-          restoring a database, or if search shows something it shouldn&apos;t.
+          {t("settings.search_index_hint")}
         </Text>
         <HStack hAlign="end">
-          <Button label="Rebuild index" isLoading={isPending} onClick={rebuild} />
+          <Button
+            label={t("settings.search_index_rebuild")}
+            isLoading={isPending}
+            onClick={rebuild}
+          />
         </HStack>
       </VStack>
     </Card>

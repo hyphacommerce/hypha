@@ -2,6 +2,8 @@
 // are strings, numbers, integers, booleans or enums. That's what admin actions take;
 // anything else isn't shown as a field (and the app checks the input it gets anyway).
 
+import type { TFor } from "@/lib/messages";
+
 export type SchemaField =
   | { name: string; label: string; description?: string; required: boolean; kind: "text" }
   | {
@@ -78,8 +80,9 @@ export function schemaFields(schema: unknown): SchemaField[] {
 
 export type FormValue = string | number | boolean | null;
 
-/** What's missing or out of range, by field name. */
+/** What's missing or out of range, by field name, said with `t`. */
 export function checkValues(
+  t: TFor<"common" | "components">,
   fields: SchemaField[],
   values: Record<string, FormValue>,
 ): Record<string, string> {
@@ -88,15 +91,16 @@ export function checkValues(
     const value = values[field.name];
     const empty = value === null || value === undefined || value === "";
     if (empty) {
-      if (field.required && field.kind !== "boolean") problems[field.name] = "Required";
+      if (field.required && field.kind !== "boolean") problems[field.name] = t("common.required");
       continue;
     }
     if (field.kind === "number" && typeof value === "number") {
-      if (field.integer && !Number.isInteger(value)) problems[field.name] = "A whole number";
+      if (field.integer && !Number.isInteger(value))
+        problems[field.name] = t("components.app_field_whole_number");
       else if (field.min !== undefined && value < field.min)
-        problems[field.name] = `At least ${field.min}`;
+        problems[field.name] = t("components.app_field_at_least", { min: field.min });
       else if (field.max !== undefined && value > field.max)
-        problems[field.name] = `At most ${field.max}`;
+        problems[field.name] = t("components.app_field_at_most", { max: field.max });
     }
   }
   return problems;

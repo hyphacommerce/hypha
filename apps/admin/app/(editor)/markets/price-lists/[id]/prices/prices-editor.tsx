@@ -21,6 +21,8 @@ import type { GridFilters } from "@/app/(admin)/markets/price-lists/grid-data";
 import { PriceGrid, type PriceGridProduct } from "@/components/price-grid/price-grid";
 import { MAX_IMPORT_BYTES } from "@/lib/price-import";
 import { type PriceList, adjustmentLabel, kindLabel, phaseBadge } from "@/lib/price-lists";
+import { useFormat } from "@/lib/use-format";
+import { useT } from "@/lib/use-t";
 
 import { exportHref, pricesHref } from "@/lib/price-editor";
 import { ImportDialog } from "./import-dialog";
@@ -35,6 +37,7 @@ function SearchBox({
   isDisabled: boolean;
   onApply: (q: string) => void;
 }) {
+  const t = useT<"price_lists">();
   const [text, setText] = useState(value);
   const [shownValue, setShownValue] = useState(value);
   if (value !== shownValue) {
@@ -49,9 +52,9 @@ function SearchBox({
   }, [text, value, isDisabled]);
   return (
     <TextInput
-      label="Search products"
+      label={t("price_lists.editor_search_label")}
       isLabelHidden
-      placeholder="Search title, handle or SKU"
+      placeholder={t("price_lists.editor_search_placeholder")}
       startIcon={MagnifyingGlassIcon}
       hasClear
       size="sm"
@@ -87,6 +90,8 @@ export function PricesEditor({
   categories: { value: string; label: string }[];
   canWrite: boolean;
 }) {
+  const t = useT<"price_lists">();
+  const format = useFormat();
   const router = useRouter();
   const [isNavigating, startNavigation] = useTransition();
   const [importFile, setImportFile] = useState<File>();
@@ -98,7 +103,7 @@ export function PricesEditor({
       router.replace(pricesHref(list.id, { ...filters, ...change }, cursor), { scroll: false }),
     );
   const isFiltered = Boolean(filters.q || filters.category || filters.fixedOnly);
-  const phase = phaseBadge(list.phase);
+  const phase = phaseBadge(list.phase, t);
   const variantCount = products.reduce((sum, p) => sum + p.variants.length, 0);
 
   return (
@@ -109,14 +114,14 @@ export function PricesEditor({
         products={products}
         isReadOnly={!canWrite}
         isLoading={isNavigating}
-        label={`Prices in ${list.name}`}
+        label={t("price_lists.editor_grid_label", { name: list.name })}
         onSave={(diff) => saveFixedPrices(list.id, diff)}
         renderChrome={({ isDirty, confirmLeave }) => ({
           title: (
             <>
               <IconButton
-                label={`Back to ${list.name}`}
-                tooltip="Back to the list"
+                label={t("price_lists.editor_back_label", { name: list.name })}
+                tooltip={t("price_lists.editor_back_tooltip")}
                 icon={<ArrowLeftIcon width={16} height={16} />}
                 size="sm"
                 variant="ghost"
@@ -126,16 +131,15 @@ export function PricesEditor({
               />
               <h1 className="pe-name">{list.name}</h1>
               <Badge
-                label={kindLabel(list.kind)}
+                label={kindLabel(t, list.kind)}
                 variant={list.kind === "sale" ? "pink" : "blue"}
               />
               <Badge label={phase.label} variant={phase.variant} />
               <span className="pe-meta">
                 <span>{list.currency}</span>
-                <span>{adjustmentLabel(list.adjustment)}</span>
+                <span>{adjustmentLabel(t, format, list.adjustment)}</span>
                 <span>
-                  {list.fixed_price_count.toLocaleString("en")} fixed{" "}
-                  {list.fixed_price_count === 1 ? "price" : "prices"}
+                  {t("price_lists.fixed_prices_count", { count: list.fixed_price_count })}
                 </span>
               </span>
             </>
@@ -148,10 +152,10 @@ export function PricesEditor({
                 onApply={(q) => go({ q: q || undefined })}
               />
               <Selector
-                label="Category"
+                label={t("common.category")}
                 isLabelHidden
                 size="sm"
-                placeholder="Any category"
+                placeholder={t("price_lists.editor_any_category")}
                 options={categories}
                 value={filters.category ?? null}
                 hasClear
@@ -161,7 +165,7 @@ export function PricesEditor({
                 width={200}
               />
               <Switch
-                label="Fixed prices only"
+                label={t("price_lists.editor_fixed_only")}
                 size="sm"
                 value={filters.fixedOnly}
                 isDisabled={isDirty}
@@ -169,7 +173,7 @@ export function PricesEditor({
               />
               {isDirty && (
                 <Text type="supporting" color="secondary">
-                  Save or discard to change filters
+                  {t("price_lists.editor_filters_locked")}
                 </Text>
               )}
             </div>
@@ -177,7 +181,7 @@ export function PricesEditor({
           tools: (
             <div className="pe-group">
               <Button
-                label="Export CSV"
+                label={t("price_lists.editor_export")}
                 size="sm"
                 variant="ghost"
                 // A download, not a page: the route answers with the file.
@@ -185,7 +189,7 @@ export function PricesEditor({
               />
               {canWrite && (
                 <Button
-                  label="Import CSV"
+                  label={t("price_lists.editor_import")}
                   size="sm"
                   variant="ghost"
                   onClick={() => fileRef.current?.click()}
@@ -197,13 +201,12 @@ export function PricesEditor({
             <div className="pe-pager">
               {variantCount > 0 && (
                 <span className="pe-meta">
-                  {variantCount.toLocaleString("en")} {variantCount === 1 ? "variant" : "variants"}{" "}
-                  on this page
+                  {t("price_lists.editor_variants_on_page", { count: variantCount })}
                 </span>
               )}
               {!isFirstPage && (
                 <Button
-                  label="First page"
+                  label={t("price_lists.editor_first_page")}
                   size="sm"
                   variant="ghost"
                   isDisabled={isDirty}
@@ -212,10 +215,10 @@ export function PricesEditor({
               )}
               {nextCursor && (
                 <Button
-                  label="Next page"
+                  label={t("price_lists.editor_next_page")}
                   size="sm"
                   isDisabled={isDirty}
-                  tooltip={isDirty ? "Save or discard your changes first" : undefined}
+                  tooltip={isDirty ? t("price_lists.editor_next_page_locked") : undefined}
                   onClick={() => go({}, nextCursor)}
                 />
               )}
@@ -234,17 +237,17 @@ export function PricesEditor({
           <div className="pe-empty">
             <Text weight="medium">
               {isFiltered
-                ? "No products match these filters"
+                ? t("price_lists.editor_empty_filtered")
                 : isFirstPage
-                  ? "No products yet"
-                  : "No more products"}
+                  ? t("price_lists.editor_empty_first")
+                  : t("price_lists.editor_empty_more")}
             </Text>
             <Text type="supporting" color="secondary">
               {filters.fixedOnly
-                ? "Only variants with a fixed price in this list are shown. Turn off “Fixed prices only” to set new ones."
+                ? t("price_lists.editor_empty_fixed_only_hint")
                 : isFiltered
-                  ? "Try another search or category."
-                  : "Products you add show here with their prices."}
+                  ? t("price_lists.editor_empty_filtered_hint")
+                  : t("price_lists.editor_empty_hint")}
             </Text>
           </div>
         }
@@ -255,14 +258,14 @@ export function PricesEditor({
           type="file"
           accept=".csv,.tsv,.txt,text/csv,text/plain"
           hidden
-          aria-label="CSV file to import"
+          aria-label={t("price_lists.editor_import_file_label")}
           onChange={(e) => {
             const file = e.target.files?.[0];
             e.target.value = "";
             if (!file) return;
             if (file.size > MAX_IMPORT_BYTES) {
               setFileError(
-                `That file is over ${MAX_IMPORT_BYTES / 1024 / 1024} MB. Split it into smaller files.`,
+                t("price_lists.import_too_large", { megabytes: MAX_IMPORT_BYTES / 1024 / 1024 }),
               );
               return;
             }

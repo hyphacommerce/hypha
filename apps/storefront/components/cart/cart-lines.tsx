@@ -21,7 +21,8 @@ import { CartMessages } from "@/components/cart-messages";
 import { DiscountNotes } from "@/components/discounts";
 import { Price } from "@/components/price";
 import { type Application, type LineDiscount, linePrice, readCartDiscounts } from "@/lib/discounts";
-import { placeMessages } from "@/lib/messages";
+import { placeMessages } from "@/lib/cart-messages";
+import { useT } from "@/lib/use-t";
 
 import { useCart } from "./cart-provider";
 
@@ -29,6 +30,7 @@ type Line = Cart["lines"][number];
 
 export function CartLines({ size = "md" }: { size?: "sm" | "md" }) {
   const { cart, digits, base, change, isPending } = useCart();
+  const t = useT();
   if (!cart) return null;
   const discounts = readCartDiscounts(cart);
   const messages = placeMessages(cart.messages);
@@ -47,7 +49,7 @@ export function CartLines({ size = "md" }: { size?: "sm" | "md" }) {
             isPending={isPending}
             onChange={(quantity) => change(line.variant, quantity)}
           />
-          <CartMessages messages={messages.lines[i]} />
+          <CartMessages t={t} messages={messages.lines[i]} />
         </VStack>
       ))}
     </VStack>
@@ -73,7 +75,8 @@ function CartLineRow({
   isPending: boolean;
   onChange: (quantity: number) => void;
 }) {
-  const title = line.product_title ?? "A product no longer sold";
+  const t = useT();
+  const title = line.product_title ?? t("common.product_gone");
   // The quantity last asked for: the input reports a typed value and again on Enter or
   // blur, and a second write of the same value would race the first.
   const asked = useRef(line.quantity);
@@ -87,7 +90,8 @@ function CartLineRow({
     asked.current = quantity;
     onChange(quantity);
   };
-  const shown = line.status === "priced" ? linePrice(line, discount, applications, digits) : null;
+  const shown =
+    line.status === "priced" ? linePrice(t, line, discount, applications, digits) : null;
   return (
     <VStack gap={2} paddingBlock={size === "sm" ? 3 : 4}>
       <HStack gap={3} vAlign="start">
@@ -106,6 +110,7 @@ function CartLineRow({
               </Text>
               {shown ? (
                 <Price
+                  t={t}
                   price={shown.price}
                   compareAt={shown.compareAt}
                   digits={digits}
@@ -122,7 +127,7 @@ function CartLineRow({
             <HStack gap={2} vAlign="center">
               <div style={{ width: 104 }}>
                 <NumberInput
-                  label={`Quantity of ${title}`}
+                  label={t("cart.quantity_of", { title })}
                   isLabelHidden
                   size="sm"
                   value={line.quantity}
@@ -136,7 +141,7 @@ function CartLineRow({
                 />
               </div>
               <Button
-                label="Remove"
+                label={t("common.remove")}
                 variant="ghost"
                 size="sm"
                 isDisabled={isPending}
@@ -144,7 +149,9 @@ function CartLineRow({
               />
               {max !== undefined && max <= 5 && line.status === "priced" && (
                 <Text type="supporting">
-                  {line.quantity >= max ? "No more in stock" : `${max} in stock`}
+                  {line.quantity >= max
+                    ? t("cart.no_more_in_stock")
+                    : t("cart.in_stock", { count: max })}
                 </Text>
               )}
             </HStack>

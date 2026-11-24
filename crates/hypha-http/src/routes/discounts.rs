@@ -1782,6 +1782,27 @@ pub struct PromotionResponse {
     summary: String,
 }
 
+impl PromotionResponse {
+    /// The discount's translatable resource, for a response's overlay.
+    pub(crate) fn resource(&self) -> hypha_translations::ResourceRef {
+        hypha_translations::ResourceRef::new(
+            hypha_translations::ResourceKind::Discount,
+            self.discount.as_uuid(),
+        )
+    }
+
+    /// The promotion with its title as `overlay` translates it. The summary is written
+    /// by the API, in English.
+    pub(crate) fn translated(mut self, overlay: &hypha_translations::Overlay) -> Self {
+        if let Some(title) =
+            overlay.text(self.resource(), hypha_translations::fields::discount::TITLE)
+        {
+            self.title = title.to_string();
+        }
+        self
+    }
+}
+
 /// The promotions of each of `products` in `market` and `channel` now, in two reads at
 /// most (the live automatic discounts, and the products' categories when one names
 /// categories). A product without any is left out.

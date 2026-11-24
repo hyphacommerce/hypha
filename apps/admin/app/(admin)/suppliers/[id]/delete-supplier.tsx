@@ -8,6 +8,8 @@ import { VStack } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
 import { useState, useTransition } from "react";
 
+import { useT } from "@/lib/use-t";
+
 import { deleteSupplier } from "../actions";
 
 /**
@@ -15,6 +17,7 @@ import { deleteSupplier } from "../actions";
  * can't be: it's archived instead, so the orders keep it.
  */
 export function DeleteSupplier({ id, name }: { id: string; name: string }) {
+  const t = useT<"suppliers">();
   const [isAsking, setIsAsking] = useState(false);
   const [error, setError] = useState<string>();
   const [isPending, startTransition] = useTransition();
@@ -22,20 +25,24 @@ export function DeleteSupplier({ id, name }: { id: string; name: string }) {
     <Card>
       <VStack gap={3} hAlign="start">
         <Text type="display-3" as="h2">
-          Delete
+          {t("common.delete")}
         </Text>
         <Text type="supporting" color="secondary">
-          Its catalogue goes with it. A supplier on purchase orders can only be archived.
+          {t("suppliers.delete_hint")}
         </Text>
         {error && <Banner status="error" title={error} />}
-        <Button label="Delete supplier" variant="destructive" onClick={() => setIsAsking(true)} />
+        <Button
+          label={t("suppliers.delete_supplier")}
+          variant="destructive"
+          onClick={() => setIsAsking(true)}
+        />
       </VStack>
       <AlertDialog
         isOpen={isAsking}
         onOpenChange={(open) => !open && setIsAsking(false)}
-        title={`Delete ${name}?`}
-        description="The supplier and the prices they gave are deleted for good."
-        actionLabel="Delete supplier"
+        title={t("common.delete_named", { name })}
+        description={t("suppliers.delete_dialog_description")}
+        actionLabel={t("suppliers.delete_dialog_action")}
         isActionLoading={isPending}
         onAction={() =>
           startTransition(async () => {

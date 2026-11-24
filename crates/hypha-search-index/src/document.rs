@@ -1,9 +1,9 @@
-//! Search documents: one per variant per market, with its product's fields, priced and
-//! stocked as a shopper in that market sees it. Built by `hypha_search::build_documents`;
-//! engines store them as they like.
+//! Search documents: one per variant, market and language the market offers, with its
+//! product's fields in that language, priced and stocked as a shopper in that market sees
+//! it. Built by `hypha_search::build_documents`; engines store them as they like.
 
 use hypha_core::{
-    AssetId, CategoryId, ChannelId, MarketId, Money, ProductId, Timestamp, VariantId,
+    AssetId, CategoryId, ChannelId, Language, MarketId, Money, ProductId, Timestamp, VariantId,
 };
 
 use crate::terms;
@@ -35,11 +35,18 @@ impl PriceRange {
     }
 }
 
-/// One variant of one active product, as a shopper in `market` sees it. A read model
-/// built by `hypha_search::build_documents`, stored by engines as they like.
+/// One variant of one active product, as a shopper in `market` reading `language` sees
+/// it. A read model built by `hypha_search::build_documents`, stored by engines as they
+/// like.
+///
+/// Text a shopper reads (title, variant title, description, `option_labels`) is in
+/// `language`; what a filter or a listing names (`options`, the facet values) stays as
+/// stored, so a filter means the same in every language.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchDocument {
     pub market: MarketId,
+    /// The language of its text: one the market offers.
+    pub language: Language,
     pub product: ProductId,
     pub variant: VariantId,
     /// What `group=listing` collapses on: the product ID, followed by the split
@@ -62,8 +69,12 @@ pub struct SearchDocument {
     pub product_type: Option<String>,
     pub tags: Vec<String>,
     pub sku: Option<String>,
-    /// Option name and value label, in option order (`("Color", "Red")`).
+    /// Option name and value label as stored, in option order (`("Color", "Red")`): the
+    /// facet's key and value, and the listing key's.
     pub options: Vec<(String, String)>,
+    /// The same options in `language` (`("Farbe", "Rot")`), one per entry of `options`:
+    /// what a shopper reads, and what terms come from.
+    pub option_labels: Vec<(String, String)>,
     /// Custom field values a storefront may filter by: the field's full key and one facet
     /// value (`("custom.material", "wool")`), the variant's value where it has one, else
     /// the product's. A `choice` gives its key (labels come from the definition), a list
@@ -93,7 +104,7 @@ pub struct SearchDocument {
 pub struct WeightedTerms {
     /// Title and variant title.
     pub a: Vec<String>,
-    /// Vendor, product type, tags, SKU, option values.
+    /// Vendor, product type, tags, SKU, option values (as labelled in the language).
     pub b: Vec<String>,
     /// Description.
     pub d: Vec<String>,
@@ -126,7 +137,7 @@ impl SearchDocument {
         for tag in &self.tags {
             b.extend(terms::terms(tag));
         }
-        for (_, value) in &self.options {
+        for (_, value) in &self.option_labels {
             b.extend(terms::terms(value));
         }
         WeightedTerms {
@@ -138,37 +149,49 @@ impl SearchDocument {
 
     /// Its facet values, as `FacetKey` strings and values: `option.color` → `Red`,
     /// `vendor` → `Acme`, one `tag` per tag, `on_sale` → `true` or `false`,
-    /// `field.custom.material` → `wool`.
+    /// `field.custom.material` → `wool`. Keys and values are as stored, whatever the
+    /// document's language.
     pub fn facet_values(&self) -> Vec<(String, String)> {
+        self.labelled_facet_values()
+            .into_iter()
+            .map(|(key, value, _)| (key, value))
+            .collect()
+    }
+
+    /// `facet_values`, each with its label in the document's language: an option
+    /// value's from `option_labels`, every other value its own (custom field labels come
+    /// from their definitions).
+    pub fn labelled_facet_values(&self) -> Vec<(String, String, String)> {
         let mut values = Vec::new();
-        for (name, value) in &self.options {
-            values.push((
+        let mut plain = |key: crate::FacetKey, value: &str| {
+            values.push((key.to_string(), value.to_string(), value.to_string()));
+        };
+        let mut options = Vec::new();
+        for (i, (name, value)) in self.options.iter().enumerate() {
+            let label = self
+                .option_labels
+                .get(i)
+                .map_or(value.as_str(), |(_, label)| label.as_str());
+            options.push((
                 crate::FacetKey::Option(name.to_lowercase()).to_string(),
                 value.clone(),
+                label.to_string(),
             ));
         }
         if let Some(vendor) = &self.vendor {
-            values.push((crate::FacetKey::Vendor.to_string(), vendor.clone()));
+            plain(crate::FacetKey::Vendor, vendor);
         }
         if let Some(product_type) = &self.product_type {
-            values.push((
-                crate::FacetKey::ProductType.to_string(),
-                product_type.clone(),
-            ));
+            plain(crate::FacetKey::ProductType, product_type);
         }
         for tag in &self.tags {
-            values.push((crate::FacetKey::Tag.to_string(), tag.clone()));
+            plain(crate::FacetKey::Tag, tag);
         }
-        values.push((
-            crate::FacetKey::OnSale.to_string(),
-            self.on_sale.to_string(),
-        ));
+        plain(crate::FacetKey::OnSale, &self.on_sale.to_string());
         for (key, value) in &self.fields {
-            values.push((
-                crate::FacetKey::Field(key.clone()).to_string(),
-                value.clone(),
-            ));
+            plain(crate::FacetKey::Field(key.clone()), value);
         }
-        values
+        options.extend(values);
+        options
     }
 }

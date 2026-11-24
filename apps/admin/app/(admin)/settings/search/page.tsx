@@ -5,7 +5,8 @@ import { Suspense } from "react";
 import { PageHeader } from "@/components/page-header";
 import { FormSkeleton } from "@/components/skeletons";
 import { loaded, sessionClient } from "@/lib/hypha";
-import { SETTINGS_CRUMB } from "@/lib/navigation";
+import { getT } from "@/lib/i18n";
+import { settingsCrumb } from "@/lib/navigation";
 
 import { loadSearchCatalog } from "./catalog";
 import { IndexStatus } from "./index-status";
@@ -16,14 +17,15 @@ import { SearchSettingsForm } from "./search-settings-form";
  * and which options split listings, offered from what the store's products actually
  * have, beside the index behind them. The header renders at once; the form streams in.
  */
-export default function SearchSettingsPage() {
+export default async function SearchSettingsPage() {
+  const t = await getT();
   return (
     <Section padding={6}>
       <VStack gap={5} maxWidth={1280}>
         <PageHeader
-          back={SETTINGS_CRUMB}
-          title="Search"
-          description="The filters and listings shoppers get on your storefront's search and category pages."
+          back={settingsCrumb(t)}
+          title={t("settings.search_title")}
+          description={t("settings.search_description")}
         />
         <Suspense fallback={<FormSkeleton cards={4} />}>
           <SearchSettings />

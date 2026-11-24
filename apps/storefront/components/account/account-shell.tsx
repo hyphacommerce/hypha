@@ -5,24 +5,28 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { HStack, VStack } from "@astryxdesign/core/Stack";
 
 import { SiteLink } from "@/components/site-link";
+import type { KeyIn, T } from "@/lib/messages";
 
+/** The account's sections, each with its label's message. */
 export const SECTIONS = [
-  { path: "/account", label: "Overview" },
-  { path: "/account/orders", label: "Orders" },
-  { path: "/account/addresses", label: "Addresses" },
-  { path: "/account/profile", label: "Profile" },
-  { path: "/account/marketing", label: "Marketing" },
-  { path: "/account/privacy", label: "Privacy" },
-] as const;
+  { path: "/account", label: "account.section_overview" },
+  { path: "/account/orders", label: "account.section_orders" },
+  { path: "/account/addresses", label: "account.section_addresses" },
+  { path: "/account/profile", label: "account.section_profile" },
+  { path: "/account/marketing", label: "account.section_marketing" },
+  { path: "/account/privacy", label: "account.section_privacy" },
+] as const satisfies readonly { path: string; label: KeyIn<"account"> }[];
 
 export type Section = (typeof SECTIONS)[number]["path"];
 
 export function AccountShell({
+  t,
   title,
   current,
   link,
   children,
 }: {
+  t: T;
   title: string;
   current: Section;
   /** `path` → the page's URL in the shopper's country. */
@@ -34,7 +38,7 @@ export function AccountShell({
       <Heading level={1} type="display-2">
         {title}
       </Heading>
-      <nav aria-label="Account" className="shop-account-nav">
+      <nav aria-label={t("account.nav_label")} className="shop-account-nav">
         <HStack gap={4} wrap="wrap">
           {SECTIONS.map((s) => (
             <SiteLink
@@ -42,7 +46,7 @@ export function AccountShell({
               href={link(s.path)}
               aria-current={s.path === current ? "page" : undefined}
             >
-              {s.label}
+              {t(s.label)}
             </SiteLink>
           ))}
         </HStack>

@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 
 import { type FieldProblems, problemsOf } from "@/lib/address";
 import { describe, sessionClient } from "@/lib/hypha";
+import { getT } from "@/lib/i18n";
 import { type TrackingInput, trackingBody, trackingProblem } from "@/lib/tracking";
 
 export type ActionResult = { error?: string };
@@ -20,7 +21,7 @@ export async function markOrderPaid(id: string, reference: string): Promise<Acti
     params: { path: { id } },
     body: { reference: reference.trim() === "" ? null : reference.trim() },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/orders/${id}`);
   revalidatePath("/orders");
   return {};
@@ -45,7 +46,7 @@ export async function fulfilOrder(
     notify: boolean;
   },
 ): Promise<ActionResult> {
-  const problem = trackingProblem(input.tracking);
+  const problem = trackingProblem(await getT(), input.tracking);
   if (problem) return { error: problem };
   const client = await sessionClient();
   const { error } = await client.POST("/admin/orders/{id}/fulfillments", {
@@ -57,7 +58,7 @@ export async function fulfilOrder(
       notify: input.notify,
     },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(orderId);
   return {};
 }
@@ -68,14 +69,14 @@ export async function updateTracking(
   input: TrackingInput[],
   notify: boolean,
 ): Promise<ActionResult> {
-  const problem = trackingProblem(input);
+  const problem = trackingProblem(await getT(), input);
   if (problem) return { error: problem };
   const client = await sessionClient();
   const { error } = await client.PATCH("/admin/fulfillments/{id}", {
     params: { path: { id: fulfillmentId } },
     body: { tracking: trackingBody(input), notify },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(orderId);
   return {};
 }
@@ -86,7 +87,7 @@ export async function takeBack(orderId: string, fulfillmentId: string): Promise<
   const { error } = await client.POST("/admin/fulfillments/{id}/cancel", {
     params: { path: { id: fulfillmentId } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(orderId);
   return {};
 }
@@ -101,7 +102,7 @@ export async function cancelOrder(
     params: { path: { id: orderId } },
     body: { reason, notify },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(orderId);
   return {};
 }
@@ -115,7 +116,7 @@ export async function resendNotification(orderId: string, id: string): Promise<A
   const { error } = await client.POST("/admin/notifications/{id}/resend", {
     params: { path: { id } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   revalidatePath(`/orders/${orderId}`);
   return {};
 }
@@ -126,7 +127,7 @@ export async function markAddressValid(id: string): Promise<ActionResult> {
   const { error } = await client.POST("/admin/orders/{id}/address-check/mark-valid", {
     params: { path: { id } },
   });
-  if (error) return { error: describe(error) };
+  if (error) return { error: await describe(error) };
   refresh(id);
   return {};
 }
@@ -147,9 +148,10 @@ export async function changeOrderAddress(
   if (error) {
     const problems = problemsOf(error);
     if (problems && Object.keys(problems).length > 0) {
-      return { error: "Check the highlighted fields.", problems };
+      const t = await getT();
+      return { error: t("common.check_highlighted_fields"), problems };
     }
-    return { error: describe(error) };
+    return { error: await describe(error) };
   }
   refresh(id);
   return {};

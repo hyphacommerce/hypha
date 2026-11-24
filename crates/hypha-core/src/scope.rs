@@ -129,6 +129,12 @@ pub enum Scope {
     CheckoutRulesRead,
     #[serde(rename = "checkout_rules:write")]
     CheckoutRulesWrite,
+    /// Translations of the store's content into its other languages. Reading or writing
+    /// a resource's translations also takes that resource's own read scope.
+    #[serde(rename = "translations:read")]
+    TranslationsRead,
+    #[serde(rename = "translations:write")]
+    TranslationsWrite,
     /// Personal data: without these, a caller that isn't a staff session (an API key, an
     /// app) gets customers, orders and carts with the field absent and listed in
     /// `redacted`. First and last names.
@@ -201,6 +207,8 @@ impl Scope {
             Scope::PurchasingSend => "purchasing:send",
             Scope::CheckoutRulesRead => "checkout_rules:read",
             Scope::CheckoutRulesWrite => "checkout_rules:write",
+            Scope::TranslationsRead => "translations:read",
+            Scope::TranslationsWrite => "translations:write",
             Scope::CustomerDataName => "customer_data:name",
             Scope::CustomerDataEmail => "customer_data:email",
             Scope::CustomerDataPhone => "customer_data:phone",
@@ -248,6 +256,7 @@ impl Scope {
             Scope::DiscountsRead => Some(Scope::DiscountsWrite),
             Scope::PurchasingRead => Some(Scope::PurchasingWrite),
             Scope::CheckoutRulesRead => Some(Scope::CheckoutRulesWrite),
+            Scope::TranslationsRead => Some(Scope::TranslationsWrite),
             Scope::ProductsWrite
             | Scope::MarketsWrite
             | Scope::PricingWrite
@@ -274,6 +283,7 @@ impl Scope {
             | Scope::PurchasingWrite
             | Scope::PurchasingSend
             | Scope::CheckoutRulesWrite
+            | Scope::TranslationsWrite
             | Scope::CustomerDataName
             | Scope::CustomerDataEmail
             | Scope::CustomerDataPhone
@@ -302,7 +312,7 @@ impl Scope {
         Scope::CustomerDataProfile,
     ];
 
-    pub const ALL: [Scope; 54] = [
+    pub const ALL: [Scope; 56] = [
         Scope::ProductsRead,
         Scope::ProductsWrite,
         Scope::MarketsRead,
@@ -352,6 +362,8 @@ impl Scope {
         Scope::PurchasingSend,
         Scope::CheckoutRulesRead,
         Scope::CheckoutRulesWrite,
+        Scope::TranslationsRead,
+        Scope::TranslationsWrite,
         Scope::CustomerDataName,
         Scope::CustomerDataEmail,
         Scope::CustomerDataPhone,

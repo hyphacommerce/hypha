@@ -1,0 +1,25 @@
+{% extends "layout" %}
+
+{% block preheader %}Vaši lični podaci biće obrisani {{ due_at.formatted }}, osim ako otkažete zahtev.{% endblock %}
+
+{% block content %}
+<p
+  style="font-size:22px;line-height:30px;font-weight:700;color:#18181b;margin:8px 0 16px;margin-top:8px;margin-right:0;margin-bottom:16px;margin-left:0">
+  Obrisaćemo vaše podatke
+</p>
+<p
+  style="font-size:15px;line-height:24px;color:#18181b;margin:0 0 16px;margin-top:0;margin-right:0;margin-bottom:16px;margin-left:0">
+  Zatražili ste od prodavnice {{ shop.name }} da obriše vaše lične podatke. To ćemo uraditi {{ due_at.formatted }}: vaše
+  ime, kontakt podaci, adrese i podešavanja za marketing biće uklonjeni iz vašeg naloga i vaših
+  porudžbina, a nalog će biti zatvoren. Same porudžbine ostaju u evidenciji, bez ičega što vas
+  identifikuje.
+</p>
+<p
+  style="font-size:15px;line-height:24px;color:#18181b;margin:0 0 16px;margin-top:0;margin-right:0;margin-bottom:16px;margin-left:0">
+  Predomislili ste se? Pre tog datuma se prijavite na svoj nalog i otkažite zahtev.
+</p>
+<p
+  style="font-size:13px;line-height:20px;color:#71717a;margin:0;margin-top:16px;margin-bottom:0;margin-left:0;margin-right:0">
+  Ako niste vi poslali ovaj zahtev, prijavite se i otkažite ga ili nas kontaktirajte.
+</p>
+{% endblock %}
