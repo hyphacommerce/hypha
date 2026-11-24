@@ -7,7 +7,11 @@ all-features = true
 
 [advisories]
 # A RustSec advisory fails the check. To accept one, list its ID here with the reason.
-ignore = []
+ignore = [
+  # chrono is unmaintained (no vulnerability). Only the `worker` crate 0.8 pulls it in, for
+  # the Workers host; drop this once worker (pinned to 0.8 with worker-build 0.8.7) is past it.
+  { id = "RUSTSEC-2026-0543", reason = "unmaintained, not vulnerable; only through worker 0.8" },
+]
 
 [licenses]
 # Hypha is MIT OR Apache-2.0, so everything it ships must be usable under both: permissive
