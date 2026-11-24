@@ -14,6 +14,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, SESSION_LIFETIME_COOKIE, sessionCookie } from "@/lib/account";
 import { api } from "@/lib/api";
 import { cartFlagCookie } from "@/lib/cart-flag";
+import { NOINDEX, indexable } from "@/lib/indexing";
 import { COUNTRY_COOKIE, LANGUAGE_COOKIE, type Offer, routeFor, routing } from "@/lib/routing";
 
 /** The store's countries, kept for a minute: they change rarely, and every page asks. */
@@ -75,7 +76,10 @@ function slideSession(request: NextRequest, response: NextResponse): NextRespons
 }
 
 export async function proxy(request: NextRequest) {
-  return slideSession(request, flagCarts(request, await route(request)));
+  const response = slideSession(request, flagCarts(request, await route(request)));
+  // Beside the pages' meta tag: it also covers what has none (redirects, not-found pages).
+  if (!indexable()) response.headers.set("x-robots-tag", NOINDEX);
+  return response;
 }
 
 /** An email's order link (`app/order/[id]/route.ts`): country-less in both modes. */
