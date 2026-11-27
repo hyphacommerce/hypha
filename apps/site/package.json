@@ -12,17 +12,17 @@
   },
   "dependencies": {
     "@astrojs/rss": "4.0.19",
-    "@astrojs/starlight": "0.42.7",
+    "@astrojs/starlight": "0.43.1",
     "@fontsource-variable/geist": "5.3.0",
     "@fontsource-variable/geist-mono": "5.3.0",
-    "@scalar/api-reference": "1.76.3",
-    "@scalar/astro": "0.4.34",
-    "astro": "7.4.7",
+    "@scalar/api-reference": "1.82.0",
+    "@scalar/astro": "0.4.40",
+    "astro": "7.4.13",
     "starlight-llms-txt": "0.12.0"
   },
   "devDependencies": {
     "@astrojs/check": "0.9.12",
     "typescript": "5.9.3",
-    "wrangler": "4.156.0"
+    "wrangler": "4.165.0"
   }
 }

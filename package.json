@@ -26,9 +26,9 @@
     "starters:check": "pnpm packages:build && node scripts/check-starters.mjs"
   },
   "devDependencies": {
-    "react-doctor": "0.9.18",
-    "tsdown": "0.23.4",
-    "vite-plus": "1.4.0",
+    "react-doctor": "0.9.23",
+    "tsdown": "0.23.7",
+    "vite-plus": "1.7.0",
     "yaml": "2.9.1"
   },
   "engines": {
