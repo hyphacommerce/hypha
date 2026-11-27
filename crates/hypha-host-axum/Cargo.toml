@@ -70,7 +70,7 @@ hypha-store-postgres = { path = "../hypha-store-postgres", features = ["testing"
 hypha-auth = { path = "../hypha-auth" }
 hypha-markets = { path = "../hypha-markets" }
 hypha-products = { path = "../hypha-products" }
-jiff = "0.2"
+jiff = "1.0"
 tower = { version = "0.5.3", features = ["util"] }
 # Reading apps' session tokens (JWTs) in the route tests.
 base64 = "0.23"

@@ -17,7 +17,7 @@ hypha-customer-accounts = { path = "../hypha-customer-accounts" }
 hypha-purchasing = { path = "../hypha-purchasing" }
 # Times in the store's zone. The bundled time zone database, not the system's, so a time
 # formats the same natively and on Workers (which has none).
-jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
+jiff = { version = "1.0", default-features = false, features = ["std", "tzdb-bundle-always"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
