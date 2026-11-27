@@ -53,7 +53,7 @@
   },
   "dependencies": {
     "@formatjs/icu-messageformat-parser": "3.5.18",
-    "intl-messageformat": "11.2.15"
+    "intl-messageformat": "12.2.0"
   },
   "devDependencies": {
     "@types/node": "26.6.5",
@@ -61,7 +61,7 @@
     "@types/react-dom": "19.3.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   },
   "peerDependencies": {
     "react": ">=19.0.0"
