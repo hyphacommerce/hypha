@@ -66,7 +66,7 @@
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.2",
     "@vitejs/plugin-rsc": "0.5.38",
-    "cf": "1.0.0-beta.28",
+    "cf": "1.0.0-rc.2",
     "next": "16.4.6",
     "typescript": "5.9.3",
     "vite": "8.3.5"
