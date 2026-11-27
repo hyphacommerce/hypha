@@ -32,7 +32,7 @@ hypha-store-s3 = { path = "../hypha-store-s3" }
 hypha-stores = { path = "../hypha-stores" }
 hypha-notifications = { path = "../hypha-notifications" }
 hypha-mail-resend = { path = "../hypha-mail-resend" }
-worker = { version = "=0.8.7", features = ["http", "axum", "tokio-postgres"] }
+worker = { version = "=0.9.0", features = ["http", "axum", "tokio-postgres"] }
 axum = { version = "0.8", default-features = false, features = ["json", "query", "form", "matched-path", "original-uri"] }
 tower-service = "0.3"
 tokio-postgres = { version = "0.7.18", default-features = false, features = ["js", "with-uuid-1"] }
